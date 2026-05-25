@@ -1,0 +1,13 @@
+{
+  "id": "imp",
+  "name": "ИМП — Инметпром",
+  "root_domain": "inmetprom.ru",
+  "main_url": "https://inmetprom.ru/",
+  "sitemap_url": "https://inmetprom.ru/sitemap.xml",
+  "subdomains_csv": "catalogs/imp-subdomains.csv",
+  "catalog_csv": "catalogs/imp-catalog.csv",
+  "categories_csv": null,
+  "mandatory_city": "Москва",
+  "has_filters": true,
+  "use_proxy": true
+}

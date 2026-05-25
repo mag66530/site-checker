@@ -1,0 +1,15 @@
+[server]
+maxUploadSize = 10
+maxMessageSize = 200
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+# Светлая тема в духе мягких корпоративных сайтов
+base = "light"
+primaryColor = "#1A56E8"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7FBFE"
+textColor = "#1E212E"
+font = "sans serif"

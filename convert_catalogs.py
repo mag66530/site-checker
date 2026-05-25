@@ -1,239 +1,247 @@
-"""
-Конвертация xlsx-каталогов в компактный CSV для Streamlit.
+"""Тесты reporter — генерация xlsx и проверка содержимого."""
+import sys
+import tempfile
+import time
+from pathlib import Path
+from dataclasses import dataclass, field
 
-Запускается один раз для подготовки данных:
-    python convert_catalogs.py
+sys.path.insert(0, '/home/claude/site-checker-py')
 
-На вход — папка с исходными xlsx (из старого проекта Node.js).
-На выход — папка catalogs/ с CSV-файлами по 3 проектам.
-
-Каждый проект → 3 файла:
-    {proj}-subdomains.csv  — поддомены (url, city)
-    {proj}-catalog.csv     — каталог (url, type)  (только для smu, imp)
-    {proj}-categories.csv  — категории (url)      (только для smu)
-"""
-import csv
-import os
-from openpyxl import load_workbook
-
-SRC_DIR = '/home/claude/site-checker/catalogs'
-DST_DIR = '/home/claude/site-checker-py/catalogs'
-
-os.makedirs(DST_DIR, exist_ok=True)
+from reporter import build_report, make_report_filename
+from text_checker import TextIssue
+from http_checker import CheckResult, STATUS, SPEED
+from sources import Subdomain
 
 
-def first_sheet_matching(wb, *keywords):
-    """Найти первый лист, в имени которого есть один из ключевых слов."""
-    for name in wb.sheetnames:
-        lower = name.lower()
-        for kw in keywords:
-            if kw.lower() in lower:
-                return name
-    return None
+def make_result(**kw):
+    """Хелпер для создания тестового CheckResult."""
+    defaults = {
+        'url': 'https://example.com/page',
+        'city': 'Москва',
+        'subdomain': 'example.com',
+        'type_code': 'category',
+        'type_label': 'Категория',
+        'http_code': 200,
+        'status': 'ok',
+        'is_ok': True,
+        'is_warning': False,
+        'is_error': False,
+        'elapsed_ms': 1200,
+        'body_size': 50000,
+        'speed_rating': 'fast',
+        'attempts': 1,
+        'final_url': None,
+        'redirect_chain': [],
+        'error_kind': None,
+        'error_message': None,
+        'text_issues': [],
+        'has_text_issues': False,
+    }
+    defaults.update(kw)
+    return CheckResult(**defaults)
 
 
-def convert_subdomains(src_path, dst_path, sheet_name, url_col, city_col):
-    """Поддомены: 1 строка = 1 URL поддомена + город."""
-    wb = load_workbook(src_path, read_only=True, data_only=True)
-    sheet = sheet_name if sheet_name in wb.sheetnames else first_sheet_matching(
-        wb, 'поддомен', 'тех', 'карта', 'кп'
-    )
-    if not sheet:
-        raise Exception(f"В {src_path} не найден подходящий лист")
-
-    ws = wb[sheet]
-    seen = set()
-    rows = []
-    for row in ws.iter_rows(values_only=True):
-        url = row[url_col] if len(row) > url_col else None
-        city = row[city_col] if len(row) > city_col else None
-        if not url or not isinstance(url, str) or not url.strip().startswith('http'):
-            continue
-        u = url.strip()
-        if u in seen:
-            continue
-        seen.add(u)
-        rows.append([u, str(city).strip() if city else ''])
-
-    with open(dst_path, 'w', encoding='utf-8', newline='') as f:
-        w = csv.writer(f)
-        w.writerow(['url', 'city'])
-        w.writerows(rows)
-    return len(rows)
-
-
-def convert_catalog_structured(src_path, dst_path, sheet_name):
-    """СМУ/ИМП каталог: ищем колонки 'url-адрес страницы' + 'сущность страницы'."""
-    wb = load_workbook(src_path, read_only=True, data_only=True)
-    sheet = sheet_name if sheet_name in wb.sheetnames else first_sheet_matching(
-        wb, 'без дублей', 'каталог'
-    )
-    if not sheet:
-        raise Exception(f"В {src_path} не найден подходящий лист")
-
-    ws = wb[sheet]
-
-    # Ищем строку с заголовками (обычно в первых 10 строках)
-    header_row_idx = None
-    headers = None
-    rows_buffer = []
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        rows_buffer.append(row)
-        if i >= 10 and header_row_idx is None:
-            break
-        clean = [str(c).strip() if c else '' for c in row]
-        if 'url-адрес страницы' in clean and 'сущность страницы' in clean:
-            header_row_idx = i
-            headers = clean
-            break
-
-    if header_row_idx is None:
-        raise Exception("В каталоге нет колонок 'url-адрес страницы' и 'сущность страницы'")
-
-    url_idx = headers.index('url-адрес страницы')
-    type_idx = headers.index('сущность страницы')
-
-    # Считываем все строки после header
-    rows = []
-    seen = set()
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        if i <= header_row_idx:
-            continue
-        url = row[url_idx] if len(row) > url_idx else None
-        typ = row[type_idx] if len(row) > type_idx else None
-        if not url or not isinstance(url, str) or not url.strip().startswith('http'):
-            continue
-        if typ not in ('категория', 'тег'):
-            continue
-        u = url.strip()
-        key = (u, typ)
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append([u, typ])
-
-    with open(dst_path, 'w', encoding='utf-8', newline='') as f:
-        w = csv.writer(f)
-        w.writerow(['url', 'type'])
-        w.writerows(rows)
-    return len(rows)
+def test_basic_report_creation():
+    """Базовый случай — отчёт создаётся и открывается."""
+    results = [
+        make_result(url='https://stalmetural.ru/', type_label='Главная'),
+        make_result(url='https://stalmetural.ru/catalog/', type_label='Каталог', elapsed_ms=2800, speed_rating='normal'),
+        make_result(url='https://kazan.stalmetural.ru/catalog/dead/',
+                    city='Казань', subdomain='kazan.stalmetural.ru',
+                    http_code=404, status='not_found',
+                    is_ok=False, is_error=True, speed_rating=None,
+                    elapsed_ms=100, body_size=1000),
+    ]
+    selected = [
+        Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru'),
+        Subdomain(url='https://kazan.stalmetural.ru/', city='Казань', host='kazan.stalmetural.ru'),
+    ]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест проект',
+            started_at_ms=int(time.time() * 1000) - 30000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected,
+            results=results,
+            output_path=out,
+        )
+        assert out.exists()
+        assert out.stat().st_size > 5000  # явно не пустой
+        
+        # Открываем и проверяем содержимое
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert 'Обзор' in wb.sheetnames
+        assert 'Все детали' in wb.sheetnames
+        assert 'Битые тексты' not in wb.sheetnames  # нет находок
+        
+        # На листе «Все детали» — 3 строки данных + 1 шапка = 4
+        ws = wb['Все детали']
+        rows_with_data = sum(1 for r in ws.iter_rows(values_only=True) if r[0])
+        assert rows_with_data == 4
+    print('✓ Базовый отчёт создаётся')
 
 
-def convert_catalog_flat(src_path, dst_path, sheet_name, url_col=0):
-    """МПЭ структура: все строки — категории, нет колонки 'сущность'."""
-    wb = load_workbook(src_path, read_only=True, data_only=True)
-    sheet = sheet_name if sheet_name in wb.sheetnames else first_sheet_matching(
-        wb, 'структура', 'каталог'
-    )
-    if not sheet:
-        raise Exception(f"В {src_path} не найден подходящий лист")
-
-    ws = wb[sheet]
-    seen = set()
-    rows = []
-    for row in ws.iter_rows(values_only=True):
-        url = row[url_col] if len(row) > url_col else None
-        if not url or not isinstance(url, str) or not url.strip().startswith('http'):
-            continue
-        u = url.strip()
-        if u in seen:
-            continue
-        seen.add(u)
-        rows.append([u, 'категория'])
-
-    with open(dst_path, 'w', encoding='utf-8', newline='') as f:
-        w = csv.writer(f)
-        w.writerow(['url', 'type'])
-        w.writerows(rows)
-    return len(rows)
-
-
-def convert_categories(src_path, dst_path):
-    """Отдельный файл актуальных категорий (только для СМУ)."""
-    wb = load_workbook(src_path, read_only=True, data_only=True)
-    ws = wb[wb.sheetnames[0]]
-    rows = []
-    seen = set()
-    for row in ws.iter_rows(values_only=True):
-        url = row[0]
-        if not url or not isinstance(url, str) or not url.strip().startswith('http'):
-            continue
-        u = url.strip()
-        if u in seen:
-            continue
-        seen.add(u)
-        rows.append([u])
-
-    with open(dst_path, 'w', encoding='utf-8', newline='') as f:
-        w = csv.writer(f)
-        w.writerow(['url'])
-        w.writerows(rows)
-    return len(rows)
+def test_report_with_text_issues():
+    """Если есть битые тексты — добавляется третий лист."""
+    issue1 = TextIssue(pattern='{{...}}', match='{{city}}',
+                       context='Купить трубу в {{city}} с доставкой')
+    issue2 = TextIssue(pattern='%переменная%', match='%price%',
+                       context='Цена от %price% рублей')
+    
+    results = [
+        make_result(url='https://stalmetural.ru/cat-a',
+                    text_issues=[issue1], has_text_issues=True),
+        make_result(url='https://stalmetural.ru/cat-b',
+                    text_issues=[issue2], has_text_issues=True),
+    ]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert 'Битые тексты' in wb.sheetnames
+        
+        # На листе - заголовок + пояснение + пусто + шапка + 2 строки данных
+        ws = wb['Битые тексты']
+        # Проверяем что нужные значения есть
+        all_cells = []
+        for row in ws.iter_rows(values_only=True):
+            all_cells.extend(c for c in row if c)
+        assert '{{city}}' in all_cells
+        assert '%price%' in all_cells
+    print('✓ Лист «Битые тексты» добавляется')
 
 
-# ── СМУ ─────────────────────────────────────────────────────────────
-print('═══ СМУ ═══')
-n = convert_subdomains(
-    f'{SRC_DIR}/smu-subdomains.xlsx',
-    f'{DST_DIR}/smu-subdomains.csv',
-    sheet_name='Тех инфо. поддомены',
-    url_col=0, city_col=2,
-)
-print(f'  Поддомены: {n}')
+def test_redirect_chain_in_path_column():
+    """Цепочка редиректов корректно отображается в «Откуда перешли»."""
+    chain = [
+        {'from': 'https://stalmetural.ru/old/', 'to': 'https://stalmetural.ru/new/', 'code': 301},
+    ]
+    results = [
+        # 404 после редиректа
+        make_result(url='https://stalmetural.ru/old/',
+                    http_code=404, status='not_found',
+                    is_ok=False, is_error=True, speed_rating=None,
+                    redirect_chain=chain),
+        # 404 без редиректа (прямая ссылка из каталога)
+        make_result(url='https://stalmetural.ru/dead/',
+                    http_code=404, status='not_found',
+                    is_ok=False, is_error=True, speed_rating=None),
+    ]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        ws = wb['Все детали']
+        
+        # Колонка J — «Откуда перешли»
+        paths = [ws.cell(row=r, column=10).value for r in range(2, 4)]
+        # Должна быть и цепочка и «Прямая ссылка»
+        assert any('301:' in p for p in paths if p)
+        assert any('Прямая ссылка' in p for p in paths if p)
+    print('✓ Колонка «Откуда перешли» правильная')
 
-n = convert_catalog_structured(
-    f'{SRC_DIR}/smu-catalog.xlsx',
-    f'{DST_DIR}/smu-catalog.csv',
-    sheet_name='РФ без дублей',
-)
-print(f'  Каталог (категории+теги): {n}')
 
-n = convert_categories(
-    f'{SRC_DIR}/smu-categories.xlsx',
-    f'{DST_DIR}/smu-categories.csv',
-)
-print(f'  Категории (свежий файл): {n}')
+def test_speed_with_comma():
+    """Скорость отображается с запятой (для русского Excel)."""
+    results = [make_result(elapsed_ms=2340)]  # 2,34 сек
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        ws = wb['Все детали']
+        # Колонка G — «Скорость, с»
+        speed = ws.cell(row=2, column=7).value
+        assert speed == '2,34', f'Ожидалось "2,34", получили {speed!r}'
+    print('✓ Скорость с запятой')
 
-# ── ИМП ─────────────────────────────────────────────────────────────
-print('\n═══ ИМП ═══')
-n = convert_subdomains(
-    f'{SRC_DIR}/imp-subdomains.xlsx',
-    f'{DST_DIR}/imp-subdomains.csv',
-    sheet_name='Карта присутствия',
-    url_col=3, city_col=1,
-)
-print(f'  Поддомены: {n}')
 
-n = convert_catalog_structured(
-    f'{SRC_DIR}/imp-catalog.xlsx',
-    f'{DST_DIR}/imp-catalog.csv',
-    sheet_name='Каталог без дублей',
-)
-print(f'  Каталог: {n}')
+def test_make_report_filename():
+    """Имена файлов: smu-21.05.2026, smu-21.05.2026_2, ..."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        # дата фиксированная для воспроизводимости
+        ts = int(time.mktime(time.strptime('2026-05-21 10:00', '%Y-%m-%d %H:%M')) * 1000)
+        
+        n1 = make_report_filename('smu', ts, d)
+        assert n1 == 'smu-21.05.2026.xlsx'
+        (d / n1).write_text('x')
+        
+        n2 = make_report_filename('smu', ts, d)
+        assert n2 == 'smu-21.05.2026_2.xlsx'
+        (d / n2).write_text('x')
+        
+        n3 = make_report_filename('smu', ts, d)
+        assert n3 == 'smu-21.05.2026_3.xlsx'
+        
+        # Другой проект — без суффикса
+        n4 = make_report_filename('mpe', ts, d)
+        assert n4 == 'mpe-21.05.2026.xlsx'
+    print('✓ Имена файлов: smu-21.05.2026 с инкрементом')
 
-# ── МПЭ ─────────────────────────────────────────────────────────────
-print('\n═══ МПЭ ═══')
-n = convert_subdomains(
-    f'{SRC_DIR}/mpe-subdomains.xlsx',
-    f'{DST_DIR}/mpe-subdomains.csv',
-    sheet_name='КП',
-    url_col=2, city_col=1,
-)
-print(f'  Поддомены: {n}')
 
-n = convert_catalog_flat(
-    f'{SRC_DIR}/mpe-catalog.xlsx',
-    f'{DST_DIR}/mpe-catalog.csv',
-    sheet_name='структура',
-    url_col=0,
-)
-print(f'  Категории (flat): {n}')
+def test_custom_run_no_subdomains():
+    """Custom-прогон: пустой selected_subdomains не ломает отчёт."""
+    results = [
+        make_result(url='https://example.com/page1', city='', subdomain='example.com',
+                    type_code='custom', type_label='URL'),
+        make_result(url='https://example.com/page2', city='', subdomain='example.com',
+                    type_code='custom', type_label='URL',
+                    http_code=404, status='not_found',
+                    is_ok=False, is_error=True, speed_rating=None),
+    ]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'custom.xlsx'
+        build_report(
+            project_name='Свой список URL',
+            started_at_ms=int(time.time() * 1000) - 3000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=[],  # пусто
+            results=results,
+            output_path=out,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        # Должен открыться без ошибок
+        ws = wb['Обзор']
+        # На листе «Обзор» в параметрах прогона — только «Длительность», без «Поддоменов»
+        text_in_overview = []
+        for row in ws.iter_rows(values_only=True):
+            text_in_overview.extend(str(c) for c in row if c)
+        assert 'Длительность' in text_in_overview
+        assert 'Поддоменов' not in text_in_overview
+    print('✓ Custom-прогон без поддоменов: отчёт корректный')
 
-# ── Сводка ──────────────────────────────────────────────────────────
-print('\n═══ Размеры файлов ═══')
-total = 0
-for f in sorted(os.listdir(DST_DIR)):
-    size = os.path.getsize(os.path.join(DST_DIR, f))
-    total += size
-    print(f'  {f}: {size/1024:.0f} КБ')
-print(f'\nИтого: {total/1024/1024:.2f} МБ (было 33 МБ в xlsx)')
+
+if __name__ == '__main__':
+    test_basic_report_creation()
+    test_report_with_text_issues()
+    test_redirect_chain_in_path_column()
+    test_speed_with_comma()
+    test_make_report_filename()
+    test_custom_run_no_subdomains()
+    print('\n✅ Все тесты reporter.py прошли')
