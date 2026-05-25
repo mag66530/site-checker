@@ -1,0 +1,247 @@
+"""Тесты reporter — генерация xlsx и проверка содержимого."""
+import sys
+import tempfile
+import time
+from pathlib import Path
+from dataclasses import dataclass, field
+
+sys.path.insert(0, '/home/claude/site-checker-py')
+
+from reporter import build_report, make_report_filename
+from text_checker import TextIssue
+from http_checker import CheckResult, STATUS, SPEED
+from sources import Subdomain
+
+
+def make_result(**kw):
+    """Хелпер для создания тестового CheckResult."""
+    defaults = {
+        'url': 'https://example.com/page',
+        'city': 'Москва',
+        'subdomain': 'example.com',
+        'type_code': 'category',
+        'type_label': 'Категория',
+        'http_code': 200,
+        'status': 'ok',
+        'is_ok': True,
+        'is_warning': False,
+        'is_error': False,
+        'elapsed_ms': 1200,
+        'body_size': 50000,
+        'speed_rating': 'fast',
+        'attempts': 1,
+        'final_url': None,
+        'redirect_chain': [],
+        'error_kind': None,
+        'error_message': None,
+        'text_issues': [],
+        'has_text_issues': False,
+    }
+    defaults.update(kw)
+    return CheckResult(**defaults)
+
+
+def test_basic_report_creation():
+    """Базовый случай — отчёт создаётся и открывается."""
+    results = [
+        make_result(url='https://stalmetural.ru/', type_label='Главная'),
+        make_result(url='https://stalmetural.ru/catalog/', type_label='Каталог', elapsed_ms=2800, speed_rating='normal'),
+        make_result(url='https://kazan.stalmetural.ru/catalog/dead/',
+                    city='Казань', subdomain='kazan.stalmetural.ru',
+                    http_code=404, status='not_found',
+                    is_ok=False, is_error=True, speed_rating=None,
+                    elapsed_ms=100, body_size=1000),
+    ]
+    selected = [
+        Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru'),
+        Subdomain(url='https://kazan.stalmetural.ru/', city='Казань', host='kazan.stalmetural.ru'),
+    ]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест проект',
+            started_at_ms=int(time.time() * 1000) - 30000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected,
+            results=results,
+            output_path=out,
+        )
+        assert out.exists()
+        assert out.stat().st_size > 5000  # явно не пустой
+        
+        # Открываем и проверяем содержимое
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert 'Обзор' in wb.sheetnames
+        assert 'Все детали' in wb.sheetnames
+        assert 'Битые тексты' not in wb.sheetnames  # нет находок
+        
+        # На листе «Все детали» — 3 строки данных + 1 шапка = 4
+        ws = wb['Все детали']
+        rows_with_data = sum(1 for r in ws.iter_rows(values_only=True) if r[0])
+        assert rows_with_data == 4
+    print('✓ Базовый отчёт создаётся')
+
+
+def test_report_with_text_issues():
+    """Если есть битые тексты — добавляется третий лист."""
+    issue1 = TextIssue(pattern='{{...}}', match='{{city}}',
+                       context='Купить трубу в {{city}} с доставкой')
+    issue2 = TextIssue(pattern='%переменная%', match='%price%',
+                       context='Цена от %price% рублей')
+    
+    results = [
+        make_result(url='https://stalmetural.ru/cat-a',
+                    text_issues=[issue1], has_text_issues=True),
+        make_result(url='https://stalmetural.ru/cat-b',
+                    text_issues=[issue2], has_text_issues=True),
+    ]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert 'Битые тексты' in wb.sheetnames
+        
+        # На листе - заголовок + пояснение + пусто + шапка + 2 строки данных
+        ws = wb['Битые тексты']
+        # Проверяем что нужные значения есть
+        all_cells = []
+        for row in ws.iter_rows(values_only=True):
+            all_cells.extend(c for c in row if c)
+        assert '{{city}}' in all_cells
+        assert '%price%' in all_cells
+    print('✓ Лист «Битые тексты» добавляется')
+
+
+def test_redirect_chain_in_path_column():
+    """Цепочка редиректов корректно отображается в «Откуда перешли»."""
+    chain = [
+        {'from': 'https://stalmetural.ru/old/', 'to': 'https://stalmetural.ru/new/', 'code': 301},
+    ]
+    results = [
+        # 404 после редиректа
+        make_result(url='https://stalmetural.ru/old/',
+                    http_code=404, status='not_found',
+                    is_ok=False, is_error=True, speed_rating=None,
+                    redirect_chain=chain),
+        # 404 без редиректа (прямая ссылка из каталога)
+        make_result(url='https://stalmetural.ru/dead/',
+                    http_code=404, status='not_found',
+                    is_ok=False, is_error=True, speed_rating=None),
+    ]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        ws = wb['Все детали']
+        
+        # Колонка J — «Откуда перешли»
+        paths = [ws.cell(row=r, column=10).value for r in range(2, 4)]
+        # Должна быть и цепочка и «Прямая ссылка»
+        assert any('301:' in p for p in paths if p)
+        assert any('Прямая ссылка' in p for p in paths if p)
+    print('✓ Колонка «Откуда перешли» правильная')
+
+
+def test_speed_with_comma():
+    """Скорость отображается с запятой (для русского Excel)."""
+    results = [make_result(elapsed_ms=2340)]  # 2,34 сек
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        ws = wb['Все детали']
+        # Колонка G — «Скорость, с»
+        speed = ws.cell(row=2, column=7).value
+        assert speed == '2,34', f'Ожидалось "2,34", получили {speed!r}'
+    print('✓ Скорость с запятой')
+
+
+def test_make_report_filename():
+    """Имена файлов: smu-21.05.2026, smu-21.05.2026_2, ..."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        # дата фиксированная для воспроизводимости
+        ts = int(time.mktime(time.strptime('2026-05-21 10:00', '%Y-%m-%d %H:%M')) * 1000)
+        
+        n1 = make_report_filename('smu', ts, d)
+        assert n1 == 'smu-21.05.2026.xlsx'
+        (d / n1).write_text('x')
+        
+        n2 = make_report_filename('smu', ts, d)
+        assert n2 == 'smu-21.05.2026_2.xlsx'
+        (d / n2).write_text('x')
+        
+        n3 = make_report_filename('smu', ts, d)
+        assert n3 == 'smu-21.05.2026_3.xlsx'
+        
+        # Другой проект — без суффикса
+        n4 = make_report_filename('mpe', ts, d)
+        assert n4 == 'mpe-21.05.2026.xlsx'
+    print('✓ Имена файлов: smu-21.05.2026 с инкрементом')
+
+
+def test_custom_run_no_subdomains():
+    """Custom-прогон: пустой selected_subdomains не ломает отчёт."""
+    results = [
+        make_result(url='https://example.com/page1', city='', subdomain='example.com',
+                    type_code='custom', type_label='URL'),
+        make_result(url='https://example.com/page2', city='', subdomain='example.com',
+                    type_code='custom', type_label='URL',
+                    http_code=404, status='not_found',
+                    is_ok=False, is_error=True, speed_rating=None),
+    ]
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'custom.xlsx'
+        build_report(
+            project_name='Свой список URL',
+            started_at_ms=int(time.time() * 1000) - 3000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=[],  # пусто
+            results=results,
+            output_path=out,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        # Должен открыться без ошибок
+        ws = wb['Обзор']
+        # На листе «Обзор» в параметрах прогона — только «Длительность», без «Поддоменов»
+        text_in_overview = []
+        for row in ws.iter_rows(values_only=True):
+            text_in_overview.extend(str(c) for c in row if c)
+        assert 'Длительность' in text_in_overview
+        assert 'Поддоменов' not in text_in_overview
+    print('✓ Custom-прогон без поддоменов: отчёт корректный')
+
+
+if __name__ == '__main__':
+    test_basic_report_creation()
+    test_report_with_text_issues()
+    test_redirect_chain_in_path_column()
+    test_speed_with_comma()
+    test_make_report_filename()
+    test_custom_run_no_subdomains()
+    print('\n✅ Все тесты reporter.py прошли')
