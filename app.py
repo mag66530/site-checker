@@ -334,6 +334,41 @@ CUSTOM_CSS = """
         border-color: var(--border-strong) !important;
         background: var(--bg-elev) !important;
     }
+    /* ════════════════════════════════════════════════════════════════
+       Кодовые блоки (st.code) — подробный лог
+       Streamlit по умолчанию делает тёмный фон даже на светлой теме.
+       ════════════════════════════════════════════════════════════════ */
+    [data-testid="stCodeBlock"],
+    [data-testid="stCode"],
+    pre {
+        background: #F7FBFE !important;
+        background-color: #F7FBFE !important;
+        border: 1px solid #E1E8F0 !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stCodeBlock"] pre,
+    [data-testid="stCode"] pre {
+        background: #F7FBFE !important;
+        background-color: #F7FBFE !important;
+        color: #1E212E !important;
+    }
+    [data-testid="stCodeBlock"] code,
+    [data-testid="stCode"] code,
+    pre code {
+        color: #1E212E !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        font-size: 0.875rem !important;
+    }
+    /* Inline-код тоже на всякий случай */
+    .stMarkdown code {
+        background: #F7FBFE !important;
+        color: #1A56E8 !important;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.9rem;
+    }
+
     /* type=primary — это «Запустить» */
     .stButton > button[kind="primary"] {
         background: #1A56E8 !important;
@@ -368,17 +403,29 @@ CUSTOM_CSS = """
     /* Кнопка скачивания — зелёный градиент */
     .stDownloadButton > button {
         background: linear-gradient(180deg, #22C55E 0%, #16A34A 100%) !important;
+        background-color: #16A34A !important;
         border: 1px solid #16A34A !important;
-        color: white !important;
-        font-weight: 600 !important;
-        font-size: 1rem !important;
-        padding: 0.85rem 1.5rem !important;
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
+        font-size: 1.05rem !important;
+        padding: 0.95rem 1.5rem !important;
         border-radius: 8px !important;
         box-shadow: 0 2px 8px rgba(22, 163, 74, 0.20) !important;
         transition: all 0.15s !important;
     }
+    /* Все вложенные элементы внутри кнопки — белый текст */
+    .stDownloadButton > button *,
+    .stDownloadButton > button p,
+    .stDownloadButton > button span,
+    .stDownloadButton > button div {
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
+        background: transparent !important;
+        background-color: transparent !important;
+    }
     .stDownloadButton > button:hover {
         background: linear-gradient(180deg, #34D365 0%, #1FB158 100%) !important;
+        background-color: #1FB158 !important;
         box-shadow: 0 6px 16px rgba(22, 163, 74, 0.30) !important;
         transform: translateY(-1px);
     }
