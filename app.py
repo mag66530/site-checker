@@ -112,21 +112,36 @@ CUSTOM_CSS = """
         color: var(--text);
     }
     h1 {
-        font-size: 2.25rem !important;
+        font-size: 2.4rem !important;
         line-height: 1.1;
         margin-bottom: 0.5rem !important;
     }
     h2 {
-        font-size: 1.5rem !important;
+        font-size: 1.625rem !important;
         margin-top: 0 !important;
         margin-bottom: 1rem !important;
     }
     h3 {
-        font-size: 1.125rem !important;
+        font-size: 1.25rem !important;
         margin-bottom: 0.75rem !important;
     }
-    p, span, div, label {
+    /* Базовый размер шрифта чуть крупнее (было ~14px, стало ~16px) */
+    p, span, div, label, li {
         color: var(--text);
+        font-size: 1rem;
+    }
+    /* Streamlit использует CSS-переменную --default-font-size */
+    .stApp {
+        font-size: 16px;
+    }
+    /* Капшен — чуть крупнее чем штатный мелкий */
+    [data-testid="stCaptionContainer"] {
+        font-size: 0.9rem !important;
+    }
+    /* Markdown-абзацы — крупнее */
+    .stMarkdown p {
+        font-size: 1rem !important;
+        line-height: 1.55;
     }
 
     /* Контейнеры-карточки */
@@ -164,6 +179,7 @@ CUSTOM_CSS = """
         border: 1px solid var(--border) !important;
         border-radius: 8px !important;
         color: var(--text) !important;
+        font-size: 1rem !important;
         transition: border-color 0.15s, box-shadow 0.15s;
     }
     [data-baseweb="select"] > div:hover,
@@ -178,6 +194,36 @@ CUSTOM_CSS = """
     .stNumberInput input:focus {
         border-color: var(--accent) !important;
         box-shadow: 0 0 0 3px var(--accent-ring) !important;
+    }
+    /* Текст внутри селекта */
+    [data-baseweb="select"] [class*="ValueContainer"],
+    [data-baseweb="select"] [class*="SingleValue"],
+    [data-baseweb="select"] span {
+        color: var(--text) !important;
+    }
+
+    /* ВЫПАДАЮЩИЙ СПИСОК (popover селекта) — рендерится отдельно от input */
+    [data-baseweb="popover"] [role="listbox"],
+    [data-baseweb="menu"] {
+        background: var(--bg) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 8px !important;
+        box-shadow: 0 8px 24px rgba(30, 33, 46, 0.12) !important;
+    }
+    [data-baseweb="popover"] [role="option"],
+    [data-baseweb="menu"] li,
+    [data-baseweb="menu"] [role="option"] {
+        background: var(--bg) !important;
+        color: var(--text) !important;
+        font-size: 1rem !important;
+    }
+    [data-baseweb="popover"] [role="option"]:hover,
+    [data-baseweb="menu"] li:hover,
+    [data-baseweb="menu"] [role="option"]:hover,
+    [data-baseweb="popover"] [role="option"][aria-selected="true"],
+    [data-baseweb="menu"] [role="option"][aria-selected="true"] {
+        background: var(--accent-soft) !important;
+        color: var(--accent) !important;
     }
 
     /* Радио-кнопки — карточный стиль */
@@ -208,7 +254,7 @@ CUSTOM_CSS = """
         padding: 4px 0;
     }
     [data-testid="stCheckbox"] label p {
-        font-size: 0.95rem !important;
+        font-size: 1rem !important;
         font-weight: 500;
         color: var(--text) !important;
     }
@@ -216,6 +262,13 @@ CUSTOM_CSS = """
     [data-testid="stCheckbox"] [data-baseweb="checkbox"] > div:first-child {
         background: var(--bg) !important;
         border-color: var(--border-strong) !important;
+    }
+
+    /* Текст радио-кнопок */
+    [data-testid="stRadio"] label p,
+    [data-testid="stRadio"] label div {
+        font-size: 1rem !important;
+        color: var(--text) !important;
     }
 
     /* Главные кнопки */
