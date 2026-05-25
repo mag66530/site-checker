@@ -703,7 +703,14 @@ elif is_project:
         (products_per_sub if check_products else 0)
     )
     total_checks = selected_cities_count * per_sub
-    estimated_sec = max(1, (total_checks // 6) * 3)  # 3 сек на запрос при concurrency 6
+    # Реалистичная оценка:
+    #   - 5 сек на запрос (с учётом тяжёлых страниц)
+    #   - +20% буфер на возможные ретраи
+    #   - +30% если проект через прокси (двойной хоп через сервер)
+    base_per_request_sec = 5
+    proxy_overhead = 1.30 if cfg.get('use_proxy') else 1.0
+    retry_buffer = 1.20
+    estimated_sec = max(1, int((total_checks / 6) * base_per_request_sec * proxy_overhead * retry_buffer))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -728,23 +735,30 @@ if is_project or is_custom:
                     f'<p style="color:var(--text-muted);font-size:0.875rem;'
                     f'margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em;'
                     f'font-weight:600">Готов к запуску</p>'
-                    f'<p style="font-size:1.05rem;margin-bottom:1rem">'
+                    f'<p style="font-size:1.05rem;margin-bottom:0.5rem">'
                     f'Будет проверено <strong style="color:var(--accent)">{selected_cities_count} городов</strong> × '
                     f'<strong style="color:var(--accent)">{per_sub} страниц</strong> = '
-                    f'<strong style="color:var(--accent)">{total_checks} проверок</strong>. '
-                    f'Примерное время: <strong>{format_duration(estimated_sec)}</strong>'
+                    f'<strong style="color:var(--accent)">{total_checks} проверок</strong>'
+                    f'</p>'
+                    f'<p style="color:var(--text-soft);font-size:0.9rem;margin-bottom:1rem">'
+                    f'Примерно <strong>{format_duration(estimated_sec)}</strong>. '
+                    f'На больших каталогах или при медленных серверах может быть в 1,5–2 раза дольше.'
                     f'</p>',
                     unsafe_allow_html=True,
                 )
         elif is_custom and valid_count > 0:
-            est_sec = max(1, (valid_count // 6) * 3)
+            # Custom-режим — без прокси, но с буфером на ретраи
+            est_sec = max(1, int((valid_count / 6) * 5 * 1.20))
             st.markdown(
                 f'<p style="color:var(--text-muted);font-size:0.875rem;'
                 f'margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em;'
                 f'font-weight:600">Готов к запуску</p>'
-                f'<p style="font-size:1.05rem;margin-bottom:1rem">'
-                f'Будет проверено <strong style="color:var(--accent)">{valid_count} URL</strong>. '
-                f'Примерное время: <strong>{format_duration(est_sec)}</strong>'
+                f'<p style="font-size:1.05rem;margin-bottom:0.5rem">'
+                f'Будет проверено <strong style="color:var(--accent)">{valid_count} URL</strong>'
+                f'</p>'
+                f'<p style="color:var(--text-soft);font-size:0.9rem;margin-bottom:1rem">'
+                f'Примерно <strong>{format_duration(est_sec)}</strong>. '
+                f'Точное время зависит от скорости сайтов.'
                 f'</p>',
                 unsafe_allow_html=True,
             )
