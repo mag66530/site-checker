@@ -8,6 +8,10 @@ http_checker.py — асинхронная проверка URL'ов.
   • Между попытками — пауза 2.5 сек
   • После успешной OK-проверки опционально ищет битые переменные
 
+Поддержка HTTP-прокси:
+  Если задана переменная окружения HTTP_PROXY (или передан proxy_url),
+  все запросы идут через неё. Без прокси приложение работает локально как раньше.
+
 Оценка скорости (Google Core Web Vitals):
   < 2.5с  → fast      (ОК)
   2.5-4с  → normal    (ОК)
@@ -15,6 +19,7 @@ http_checker.py — асинхронная проверка URL'ов.
   > 8с    → very_slow (Долгий ответ сервера)
 """
 import asyncio
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Callable
@@ -138,6 +143,7 @@ async def _attempt_once(
     session: aiohttp.ClientSession,
     url: str,
     timeout_ms: int,
+    proxy_url: Optional[str] = None,
 ) -> dict:
     """
     Одна попытка обращения к URL. Сама обрабатывает редиректы вручную,
@@ -163,6 +169,7 @@ async def _attempt_once(
                     current_url,
                     timeout=timeout,
                     allow_redirects=False,
+                    proxy=proxy_url,
                 ) as resp:
                     http_code = resp.status
 
@@ -229,13 +236,14 @@ async def check_one(
     retry_delay_ms: int = 2500,
     check_text: bool = True,
     text_patterns: str | None = None,
+    proxy_url: Optional[str] = None,
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
     attempts = 0
     for i in range(max_attempts):
         attempts += 1
-        attempt = await _attempt_once(session, task.url, timeout_ms)
+        attempt = await _attempt_once(session, task.url, timeout_ms, proxy_url=proxy_url)
         status = classify(attempt['http_code'], attempt['error_kind'])
         last = {**attempt, 'status': status}
 
@@ -296,6 +304,7 @@ async def run_batch(
     text_patterns: str | None = None,
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
+    proxy_url: Optional[str] = None,
 ) -> list[CheckResult]:
     """
     Прогнать все задачи параллельно с ограничением concurrency.
@@ -305,7 +314,13 @@ async def run_batch(
     
     is_cancelled() -> bool — если возвращает True, оставшиеся задачи
     помечаются как 'cancelled'.
+
+    proxy_url — если задан (или есть env HTTP_PROXY), все запросы идут через прокси.
     """
+    # Если прокси не задан явно — берём из переменной окружения
+    if proxy_url is None:
+        proxy_url = os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy')
+
     sem = asyncio.Semaphore(concurrency)
     results = []
     done_count = 0
@@ -332,6 +347,7 @@ async def run_batch(
                     retry_delay_ms=retry_delay_ms,
                     check_text=check_text,
                     text_patterns=text_patterns,
+                    proxy_url=proxy_url,
                 )
                 done_count += 1
                 if on_progress:

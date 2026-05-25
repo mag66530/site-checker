@@ -38,6 +38,23 @@ REPORTS_DIR = PROJECT_ROOT / 'reports'
 REPORTS_DIR.mkdir(exist_ok=True)
 
 
+def get_proxy_url() -> str | None:
+    """
+    Достать URL прокси для исходящих запросов.
+    Источник в порядке приоритета:
+      1. Streamlit Secrets (для деплоя): st.secrets["proxy_url"]
+      2. Переменная окружения HTTP_PROXY (для локального запуска)
+      3. Если ничего нет — работаем напрямую
+    """
+    try:
+        if hasattr(st, 'secrets') and 'proxy_url' in st.secrets:
+            return st.secrets['proxy_url']
+    except Exception:
+        pass
+    import os
+    return os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy')
+
+
 # ── Streamlit page config ─────────────────────────────────────────
 
 
@@ -415,6 +432,7 @@ async def run_check_async(project_id, plan, options, on_progress):
         retry_delay_ms=options.get('retry_delay_ms', 2500),
         check_text=options.get('check_text', True),
         on_progress=on_progress,
+        proxy_url=options.get('proxy_url'),
     )
 
 
@@ -444,6 +462,12 @@ if st.session_state.is_running:
     started_ms = int(time.time() * 1000)
     st.session_state.run_started_at = started_ms
 
+    # Достаём прокси один раз (нужен для всех async-вызовов в этом блоке)
+    proxy_url = get_proxy_url()
+    if proxy_url:
+        # Не показываем сам URL (там креды), просто факт что прокси настроен
+        append_log(f'Прокси: настроен')
+
     try:
         if is_custom:
             plan = build_custom_plan(st.session_state.custom_urls_text.split('\n'))
@@ -465,6 +489,7 @@ if st.session_state.is_running:
                         [c for c in src.categories],
                         [f for f in src.filters],
                         log=lambda lvl, msg: append_log(msg),
+                        proxy_url=proxy_url,
                     ))
                     src.products = sm.get('pathnames', [])
                     append_log(f'Из sitemap: {len(src.products)} товаров')
@@ -523,6 +548,7 @@ if st.session_state.is_running:
                 'max_attempts': 3,
                 'retry_delay_ms': 2500,
                 'check_text': check_text_opt,
+                'proxy_url': proxy_url,
             },
             on_progress=on_progress,
         ))
