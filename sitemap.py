@@ -29,8 +29,25 @@ SITEMAP_INDEX_RE = re.compile(r'<sitemapindex\b', re.IGNORECASE)
 
 DEFAULT_USER_AGENT = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-    '(KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+    '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 )
+
+
+def _sitemap_headers(user_agent: str = DEFAULT_USER_AGENT) -> dict:
+    """Заголовки для запроса XML-карты сайта (Accept: xml, остальное как у браузера)."""
+    return {
+        'User-Agent': user_agent,
+        'Accept': 'application/xml,text/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Connection': 'keep-alive',
+    }
 
 
 # ── Сбор URL'ов из sitemap ──────────────────────────────────────────
@@ -66,7 +83,7 @@ async def collect_all_urls(
     queue = [root_sitemap_url]
     processed = 0
 
-    headers = {'User-Agent': user_agent, 'Accept': 'text/xml, application/xml, */*'}
+    headers = _sitemap_headers(user_agent)
     async with aiohttp.ClientSession(headers=headers) as session:
         while queue and processed < max_sitemaps:
             next_url = queue.pop(0)

@@ -50,10 +50,42 @@ class SPEED:
     VERY_SLOW = 'very_slow'
 
 
+# User-Agent от свежего Chrome 131 (актуальный на 2026 год).
+# Версия должна быть свежей — старые UA сами по себе подозрительны.
 DEFAULT_USER_AGENT = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-    '(KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+    '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 )
+
+
+def make_browser_headers(user_agent: str = DEFAULT_USER_AGENT) -> dict:
+    """
+    Реалистичный набор HTTP-заголовков, имитирующий настоящий Chrome.
+    
+    Многие anti-bot защиты (включая Cloudflare и SiteSecure) детектируют ботов
+    по отсутствию или нестандартному порядку этих заголовков. Реальный Chrome
+    шлёт их именно в таком составе и порядке.
+    
+    Sec-Fetch-* заголовки появились в Chrome 76 (2019) — отсутствие их сразу
+    выдаёт «голый» HTTP-клиент.
+    """
+    return {
+        'User-Agent': user_agent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+        'Connection': 'keep-alive',
+    }
 
 
 def rate_speed(elapsed_ms: Optional[int]) -> Optional[str]:
@@ -326,7 +358,7 @@ async def run_batch(
     done_count = 0
     total = len(tasks)
 
-    headers = {'User-Agent': user_agent, 'Accept': 'text/html,*/*'}
+    headers = make_browser_headers(user_agent)
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
 
     async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
