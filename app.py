@@ -252,7 +252,6 @@ CUSTOM_CSS = """
 
     /* ════════════════════════════════════════════════════════════════
        РАДИО-КНОПКИ ПРОФИЛЕЙ — карточный стиль
-       Та же история — переопределяем inline-стили BaseWeb
        ════════════════════════════════════════════════════════════════ */
     [data-testid="stRadio"] > div {
         gap: 8px;
@@ -262,10 +261,14 @@ CUSTOM_CSS = """
         background-color: #FFFFFF !important;
         border: 1px solid #E1E8F0;
         border-radius: 8px;
-        padding: 12px 16px;
+        padding: 14px 18px !important;
         margin: 0 !important;
         transition: all 0.15s;
         cursor: pointer;
+        /* Flex-выравнивание: точка слева, текст справа, не налезают */
+        display: flex !important;
+        align-items: flex-start !important;
+        gap: 12px !important;
     }
     [data-testid="stRadio"] label:hover {
         border-color: #C7D3E1;
@@ -278,30 +281,21 @@ CUSTOM_CSS = """
         background: #EEF3FB !important;
         background-color: #EEF3FB !important;
     }
-    /* Сама радио-точка (кружок) — белый фон внутри карточки, синяя обводка */
-    [data-testid="stRadio"] [data-baseweb="radio"] > div,
-    [data-testid="stRadio"] label > div:first-child > div {
-        background: #FFFFFF !important;
-        background-color: #FFFFFF !important;
+    /* Радио-точка (кружок) — фиксированная ширина, не сжимается */
+    [data-testid="stRadio"] label > div:first-child {
+        flex-shrink: 0 !important;
+        margin-top: 2px !important;
     }
-    /* Сам круглый input — синяя точка внутри когда выбрано */
-    [data-testid="stRadio"] input[type="radio"]:checked + div {
-        background: #FFFFFF !important;
-    }
-    /* Текст внутри label — всегда тёмный, не сливается */
-    [data-testid="stRadio"] label p,
-    [data-testid="stRadio"] label span,
-    [data-testid="stRadio"] label div[data-testid="stMarkdownContainer"] {
+    /* Текст внутри label — нормальная ширина, выравнивание по верху */
+    [data-testid="stRadio"] label > div:last-child,
+    [data-testid="stRadio"] label p {
+        flex: 1 !important;
         color: #1E212E !important;
         background: transparent !important;
         background-color: transparent !important;
         font-size: 1rem !important;
-    }
-    /* Текст внутри label */
-    [data-testid="stRadio"] label p,
-    [data-testid="stRadio"] label > div:last-child {
-        color: var(--text) !important;
-        background: transparent !important;
+        line-height: 1.5 !important;
+        margin: 0 !important;
     }
 
     /* Чек-боксы */
