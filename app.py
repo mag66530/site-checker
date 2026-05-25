@@ -202,58 +202,65 @@ CUSTOM_CSS = """
         color: var(--text) !important;
     }
 
-    /* ВЫПАДАЮЩИЙ СПИСОК (popover селекта) — рендерится отдельно от input */
-    [data-baseweb="popover"] [role="listbox"],
-    [data-baseweb="menu"] {
-        background: var(--bg) !important;
-        border: 1px solid var(--border) !important;
+    /* ════════════════════════════════════════════════════════════════
+       ВЫПАДАЮЩИЙ СПИСОК (popover селекта)
+       Streamlit использует BaseWeb который ставит inline-стили с тёмным
+       фоном (#262730). Перебиваем максимально специфичными селекторами.
+       ════════════════════════════════════════════════════════════════ */
+    div[data-baseweb="popover"] {
+        background: transparent !important;
+    }
+    div[data-baseweb="popover"] > div,
+    div[data-baseweb="popover"] ul,
+    div[data-baseweb="popover"] [role="listbox"] {
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        border: 1px solid #E1E8F0 !important;
         border-radius: 8px !important;
         box-shadow: 0 8px 24px rgba(30, 33, 46, 0.12) !important;
     }
-    /* Каждая опция — белый фон, тёмный текст */
-    [data-baseweb="popover"] [role="option"],
-    [data-baseweb="menu"] li,
-    [data-baseweb="menu"] [role="option"],
-    [data-baseweb="popover"] ul li {
-        background: var(--bg) !important;
-        background-color: var(--bg) !important;
-        color: var(--text) !important;
+    /* Каждая опция */
+    div[data-baseweb="popover"] li,
+    div[data-baseweb="popover"] [role="option"],
+    div[data-baseweb="popover"] ul > li {
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        color: #1E212E !important;
         font-size: 1rem !important;
     }
-    /* Внутренние элементы опции (иногда есть div'ы со своим фоном) */
-    [data-baseweb="popover"] [role="option"] *,
-    [data-baseweb="menu"] [role="option"] * {
+    div[data-baseweb="popover"] li *,
+    div[data-baseweb="popover"] [role="option"] * {
         background: transparent !important;
         background-color: transparent !important;
-        color: var(--text) !important;
+        color: #1E212E !important;
     }
-    /* Hover и выбранный пункт — мягкая голубая подсветка */
-    [data-baseweb="popover"] [role="option"]:hover,
-    [data-baseweb="menu"] li:hover,
-    [data-baseweb="menu"] [role="option"]:hover {
-        background: var(--accent-soft) !important;
-        background-color: var(--accent-soft) !important;
-        color: var(--accent) !important;
+    /* Hover на опции — голубая подсветка */
+    div[data-baseweb="popover"] li:hover,
+    div[data-baseweb="popover"] [role="option"]:hover,
+    div[data-baseweb="popover"] li[aria-selected="true"],
+    div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
+        background: #EEF3FB !important;
+        background-color: #EEF3FB !important;
+        color: #1A56E8 !important;
     }
-    [data-baseweb="popover"] [role="option"]:hover *,
-    [data-baseweb="menu"] [role="option"]:hover * {
-        color: var(--accent) !important;
-    }
-    [data-baseweb="popover"] [role="option"][aria-selected="true"],
-    [data-baseweb="menu"] [role="option"][aria-selected="true"] {
-        background: var(--accent-soft) !important;
-        background-color: var(--accent-soft) !important;
-        color: var(--accent) !important;
-        font-weight: 600;
+    div[data-baseweb="popover"] li:hover *,
+    div[data-baseweb="popover"] [role="option"]:hover *,
+    div[data-baseweb="popover"] li[aria-selected="true"] *,
+    div[data-baseweb="popover"] [role="option"][aria-selected="true"] * {
+        color: #1A56E8 !important;
     }
 
-    /* Радио-кнопки — карточный стиль */
+    /* ════════════════════════════════════════════════════════════════
+       РАДИО-КНОПКИ ПРОФИЛЕЙ — карточный стиль
+       Та же история — переопределяем inline-стили BaseWeb
+       ════════════════════════════════════════════════════════════════ */
     [data-testid="stRadio"] > div {
         gap: 8px;
     }
     [data-testid="stRadio"] label {
-        background: var(--bg) !important;
-        border: 1px solid var(--border);
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        border: 1px solid #E1E8F0;
         border-radius: 8px;
         padding: 12px 16px;
         margin: 0 !important;
@@ -261,22 +268,34 @@ CUSTOM_CSS = """
         cursor: pointer;
     }
     [data-testid="stRadio"] label:hover {
-        border-color: var(--border-strong);
-        background: var(--bg-elev-2) !important;
+        border-color: #C7D3E1;
+        background: #F7FBFE !important;
+        background-color: #F7FBFE !important;
     }
-    /* Выбранная карточка */
+    /* Выбранная карточка профиля */
     [data-testid="stRadio"] label:has(input:checked) {
-        border-color: var(--accent) !important;
-        background: var(--accent-soft) !important;
+        border-color: #1A56E8 !important;
+        background: #EEF3FB !important;
+        background-color: #EEF3FB !important;
     }
-    /* Сама радио-точка (кружок) */
-    [data-testid="stRadio"] label > div:first-child {
-        background: var(--bg) !important;
-        background-color: var(--bg) !important;
+    /* Сама радио-точка (кружок) — белый фон внутри карточки, синяя обводка */
+    [data-testid="stRadio"] [data-baseweb="radio"] > div,
+    [data-testid="stRadio"] label > div:first-child > div {
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
     }
-    /* Кружок-точка когда выбрано */
-    [data-testid="stRadio"] label:has(input:checked) > div:first-child {
+    /* Сам круглый input — синяя точка внутри когда выбрано */
+    [data-testid="stRadio"] input[type="radio"]:checked + div {
+        background: #FFFFFF !important;
+    }
+    /* Текст внутри label — всегда тёмный, не сливается */
+    [data-testid="stRadio"] label p,
+    [data-testid="stRadio"] label span,
+    [data-testid="stRadio"] label div[data-testid="stMarkdownContainer"] {
+        color: #1E212E !important;
         background: transparent !important;
+        background-color: transparent !important;
+        font-size: 1rem !important;
     }
     /* Текст внутри label */
     [data-testid="stRadio"] label p,
@@ -323,16 +342,27 @@ CUSTOM_CSS = """
     }
     /* type=primary — это «Запустить» */
     .stButton > button[kind="primary"] {
-        background: var(--accent) !important;
-        border-color: var(--accent) !important;
-        color: white !important;
+        background: #1A56E8 !important;
+        background-color: #1A56E8 !important;
+        border-color: #1A56E8 !important;
+        color: #FFFFFF !important;
         box-shadow: 0 1px 3px rgba(26, 86, 232, 0.20);
-        font-size: 1rem !important;
-        padding: 0.7rem 1.5rem !important;
+        font-size: 1.05rem !important;
+        font-weight: 700 !important;
+        padding: 0.85rem 1.5rem !important;
+    }
+    /* ВСЕ вложенные элементы внутри кнопки primary — чисто белый текст */
+    .stButton > button[kind="primary"] *,
+    .stButton > button[kind="primary"] p,
+    .stButton > button[kind="primary"] span,
+    .stButton > button[kind="primary"] div {
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
     }
     .stButton > button[kind="primary"]:hover:not(:disabled) {
-        background: var(--accent-hover) !important;
-        border-color: var(--accent-hover) !important;
+        background: #1148C9 !important;
+        background-color: #1148C9 !important;
+        border-color: #1148C9 !important;
         box-shadow: 0 4px 12px rgba(26, 86, 232, 0.30);
         transform: translateY(-1px);
     }
