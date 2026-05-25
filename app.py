@@ -71,22 +71,26 @@ st.set_page_config(
 
 CUSTOM_CSS = """
 <style>
-    /* Основные переменные палитры */
+    /* Светлая палитра — мягкая корпоративная */
     :root {
-        --bg: #0A0A0A;
-        --bg-elev: #111111;
-        --bg-elev-2: #1A1A1A;
-        --border: #262626;
-        --border-strong: #333333;
-        --text: #EDEDED;
-        --text-soft: #A1A1AA;
-        --text-muted: #71717A;
-        --accent: #0070F3;
-        --accent-hover: #1F8CFF;
-        --accent-soft: rgba(0, 112, 243, 0.10);
-        --ok: #50E3C2;
-        --warn: #F5A623;
-        --err: #FF4D4F;
+        --bg: #FFFFFF;
+        --bg-elev: #F7FBFE;
+        --bg-elev-2: #EEF4FB;
+        --border: #E1E8F0;
+        --border-strong: #C7D3E1;
+        --text: #1E212E;
+        --text-soft: #4B5366;
+        --text-muted: #7A8294;
+        --accent: #1A56E8;
+        --accent-hover: #1148C9;
+        --accent-soft: rgba(26, 86, 232, 0.08);
+        --accent-ring: rgba(26, 86, 232, 0.15);
+        --ok: #16A34A;
+        --ok-soft: rgba(22, 163, 74, 0.08);
+        --warn: #D97706;
+        --warn-soft: rgba(217, 119, 6, 0.08);
+        --err: #DC2626;
+        --err-soft: rgba(220, 38, 38, 0.08);
     }
 
     /* Убираем верхний баннер Streamlit */
@@ -105,6 +109,7 @@ CUSTOM_CSS = """
     h1, h2, h3 {
         font-weight: 600;
         letter-spacing: -0.02em;
+        color: var(--text);
     }
     h1 {
         font-size: 2.25rem !important;
@@ -120,14 +125,18 @@ CUSTOM_CSS = """
         font-size: 1.125rem !important;
         margin-bottom: 0.75rem !important;
     }
+    p, span, div, label {
+        color: var(--text);
+    }
 
-    /* Контейнеры-карточки — оборачиваем визуально каждую секцию */
-    .scope-card {
-        background: var(--bg-elev);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 24px 28px;
-        margin-bottom: 16px;
+    /* Контейнеры-карточки */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        background: var(--bg-elev) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 12px !important;
+        padding: 24px 28px !important;
+        margin-bottom: 16px !important;
+        transition: border-color 0.15s, box-shadow 0.15s;
     }
 
     /* Лейблы шагов в заголовках */
@@ -135,13 +144,13 @@ CUSTOM_CSS = """
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 24px;
-        height: 24px;
+        width: 26px;
+        height: 26px;
         background: var(--accent-soft);
         color: var(--accent);
-        border-radius: 6px;
-        font-size: 12px;
-        font-weight: 600;
+        border-radius: 7px;
+        font-size: 13px;
+        font-weight: 700;
         margin-right: 10px;
         vertical-align: 2px;
     }
@@ -155,7 +164,7 @@ CUSTOM_CSS = """
         border: 1px solid var(--border) !important;
         border-radius: 8px !important;
         color: var(--text) !important;
-        transition: border-color 0.15s;
+        transition: border-color 0.15s, box-shadow 0.15s;
     }
     [data-baseweb="select"] > div:hover,
     .stTextInput input:hover,
@@ -168,7 +177,7 @@ CUSTOM_CSS = """
     .stTextArea textarea:focus,
     .stNumberInput input:focus {
         border-color: var(--accent) !important;
-        box-shadow: 0 0 0 3px var(--accent-soft) !important;
+        box-shadow: 0 0 0 3px var(--accent-ring) !important;
     }
 
     /* Радио-кнопки — карточный стиль */
@@ -201,14 +210,20 @@ CUSTOM_CSS = """
     [data-testid="stCheckbox"] label p {
         font-size: 0.95rem !important;
         font-weight: 500;
+        color: var(--text) !important;
+    }
+    /* Сам квадратик чек-бокса */
+    [data-testid="stCheckbox"] [data-baseweb="checkbox"] > div:first-child {
+        background: var(--bg) !important;
+        border-color: var(--border-strong) !important;
     }
 
-    /* Главные кнопки — крупные, заметные */
+    /* Главные кнопки */
     .stButton > button {
         font-weight: 600 !important;
         border-radius: 8px !important;
         border: 1px solid var(--border) !important;
-        background: var(--bg-elev-2) !important;
+        background: var(--bg) !important;
         color: var(--text) !important;
         transition: all 0.15s !important;
         padding: 0.5rem 1.25rem !important;
@@ -222,35 +237,36 @@ CUSTOM_CSS = """
         background: var(--accent) !important;
         border-color: var(--accent) !important;
         color: white !important;
-        box-shadow: 0 0 0 0 var(--accent-soft);
+        box-shadow: 0 1px 3px rgba(26, 86, 232, 0.20);
         font-size: 1rem !important;
-        padding: 0.65rem 1.5rem !important;
+        padding: 0.7rem 1.5rem !important;
     }
     .stButton > button[kind="primary"]:hover:not(:disabled) {
         background: var(--accent-hover) !important;
         border-color: var(--accent-hover) !important;
-        box-shadow: 0 0 0 4px var(--accent-soft);
+        box-shadow: 0 4px 12px rgba(26, 86, 232, 0.30);
+        transform: translateY(-1px);
     }
     .stButton > button[kind="primary"]:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }
 
-    /* Кнопка скачивания — стиль «success», крупная */
+    /* Кнопка скачивания — зелёный градиент */
     .stDownloadButton > button {
-        background: linear-gradient(180deg, #4CAF50 0%, #43A047 100%) !important;
-        border: 1px solid #4CAF50 !important;
+        background: linear-gradient(180deg, #22C55E 0%, #16A34A 100%) !important;
+        border: 1px solid #16A34A !important;
         color: white !important;
         font-weight: 600 !important;
         font-size: 1rem !important;
-        padding: 0.75rem 1.5rem !important;
+        padding: 0.85rem 1.5rem !important;
         border-radius: 8px !important;
-        box-shadow: 0 2px 8px rgba(76, 175, 80, 0.25) !important;
+        box-shadow: 0 2px 8px rgba(22, 163, 74, 0.20) !important;
         transition: all 0.15s !important;
     }
     .stDownloadButton > button:hover {
-        background: linear-gradient(180deg, #5CBB60 0%, #4CB14F 100%) !important;
-        box-shadow: 0 4px 12px rgba(76, 175, 80, 0.35) !important;
+        background: linear-gradient(180deg, #34D365 0%, #1FB158 100%) !important;
+        box-shadow: 0 6px 16px rgba(22, 163, 74, 0.30) !important;
         transform: translateY(-1px);
     }
 
@@ -276,20 +292,16 @@ CUSTOM_CSS = """
         font-size: 1.875rem !important;
         font-weight: 600 !important;
         margin-top: 4px;
+        color: var(--text) !important;
     }
 
-    /* Алерты (info/warning/error/success) */
+    /* Алерты */
     [data-baseweb="notification"] {
         border-radius: 10px !important;
         border-width: 1px !important;
     }
-    /* info */
-    [data-testid="stAlert"][data-baseweb="notification"] {
-        background: var(--accent-soft) !important;
-        border-color: var(--accent) !important;
-    }
 
-    /* Прогресс-бар — синий */
+    /* Прогресс-бар */
     [data-testid="stProgress"] > div > div > div {
         background: var(--accent) !important;
     }
@@ -298,68 +310,62 @@ CUSTOM_CSS = """
     [data-testid="stExpander"] {
         border: 1px solid var(--border) !important;
         border-radius: 10px !important;
-        background: var(--bg-elev) !important;
+        background: var(--bg) !important;
     }
     [data-testid="stExpander"] summary {
         font-weight: 500;
     }
 
-    /* Капшен — нежно-серый */
+    /* Капшен */
     [data-testid="stCaptionContainer"] {
         color: var(--text-muted) !important;
     }
 
-    /* Разделитель — тоньше */
+    /* Разделитель */
     hr {
         margin: 1.5rem 0 !important;
         border-color: var(--border) !important;
     }
 
-    /* Подсветка ссылок в проблемах */
+    /* Ссылки */
     .stMarkdown a {
         color: var(--accent) !important;
         text-decoration: none;
+        font-weight: 500;
     }
     .stMarkdown a:hover {
         text-decoration: underline;
     }
 
-    /* Брендинговая шапка — тонкая полоска с лого */
+    /* Брендинговая шапка */
     .brand-bar {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 12px;
         padding-bottom: 16px;
         margin-bottom: 8px;
     }
     .brand-logo {
-        width: 36px;
-        height: 36px;
-        background: var(--accent);
-        border-radius: 8px;
+        width: 40px;
+        height: 40px;
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+        border-radius: 9px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 20px;
+        font-size: 21px;
+        box-shadow: 0 2px 8px rgba(26, 86, 232, 0.25);
     }
     .brand-name {
-        font-weight: 600;
-        font-size: 1.05rem;
+        font-weight: 700;
+        font-size: 1.1rem;
         letter-spacing: -0.01em;
+        color: var(--text);
     }
     .brand-sub {
         color: var(--text-muted);
         font-size: 0.875rem;
         margin-left: auto;
-    }
-
-    /* Большой ободок вокруг результатов */
-    .results-banner {
-        background: linear-gradient(180deg, rgba(80, 227, 194, 0.06) 0%, transparent 100%);
-        border: 1px solid var(--ok);
-        border-radius: 12px;
-        padding: 20px 24px;
-        margin-bottom: 16px;
     }
 </style>
 """
