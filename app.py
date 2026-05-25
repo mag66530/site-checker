@@ -61,9 +61,309 @@ def get_proxy_url() -> str | None:
 st.set_page_config(
     page_title='Site Checker',
     page_icon='🔎',
-    layout='wide',
+    layout='centered',
     initial_sidebar_state='collapsed',
 )
+
+
+# ── Кастомный CSS: тема Vercel/Anthropic ─────────────────────────
+
+
+CUSTOM_CSS = """
+<style>
+    /* Основные переменные палитры */
+    :root {
+        --bg: #0A0A0A;
+        --bg-elev: #111111;
+        --bg-elev-2: #1A1A1A;
+        --border: #262626;
+        --border-strong: #333333;
+        --text: #EDEDED;
+        --text-soft: #A1A1AA;
+        --text-muted: #71717A;
+        --accent: #0070F3;
+        --accent-hover: #1F8CFF;
+        --accent-soft: rgba(0, 112, 243, 0.10);
+        --ok: #50E3C2;
+        --warn: #F5A623;
+        --err: #FF4D4F;
+    }
+
+    /* Убираем верхний баннер Streamlit */
+    [data-testid="stHeader"] {
+        background: transparent;
+        height: 0;
+    }
+    [data-testid="stToolbar"] {
+        right: 1rem;
+    }
+
+    /* Базовая типографика */
+    .stApp {
+        background-color: var(--bg);
+    }
+    h1, h2, h3 {
+        font-weight: 600;
+        letter-spacing: -0.02em;
+    }
+    h1 {
+        font-size: 2.25rem !important;
+        line-height: 1.1;
+        margin-bottom: 0.5rem !important;
+    }
+    h2 {
+        font-size: 1.5rem !important;
+        margin-top: 0 !important;
+        margin-bottom: 1rem !important;
+    }
+    h3 {
+        font-size: 1.125rem !important;
+        margin-bottom: 0.75rem !important;
+    }
+
+    /* Контейнеры-карточки — оборачиваем визуально каждую секцию */
+    .scope-card {
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 24px 28px;
+        margin-bottom: 16px;
+    }
+
+    /* Лейблы шагов в заголовках */
+    .step-num {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-right: 10px;
+        vertical-align: 2px;
+    }
+
+    /* Поля ввода / селекты */
+    [data-baseweb="select"] > div,
+    .stTextInput input,
+    .stTextArea textarea,
+    .stNumberInput input {
+        background: var(--bg) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 8px !important;
+        color: var(--text) !important;
+        transition: border-color 0.15s;
+    }
+    [data-baseweb="select"] > div:hover,
+    .stTextInput input:hover,
+    .stTextArea textarea:hover,
+    .stNumberInput input:hover {
+        border-color: var(--border-strong) !important;
+    }
+    [data-baseweb="select"] > div:focus-within,
+    .stTextInput input:focus,
+    .stTextArea textarea:focus,
+    .stNumberInput input:focus {
+        border-color: var(--accent) !important;
+        box-shadow: 0 0 0 3px var(--accent-soft) !important;
+    }
+
+    /* Радио-кнопки — карточный стиль */
+    [data-testid="stRadio"] > div {
+        gap: 8px;
+    }
+    [data-testid="stRadio"] label {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin: 0 !important;
+        transition: all 0.15s;
+        cursor: pointer;
+    }
+    [data-testid="stRadio"] label:hover {
+        border-color: var(--border-strong);
+        background: var(--bg-elev-2);
+    }
+    [data-testid="stRadio"] label[data-checked="true"],
+    [data-testid="stRadio"] label:has(input:checked) {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+    }
+
+    /* Чек-боксы */
+    [data-testid="stCheckbox"] {
+        padding: 4px 0;
+    }
+    [data-testid="stCheckbox"] label p {
+        font-size: 0.95rem !important;
+        font-weight: 500;
+    }
+
+    /* Главные кнопки — крупные, заметные */
+    .stButton > button {
+        font-weight: 600 !important;
+        border-radius: 8px !important;
+        border: 1px solid var(--border) !important;
+        background: var(--bg-elev-2) !important;
+        color: var(--text) !important;
+        transition: all 0.15s !important;
+        padding: 0.5rem 1.25rem !important;
+    }
+    .stButton > button:hover {
+        border-color: var(--border-strong) !important;
+        background: var(--bg-elev) !important;
+    }
+    /* type=primary — это «Запустить» */
+    .stButton > button[kind="primary"] {
+        background: var(--accent) !important;
+        border-color: var(--accent) !important;
+        color: white !important;
+        box-shadow: 0 0 0 0 var(--accent-soft);
+        font-size: 1rem !important;
+        padding: 0.65rem 1.5rem !important;
+    }
+    .stButton > button[kind="primary"]:hover:not(:disabled) {
+        background: var(--accent-hover) !important;
+        border-color: var(--accent-hover) !important;
+        box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+    .stButton > button[kind="primary"]:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Кнопка скачивания — стиль «success», крупная */
+    .stDownloadButton > button {
+        background: linear-gradient(180deg, #4CAF50 0%, #43A047 100%) !important;
+        border: 1px solid #4CAF50 !important;
+        color: white !important;
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        padding: 0.75rem 1.5rem !important;
+        border-radius: 8px !important;
+        box-shadow: 0 2px 8px rgba(76, 175, 80, 0.25) !important;
+        transition: all 0.15s !important;
+    }
+    .stDownloadButton > button:hover {
+        background: linear-gradient(180deg, #5CBB60 0%, #4CB14F 100%) !important;
+        box-shadow: 0 4px 12px rgba(76, 175, 80, 0.35) !important;
+        transform: translateY(-1px);
+    }
+
+    /* Метрики — карточный вид */
+    [data-testid="stMetric"] {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 18px;
+        transition: border-color 0.15s;
+    }
+    [data-testid="stMetric"]:hover {
+        border-color: var(--border-strong);
+    }
+    [data-testid="stMetricLabel"] {
+        color: var(--text-muted) !important;
+        font-size: 0.75rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.05em !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 1.875rem !important;
+        font-weight: 600 !important;
+        margin-top: 4px;
+    }
+
+    /* Алерты (info/warning/error/success) */
+    [data-baseweb="notification"] {
+        border-radius: 10px !important;
+        border-width: 1px !important;
+    }
+    /* info */
+    [data-testid="stAlert"][data-baseweb="notification"] {
+        background: var(--accent-soft) !important;
+        border-color: var(--accent) !important;
+    }
+
+    /* Прогресс-бар — синий */
+    [data-testid="stProgress"] > div > div > div {
+        background: var(--accent) !important;
+    }
+
+    /* Expander */
+    [data-testid="stExpander"] {
+        border: 1px solid var(--border) !important;
+        border-radius: 10px !important;
+        background: var(--bg-elev) !important;
+    }
+    [data-testid="stExpander"] summary {
+        font-weight: 500;
+    }
+
+    /* Капшен — нежно-серый */
+    [data-testid="stCaptionContainer"] {
+        color: var(--text-muted) !important;
+    }
+
+    /* Разделитель — тоньше */
+    hr {
+        margin: 1.5rem 0 !important;
+        border-color: var(--border) !important;
+    }
+
+    /* Подсветка ссылок в проблемах */
+    .stMarkdown a {
+        color: var(--accent) !important;
+        text-decoration: none;
+    }
+    .stMarkdown a:hover {
+        text-decoration: underline;
+    }
+
+    /* Брендинговая шапка — тонкая полоска с лого */
+    .brand-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-bottom: 16px;
+        margin-bottom: 8px;
+    }
+    .brand-logo {
+        width: 36px;
+        height: 36px;
+        background: var(--accent);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+    }
+    .brand-name {
+        font-weight: 600;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+    }
+    .brand-sub {
+        color: var(--text-muted);
+        font-size: 0.875rem;
+        margin-left: auto;
+    }
+
+    /* Большой ободок вокруг результатов */
+    .results-banner {
+        background: linear-gradient(180deg, rgba(80, 227, 194, 0.06) 0%, transparent 100%);
+        border: 1px solid var(--ok);
+        border-radius: 12px;
+        padding: 20px 24px;
+        margin-bottom: 16px;
+    }
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ── Session state defaults ────────────────────────────────────────
@@ -132,50 +432,66 @@ def cached_load_sources(project_id: str):
 # ── Шапка ──────────────────────────────────────────────────────────
 
 
-st.title('🔎 Site Checker')
-st.caption(
+st.markdown("""
+<div class="brand-bar">
+    <div class="brand-logo">🔎</div>
+    <div>
+        <div class="brand-name">Site Checker</div>
+    </div>
+    <div class="brand-sub">проверка доступности сайтов</div>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown(
+    '<p style="color:var(--text-soft);font-size:0.95rem;margin-bottom:1.5rem">'
     'Автоматическая проверка доступности страниц СМУ, ИМП, МПЭ. '
     'Главные страницы · Каталог · Категории · Фильтры · Товары · Битые переменные'
+    '</p>',
+    unsafe_allow_html=True,
 )
 
 
 # ── Шаг 1: выбор проекта ───────────────────────────────────────────
 
 
-st.subheader('Шаг 1. Какой сайт проверяем')
+# ── Шаг 1: выбор проекта ───────────────────────────────────────────
 
-projects = list_projects()
-project_options = ['— выберите —'] + [p['name'] for p in projects] + ['Свой список URL']
-project_to_id = {p['name']: p['id'] for p in projects}
 
-# Подсчёт текущего индекса для select-box
-current_label = '— выберите —'
-if st.session_state.project_id == '__custom__':
-    current_label = 'Свой список URL'
-elif st.session_state.project_id:
-    for p in projects:
-        if p['id'] == st.session_state.project_id:
-            current_label = p['name']
-            break
+with st.container(border=True):
+    st.markdown('<h3><span class="step-num">1</span>Какой сайт проверяем</h3>', unsafe_allow_html=True)
 
-selected_label = st.selectbox(
-    'Проект',
-    project_options,
-    index=project_options.index(current_label),
-    label_visibility='collapsed',
-)
+    projects = list_projects()
+    project_options = ['— выберите —'] + [p['name'] for p in projects] + ['Свой список URL']
+    project_to_id = {p['name']: p['id'] for p in projects}
 
-if selected_label == 'Свой список URL':
-    new_pid = '__custom__'
-elif selected_label == '— выберите —':
-    new_pid = None
-else:
-    new_pid = project_to_id[selected_label]
+    # Подсчёт текущего индекса для select-box
+    current_label = '— выберите —'
+    if st.session_state.project_id == '__custom__':
+        current_label = 'Свой список URL'
+    elif st.session_state.project_id:
+        for p in projects:
+            if p['id'] == st.session_state.project_id:
+                current_label = p['name']
+                break
 
-# Если проект сменился — сброс результата прошлого прогона
-if new_pid != st.session_state.project_id:
-    reset_run_state()
-    st.session_state.project_id = new_pid
+    selected_label = st.selectbox(
+        'Проект',
+        project_options,
+        index=project_options.index(current_label),
+        label_visibility='collapsed',
+    )
+
+    if selected_label == 'Свой список URL':
+        new_pid = '__custom__'
+    elif selected_label == '— выберите —':
+        new_pid = None
+    else:
+        new_pid = project_to_id[selected_label]
+
+    # Если проект сменился — сброс результата прошлого прогона
+    if new_pid != st.session_state.project_id:
+        reset_run_state()
+        st.session_state.project_id = new_pid
 
 
 # ── Дальше расходится логика: обычный проект ИЛИ custom-режим ──────
@@ -191,73 +507,71 @@ is_project = (st.session_state.project_id is not None and not is_custom)
 
 
 if is_custom:
-    st.divider()
-    st.subheader('Список URL для проверки')
-    st.caption(
-        'Вставьте ссылки – по одной на строку. Можно загрузить из файла (.txt или .csv). '
-        'Если протокол не указан, добавится https://. Строки после символа # игнорируются.'
-    )
-
-    uploaded = st.file_uploader(
-        'Загрузить .txt / .csv',
-        type=['txt', 'csv'],
-        label_visibility='visible',
-    )
-    if uploaded:
-        try:
-            text = uploaded.read().decode('utf-8', errors='replace')
-            # Для CSV — берём первое поле каждой строки
-            if uploaded.name.lower().endswith('.csv'):
-                lines = []
-                for line in text.splitlines():
-                    cells = line.split(',') if ',' in line else line.split(';')
-                    first = cells[0].strip().strip('"').strip("'")
-                    lines.append(first)
-                text = '\n'.join(lines)
-            # Дописываем к существующему
-            existing = st.session_state.custom_urls_text.strip()
-            st.session_state.custom_urls_text = (existing + '\n' + text) if existing else text
-        except Exception as e:
-            st.error(f'Не удалось прочитать файл: {e}')
-
-    custom_text = st.text_area(
-        'URLs',
-        value=st.session_state.custom_urls_text,
-        height=240,
-        label_visibility='collapsed',
-        placeholder='https://example.com/page1\nhttps://example.com/page2\nexample.com/page3',
-        key='custom_urls_input',
-    )
-    if custom_text != st.session_state.custom_urls_text:
-        st.session_state.custom_urls_text = custom_text
-        reset_run_state()
-
-    # Парсим URL'ы из текста (та же логика что в sources.build_custom_plan)
-    custom_plan = build_custom_plan(custom_text.split('\n'))
-    valid_count = len(custom_plan.tasks)
-
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        if valid_count == 0:
-            st.info('Введите URL\'ы')
-        else:
-            st.success(f'Готово к проверке: {valid_count} URL')
-    with col2:
-        save_list = st.checkbox(
-            'Сохранить список',
-            value=st.session_state.custom_save_list,
-            help='Список останется в сессии и появится при следующем открытии',
+    with st.container(border=True):
+        st.markdown('<h3>Список URL для проверки</h3>', unsafe_allow_html=True)
+        st.caption(
+            'Вставьте ссылки – по одной на строку. Можно загрузить из файла (.txt или .csv). '
+            'Если протокол не указан, добавится https://. Строки после символа # игнорируются.'
         )
-        st.session_state.custom_save_list = save_list
 
-    check_text_custom = st.checkbox(
-        'Искать битые переменные в текстах',
-        value=st.session_state.check_text,
-        help='{{переменная}}, %name%, undefined и [object Object]',
-    )
-    st.session_state.check_text = check_text_custom
+        uploaded = st.file_uploader(
+            'Загрузить .txt / .csv',
+            type=['txt', 'csv'],
+            label_visibility='collapsed',
+        )
+        if uploaded:
+            try:
+                text = uploaded.read().decode('utf-8', errors='replace')
+                # Для CSV — берём первое поле каждой строки
+                if uploaded.name.lower().endswith('.csv'):
+                    lines = []
+                    for line in text.splitlines():
+                        cells = line.split(',') if ',' in line else line.split(';')
+                        first = cells[0].strip().strip('"').strip("'")
+                        lines.append(first)
+                    text = '\n'.join(lines)
+                # Дописываем к существующему
+                existing = st.session_state.custom_urls_text.strip()
+                st.session_state.custom_urls_text = (existing + '\n' + text) if existing else text
+            except Exception as e:
+                st.error(f'Не удалось прочитать файл: {e}')
 
-    st.divider()
+        custom_text = st.text_area(
+            'URLs',
+            value=st.session_state.custom_urls_text,
+            height=240,
+            label_visibility='collapsed',
+            placeholder='https://example.com/page1\nhttps://example.com/page2\nexample.com/page3',
+            key='custom_urls_input',
+        )
+        if custom_text != st.session_state.custom_urls_text:
+            st.session_state.custom_urls_text = custom_text
+            reset_run_state()
+
+        # Парсим URL'ы из текста
+        custom_plan = build_custom_plan(custom_text.split('\n'))
+        valid_count = len(custom_plan.tasks)
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if valid_count == 0:
+                st.info('Введите URL\'ы')
+            else:
+                st.success(f'Готово к проверке: {valid_count} URL')
+        with col2:
+            save_list = st.checkbox(
+                'Сохранить список',
+                value=st.session_state.custom_save_list,
+                help='Список останется в сессии и появится при следующем открытии',
+            )
+            st.session_state.custom_save_list = save_list
+
+        check_text_custom = st.checkbox(
+            'Искать битые переменные в текстах',
+            value=st.session_state.check_text,
+            help='{{переменная}}, %name%, undefined и [object Object]',
+        )
+        st.session_state.check_text = check_text_custom
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -275,109 +589,111 @@ elif is_project:
         st.error(f'Не удалось загрузить каталог: {e}')
         st.stop()
 
-    # Метрики проекта
+    # ─── Метрики проекта в одной карточке ─────────────────────
     stats = src.stats
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric('Городов', stats['subdomains_count'])
-    c2.metric('Категорий', f'{stats["categories_count"]:,}'.replace(',', ' '))
-    if stats['has_filters']:
-        c3.metric('Фильтров', f'{stats["filters_count"]:,}'.replace(',', ' '))
-    else:
-        c3.metric('Фильтров', 'нет')
-    c4.metric('Главный город', cfg.get('mandatory_city', 'Москва'))
-
-    st.divider()
-
-    # ─── Шаг 2: профиль ──────────────────────────────────────────
-    st.subheader('Шаг 2. Что и сколько проверять')
-
-    profile_labels = {pid: f'{p["label"]} — {p["description"]}' for pid, p in PROFILES.items()}
-    profile_choices = list(profile_labels.keys()) + ['custom']
-
-    def profile_format(pid):
-        if pid == 'custom':
-            return 'Свои настройки — задать вручную'
-        return profile_labels[pid]
-
-    new_profile = st.radio(
-        'Профиль',
-        profile_choices,
-        index=profile_choices.index(st.session_state.profile) if st.session_state.profile in profile_choices else 0,
-        format_func=profile_format,
-        label_visibility='collapsed',
-    )
-    if new_profile != st.session_state.profile:
-        st.session_state.profile = new_profile
-        reset_run_state()
-
-    # Если выбран профиль — подставляем его значения. Если «Свои» — даём слайдеры
-    if st.session_state.profile == 'custom':
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            random_subs = st.number_input(
-                'Случайных городов',
-                min_value=0, max_value=stats['subdomains_count'] - 1,
-                value=5, step=1,
-                help='Москва добавится автоматически',
-            )
-        with col2:
-            cats_per_sub = st.number_input(
-                'Категорий на каждый город',
-                min_value=0, max_value=50, value=5, step=1,
-            )
-        with col3:
-            if stats['has_filters']:
-                filters_per_sub = st.number_input(
-                    'Фильтров на каждый город',
-                    min_value=0, max_value=50, value=5, step=1,
-                )
-            else:
-                filters_per_sub = 0
-                st.markdown('_У проекта нет фильтров_')
-        with col4:
-            products_per_sub = st.number_input(
-                'Товаров на каждый город',
-                min_value=0, max_value=50, value=3, step=1,
-            )
-    else:
-        kw = get_profile_kwargs(st.session_state.profile)
-        random_subs = kw['random_subdomains_count']
-        cats_per_sub = kw['categories_per_subdomain']
-        filters_per_sub = kw['filters_per_subdomain'] if stats['has_filters'] else 0
-        products_per_sub = kw['products_per_subdomain']
-
-    st.divider()
-
-    # ─── Шаг 3: какие пункты включать ───────────────────────────
-    st.subheader('Шаг 3. Какие пункты включить')
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        check_main = st.checkbox('🏠 Главные страницы', value=st.session_state.check_main, help='1.1')
-        check_catalog = st.checkbox('📁 Страница /catalog/', value=st.session_state.check_catalog, help='1.2')
-    with c2:
-        check_categories = st.checkbox('📂 Категории', value=st.session_state.check_categories, help='1.3')
+    with st.container(border=True):
+        st.markdown(
+            f'<p style="color:var(--text-muted);font-size:0.875rem;'
+            f'margin-bottom:0.75rem;text-transform:uppercase;letter-spacing:0.05em;'
+            f'font-weight:600">Каталог проекта</p>',
+            unsafe_allow_html=True,
+        )
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric('Городов', stats['subdomains_count'])
+        c2.metric('Категорий', f'{stats["categories_count"]:,}'.replace(',', ' '))
         if stats['has_filters']:
-            check_filters = st.checkbox('🏷️ Фильтры', value=st.session_state.check_filters, help='1.4')
+            c3.metric('Фильтров', f'{stats["filters_count"]:,}'.replace(',', ' '))
         else:
-            check_filters = False
-    with c3:
-        check_products = st.checkbox('🛒 Карточки товаров', value=st.session_state.check_products, help='1.5 — из sitemap.xml')
-        check_text = st.checkbox('🔤 Битые переменные в текстах', value=st.session_state.check_text, help='1.6')
+            c3.metric('Фильтров', 'нет')
+        c4.metric('Главный город', cfg.get('mandatory_city', 'Москва'))
 
-    # сохраняем в state
-    for key, val in [
-        ('check_main', check_main), ('check_catalog', check_catalog),
-        ('check_categories', check_categories), ('check_filters', check_filters),
-        ('check_products', check_products), ('check_text', check_text),
-    ]:
-        if val != st.session_state[key]:
-            st.session_state[key] = val
+    # ─── Шаг 2: профиль в карточке ───────────────────────────
+    with st.container(border=True):
+        st.markdown('<h3><span class="step-num">2</span>Что и сколько проверять</h3>', unsafe_allow_html=True)
+
+        profile_labels = {pid: f'{p["label"]} — {p["description"]}' for pid, p in PROFILES.items()}
+        profile_choices = list(profile_labels.keys()) + ['custom']
+
+        def profile_format(pid):
+            if pid == 'custom':
+                return 'Свои настройки — задать вручную'
+            return profile_labels[pid]
+
+        new_profile = st.radio(
+            'Профиль',
+            profile_choices,
+            index=profile_choices.index(st.session_state.profile) if st.session_state.profile in profile_choices else 0,
+            format_func=profile_format,
+            label_visibility='collapsed',
+        )
+        if new_profile != st.session_state.profile:
+            st.session_state.profile = new_profile
             reset_run_state()
 
-    st.divider()
+        # Если выбран профиль — подставляем его значения. Если «Свои» — даём слайдеры
+        if st.session_state.profile == 'custom':
+            st.markdown('<p style="color:var(--text-muted);font-size:0.875rem;margin-top:1rem;margin-bottom:0.5rem">Параметры выборки</p>', unsafe_allow_html=True)
+            col1, col2 = st.columns(2)
+            with col1:
+                random_subs = st.number_input(
+                    'Случайных городов',
+                    min_value=0, max_value=stats['subdomains_count'] - 1,
+                    value=5, step=1,
+                    help='Москва добавится автоматически',
+                )
+                cats_per_sub = st.number_input(
+                    'Категорий на каждый город',
+                    min_value=0, max_value=50, value=5, step=1,
+                )
+            with col2:
+                if stats['has_filters']:
+                    filters_per_sub = st.number_input(
+                        'Фильтров на каждый город',
+                        min_value=0, max_value=50, value=5, step=1,
+                    )
+                else:
+                    filters_per_sub = 0
+                    st.markdown('_У проекта нет фильтров_')
+                products_per_sub = st.number_input(
+                    'Товаров на каждый город',
+                    min_value=0, max_value=50, value=3, step=1,
+                )
+        else:
+            kw = get_profile_kwargs(st.session_state.profile)
+            random_subs = kw['random_subdomains_count']
+            cats_per_sub = kw['categories_per_subdomain']
+            filters_per_sub = kw['filters_per_subdomain'] if stats['has_filters'] else 0
+            products_per_sub = kw['products_per_subdomain']
 
-    # ─── Оценка плана ───────────────────────────────────────────
+    # ─── Шаг 3: чек-боксы в карточке ────────────────────────
+    with st.container(border=True):
+        st.markdown('<h3><span class="step-num">3</span>Какие пункты включить</h3>', unsafe_allow_html=True)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            check_main = st.checkbox('🏠 Главные страницы', value=st.session_state.check_main, help='Пункт 1.1 чек-листа')
+            check_catalog = st.checkbox('📁 Страница /catalog/', value=st.session_state.check_catalog, help='Пункт 1.2')
+            check_categories = st.checkbox('📂 Категории', value=st.session_state.check_categories, help='Пункт 1.3')
+        with c2:
+            if stats['has_filters']:
+                check_filters = st.checkbox('🏷️ Фильтры', value=st.session_state.check_filters, help='Пункт 1.4')
+            else:
+                check_filters = False
+                st.markdown('<span style="color:var(--text-muted)">🏷️ Фильтры _(нет в каталоге проекта)_</span>', unsafe_allow_html=True)
+            check_products = st.checkbox('🛒 Карточки товаров', value=st.session_state.check_products, help='Пункт 1.5 — из sitemap.xml')
+            check_text = st.checkbox('🔤 Битые переменные', value=st.session_state.check_text, help='Пункт 1.6 — {{city}}, %price%, undefined и т.д.')
+
+        # сохраняем в state
+        for key, val in [
+            ('check_main', check_main), ('check_catalog', check_catalog),
+            ('check_categories', check_categories), ('check_filters', check_filters),
+            ('check_products', check_products), ('check_text', check_text),
+        ]:
+            if val != st.session_state[key]:
+                st.session_state[key] = val
+                reset_run_state()
+
+    # ─── Оценка плана + кнопка запуска в одной карточке ───────
     selected_cities_count = 1 + random_subs  # Москва + случайные
     per_sub = (
         (1 if check_main else 0) +
@@ -388,14 +704,6 @@ elif is_project:
     )
     total_checks = selected_cities_count * per_sub
     estimated_sec = max(1, (total_checks // 6) * 3)  # 3 сек на запрос при concurrency 6
-
-    if total_checks == 0:
-        st.warning('Сейчас не выбрано ни одного пункта для проверки')
-    else:
-        st.info(
-            f'Будет проверено **{selected_cities_count} городов** × **{per_sub} страниц** = '
-            f'**{total_checks} проверок**. Примерное время: **{format_duration(estimated_sec)}**'
-        )
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -410,11 +718,47 @@ if is_project or is_custom:
     elif is_project:
         can_run = total_checks > 0
 
-    btn_label = '▶ Запустить проверку'
-    if st.button(btn_label, type='primary', disabled=not can_run, use_container_width=True):
-        st.session_state.is_running = True
-        reset_run_state()
-        st.rerun()
+    # Карточка с превью + кнопкой
+    with st.container(border=True):
+        if is_project:
+            if total_checks == 0:
+                st.warning('Не выбрано ни одного пункта для проверки')
+            else:
+                st.markdown(
+                    f'<p style="color:var(--text-muted);font-size:0.875rem;'
+                    f'margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em;'
+                    f'font-weight:600">Готов к запуску</p>'
+                    f'<p style="font-size:1.05rem;margin-bottom:1rem">'
+                    f'Будет проверено <strong style="color:var(--accent)">{selected_cities_count} городов</strong> × '
+                    f'<strong style="color:var(--accent)">{per_sub} страниц</strong> = '
+                    f'<strong style="color:var(--accent)">{total_checks} проверок</strong>. '
+                    f'Примерное время: <strong>{format_duration(estimated_sec)}</strong>'
+                    f'</p>',
+                    unsafe_allow_html=True,
+                )
+        elif is_custom and valid_count > 0:
+            est_sec = max(1, (valid_count // 6) * 3)
+            st.markdown(
+                f'<p style="color:var(--text-muted);font-size:0.875rem;'
+                f'margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em;'
+                f'font-weight:600">Готов к запуску</p>'
+                f'<p style="font-size:1.05rem;margin-bottom:1rem">'
+                f'Будет проверено <strong style="color:var(--accent)">{valid_count} URL</strong>. '
+                f'Примерное время: <strong>{format_duration(est_sec)}</strong>'
+                f'</p>',
+                unsafe_allow_html=True,
+            )
+
+        if st.button(
+            '▶ Запустить проверку',
+            type='primary',
+            disabled=not can_run,
+            use_container_width=True,
+            key='btn_run',
+        ):
+            st.session_state.is_running = True
+            reset_run_state()
+            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -437,22 +781,22 @@ async def run_check_async(project_id, plan, options, on_progress):
 
 
 if st.session_state.is_running:
-    st.divider()
-    st.subheader('Идёт проверка')
+    with st.container(border=True):
+        st.markdown('<h3>⏳ Идёт проверка</h3>', unsafe_allow_html=True)
 
-    # Крупное предупреждение чтобы контент-менеджер случайно не закрыл вкладку
-    st.warning(
-        '⚠ **Не закрывайте вкладку до окончания проверки.** '
-        'Можно переключаться на другие вкладки, но эту нужно держать открытой — '
-        'если её закрыть, прогон оборвётся и отчёт не сохранится.'
-    )
+        # Крупное предупреждение чтобы контент-менеджер случайно не закрыл вкладку
+        st.warning(
+            '⚠ **Не закрывайте вкладку до окончания проверки.** '
+            'Можно переключаться на другие вкладки, но эту нужно держать открытой — '
+            'если её закрыть, прогон оборвётся и отчёт не сохранится.'
+        )
 
-    # Места для прогресс-бара и счётчика
-    progress_bar = st.progress(0, text='Подготовка…')
-    metrics_row = st.empty()
-    log_expander = st.expander('Подробный лог', expanded=False)
-    log_area = log_expander.empty()
-    log_messages = []
+        # Места для прогресс-бара и счётчика
+        progress_bar = st.progress(0, text='Подготовка…')
+        metrics_row = st.empty()
+        log_expander = st.expander('Подробный лог', expanded=False)
+        log_area = log_expander.empty()
+        log_messages = []
 
     def append_log(msg: str):
         log_messages.append(msg)
@@ -462,11 +806,10 @@ if st.session_state.is_running:
     started_ms = int(time.time() * 1000)
     st.session_state.run_started_at = started_ms
 
-    # Достаём прокси один раз (нужен для всех async-вызовов в этом блоке)
-    proxy_url = get_proxy_url()
-    if proxy_url:
-        # Не показываем сам URL (там креды), просто факт что прокси настроен
-        append_log(f'Прокси: настроен')
+    # Прокси применяется только когда проект явно его разрешает (use_proxy: true).
+    # Custom-режим всегда без прокси.
+    # Для каждого проекта в projects/{id}.json — флаг use_proxy.
+    proxy_url = None
 
     try:
         if is_custom:
@@ -475,10 +818,21 @@ if st.session_state.is_running:
             project_name_for_report = 'Свой список URL'
             check_text_opt = st.session_state.check_text
             append_log(f'Запуск custom-прогона: {len(plan.tasks)} URL')
+            append_log('Прокси: не используется (custom-режим)')
 
         else:
             cfg = load_project_config(st.session_state.project_id)
             src = st.session_state.sources
+
+            # Решение про прокси на основе use_proxy в конфиге
+            if cfg.get('use_proxy'):
+                proxy_url = get_proxy_url()
+                if proxy_url:
+                    append_log(f'Прокси: включён для проекта {cfg["name"]}')
+                else:
+                    append_log(f'⚠ Прокси нужен для {cfg["name"]}, но не настроен в Streamlit Secrets')
+            else:
+                append_log(f'Прокси: не используется (для {cfg["name"]} не требуется)')
 
             # Загружаем sitemap если нужны товары
             if st.session_state.check_products and not src.products:
@@ -597,64 +951,113 @@ if st.session_state.is_running:
 
 
 if st.session_state.run_results and not st.session_state.is_running:
-    st.divider()
-    st.subheader('✅ Результаты проверки')
-
     results = st.session_state.run_results
     total = len(results)
     ok_count = sum(1 for r in results if r.is_ok)
     warn_count = sum(1 for r in results if r.is_warning)
     err_count = total - ok_count - warn_count
     text_issues_count = sum(len(r.text_issues) for r in results if r.has_text_issues)
-
     duration = (st.session_state.run_finished_at - st.session_state.run_started_at) // 1000
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric('Всего', total)
-    c2.metric('✅ Работает', ok_count)
-    c3.metric('⚠ Предупреждений', warn_count)
-    c4.metric('❌ Не работает', err_count, delta_color='inverse')
+    # ─── Главная карточка результатов ─────────────────────────
+    with st.container(border=True):
+        # Зелёная плашка с заголовком
+        any_problems = err_count > 0 or warn_count > 0 or text_issues_count > 0
+        if not any_problems:
+            st.markdown(
+                f'<div style="background:linear-gradient(180deg, rgba(80, 227, 194, 0.10) 0%, transparent 100%);'
+                f'border-left:3px solid var(--ok);padding:14px 18px;border-radius:8px;margin-bottom:1rem">'
+                f'<p style="margin:0;font-size:1.1rem"><strong style="color:var(--ok)">✓ Все проверки прошли успешно</strong></p>'
+                f'<p style="margin:6px 0 0 0;color:var(--text-soft)">'
+                f'Проверено {total} страниц за {format_duration(duration)}. Проблем не найдено.</p>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            problems_summary = []
+            if err_count > 0:
+                problems_summary.append(f'{err_count} {"страница не работает" if err_count == 1 else "страниц не работают"}')
+            if warn_count > 0:
+                problems_summary.append(f'{warn_count} с предупреждениями')
+            if text_issues_count > 0:
+                problems_summary.append(f'{text_issues_count} битых переменных')
+            st.markdown(
+                f'<div style="background:linear-gradient(180deg, rgba(245, 166, 35, 0.10) 0%, transparent 100%);'
+                f'border-left:3px solid var(--warn);padding:14px 18px;border-radius:8px;margin-bottom:1rem">'
+                f'<p style="margin:0;font-size:1.1rem"><strong style="color:var(--warn)">Найдены проблемы</strong></p>'
+                f'<p style="margin:6px 0 0 0;color:var(--text-soft)">'
+                f'{", ".join(problems_summary)}. Проверено {total} страниц за {format_duration(duration)}.</p>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-    info_parts = [f'**Длительность:** {format_duration(duration)}']
-    if text_issues_count > 0:
-        info_parts.append(f'**Битых переменных:** {text_issues_count}')
-    st.info(' · '.join(info_parts))
+        # Метрики
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric('Всего', total)
+        c2.metric('✅ Работает', ok_count)
+        c3.metric('⚠ Предупреждений', warn_count)
+        c4.metric('❌ Не работает', err_count, delta_color='inverse')
 
-    # Скачивание отчёта
-    if st.session_state.run_report_path:
-        report_path = Path(st.session_state.run_report_path)
-        if report_path.exists():
-            with open(report_path, 'rb') as f:
-                st.download_button(
-                    label=f'⬇ Скачать отчёт ({report_path.name})',
-                    data=f.read(),
-                    file_name=report_path.name,
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    use_container_width=True,
-                )
+        # ─── ВЫДЕЛЕННАЯ кнопка скачивания ─────────────────────
+        if st.session_state.run_report_path:
+            report_path = Path(st.session_state.run_report_path)
+            if report_path.exists():
+                st.markdown('<div style="margin-top:1rem"></div>', unsafe_allow_html=True)
+                with open(report_path, 'rb') as f:
+                    st.download_button(
+                        label=f'📥 Скачать полный отчёт ({report_path.name})',
+                        data=f.read(),
+                        file_name=report_path.name,
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True,
+                        type='primary',
+                    )
+                st.caption(f'В отчёте: все проверки в формате xlsx с фильтрами по статусу')
 
-    # Показываем проблемы списком
+    # ─── Список проблем в отдельной карточке ──────────────
     problems = [r for r in results if r.is_error or r.is_warning or r.has_text_issues]
     if problems:
-        with st.expander(f'Список проблем ({len(problems)})', expanded=True):
+        with st.container(border=True):
+            st.markdown(
+                f'<h3 style="margin-bottom:1rem">Список проблем '
+                f'<span style="color:var(--text-muted);font-weight:400;font-size:0.95rem">({len(problems)})</span>'
+                f'</h3>',
+                unsafe_allow_html=True,
+            )
+            status_labels = {
+                'ok': 'Работает',
+                'redirect': 'Перенаправление',
+                'not_found': 'Страница не найдена',
+                'client_error': 'Ошибка на сайте',
+                'server_error': 'Сервер не отвечает',
+                'timeout': 'Нет ответа',
+                'network_error': 'Нет соединения',
+            }
             for r in problems[:50]:
-                emoji = '❌' if r.is_error else '⚠'
-                if r.has_text_issues and not (r.is_error or r.is_warning):
+                if r.is_error:
+                    emoji = '❌'
+                    color = 'var(--err)'
+                elif r.is_warning:
+                    emoji = '⚠️'
+                    color = 'var(--warn)'
+                else:
                     emoji = '🔤'
-                status_text = {
-                    'ok': 'Работает',
-                    'redirect': 'Перенаправление',
-                    'not_found': 'Страница не найдена',
-                    'client_error': 'Ошибка на сайте',
-                    'server_error': 'Сервер не отвечает',
-                    'timeout': 'Нет ответа',
-                    'network_error': 'Нет соединения',
-                }.get(r.status, r.status)
+                    color = 'var(--warn)'
 
+                status_text = status_labels.get(r.status, r.status)
                 extra = ''
                 if r.has_text_issues:
-                    extra = f' · {len(r.text_issues)} битых переменных'
-                st.markdown(f'{emoji} **[{r.city}]** {r.type_label}: [{r.url}]({r.url}) — {status_text}{extra}')
+                    extra = f' · <span style="color:var(--warn)">{len(r.text_issues)} битых переменных</span>'
+
+                city_part = f'[{r.city}] ' if r.city else ''
+                st.markdown(
+                    f'<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:0.92rem">'
+                    f'{emoji} <strong>{city_part}</strong>{r.type_label}: '
+                    f'<a href="{r.url}" target="_blank" style="color:var(--accent);text-decoration:none">{r.url}</a> '
+                    f'— <span style="color:{color}">{status_text}</span>{extra}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
             if len(problems) > 50:
                 st.caption(f'... и ещё {len(problems) - 50}. Все детали — в xlsx-отчёте.')

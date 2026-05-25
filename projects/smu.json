@@ -8,5 +8,6 @@
   "catalog_csv": "catalogs/smu-catalog.csv",
   "categories_csv": "catalogs/smu-categories.csv",
   "mandatory_city": "Москва",
-  "has_filters": true
+  "has_filters": true,
+  "use_proxy": true
 }
