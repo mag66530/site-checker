@@ -34,6 +34,8 @@ from reporter import build_report, make_report_filename
 from metrika_404 import (
     fetch_metrika_emails, save_reports_batch, list_stored_reports,
     load_report, MAILBOX_CONFIG, COUNTRY_LABELS,
+    fetch_incremental, get_latest_available_date,
+    load_reports_for_date, load_reports_for_period,
 )
 
 
@@ -979,6 +981,169 @@ elif is_project:
                 st.session_state[key] = val
                 reset_run_state()
 
+    # ─── БЛОК 404 ИЗ МЕТРИКИ (если проект имеет настроенные креды) ──
+    metrika_pid = st.session_state.project_id
+    m_email, m_password = get_metrika_credentials(metrika_pid)
+    metrika_creds_ok = bool(m_email and m_password)
+
+    if metrika_creds_ok:
+        with st.container(border=True):
+            st.markdown(
+                '<h3>📧 404-страницы из Яндекс.Метрики</h3>',
+                unsafe_allow_html=True,
+            )
+
+            # Текущий статус кеша
+            latest_date = get_latest_available_date(metrika_pid)
+            stored_count = len(list_stored_reports(metrika_pid))
+
+            from datetime import datetime as _dt, timedelta as _td
+            yesterday_str = (_dt.now().date() - _td(days=1)).strftime('%Y-%m-%d')
+            is_fresh = latest_date == yesterday_str
+
+            # Информационная строка о состоянии
+            if latest_date:
+                try:
+                    d_obj = _dt.strptime(latest_date, '%Y-%m-%d')
+                    date_display = d_obj.strftime('%d.%m.%Y')
+                except ValueError:
+                    date_display = latest_date
+
+                if is_fresh:
+                    st.markdown(
+                        f'<p style="color:var(--text-soft);font-size:0.95rem;margin-bottom:0.75rem">'
+                        f'✓ Свежие данные за <strong>{date_display}</strong>. '
+                        f'В хранилище: {stored_count} отчётов.</p>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f'<div style="background:#FFF4E5;border-left:3px solid #D97706;'
+                        f'padding:10px 14px;border-radius:6px;margin-bottom:0.75rem;color:#1E212E">'
+                        f'<strong>⚠ Последние данные за {date_display}.</strong> '
+                        f'Отчёт за вчера ещё не пришёл. Обновитесь — может уже появился.'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.markdown(
+                    f'<p style="color:var(--text-muted);font-size:0.95rem;margin-bottom:0.75rem">'
+                    f'Хранилище пустое — нажмите «Обновить» чтобы загрузить отчёты Метрики.</p>',
+                    unsafe_allow_html=True,
+                )
+
+            # Кнопка ручного обновления + выбор периода для скачивания
+            cb1, cb2 = st.columns([1, 1])
+            with cb1:
+                refresh_clicked = st.button(
+                    '📥 Обновить из почты',
+                    type='secondary',
+                    use_container_width=True,
+                    key='btn_refresh_metrika',
+                    help='Скачать новые письма из почты Яндекс.Метрики. '
+                         'Автоматически вызывается при запуске проверки.',
+                )
+
+            with cb2:
+                period_options = {
+                    'Только вчера': 1,
+                    'Последние 7 дней': 7,
+                    'Последние 2 недели': 14,
+                    'Последние 30 дней': 30,
+                }
+                period_label = st.selectbox(
+                    'Период для скачивания сводного xlsx',
+                    list(period_options.keys()),
+                    label_visibility='collapsed',
+                    key='metrika_period_select',
+                )
+
+            # Обработка кнопки обновления
+            if refresh_clicked:
+                metrika_proxy = get_proxy_url()
+                log_messages_m = []
+                # Лог свёрнут по умолчанию, expanded только при ошибке
+                progress_m = st.progress(0, text='Подключаюсь к почте…')
+
+                def on_log_m(level, msg):
+                    log_messages_m.append(msg)
+
+                def on_progress_m(done, total):
+                    if total > 0:
+                        progress_m.progress(min(1.0, done / total), text=f'Письма ({done}/{total})…')
+
+                try:
+                    summary = fetch_incremental(
+                        project_id=metrika_pid,
+                        email_addr=m_email,
+                        password=m_password,
+                        folder=MAILBOX_CONFIG[metrika_pid]['folder'],
+                        proxy_url=metrika_proxy,
+                        lookback_days=3,
+                        log=on_log_m,
+                        progress=on_progress_m,
+                    )
+                    progress_m.progress(1.0, text='Готово')
+                    if summary['fetched'] > 0:
+                        st.success(
+                            f'✅ Загружено новых отчётов: **{summary["fetched"]}** '
+                            f'(уже было: {summary["skipped"]})'
+                        )
+                    else:
+                        st.info(f'Новых писем нет (всё уже было в кеше)')
+                    # Свёрнутый лог — раскрывается только если интересно
+                    with st.expander('Подробный лог', expanded=False):
+                        st.code('\n'.join(log_messages_m[-100:]) or '(лог пуст)', language='text')
+                    st.rerun()
+                except Exception as e:
+                    progress_m.empty()
+                    import traceback
+                    st.error(f'❌ Не удалось обновить: {type(e).__name__}: {e}')
+                    # Подробный лог раскрыт чтобы было видно где упало
+                    with st.expander('Подробный лог', expanded=True):
+                        st.code(
+                            '\n'.join(log_messages_m[-100:]) + '\n\n--- TRACEBACK ---\n' + traceback.format_exc(),
+                            language='text',
+                        )
+
+            # Скачивашка периодического сводного xlsx
+            selected_days = period_options.get(period_label, 7)
+            period_reports = load_reports_for_period(metrika_pid, selected_days)
+            if period_reports:
+                # Генерим файл в памяти (in-memory)
+                from io import BytesIO as _BIO
+                from openpyxl import Workbook as _Wb
+                buf = _BIO()
+                _wb = _Wb()
+                _ws = _wb.active
+                _ws.title = f'404 за {selected_days} дн.'
+                _ws.append(['Дата', 'Страна', 'URL', 'Просмотры', 'Посетители', 'Реферер', 'Заголовок'])
+                for rep in period_reports:
+                    for p in rep.pages:
+                        _ws.append([
+                            rep.report_date,
+                            f'{rep.country_code} — {rep.country_name}',
+                            p.page_url or '',
+                            p.views,
+                            p.visitors,
+                            p.referer or '',
+                            p.page_title,
+                        ])
+                _wb.save(buf)
+                buf.seek(0)
+
+                total_pages_in_period = sum(r.total_pages for r in period_reports)
+                st.download_button(
+                    label=f'⬇ Скачать сводный xlsx ({period_label}, {total_pages_in_period} страниц)',
+                    data=buf.getvalue(),
+                    file_name=f'metrika-404-{metrika_pid}-{selected_days}d.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    use_container_width=True,
+                    key='dl_metrika_period',
+                )
+            else:
+                st.caption(f'За {period_label.lower()} в кеше нет данных. Обновите.')
+
     # ─── Оценка плана + кнопка запуска в одной карточке ───────
     selected_cities_count = 1 + random_subs  # Москва + случайные
     per_sub = (
@@ -1134,6 +1299,28 @@ if st.session_state.is_running:
             else:
                 append_log(f'Прокси: не используется (для {cfg["name"]} не требуется)')
 
+            # ─── Автоматическое обновление почты Метрики (если креды настроены) ──
+            metrika_email_auto, metrika_password_auto = get_metrika_credentials(st.session_state.project_id)
+            if metrika_email_auto and metrika_password_auto:
+                append_log('Обновляю 404-отчёты из почты Метрики (последние 3 дня)…')
+                try:
+                    metrika_proxy_auto = get_proxy_url()
+                    summary = fetch_incremental(
+                        project_id=st.session_state.project_id,
+                        email_addr=metrika_email_auto,
+                        password=metrika_password_auto,
+                        folder=MAILBOX_CONFIG[st.session_state.project_id]['folder'],
+                        proxy_url=metrika_proxy_auto,
+                        lookback_days=3,
+                        log=lambda lvl, msg: append_log(msg),
+                    )
+                    if summary['fetched'] > 0:
+                        append_log(f'Получено новых отчётов Метрики: {summary["fetched"]}')
+                    else:
+                        append_log('Новых отчётов Метрики нет (всё уже было в кеше)')
+                except Exception as e:
+                    append_log(f'⚠ Не удалось обновить почту: {e}. Продолжаю без свежих 404-данных.')
+
             # Загружаем sitemap если нужны товары
             if st.session_state.check_products and not src.products:
                 append_log(f'Загружаю sitemap из {cfg.get("sitemap_url")}…')
@@ -1221,6 +1408,31 @@ if st.session_state.is_running:
             project_id_for_report, started_ms, REPORTS_DIR,
         )
         report_path = REPORTS_DIR / report_filename
+
+        # ─── Подгружаем данные Метрики для листа «404 из Метрики» ───
+        metrika_reports_for_xlsx = None
+        metrika_data_date = None
+        metrika_is_stale = False
+        if not is_custom:
+            metrika_email_check, metrika_password_check = get_metrika_credentials(st.session_state.project_id)
+            if metrika_email_check and metrika_password_check:
+                latest_d = get_latest_available_date(st.session_state.project_id)
+                if latest_d:
+                    metrika_data_date = latest_d
+                    metrika_reports_for_xlsx = load_reports_for_date(
+                        st.session_state.project_id, latest_d,
+                    )
+                    # Если самый свежий день — это НЕ вчера, ставим флаг stale
+                    from datetime import datetime as _dtt, timedelta as _tdd
+                    yesterday = (_dtt.now().date() - _tdd(days=1)).strftime('%Y-%m-%d')
+                    metrika_is_stale = latest_d != yesterday
+                    append_log(
+                        f'В отчёт добавлю 404 из Метрики за {latest_d}: '
+                        f'{len(metrika_reports_for_xlsx)} стран, '
+                        f'{sum(r.total_pages for r in metrika_reports_for_xlsx)} страниц.'
+                        + (' (данные не самые свежие)' if metrika_is_stale else '')
+                    )
+
         build_report(
             project_name=project_name_for_report,
             started_at_ms=started_ms,
@@ -1228,6 +1440,9 @@ if st.session_state.is_running:
             selected_subdomains=plan.selected_subdomains,
             results=results,
             output_path=report_path,
+            metrika_reports=metrika_reports_for_xlsx,
+            metrika_data_date=metrika_data_date,
+            metrika_is_stale=metrika_is_stale,
         )
 
         st.session_state.run_results = results
@@ -1362,194 +1577,6 @@ if st.session_state.run_results and not st.session_state.is_running:
             if len(problems) > 50:
                 st.caption(f'... и ещё {len(problems) - 50}. Все детали — в xlsx-отчёте.')
 
-
-# ══════════════════════════════════════════════════════════════════
-# РАЗДЕЛ: 404 из Метрики
-# ══════════════════════════════════════════════════════════════════
-
-
-with st.container(border=True):
-    st.markdown(
-        '<h3>📧 404-страницы из Яндекс.Метрики</h3>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        'Загрузка 404-отчётов из почты Яндекс.Метрики и просмотр истории. '
-        'Пока подключён только проект СМУ — ИМП и МПЭ добавим позже.'
-    )
-
-    # Селектор проекта (пока только СМУ доступен)
-    metrika_project_options = ['СМУ — Сталметурал']
-    metrika_project_ids = {'СМУ — Сталметурал': 'smu'}
-    metrika_selected_label = st.selectbox(
-        'Проект',
-        metrika_project_options,
-        key='metrika_project',
-        label_visibility='collapsed',
-    )
-    metrika_pid = metrika_project_ids[metrika_selected_label]
-
-    # Проверяем что креды для этого проекта настроены в Secrets
-    m_email, m_password = get_metrika_credentials(metrika_pid)
-    creds_ok = bool(m_email and m_password)
-
-    if not creds_ok:
-        st.warning(
-            f'⚠ Для проекта **{metrika_selected_label}** не настроены креды почты. '
-            f'Добавьте в Streamlit Secrets:\n\n'
-            f'`metrika_{metrika_pid}_email = "адрес@yandex.ru"`\n\n'
-            f'`metrika_{metrika_pid}_password = "пароль приложения"`'
-        )
-
-    # Кнопка загрузки и инфо-строка
-    col_btn, col_info = st.columns([1, 2])
-    with col_btn:
-        load_clicked = st.button(
-            '📥 Загрузить новые из почты',
-            type='secondary',
-            disabled=not creds_ok,
-            use_container_width=True,
-            key='btn_load_metrika',
-        )
-    with col_info:
-        # Сколько отчётов уже сохранено
-        stored = list_stored_reports(metrika_pid)
-        if stored:
-            countries_count = len(set(r['country_code'] for r in stored))
-            st.markdown(
-                f'<p style="color:var(--text-soft);margin:8px 0">'
-                f'В хранилище: <strong>{len(stored)}</strong> отчётов '
-                f'по <strong>{countries_count}</strong> странам</p>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<p style="color:var(--text-muted);margin:8px 0">'
-                'Хранилище пустое — нажмите кнопку, чтобы загрузить первые отчёты</p>',
-                unsafe_allow_html=True,
-            )
-
-    # Обработка нажатия кнопки
-    if load_clicked and creds_ok:
-        progress_bar = st.progress(0, text='Подключаюсь к почте…')
-        log_messages = []
-        log_expander = st.expander('Подробный лог', expanded=True)
-        log_area = log_expander.empty()
-
-        def append_log(msg: str):
-            log_messages.append(msg)
-            log_area.code('\n'.join(log_messages[-100:]), language='text')
-
-        def on_log(level, msg):
-            append_log(msg)
-
-        def on_progress(done, total):
-            if total > 0:
-                pct = min(1.0, done / total)
-                progress_bar.progress(pct, text=f'Обрабатываю письма ({done}/{total})…')
-
-        try:
-            # Для IMAP-соединения тоже используем прокси (если настроен),
-            # потому что Яндекс часто блокирует IMAP с зарубежных IP
-            metrika_proxy = get_proxy_url()
-            reports = fetch_metrika_emails(
-                project_id=metrika_pid,
-                email_addr=m_email,
-                password=m_password,
-                folder=MAILBOX_CONFIG[metrika_pid]['folder'],
-                since_days=30,
-                log=on_log,
-                progress=on_progress,
-                proxy_url=metrika_proxy,
-            )
-            new_count = save_reports_batch(reports)
-            progress_bar.progress(1.0, text='Готово')
-            st.success(
-                f'✅ Загружено отчётов: **{len(reports)}** '
-                f'(из них новых: **{new_count}**, обновлено: **{len(reports) - new_count}**)'
-            )
-            # Перезагрузим страницу чтобы список обновился
-            st.rerun()
-        except PermissionError as e:
-            st.error(f'❌ {e}')
-        except FileNotFoundError as e:
-            st.error(f'❌ {e}')
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            st.error(f'❌ Не удалось загрузить отчёты: {type(e).__name__}: {e}')
-            # Показываем подробный traceback чтобы понять где именно упало
-            append_log(f'─── TRACEBACK ───')
-            for line in tb.split('\n'):
-                append_log(line)
-
-    # ─── История загруженных отчётов ────────────────────────────
-    if stored:
-        st.markdown('<div style="margin-top:1.5rem"></div>', unsafe_allow_html=True)
-        st.markdown(
-            f'<p style="color:var(--text-muted);font-size:0.875rem;'
-            f'margin-bottom:0.75rem;text-transform:uppercase;letter-spacing:0.05em;'
-            f'font-weight:600">Последние отчёты</p>',
-            unsafe_allow_html=True,
-        )
-
-        # Группируем по дате
-        from collections import defaultdict
-        by_date = defaultdict(list)
-        for r in stored[:40]:  # последние 40 = ~5 дней × 8 стран
-            by_date[r['date']].append(r)
-
-        for date_str in sorted(by_date.keys(), reverse=True)[:7]:
-            # Заголовок даты
-            display_date = date_str
-            try:
-                d = datetime.strptime(date_str, '%Y-%m-%d')
-                display_date = d.strftime('%d.%m.%Y')
-            except ValueError:
-                pass
-            st.markdown(
-                f'<p style="font-weight:600;margin:0.75rem 0 0.5rem">📅 {display_date}</p>',
-                unsafe_allow_html=True,
-            )
-
-            # Метрики по странам этой даты — в одной строке
-            day_reports = by_date[date_str]
-            cols = st.columns(min(4, len(day_reports)))
-            for i, r in enumerate(day_reports):
-                col = cols[i % len(cols)]
-                with col:
-                    badge = '⚠️' if r['total_pages'] > 0 else '✓'
-                    color = 'var(--warn)' if r['total_pages'] > 0 else 'var(--ok)'
-                    st.markdown(
-                        f'<div style="background:var(--bg);border:1px solid var(--border);'
-                        f'border-radius:8px;padding:10px 12px;margin-bottom:6px">'
-                        f'<div style="font-size:0.875rem;color:var(--text-muted);font-weight:600">'
-                        f'{badge} {r["country_code"]} · {r["country_name"]}</div>'
-                        f'<div style="font-size:1.1rem;font-weight:600;color:{color};margin-top:2px">'
-                        f'{r["total_pages"]} стр. / {r["total_views"]} просм.</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-
-        # Кнопка раскрытия с деталями последнего дня — если есть страницы
-        latest = stored[0]
-        if latest['total_pages'] > 0:
-            with st.expander(
-                f'Открыть последний отчёт: {latest["country_code"]} за {latest["date"]} ({latest["total_pages"]} стр.)',
-                expanded=False,
-            ):
-                report = load_report(metrika_pid, latest['country_code'], latest['date'])
-                if report:
-                    for p in report.pages[:50]:
-                        url_part = f' · <a href="{p.page_url}" target="_blank">{p.page_url}</a>' if p.page_url else ''
-                        st.markdown(
-                            f'<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:0.92rem">'
-                            f'<strong>{p.views}</strong> просмотров · <span style="color:var(--text-soft)">{p.page_title}</span>{url_part}'
-                            f'</div>',
-                            unsafe_allow_html=True,
-                        )
-                    if len(report.pages) > 50:
-                        st.caption(f'... и ещё {len(report.pages) - 50} страниц')
 
 
 # ── Футер ──────────────────────────────────────────────────────────

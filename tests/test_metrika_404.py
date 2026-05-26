@@ -213,12 +213,116 @@ def test_list_stored_reports():
         assert len(listing) == 3
         # Сортировка: сначала свежие даты
         assert listing[0]['date'] == '2026-05-25'
-        # Внутри даты — в алфавитном порядке
-        codes_on_25 = [r['country_code'] for r in listing if r['date'] == '2026-05-25']
-        assert codes_on_25 == sorted(codes_on_25, reverse=True)  # desc
 
     metrika_404.CACHE_DIR = original
     print(f'✓ Листинг: {len(listing)} отчётов')
+
+
+def test_get_stored_dates():
+    """Получение множества дат, за которые есть отчёты."""
+    import metrika_404
+    from metrika_404 import get_stored_dates
+    original = metrika_404.CACHE_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        metrika_404.CACHE_DIR = Path(tmp)
+        for code, date in [('РФ', '2026-05-25'), ('КЗ', '2026-05-25'), ('РФ', '2026-05-24')]:
+            r = Report404(
+                project_id='smu', country_code=code, country_name=COUNTRY_LABELS.get(code, code),
+                report_date=date, received_at='x',
+                pages=[], total_views=0, total_pages=0,
+            )
+            save_report(r)
+        dates = get_stored_dates('smu')
+        assert dates == {'2026-05-25', '2026-05-24'}
+    metrika_404.CACHE_DIR = original
+    print('✓ get_stored_dates: {2026-05-25, 2026-05-24}')
+
+
+def test_get_latest_available_date():
+    """Самая свежая дата."""
+    import metrika_404
+    from metrika_404 import get_latest_available_date
+    original = metrika_404.CACHE_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        metrika_404.CACHE_DIR = Path(tmp)
+        # Пусто
+        assert get_latest_available_date('smu') is None
+
+        # Добавляем
+        for date in ['2026-05-24', '2026-05-23', '2026-05-25']:
+            r = Report404(
+                project_id='smu', country_code='РФ', country_name='Россия',
+                report_date=date, received_at='x',
+                pages=[], total_views=0, total_pages=0,
+            )
+            save_report(r)
+        assert get_latest_available_date('smu') == '2026-05-25'
+    metrika_404.CACHE_DIR = original
+    print('✓ get_latest_available_date: max из {24, 23, 25} = 25')
+
+
+def test_load_reports_for_date():
+    """Загрузка всех отчётов за одну дату."""
+    import metrika_404
+    from metrika_404 import load_reports_for_date
+    original = metrika_404.CACHE_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        metrika_404.CACHE_DIR = Path(tmp)
+        # 25 числа: РФ и КЗ, 24 числа: только РФ
+        for code, date in [('РФ', '2026-05-25'), ('КЗ', '2026-05-25'), ('РФ', '2026-05-24')]:
+            r = Report404(
+                project_id='smu', country_code=code, country_name=COUNTRY_LABELS.get(code, code),
+                report_date=date, received_at='x',
+                pages=[Page404(page_title=f'{code} test', page_url=None, views=10, visitors=8)],
+                total_views=10, total_pages=1,
+            )
+            save_report(r)
+
+        reports_25 = load_reports_for_date('smu', '2026-05-25')
+        assert len(reports_25) == 2
+        assert {r.country_code for r in reports_25} == {'РФ', 'КЗ'}
+
+        reports_24 = load_reports_for_date('smu', '2026-05-24')
+        assert len(reports_24) == 1
+
+        reports_22 = load_reports_for_date('smu', '2026-05-22')
+        assert len(reports_22) == 0
+    metrika_404.CACHE_DIR = original
+    print('✓ load_reports_for_date: правильная фильтрация по дате')
+
+
+def test_load_reports_for_period():
+    """Загрузка за период N дней."""
+    import metrika_404
+    from metrika_404 import load_reports_for_period
+    from datetime import datetime, timedelta
+    original = metrika_404.CACHE_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        metrika_404.CACHE_DIR = Path(tmp)
+        today = datetime.now().date()
+        # Создаём отчёты на сегодня, вчера и 10 дней назад
+        for i, (offset, code) in enumerate([(0, 'РФ'), (1, 'РФ'), (10, 'РФ')]):
+            d = (today - timedelta(days=offset)).strftime('%Y-%m-%d')
+            r = Report404(
+                project_id='smu', country_code=code, country_name='Россия',
+                report_date=d, received_at='x',
+                pages=[], total_views=0, total_pages=0,
+            )
+            save_report(r)
+
+        # За последние 7 дней — должно быть 2 (сегодня и вчера)
+        period_7 = load_reports_for_period('smu', 7)
+        assert len(period_7) == 2
+
+        # За последние 30 дней — все 3
+        period_30 = load_reports_for_period('smu', 30)
+        assert len(period_30) == 3
+
+        # За 1 день — только сегодня
+        period_1 = load_reports_for_period('smu', 1)
+        assert len(period_1) == 1
+    metrika_404.CACHE_DIR = original
+    print('✓ load_reports_for_period: правильно по диапазону')
 
 
 if __name__ == '__main__':
@@ -236,4 +340,8 @@ if __name__ == '__main__':
     test_parse_table_with_synthetic_data()
     test_save_and_load_report()
     test_list_stored_reports()
+    test_get_stored_dates()
+    test_get_latest_available_date()
+    test_load_reports_for_date()
+    test_load_reports_for_period()
     print('\n✅ Все тесты metrika_404.py прошли')

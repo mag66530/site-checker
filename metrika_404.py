@@ -82,10 +82,11 @@ COUNTRY_LABELS = {
 @dataclass
 class Page404:
     """Одна 404-страница из отчёта Метрики."""
-    page_title: str          # «Страница не найдена | Стальметурал»
-    page_url: Optional[str]  # URL может быть в теме страницы или нет — извлекаем
-    views: int               # просмотры
-    visitors: int            # уникальные посетители
+    page_title: str              # «Страница не найдена | Стальметурал»
+    page_url: Optional[str]      # URL — из колонки «Адрес страницы» или из заголовка
+    views: int                   # просмотры
+    visitors: int                # уникальные посетители
+    referer: Optional[str] = None  # откуда пришли (колонка «Реферер»)
 
 
 @dataclass
@@ -199,19 +200,27 @@ def parse_table_xlsx(xlsx_bytes: bytes) -> list[Page404]:
 
     # Определяем индексы колонок гибко
     title_idx = None
+    url_idx = None
     views_idx = None
     visitors_idx = None
+    referer_idx = None
     for idx, h in enumerate(headers):
         h_lower = h.lower()
-        if 'заголовок' in h_lower or 'страниц' in h_lower or 'url' in h_lower:
+        if h_lower in ('адрес страницы', 'url'):
+            if url_idx is None:
+                url_idx = idx
+        elif 'заголовок' in h_lower or h_lower == 'страница':
             if title_idx is None:
                 title_idx = idx
         elif 'просмотр' in h_lower:
             views_idx = idx
         elif 'посетит' in h_lower:
             visitors_idx = idx
+        elif 'реферер' in h_lower or 'переход' in h_lower or 'источник' in h_lower:
+            referer_idx = idx
 
-    if title_idx is None:
+    # Минимум — должны быть либо title, либо url
+    if title_idx is None and url_idx is None:
         return []
 
     # Читаем данные начиная со следующей строки после заголовков
@@ -219,20 +228,35 @@ def parse_table_xlsx(xlsx_bytes: bytes) -> list[Page404]:
     for i, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), 1):
         if all(c is None or str(c).strip() == '' for c in row):
             continue
-        title = str(row[title_idx]).strip() if row[title_idx] else ''
-        if not title:
+
+        # Если первая ячейка — «Итого и средние», это сводная строка, пропускаем
+        first_cell = str(row[0]).strip().lower() if row[0] else ''
+        if 'итого' in first_cell:
             continue
+
+        title = str(row[title_idx]).strip() if title_idx is not None and title_idx < len(row) and row[title_idx] else ''
+        url_from_col = str(row[url_idx]).strip() if url_idx is not None and url_idx < len(row) and row[url_idx] else ''
+        if not title and not url_from_col:
+            continue
+
         views = _to_int(row[views_idx]) if views_idx is not None and views_idx < len(row) else 0
         visitors = _to_int(row[visitors_idx]) if visitors_idx is not None and visitors_idx < len(row) else 0
+        referer = None
+        if referer_idx is not None and referer_idx < len(row) and row[referer_idx]:
+            ref_str = str(row[referer_idx]).strip()
+            # «Не определен» — это пусто
+            if ref_str and ref_str.lower() != 'не определен':
+                referer = ref_str
 
-        # Пытаемся извлечь URL из заголовка (он может быть в формате «Title | https://...»)
-        url = _extract_url(title)
+        # URL: сначала из явной колонки, потом из заголовка
+        url = url_from_col or _extract_url(title)
 
         pages.append(Page404(
-            page_title=title,
-            page_url=url,
+            page_title=title or (url or ''),
+            page_url=url or None,
             views=views,
             visitors=visitors,
+            referer=referer,
         ))
 
     return pages
@@ -701,3 +725,102 @@ def save_reports_batch(reports: list[Report404]) -> int:
         if is_new:
             new_count += 1
     return new_count
+
+
+# ── Высокоуровневые операции ────────────────────────────────────────
+
+
+def get_stored_dates(project_id: str) -> set[str]:
+    """Множество дат (YYYY-MM-DD), за которые в кеше есть хотя бы один отчёт."""
+    return {r['date'] for r in list_stored_reports(project_id)}
+
+
+def fetch_incremental(
+    project_id: str,
+    email_addr: str,
+    password: str,
+    folder: str,
+    *,
+    proxy_url: Optional[str] = None,
+    lookback_days: int = 3,
+    log: Optional[Callable] = None,
+    progress: Optional[Callable] = None,
+) -> dict:
+    """
+    Инкрементальная загрузка: идём в IMAP только за последние lookback_days дней,
+    парсим только письма за даты, которых ещё нет в кеше, сразу сохраняем.
+
+    Возвращает {'fetched': N_новых_отчётов, 'skipped': N_уже_было, 'errors': N_ошибок}.
+    """
+    existing_dates = get_stored_dates(project_id)
+
+    reports = fetch_metrika_emails(
+        project_id=project_id,
+        email_addr=email_addr,
+        password=password,
+        folder=folder,
+        since_days=lookback_days,
+        log=log,
+        progress=progress,
+        proxy_url=proxy_url,
+    )
+
+    fetched = 0
+    skipped = 0
+    for r in reports:
+        # Проверяем: нет ли уже такого отчёта (по дате + стране)
+        path = report_storage_path(r.project_id, r.country_code, r.report_date)
+        if path.exists():
+            skipped += 1
+        else:
+            save_report(r)
+            fetched += 1
+
+    return {'fetched': fetched, 'skipped': skipped, 'total_in_letters': len(reports)}
+
+
+def get_latest_available_date(project_id: str) -> Optional[str]:
+    """Самая свежая дата отчёта, которая есть в кеше. None если кеш пустой."""
+    dates = get_stored_dates(project_id)
+    if not dates:
+        return None
+    return max(dates)
+
+
+def load_reports_for_date(project_id: str, target_date: str) -> list[Report404]:
+    """Все отчёты (по странам) за одну конкретную дату."""
+    reports = []
+    listing = list_stored_reports(project_id)
+    for r in listing:
+        if r['date'] != target_date:
+            continue
+        rep = load_report(project_id, r['country_code'], target_date)
+        if rep:
+            reports.append(rep)
+    return reports
+
+
+def load_reports_for_period(
+    project_id: str,
+    days: int,
+) -> list[Report404]:
+    """Все отчёты за последние N дней (включая сегодня)."""
+    from datetime import datetime as _dt, timedelta as _td
+    today = _dt.now().date()
+    cutoff = today - _td(days=days - 1)
+
+    reports = []
+    listing = list_stored_reports(project_id)
+    for r in listing:
+        try:
+            d = _dt.strptime(r['date'], '%Y-%m-%d').date()
+        except ValueError:
+            continue
+        if d >= cutoff:
+            rep = load_report(project_id, r['country_code'], r['date'])
+            if rep:
+                reports.append(rep)
+    # Сортируем: свежие сверху, потом по стране
+    reports.sort(key=lambda r: (r.report_date, r.country_code), reverse=True)
+    return reports
+

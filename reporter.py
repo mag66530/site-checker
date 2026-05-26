@@ -120,6 +120,9 @@ def build_report(
     selected_subdomains: list,    # список Subdomain
     results: list,                 # список CheckResult
     output_path: Path | str,
+    metrika_reports: list = None,  # список Report404 — добавит лист «404 из Метрики»
+    metrika_data_date: str = None, # дата отчёта Метрики (YYYY-MM-DD)
+    metrika_is_stale: bool = False,# True если данные не за вчера, а за более ранний день
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -439,6 +442,220 @@ def build_report(
                 row_idx += 1
 
         ws3.auto_filter.ref = f'A{hdr_row}:E{hdr_row}'
+
+    # ═══════════════════════════════════════════════════════════════
+    # ЛИСТ 4: «404 из Метрики» — если есть данные
+    # ═══════════════════════════════════════════════════════════════
+    if metrika_reports:
+        # Собираем все страницы из всех стран, считаем сшивку с Site Checker
+        # Множество URL'ов которые упали в Site Checker (404 или 5xx)
+        sc_failed_urls = set()
+        sc_failed_paths = set()  # для сравнения по pathname (без поддомена)
+        from urllib.parse import urlparse as _urlparse
+        for r in results:
+            if r.is_error and r.http_code in (404, 410):
+                sc_failed_urls.add(r.url)
+                try:
+                    p = _urlparse(r.url).path
+                    if p:
+                        sc_failed_paths.add(p)
+                except ValueError:
+                    pass
+
+        ws4 = wb.create_sheet('404 из Метрики')
+        ws4.sheet_view.showGridLines = False
+        ws4.sheet_properties.tabColor = C.err if metrika_is_stale else C.accent
+        ws4.freeze_panes = 'A6'  # шапка фиксируется
+
+        # Колонки и их ширина
+        ws4.column_dimensions['A'].width = 14   # Дата отчёта
+        ws4.column_dimensions['B'].width = 16   # Страна
+        ws4.column_dimensions['C'].width = 18   # Статус сшивки
+        ws4.column_dimensions['D'].width = 55   # URL
+        ws4.column_dimensions['E'].width = 12   # Просмотры
+        ws4.column_dimensions['F'].width = 12   # Посетители
+        ws4.column_dimensions['G'].width = 40   # Реферер
+        ws4.column_dimensions['H'].width = 40   # Заголовок страницы
+
+        # ─── Заголовок и пояснение ─────────────────────────────────
+        ws4.merge_cells('A1:H1')
+        c = ws4['A1']
+        c.value = '404-страницы по данным Яндекс.Метрики'
+        c.font = _font(size=14, bold=True)
+        ws4.row_dimensions[1].height = 26
+
+        # Информация о дате данных
+        ws4.merge_cells('A2:H2')
+        c = ws4['A2']
+        # Форматируем дату красиво
+        try:
+            d_obj = datetime.strptime(metrika_data_date or '', '%Y-%m-%d')
+            date_display = d_obj.strftime('%d.%m.%Y')
+        except ValueError:
+            date_display = metrika_data_date or '—'
+
+        if metrika_is_stale:
+            c.value = (
+                f'⚠ Внимание: данные за {date_display}. '
+                f'Свежий отчёт Метрики (за вчерашний день) ещё не пришёл — '
+                f'используем последний доступный.'
+            )
+            c.font = _font(size=10, italic=True, bold=True, color=C.err)
+            c.fill = _fill(C.err_soft)
+        else:
+            c.value = f'Данные за {date_display}'
+            c.font = _font(size=10, color=C.text_soft)
+        c.alignment = _align(wrap=True)
+        ws4.row_dimensions[2].height = 30 if metrika_is_stale else 20
+
+        # Пояснение сшивки
+        ws4.merge_cells('A3:H3')
+        c = ws4['A3']
+        c.value = (
+            'Статус сшивки: "🔴 Подтверждено" — этот URL также упал в проверке Site Checker (двойное подтверждение, чинить срочно). '
+            '"⚠ Только в Метрике" — Site Checker эту страницу не проверял или она там не упала. '
+            'Сортировка: подтверждённые сверху, далее по количеству просмотров.'
+        )
+        c.font = _font(size=9, italic=True, color=C.text_muted)
+        c.alignment = _align(wrap=True, vertical='top')
+        ws4.row_dimensions[3].height = 42
+
+        # ─── Шапка таблицы на 5-й строке ───────────────────────────
+        # 4-я строка — пустая разделительная
+        hdr_row = 5
+        ws4.row_dimensions[hdr_row].height = 28
+        hdrs = ['Дата', 'Страна', 'Статус', 'URL страницы', 'Просмотры', 'Посетители', 'Реферер', 'Заголовок страницы']
+        for col_idx, label in enumerate(hdrs, 1):
+            cell = ws4.cell(row=hdr_row, column=col_idx)
+            cell.value = label
+            cell.font = _font(size=10, bold=True, color=C.text_muted)
+            cell.alignment = _align()
+            cell.fill = _fill(C.surface)
+            cell.border = _border()
+
+        # ─── Собираем плоский список страниц со статусом сшивки ────
+        flat_rows = []
+        for report in metrika_reports:
+            for page in report.pages:
+                # Проверяем сшивку: URL из метрики совпадает с упавшим в Site Checker?
+                is_confirmed = False
+                if page.page_url:
+                    if page.page_url in sc_failed_urls:
+                        is_confirmed = True
+                    else:
+                        # Также сравним по path — если в Метрике URL без поддомена, в SC с поддоменом
+                        try:
+                            p = _urlparse(page.page_url).path
+                            if p and p in sc_failed_paths:
+                                is_confirmed = True
+                        except ValueError:
+                            pass
+
+                flat_rows.append({
+                    'date': report.report_date,
+                    'country_code': report.country_code,
+                    'country_name': report.country_name,
+                    'url': page.page_url or '',
+                    'title': page.page_title,
+                    'views': page.views,
+                    'visitors': page.visitors,
+                    'referer': page.referer or '',
+                    'confirmed': is_confirmed,
+                })
+
+        # Сортируем: сначала подтверждённые, потом по убыванию просмотров
+        flat_rows.sort(key=lambda r: (not r['confirmed'], -r['views']))
+
+        # ─── Если в почте есть отчёты но 404 не нашлось — короткое сообщение ──
+        if not flat_rows:
+            ws4.merge_cells(f'A{hdr_row + 1}:H{hdr_row + 1}')
+            cell = ws4.cell(row=hdr_row + 1, column=1)
+            cell.value = '✓ За эту дату Метрика не зафиксировала ни одной 404-страницы по проекту'
+            cell.font = _font(size=11, bold=True, color=C.ok)
+            cell.alignment = _align()
+            cell.fill = _fill(C.ok_soft)
+            ws4.row_dimensions[hdr_row + 1].height = 32
+        else:
+            row_idx = hdr_row + 1
+            for fr in flat_rows:
+                ws4.row_dimensions[row_idx].height = 22
+
+                # Дата
+                try:
+                    d_obj = datetime.strptime(fr['date'], '%Y-%m-%d')
+                    date_str = d_obj.strftime('%d.%m.%Y')
+                except ValueError:
+                    date_str = fr['date']
+                cell = ws4.cell(row=row_idx, column=1)
+                cell.value = date_str
+                cell.font = _font(size=10, color=C.text_soft)
+                cell.alignment = _align()
+                cell.border = _border(color=C.border_light)
+
+                # Страна
+                cell = ws4.cell(row=row_idx, column=2)
+                cell.value = f'{fr["country_code"]} — {fr["country_name"]}'
+                cell.font = _font(size=10)
+                cell.alignment = _align()
+                cell.border = _border(color=C.border_light)
+
+                # Статус сшивки
+                cell = ws4.cell(row=row_idx, column=3)
+                if fr['confirmed']:
+                    cell.value = '🔴 Подтверждено'
+                    cell.font = _font(size=10, bold=True, color=C.err)
+                    cell.fill = _fill(C.err_soft)
+                else:
+                    cell.value = '⚠ Только в Метрике'
+                    cell.font = _font(size=10, color=C.warn)
+                cell.alignment = _align()
+                cell.border = _border(color=C.border_light)
+
+                # URL — кликабельный
+                cell = ws4.cell(row=row_idx, column=4)
+                cell.value = fr['url'] or '—'
+                if fr['url']:
+                    cell.hyperlink = fr['url']
+                    cell.font = _font(name='Consolas', size=10, color=C.accent, underline='single')
+                else:
+                    cell.font = _font(size=10, color=C.text_muted, italic=True)
+                cell.alignment = _align(wrap=True)
+                cell.border = _border(color=C.border_light)
+
+                # Просмотры
+                cell = ws4.cell(row=row_idx, column=5)
+                cell.value = fr['views']
+                cell.font = _font(size=10, bold=fr['confirmed'])
+                cell.alignment = _align(horizontal='right')
+                cell.border = _border(color=C.border_light)
+
+                # Посетители
+                cell = ws4.cell(row=row_idx, column=6)
+                cell.value = fr['visitors']
+                cell.font = _font(size=10)
+                cell.alignment = _align(horizontal='right')
+                cell.border = _border(color=C.border_light)
+
+                # Реферер
+                cell = ws4.cell(row=row_idx, column=7)
+                cell.value = fr['referer'] or '—'
+                if fr['referer']:
+                    cell.font = _font(name='Consolas', size=9, color=C.text_soft)
+                else:
+                    cell.font = _font(size=10, color=C.text_muted, italic=True)
+                cell.alignment = _align(wrap=True)
+                cell.border = _border(color=C.border_light)
+
+                # Заголовок страницы
+                cell = ws4.cell(row=row_idx, column=8)
+                cell.value = fr['title']
+                cell.font = _font(size=9, color=C.text_soft)
+                cell.alignment = _align(wrap=True)
+                cell.border = _border(color=C.border_light)
+
+                row_idx += 1
+
+            ws4.auto_filter.ref = f'A{hdr_row}:H{row_idx - 1}'
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)
