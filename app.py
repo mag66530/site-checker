@@ -91,7 +91,7 @@ def get_metrika_credentials(project_id):
 st.set_page_config(
     page_title='Site Checker',
     page_icon='🔎',
-    layout='centered',
+    layout='wide',
     initial_sidebar_state='collapsed',
 )
 
@@ -130,6 +130,23 @@ CUSTOM_CSS = """
     }
     [data-testid="stToolbar"] {
         right: 1rem;
+    }
+
+    /* ════════════════════════════════════════════════════════════════
+       ОГРАНИЧЕНИЕ ШИРИНЫ КОНТЕНТА.
+       layout='wide' даёт всю ширину экрана, но при этом контент
+       растекается на широких мониторах. Ограничиваем до 1040px и
+       центрируем — карточка «Каталог проекта» с 4 метриками помещается
+       целиком (Городов / Категорий / Фильтров / Товаров), ничего не
+       обрезается (как было «Фильтров: 13 0...»).
+       ════════════════════════════════════════════════════════════════ */
+    [data-testid="stMainBlockContainer"],
+    [data-testid="stAppViewContainer"] section.main > div.block-container,
+    section.main > div.block-container {
+        max-width: 1040px !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        padding-top: 3rem !important;
     }
 
     /* Базовая типографика */
@@ -350,54 +367,59 @@ CUSTOM_CSS = """
         color: var(--text) !important;
     }
 
-    /* Главные кнопки */
-    .stButton > button {
+    /* ════════════════════════════════════════════════════════════════
+       КНОПКИ — общий слой (любая кнопка по умолчанию белая со светлой
+       рамкой). Streamlit в разных версиях рендерит кнопки то через
+       <button kind="secondary">, то через data-testid="stBaseButton-…",
+       поэтому ловим все варианты сразу, иначе на части кнопок остаётся
+       чёрный/тёмный фон по умолчанию (это и было «опять чёрный цвет»
+       на кнопке «Обновить из почты»).
+       ════════════════════════════════════════════════════════════════ */
+    .stButton > button,
+    .stButton button[kind="secondary"],
+    .stButton button[kind="tertiary"],
+    button[data-testid="stBaseButton-secondary"],
+    button[data-testid="stBaseButton-secondaryFormSubmit"],
+    button[data-testid="baseButton-secondary"],
+    .stButton button:not([kind="primary"]):not([kind="primaryFormSubmit"]) {
         font-weight: 600 !important;
         border-radius: 8px !important;
-        border: 1px solid #E1E8F0 !important;
+        border: 1px solid #C7D3E1 !important;
         background: #FFFFFF !important;
         background-color: #FFFFFF !important;
+        background-image: none !important;
         color: #1E212E !important;
+        box-shadow: none !important;
         transition: all 0.15s !important;
-        padding: 0.5rem 1.25rem !important;
+        padding: 0.55rem 1.25rem !important;
         font-size: 0.95rem !important;
     }
-    .stButton > button:hover {
-        border-color: #C7D3E1 !important;
+    .stButton > button:hover:not(:disabled),
+    button[data-testid="stBaseButton-secondary"]:hover:not(:disabled),
+    button[data-testid="baseButton-secondary"]:hover:not(:disabled) {
+        border-color: #1A56E8 !important;
         background: #F7FBFE !important;
         background-color: #F7FBFE !important;
+        color: #1A56E8 !important;
     }
-    /* Текст и иконки внутри обычной кнопки */
+    /* Текст, иконки и любые вложенные div внутри светлой кнопки */
     .stButton > button p,
     .stButton > button span,
-    .stButton > button div {
-        color: #1E212E !important;
+    .stButton > button div,
+    button[data-testid="stBaseButton-secondary"] *,
+    button[data-testid="baseButton-secondary"] * {
+        color: inherit !important;
         background: transparent !important;
+        background-color: transparent !important;
     }
-    /* secondary-кнопки (не primary) — outline-стиль с синим текстом */
-    .stButton > button[kind="secondary"] {
-        background: var(--bg) !important;
-        background-color: var(--bg) !important;
-        border: 1px solid var(--accent) !important;
-        color: var(--accent) !important;
-        font-weight: 600 !important;
-        font-size: 0.95rem !important;
-        padding: 0.5rem 1.25rem !important;
-    }
-    .stButton > button[kind="secondary"] *,
-    .stButton > button[kind="secondary"] p,
-    .stButton > button[kind="secondary"] span,
-    .stButton > button[kind="secondary"] div {
-        color: var(--accent) !important;
-    }
-    .stButton > button[kind="secondary"]:hover:not(:disabled) {
-        background: var(--accent-soft) !important;
-        background-color: var(--accent-soft) !important;
-        border-color: var(--accent-hover) !important;
-    }
-    .stButton > button[kind="secondary"]:disabled {
-        opacity: 0.5;
+    /* disabled-кнопки */
+    .stButton > button:disabled,
+    button[data-testid="stBaseButton-secondary"]:disabled {
+        opacity: 0.45;
         cursor: not-allowed;
+        background: #FAFBFC !important;
+        background-color: #FAFBFC !important;
+        color: #8A93A6 !important;
     }
     /* ════════════════════════════════════════════════════════════════
        Кодовые блоки (st.code) — подробный лог
@@ -535,10 +557,17 @@ CUSTOM_CSS = """
         font-weight: 600 !important;
     }
     [data-testid="stMetricValue"] {
-        font-size: 1.875rem !important;
+        font-size: 1.625rem !important;
         font-weight: 600 !important;
         margin-top: 4px;
         color: var(--text) !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
+    }
+    /* Контейнер значения метрики — без обрезки */
+    [data-testid="stMetricValue"] > div {
+        overflow: visible !important;
+        text-overflow: clip !important;
     }
 
     /* Алерты */
@@ -702,6 +731,85 @@ def cached_load_sources(project_id: str):
     cfg = load_project_config(project_id)
     src = load_sources(cfg)
     return cfg, src
+
+
+def _build_metrika_only_xlsx(reports, sheet_title: str = '404 из Метрики') -> bytes:
+    """
+    Сформировать простой xlsx по списку Report404 без данных Site Checker.
+
+    Используется для кнопок «Скачать отчёт за вчера» и «Скачать за период» —
+    когда пользователю нужен только агрегат Метрики, без запуска проверки сайта.
+
+    Сортировка: свежие даты сверху, в пределах даты — по убыванию просмотров.
+    Возвращает bytes (готовые для st.download_button).
+    """
+    from io import BytesIO as _BIO
+    from openpyxl import Workbook as _Wb
+    from openpyxl.styles import Font as _Font, PatternFill as _Fill, Alignment as _Align
+
+    buf = _BIO()
+    wb = _Wb()
+    ws = wb.active
+    ws.title = sheet_title[:31]  # лимит Excel на имя листа
+    ws.sheet_view.showGridLines = False
+
+    headers = [
+        ('Дата', 14),
+        ('Страна', 18),
+        ('URL страницы', 60),
+        ('Просмотры', 12),
+        ('Посетители', 12),
+        ('Реферер', 38),
+        ('Заголовок страницы', 40),
+    ]
+    for i, (label, width) in enumerate(headers, 1):
+        from openpyxl.utils import get_column_letter as _gcl
+        ws.column_dimensions[_gcl(i)].width = width
+        c = ws.cell(row=1, column=i)
+        c.value = label
+        c.font = _Font(bold=True, size=10, color='71717A')
+        c.fill = _Fill(start_color='FAFAFA', end_color='FAFAFA', fill_type='solid')
+        c.alignment = _Align(horizontal='left', vertical='center', indent=1)
+    ws.row_dimensions[1].height = 22
+    ws.freeze_panes = 'A2'
+
+    # Плоский список с сортировкой
+    flat = []
+    for rep in reports:
+        for p in rep.pages:
+            flat.append((rep, p))
+    flat.sort(key=lambda rp: (rp[0].report_date, -rp[1].views), reverse=False)
+    flat.sort(key=lambda rp: rp[0].report_date, reverse=True)
+
+    from datetime import datetime as _dt2
+    for row_idx, (rep, p) in enumerate(flat, start=2):
+        try:
+            date_str = _dt2.strptime(rep.report_date, '%Y-%m-%d').strftime('%d.%m.%Y')
+        except ValueError:
+            date_str = rep.report_date
+
+        ws.cell(row=row_idx, column=1).value = date_str
+        ws.cell(row=row_idx, column=2).value = f'{rep.country_code} — {rep.country_name}'
+
+        url_cell = ws.cell(row=row_idx, column=3)
+        if p.page_url:
+            url_cell.value = p.page_url
+            url_cell.hyperlink = p.page_url
+            url_cell.font = _Font(name='Consolas', size=10, color='1A56E8', underline='single')
+        else:
+            url_cell.value = '—'
+            url_cell.font = _Font(size=10, italic=True, color='9CA3AF')
+
+        ws.cell(row=row_idx, column=4).value = p.views
+        ws.cell(row=row_idx, column=5).value = p.visitors
+        ws.cell(row=row_idx, column=6).value = p.referer or '—'
+        ws.cell(row=row_idx, column=7).value = p.page_title
+
+    if flat:
+        ws.auto_filter.ref = f'A1:G{len(flat) + 1}'
+
+    wb.save(buf)
+    return buf.getvalue()
 
 
 # ── Шапка ──────────────────────────────────────────────────────────
@@ -998,95 +1106,164 @@ elif is_project:
                 st.session_state[key] = val
                 reset_run_state()
 
-    # ─── БЛОК 404 ИЗ МЕТРИКИ (если проект имеет настроенные креды) ──
+    # ═══════════════════════════════════════════════════════════════════
+    # БЛОК 404 ИЗ МЕТРИКИ — отдельная самодостаточная карточка.
+    # Работает БЕЗ запуска полной проверки сайта: можно просто скачать
+    # отчёт Метрики за вчера или за период.
+    # ═══════════════════════════════════════════════════════════════════
     metrika_pid = st.session_state.project_id
     m_email, m_password = get_metrika_credentials(metrika_pid)
     metrika_creds_ok = bool(m_email and m_password)
 
     if metrika_creds_ok:
+        from datetime import datetime as _dt, timedelta as _td
+        today_d = _dt.now().date()
+        yesterday_d = today_d - _td(days=1)
+        yesterday_str = yesterday_d.strftime('%Y-%m-%d')
+        yesterday_display = yesterday_d.strftime('%d.%m.%Y')
+        today_display = today_d.strftime('%d.%m.%Y')
+
+        latest_date = get_latest_available_date(metrika_pid)
+        stored_count = len(list_stored_reports(metrika_pid))
+        has_yesterday = latest_date == yesterday_str
+
+        # Грузим отчёты за вчера ОДИН раз — пригодятся и для статистики,
+        # и для кнопки скачивания (чтобы не дублировать дисковые чтения).
+        yesterday_reports = (
+            load_reports_for_date(metrika_pid, yesterday_str) if has_yesterday else []
+        )
+        yesterday_total_pages = sum(r.total_pages for r in yesterday_reports)
+        yesterday_total_views = sum(r.total_views for r in yesterday_reports)
+
         with st.container(border=True):
             st.markdown(
                 '<h3>📧 404-страницы из Яндекс.Метрики</h3>',
                 unsafe_allow_html=True,
             )
+            st.markdown(
+                f'<p style="color:var(--text-soft);font-size:0.95rem;margin-bottom:0.75rem">'
+                f'Этот блок работает отдельно от проверки сайта. Метрика присылает '
+                f'отчёт о 404-страницах по почте раз в сутки — за прошедший день, '
+                f'утром следующего. <strong>Сегодня — {today_display}, значит самые '
+                f'свежие данные могут быть только за {yesterday_display}.</strong> '
+                f'За сегодняшний день отчёта не бывает — Метрика его ещё не сформировала.'
+                f'</p>',
+                unsafe_allow_html=True,
+            )
 
-            # Текущий статус кеша
-            latest_date = get_latest_available_date(metrika_pid)
-            stored_count = len(list_stored_reports(metrika_pid))
-
-            from datetime import datetime as _dt, timedelta as _td
-            yesterday_str = (_dt.now().date() - _td(days=1)).strftime('%Y-%m-%d')
-            is_fresh = latest_date == yesterday_str
-
-            # Информационная строка о состоянии
-            if latest_date:
+            # ─── Плашка статуса данных ──────────────────────────────
+            if has_yesterday:
+                st.markdown(
+                    f'<div style="background:linear-gradient(180deg, rgba(22,163,74,0.10) 0%, transparent 100%);'
+                    f'border-left:3px solid var(--ok);padding:14px 18px;border-radius:8px;margin:0.5rem 0 1rem 0">'
+                    f'<p style="margin:0;font-size:1.05rem">'
+                    f'<strong style="color:var(--ok)">✓ Данные за {yesterday_display} в наличии</strong>'
+                    f'</p>'
+                    f'<p style="margin:6px 0 0 0;color:var(--text-soft)">'
+                    f'{len(yesterday_reports)} стран, {yesterday_total_pages} 404-страниц, '
+                    f'{yesterday_total_views} просмотров. Всего в хранилище: {stored_count} отчётов.'
+                    f'</p>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            elif latest_date:
                 try:
                     d_obj = _dt.strptime(latest_date, '%Y-%m-%d')
-                    date_display = d_obj.strftime('%d.%m.%Y')
+                    latest_display = d_obj.strftime('%d.%m.%Y')
                 except ValueError:
-                    date_display = latest_date
-
-                if is_fresh:
-                    st.markdown(
-                        f'<p style="color:var(--text-soft);font-size:0.95rem;margin-bottom:0.75rem">'
-                        f'✓ Свежие данные за <strong>{date_display}</strong>. '
-                        f'В хранилище: {stored_count} отчётов.</p>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        f'<div style="background:#FFF4E5;border-left:3px solid #D97706;'
-                        f'padding:10px 14px;border-radius:6px;margin-bottom:0.75rem;color:#1E212E">'
-                        f'<strong>⚠ Последние данные за {date_display}.</strong> '
-                        f'Отчёт за вчера ещё не пришёл. Обновитесь — может уже появился.'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
+                    latest_display = latest_date
+                days_late = (yesterday_d - _dt.strptime(latest_date, '%Y-%m-%d').date()).days
+                st.markdown(
+                    f'<div style="background:linear-gradient(180deg, rgba(217,119,6,0.10) 0%, transparent 100%);'
+                    f'border-left:3px solid var(--warn);padding:14px 18px;border-radius:8px;margin:0.5rem 0 1rem 0">'
+                    f'<p style="margin:0;font-size:1.05rem">'
+                    f'<strong style="color:var(--warn)">Свежий отчёт за {yesterday_display} ещё не пришёл</strong>'
+                    f'</p>'
+                    f'<p style="margin:6px 0 0 0;color:var(--text-soft)">'
+                    f'Самые свежие данные в хранилище — за <strong>{latest_display}</strong> '
+                    f'(отстают на {days_late} {"день" if days_late == 1 else "дня" if days_late < 5 else "дней"}). '
+                    f'Нажмите «Обновить из почты» — возможно, новое письмо уже пришло.'
+                    f'</p>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
             else:
                 st.markdown(
-                    f'<p style="color:var(--text-muted);font-size:0.95rem;margin-bottom:0.75rem">'
-                    f'Хранилище пустое — нажмите «Обновить» чтобы загрузить отчёты Метрики.</p>',
+                    f'<div style="background:linear-gradient(180deg, rgba(26,86,232,0.08) 0%, transparent 100%);'
+                    f'border-left:3px solid var(--accent);padding:14px 18px;border-radius:8px;margin:0.5rem 0 1rem 0">'
+                    f'<p style="margin:0;font-size:1.05rem">'
+                    f'<strong style="color:var(--accent)">Хранилище пустое</strong>'
+                    f'</p>'
+                    f'<p style="margin:6px 0 0 0;color:var(--text-soft)">'
+                    f'Ни одного отчёта ещё не загружено. Нажмите «Обновить из почты» — '
+                    f'приложение зайдёт в ящик и заберёт письма Метрики за последние 30 дней.'
+                    f'</p>'
+                    f'</div>',
                     unsafe_allow_html=True,
                 )
 
-            # Кнопка ручного обновления + выбор периода для скачивания
-            cb1, cb2 = st.columns([1, 1])
-            with cb1:
-                refresh_clicked = st.button(
-                    '📥 Обновить из почты',
+            # ─── ГЛАВНАЯ КНОПКА: скачать отчёт за вчера ─────────────
+            # Это то, ради чего блок и нужен на 90%: получить xlsx без
+            # запуска полной проверки сайта. Выводим крупно и зелёным.
+            if has_yesterday and yesterday_reports:
+                yest_buf = _build_metrika_only_xlsx(
+                    yesterday_reports,
+                    sheet_title=f'404 за {yesterday_display}',
+                )
+                st.download_button(
+                    label=f'⬇ Скачать отчёт за {yesterday_display} '
+                          f'({yesterday_total_pages} страниц)',
+                    data=yest_buf,
+                    file_name=f'metrika-404-{metrika_pid}-{yesterday_str}.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     use_container_width=True,
-                    key='btn_refresh_metrika',
-                    help='Скачать новые письма из почты Яндекс.Метрики. '
-                         'Автоматически вызывается при запуске проверки.',
+                    key='dl_metrika_yesterday',
                 )
-
-            with cb2:
-                period_options = {
-                    'Только вчера': 1,
-                    'Последние 7 дней': 7,
-                    'Последние 2 недели': 14,
-                    'Последние 30 дней': 30,
-                }
-                period_label = st.selectbox(
-                    'Период для скачивания сводного xlsx',
-                    list(period_options.keys()),
-                    label_visibility='collapsed',
-                    key='metrika_period_select',
+                # Предупреждение если URL пустые — это типичная проблема:
+                # в шаблоне отчёта Метрики не настроена колонка «Адрес страницы».
+                pages_with_url = sum(
+                    1 for r in yesterday_reports for p in r.pages if p.page_url
                 )
+                if yesterday_total_pages > 0 and pages_with_url == 0:
+                    st.warning(
+                        '⚠ **В отчёте за вчера нет URL-адресов страниц** — '
+                        'колонка «URL страницы» будет пустая. '
+                        'Это потому, что шаблон отчёта в Метрике сейчас отдаёт только '
+                        'заголовок страницы. Чтобы получать URL: откройте в Метрике '
+                        '«Содержание → Страницы → 404», нажмите «Группировки» и '
+                        'добавьте «Адрес страницы» к группировкам, потом сохраните '
+                        'шаблон рассылки. Со следующего письма URL начнут приходить.'
+                    )
+                elif yesterday_total_pages > 0 and pages_with_url < yesterday_total_pages:
+                    st.caption(
+                        f'ℹ В отчёте {pages_with_url} из {yesterday_total_pages} страниц '
+                        f'имеют URL — у остальных в Метрике URL не сохранился.'
+                    )
 
-            # Обработка кнопки обновления
+            # ─── Кнопка обновления почты ────────────────────────────
+            refresh_clicked = st.button(
+                '📥 Обновить из почты — проверить, не пришли ли новые отчёты',
+                use_container_width=True,
+                key='btn_refresh_metrika',
+                help='Зайдёт в ящик Яндекс.Метрики и скачает все новые письма '
+                     'за последние 3 дня. Уже сохранённые отчёты пропустит.',
+            )
+
+            # ─── Обработка обновления ───────────────────────────────
             if refresh_clicked:
                 metrika_proxy = get_proxy_url()
                 log_messages_m = []
-                # Лог свёрнут по умолчанию, expanded только при ошибке
-                progress_m = st.progress(0, text='Подключаюсь к почте…')
+                progress_m = st.progress(0, text='Подключаюсь к почте Яндекса…')
 
                 def on_log_m(level, msg):
                     log_messages_m.append(msg)
 
                 def on_progress_m(done, total):
                     if total > 0:
-                        progress_m.progress(min(1.0, done / total), text=f'Письма ({done}/{total})…')
+                        progress_m.progress(
+                            min(1.0, done / total),
+                            text=f'Обрабатываю письмо {done} из {total}…',
+                        )
 
                 try:
                     summary = fetch_incremental(
@@ -1099,66 +1276,113 @@ elif is_project:
                         log=on_log_m,
                         progress=on_progress_m,
                     )
-                    progress_m.progress(1.0, text='Готово')
-                    if summary['fetched'] > 0:
+                    progress_m.empty()
+                    fetched = summary['fetched']
+                    skipped = summary['skipped']
+                    total_letters = summary.get('total_in_letters', fetched + skipped)
+                    if fetched > 0:
+                        # Сразу проверим: появился ли вчерашний?
+                        new_latest = get_latest_available_date(metrika_pid)
+                        if new_latest == yesterday_str:
+                            note = (
+                                f'Среди них — отчёты за **вчера ({yesterday_display})**. '
+                                f'Можно сразу нажать «Скачать отчёт за вчера» вверху блока.'
+                            )
+                        elif new_latest:
+                            try:
+                                nd = _dt.strptime(new_latest, '%Y-%m-%d').strftime('%d.%m.%Y')
+                            except ValueError:
+                                nd = new_latest
+                            note = (
+                                f'Самые свежие данные теперь за **{nd}**. '
+                                f'Отчёт за вчера ({yesterday_display}) пока не пришёл — '
+                                f'Метрика обычно присылает его ближе к обеду.'
+                            )
+                        else:
+                            note = ''
                         st.success(
-                            f'✅ Загружено новых отчётов: **{summary["fetched"]}** '
-                            f'(уже было: {summary["skipped"]})'
+                            f'✅ Загружено новых отчётов: **{fetched}** '
+                            f'(уже было в кеше: {skipped}). {note}'
+                        )
+                    elif total_letters > 0:
+                        st.info(
+                            f'ℹ Просмотрено {total_letters} писем — все уже есть в кеше. '
+                            f'Новых отчётов нет. '
+                            + (
+                                f'Свежие данные — за **{yesterday_display}**, '
+                                f'всё актуально.'
+                                if has_yesterday
+                                else f'За вчера ({yesterday_display}) письмо пока не пришло — '
+                                     f'попробуйте позже.'
+                            )
                         )
                     else:
-                        st.info(f'Новых писем нет (всё уже было в кеше)')
-                    # Свёрнутый лог — раскрывается только если интересно
-                    with st.expander('Подробный лог', expanded=False):
-                        st.code('\n'.join(log_messages_m[-100:]) or '(лог пуст)', language='text')
-                    st.rerun()
+                        st.warning(
+                            '⚠ В ящике не нашлось ни одного письма от Яндекс.Метрики '
+                            f'за последние 3 дня. Проверьте, не сломалась ли рассылка в Метрике '
+                            f'(Содержание → Страницы → 404 → Отправлять по почте).'
+                        )
+                    with st.expander('Подробный лог обновления', expanded=False):
+                        st.code(
+                            '\n'.join(log_messages_m[-100:]) or '(лог пуст)',
+                            language='text',
+                        )
                 except Exception as e:
                     progress_m.empty()
                     import traceback
-                    st.error(f'❌ Не удалось обновить: {type(e).__name__}: {e}')
-                    # Подробный лог раскрыт чтобы было видно где упало
-                    with st.expander('Подробный лог', expanded=True):
+                    st.error(f'❌ Не удалось обновить почту: {type(e).__name__}: {e}')
+                    with st.expander('Подробный лог (с трассировкой)', expanded=True):
                         st.code(
-                            '\n'.join(log_messages_m[-100:]) + '\n\n--- TRACEBACK ---\n' + traceback.format_exc(),
+                            '\n'.join(log_messages_m[-100:])
+                            + '\n\n--- TRACEBACK ---\n'
+                            + traceback.format_exc(),
                             language='text',
                         )
 
-            # Скачивашка периодического сводного xlsx
-            selected_days = period_options.get(period_label, 7)
-            period_reports = load_reports_for_period(metrika_pid, selected_days)
-            if period_reports:
-                # Генерим файл в памяти (in-memory)
-                from io import BytesIO as _BIO
-                from openpyxl import Workbook as _Wb
-                buf = _BIO()
-                _wb = _Wb()
-                _ws = _wb.active
-                _ws.title = f'404 за {selected_days} дн.'
-                _ws.append(['Дата', 'Страна', 'URL', 'Просмотры', 'Посетители', 'Реферер', 'Заголовок'])
-                for rep in period_reports:
-                    for p in rep.pages:
-                        _ws.append([
-                            rep.report_date,
-                            f'{rep.country_code} — {rep.country_name}',
-                            p.page_url or '',
-                            p.views,
-                            p.visitors,
-                            p.referer or '',
-                            p.page_title,
-                        ])
-                _wb.save(buf)
-                buf.seek(0)
-
-                total_pages_in_period = sum(r.total_pages for r in period_reports)
-                st.download_button(
-                    label=f'⬇ Скачать сводный xlsx ({period_label}, {total_pages_in_period} страниц)',
-                    data=buf.getvalue(),
-                    file_name=f'metrika-404-{metrika_pid}-{selected_days}d.xlsx',
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    use_container_width=True,
-                    key='dl_metrika_period',
+            # ─── Скачать за период (свёрнутый по умолчанию) ─────────
+            with st.expander(
+                'Скачать сводный отчёт за период (7 / 14 / 30 дней)',
+                expanded=False,
+            ):
+                st.caption(
+                    'Если нужен не один день, а агрегат за несколько — выберите период '
+                    'и скачайте единый xlsx. Сегодняшний день никогда не входит.'
                 )
-            else:
-                st.caption(f'За {period_label.lower()} в кеше нет данных. Обновите.')
+                period_options = {
+                    'Последние 7 дней': 7,
+                    'Последние 2 недели': 14,
+                    'Последние 30 дней': 30,
+                }
+                period_label = st.selectbox(
+                    'Период',
+                    list(period_options.keys()),
+                    label_visibility='collapsed',
+                    key='metrika_period_select',
+                )
+                selected_days = period_options[period_label]
+                period_reports = load_reports_for_period(metrika_pid, selected_days)
+                if period_reports:
+                    period_buf = _build_metrika_only_xlsx(
+                        period_reports,
+                        sheet_title=f'404 за {selected_days} дн.',
+                    )
+                    total_pages_in_period = sum(r.total_pages for r in period_reports)
+                    unique_dates = len({r.report_date for r in period_reports})
+                    st.download_button(
+                        label=f'⬇ Скачать xlsx ({period_label.lower()}, '
+                              f'{unique_dates} дней с данными, {total_pages_in_period} страниц)',
+                        data=period_buf,
+                        file_name=f'metrika-404-{metrika_pid}-{selected_days}d.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True,
+                        key='dl_metrika_period',
+                    )
+                else:
+                    st.info(
+                        f'За {period_label.lower()} в кеше нет ни одного отчёта. '
+                        f'Нажмите «Обновить из почты» — если письма приходили, '
+                        f'они подтянутся.'
+                    )
 
     # ─── Оценка плана + кнопка запуска в одной карточке ───────
     selected_cities_count = 1 + random_subs  # Москва + случайные
