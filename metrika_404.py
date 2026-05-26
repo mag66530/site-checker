@@ -474,16 +474,29 @@ def fetch_metrika_emails(
                 f'(mail.yandex.ru → Все настройки → Почтовые программы).'
             )
 
+        if log:
+            log('info', 'Логин успешен. Запрашиваю список папок…')
+
         # Папки на Яндексе с русскими именами требуют кодировки IMAP UTF-7,
         # но самый надёжный способ — заключить имя в кавычки.
         # Сначала найдём папку среди списка
-        status, folders = M.list()
+        try:
+            status, folders = M.list()
+        except Exception as e:
+            raise RuntimeError(f'M.list() упало: {type(e).__name__}: {e}')
+
+        if log:
+            log('info', f'Получено папок: {len(folders) if folders else 0}')
+
         target_folder_encoded = None
-        if status == 'OK':
+        if status == 'OK' and folders:
             for f in folders:
                 # В ответе строка типа: b'(\\HasNoChildren) "|" "&BB8-.&BBwAVA..."'
                 # Имя папки уже в IMAP UTF-7 (если содержит кириллицу)
-                line = f.decode('ascii', errors='replace') if isinstance(f, bytes) else f
+                try:
+                    line = f.decode('ascii', errors='replace') if isinstance(f, bytes) else f
+                except Exception:
+                    continue
                 # Имя в конце строки — берём из последних кавычек
                 m = re.search(r'"([^"]+)"\s*$', line)
                 if not m:
@@ -496,26 +509,49 @@ def fetch_metrika_emails(
                     name_decoded = name_encoded
                 if name_decoded == folder:
                     target_folder_encoded = name_encoded
+                    if log:
+                        log('info', f'Папка найдена в листинге: {name_encoded}')
                     break
 
         if target_folder_encoded is None:
             # Папка не нашлась в листинге — кодируем имя сами
             target_folder_encoded = _imap_utf7_encode(folder).decode('ascii')
+            if log:
+                log('warn', f'Папка не нашлась в листинге. Использую закодированное имя: {target_folder_encoded}')
 
         if log:
             log('info', f'Открываю папку «{folder}» (IMAP-имя: {target_folder_encoded})…')
 
-        # Имя папки оборачиваем в кавычки для корректного парсинга IMAP
-        status, _ = M.select(f'"{target_folder_encoded}"', readonly=True)
+        # Кодируем имя папки В BYTES сразу — imaplib попытается сделать bytes(arg, 'ascii')
+        # и упадёт на любом не-ASCII. Передавая bytes, обходим эту проверку.
+        # target_folder_encoded уже содержит только ASCII (это IMAP UTF-7), но
+        # обернём для надёжности.
+        folder_bytes = target_folder_encoded.encode('ascii', errors='replace')
+        select_arg = b'"' + folder_bytes + b'"'
+
+        try:
+            status, _ = M.select(select_arg, readonly=True)
+        except Exception as e:
+            raise RuntimeError(f'M.select({select_arg!r}) упало: {type(e).__name__}: {e}')
+
         if status != 'OK':
             raise FileNotFoundError(f'Папка «{folder}» не найдена в почте')
+
+        if log:
+            log('info', 'Папка открыта. Ищу письма…')
 
         # Ищем все письма за последние N дней от Яндекс.Метрики
         from datetime import datetime, timedelta
         since_date = (datetime.now() - timedelta(days=since_days)).strftime('%d-%b-%Y')
-        # IMAP-команда для поиска
-        criteria = f'(SINCE "{since_date}" FROM "yandex.ru")'
-        status, data = M.search(None, criteria)
+        # IMAP-команда для поиска (только ASCII символы — даты и yandex.ru)
+        criteria_str = f'(SINCE "{since_date}" FROM "yandex.ru")'
+        criteria_bytes = criteria_str.encode('ascii')
+
+        try:
+            status, data = M.search(None, criteria_bytes)
+        except Exception as e:
+            raise RuntimeError(f'M.search() упало: {type(e).__name__}: {e}')
+
         if status != 'OK':
             if log:
                 log('warn', 'IMAP search вернул ошибку')

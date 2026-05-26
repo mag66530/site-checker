@@ -1475,7 +1475,13 @@ with st.container(border=True):
         except FileNotFoundError as e:
             st.error(f'❌ {e}')
         except Exception as e:
-            st.error(f'❌ Не удалось загрузить отчёты: {e}')
+            import traceback
+            tb = traceback.format_exc()
+            st.error(f'❌ Не удалось загрузить отчёты: {type(e).__name__}: {e}')
+            # Показываем подробный traceback чтобы понять где именно упало
+            append_log(f'─── TRACEBACK ───')
+            for line in tb.split('\n'):
+                append_log(line)
 
     # ─── История загруженных отчётов ────────────────────────────
     if stored:
