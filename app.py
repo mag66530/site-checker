@@ -28,7 +28,7 @@ from sources import (
 )
 from profiles import PROFILES, get_profile_kwargs
 from history import load_history, save_history
-from sitemap import load_product_pathnames
+from sitemap import load_product_pathnames, get_cached_products_info
 from http_checker import run_batch, STATUS, SPEED
 from reporter import build_report, make_report_filename
 from metrika_404 import (
@@ -355,38 +355,85 @@ CUSTOM_CSS = """
         color: var(--text) !important;
         transition: all 0.15s !important;
         padding: 0.5rem 1.25rem !important;
+        font-size: 0.95rem !important;
     }
     .stButton > button:hover {
         border-color: var(--border-strong) !important;
         background: var(--bg-elev) !important;
     }
+    /* secondary-кнопки (не primary) — outline-стиль с синим текстом */
+    .stButton > button[kind="secondary"] {
+        background: var(--bg) !important;
+        background-color: var(--bg) !important;
+        border: 1px solid var(--accent) !important;
+        color: var(--accent) !important;
+        font-weight: 600 !important;
+        font-size: 0.95rem !important;
+        padding: 0.5rem 1.25rem !important;
+    }
+    .stButton > button[kind="secondary"] *,
+    .stButton > button[kind="secondary"] p,
+    .stButton > button[kind="secondary"] span,
+    .stButton > button[kind="secondary"] div {
+        color: var(--accent) !important;
+    }
+    .stButton > button[kind="secondary"]:hover:not(:disabled) {
+        background: var(--accent-soft) !important;
+        background-color: var(--accent-soft) !important;
+        border-color: var(--accent-hover) !important;
+    }
+    .stButton > button[kind="secondary"]:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
     /* ════════════════════════════════════════════════════════════════
        Кодовые блоки (st.code) — подробный лог
-       Streamlit по умолчанию делает тёмный фон даже на светлой теме.
+       Streamlit рендерит код через Prism.js, который ставит тёмную тему
+       даже на светлой странице. Бьём по всем вложенным элементам.
        ════════════════════════════════════════════════════════════════ */
     [data-testid="stCodeBlock"],
     [data-testid="stCode"],
+    .stCodeBlock,
+    .stCode,
     pre {
         background: #F7FBFE !important;
         background-color: #F7FBFE !important;
         border: 1px solid #E1E8F0 !important;
         border-radius: 8px !important;
     }
-    [data-testid="stCodeBlock"] pre,
-    [data-testid="stCode"] pre {
-        background: #F7FBFE !important;
-        background-color: #F7FBFE !important;
+    /* ВСЕ вложенные элементы внутри code-block — светлая тема */
+    [data-testid="stCodeBlock"] *,
+    [data-testid="stCode"] *,
+    .stCodeBlock *,
+    .stCode * {
+        background: transparent !important;
+        background-color: transparent !important;
         color: #1E212E !important;
     }
+    [data-testid="stCodeBlock"] pre,
+    [data-testid="stCode"] pre,
     [data-testid="stCodeBlock"] code,
     [data-testid="stCode"] code,
     pre code {
+        background: #F7FBFE !important;
+        background-color: #F7FBFE !important;
         color: #1E212E !important;
-        background: transparent !important;
-        background-color: transparent !important;
         font-size: 0.875rem !important;
     }
-    /* Inline-код тоже на всякий случай */
+    /* Кнопка копирования в углу code-block — тоже светлая */
+    [data-testid="stCodeBlock"] button,
+    [data-testid="stCode"] button,
+    [data-testid="stCodeBlockCopyButton"] {
+        background: var(--bg-elev) !important;
+        color: var(--text-muted) !important;
+        border: 1px solid var(--border) !important;
+    }
+    [data-testid="stCodeBlock"] button:hover,
+    [data-testid="stCode"] button:hover {
+        background: var(--accent-soft) !important;
+        color: var(--accent) !important;
+    }
+    /* Inline-код */
     .stMarkdown code {
         background: #F7FBFE !important;
         color: #1A56E8 !important;
@@ -488,8 +535,31 @@ CUSTOM_CSS = """
     }
 
     /* Прогресс-бар */
+    [data-testid="stProgress"] {
+        background: transparent !important;
+    }
+    [data-testid="stProgress"] > div {
+        background: transparent !important;
+    }
+    /* Дорожка прогресса — светлая */
+    [data-testid="stProgress"] > div > div {
+        background: var(--bg-elev-2) !important;
+        background-color: var(--bg-elev-2) !important;
+        border-radius: 4px;
+    }
+    /* Заполнение — синее */
     [data-testid="stProgress"] > div > div > div {
         background: var(--accent) !important;
+        background-color: var(--accent) !important;
+    }
+    /* Текст-метка над прогресс-баром */
+    [data-testid="stProgress"] p,
+    [data-testid="stProgress"] label,
+    [data-testid="stProgress"] span {
+        color: var(--text) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        font-size: 0.95rem !important;
     }
 
     /* Expander */
@@ -783,6 +853,9 @@ elif is_project:
 
     # ─── Метрики проекта в одной карточке ─────────────────────
     stats = src.stats
+    # Достаём кеш товаров (если был хоть один прогон с галкой «Товары»)
+    products_info = get_cached_products_info(st.session_state.project_id)
+
     with st.container(border=True):
         st.markdown(
             f'<p style="color:var(--text-muted);font-size:0.875rem;'
@@ -790,14 +863,35 @@ elif is_project:
             f'font-weight:600">Каталог проекта</p>',
             unsafe_allow_html=True,
         )
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric('Городов', stats['subdomains_count'])
         c2.metric('Категорий', f'{stats["categories_count"]:,}'.replace(',', ' '))
         if stats['has_filters']:
             c3.metric('Фильтров', f'{stats["filters_count"]:,}'.replace(',', ' '))
         else:
             c3.metric('Фильтров', 'нет')
-        c4.metric('Главный город', cfg.get('mandatory_city', 'Москва'))
+
+        # Товары — динамически из sitemap. Если ещё не загружали — показываем «—»
+        if products_info and products_info['count'] > 0:
+            fmt_count = f'{products_info["count"]:,}'.replace(',', ' ')
+            from datetime import datetime as _dt
+            d = _dt.fromtimestamp(products_info['fetched_at_ms'] / 1000)
+            label_suffix = '' if products_info['is_fresh'] else ' (устарел)'
+            c4.metric(
+                'Товаров',
+                fmt_count,
+                help=f'По данным sitemap.xml от {d.strftime("%d.%m.%Y %H:%M")}{label_suffix}. '
+                     f'Обновится автоматически при следующем прогоне с галкой «Карточки товаров».',
+            )
+        else:
+            c4.metric(
+                'Товаров',
+                '—',
+                help='Запустите проверку с галкой «Карточки товаров» — '
+                     'приложение загрузит sitemap.xml и покажет здесь число.',
+            )
+
+        c5.metric('Главный город', cfg.get('mandatory_city', 'Москва'))
 
     # ─── Шаг 2: профиль в карточке ───────────────────────────
     with st.container(border=True):
@@ -1312,7 +1406,7 @@ with st.container(border=True):
     with col_btn:
         load_clicked = st.button(
             '📥 Загрузить новые из почты',
-            type='primary',
+            type='secondary',
             disabled=not creds_ok,
             use_container_width=True,
             key='btn_load_metrika',
@@ -1355,6 +1449,9 @@ with st.container(border=True):
                 progress_bar.progress(pct, text=f'Обрабатываю письма ({done}/{total})…')
 
         try:
+            # Для IMAP-соединения тоже используем прокси (если настроен),
+            # потому что Яндекс часто блокирует IMAP с зарубежных IP
+            metrika_proxy = get_proxy_url()
             reports = fetch_metrika_emails(
                 project_id=metrika_pid,
                 email_addr=m_email,
@@ -1363,6 +1460,7 @@ with st.container(border=True):
                 since_days=30,
                 log=on_log,
                 progress=on_progress,
+                proxy_url=metrika_proxy,
             )
             new_count = save_reports_batch(reports)
             progress_bar.progress(1.0, text='Готово')

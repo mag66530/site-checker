@@ -16,10 +16,12 @@ metrika_404.py — загрузка и парсинг 404-отчётов из п
 
 Хранилище: cache/metrika-404/{project_id}/{country}/{YYYY-MM-DD}.json
 """
+import base64
 import email
 import imaplib
 import json
 import re
+import socket
 import ssl
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -27,6 +29,7 @@ from email.header import decode_header
 from io import BytesIO
 from pathlib import Path
 from typing import Optional, Callable
+from urllib.parse import urlparse
 
 from openpyxl import load_workbook
 
@@ -261,6 +264,93 @@ def _extract_url(text: str) -> Optional[str]:
 # ── IMAP-клиент ─────────────────────────────────────────────────────
 
 
+def _connect_via_http_proxy(
+    proxy_url: str,
+    target_host: str,
+    target_port: int,
+    timeout: int = 30,
+) -> socket.socket:
+    """
+    Установить TCP-соединение к target_host:target_port через HTTP-прокси
+    используя метод CONNECT. Возвращает голый сокет, поверх которого
+    можно навернуть SSL.
+    
+    proxy_url: http://user:pass@host:port
+    """
+    p = urlparse(proxy_url)
+    proxy_host = p.hostname
+    proxy_port = p.port or 8080
+    
+    # Готовим CONNECT-запрос
+    connect_line = f'CONNECT {target_host}:{target_port} HTTP/1.1'
+    headers = [
+        connect_line,
+        f'Host: {target_host}:{target_port}',
+        'User-Agent: Mozilla/5.0 (site-checker)',
+        'Proxy-Connection: keep-alive',
+    ]
+    if p.username and p.password:
+        creds = f'{p.username}:{p.password}'
+        token = base64.b64encode(creds.encode()).decode()
+        headers.append(f'Proxy-Authorization: Basic {token}')
+    request = '\r\n'.join(headers) + '\r\n\r\n'
+
+    sock = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
+    sock.sendall(request.encode())
+
+    # Читаем ответ — должен быть "HTTP/1.1 200 ..."
+    response = b''
+    while b'\r\n\r\n' not in response:
+        chunk = sock.recv(4096)
+        if not chunk:
+            sock.close()
+            raise ConnectionError(f'Прокси {proxy_host}:{proxy_port} закрыл соединение без ответа')
+        response += chunk
+        if len(response) > 16384:
+            sock.close()
+            raise ConnectionError('Слишком длинный ответ от прокси')
+
+    status_line = response.split(b'\r\n', 1)[0].decode('utf-8', errors='replace')
+    if ' 200 ' not in status_line:
+        sock.close()
+        raise ConnectionError(
+            f'Прокси отказал в CONNECT к {target_host}:{target_port}. '
+            f'Ответ: {status_line}. Возможно, прокси не разрешает '
+            f'порт {target_port} (только 443/HTTPS).'
+        )
+    return sock
+
+
+class IMAP4_SSL_via_Proxy(imaplib.IMAP4_SSL):
+    """
+    IMAP4_SSL который сначала идёт через HTTP-прокси (CONNECT),
+    потом наворачивает SSL на этот сокет.
+    """
+    def __init__(self, host, port, proxy_url, ssl_context=None, timeout=30):
+        self._proxy_url = proxy_url
+        self._connect_timeout = timeout
+        super().__init__(host, port, ssl_context=ssl_context, timeout=timeout)
+
+    def _create_socket(self, timeout=None):
+        # Этот метод вызывается из IMAP4.__init__ — здесь делаем CONNECT
+        raw_sock = _connect_via_http_proxy(
+            self._proxy_url, self.host, self.port,
+            timeout=self._connect_timeout,
+        )
+        return raw_sock
+
+    def open(self, host='', port=imaplib.IMAP4_SSL_PORT, timeout=None):
+        # Переопределяем open чтобы навернуть SSL поверх нашего проксированного сокета
+        self.host = host
+        self.port = port
+        self.sock = self._create_socket(timeout)
+        # SSL поверх сокета
+        ctx = self.ssl_context if hasattr(self, 'ssl_context') and self.ssl_context else ssl.create_default_context()
+        self.sock = ctx.wrap_socket(self.sock, server_hostname=host)
+        self.file = self.sock.makefile('rb')
+
+
+
 def fetch_metrika_emails(
     project_id: str,
     email_addr: str,
@@ -270,26 +360,47 @@ def fetch_metrika_emails(
     since_days: int = 30,
     log: Optional[Callable] = None,
     progress: Optional[Callable] = None,
+    proxy_url: Optional[str] = None,
 ) -> list[Report404]:
     """
     Подключиться по IMAP, скачать новые письма из указанной папки,
     распарсить вложения и вернуть список отчётов Report404.
 
     since_days — забираем письма не старше N дней (по умолчанию 30).
+    proxy_url — если задан, IMAP-соединение пойдёт через HTTP CONNECT-прокси.
+                Нужно когда основной хостинг (Streamlit Cloud в США) блокируется
+                Яндексом. Прокси должен разрешать CONNECT на порт 993.
     """
     reports = []
 
     if log:
         log('info', f'Подключаюсь к {YANDEX_IMAP_HOST}:{YANDEX_IMAP_PORT} как {email_addr}…')
+        if proxy_url:
+            p = urlparse(proxy_url)
+            log('info', f'IMAP через прокси {p.hostname}:{p.port}')
 
     ssl_ctx = ssl.create_default_context()
-    with imaplib.IMAP4_SSL(YANDEX_IMAP_HOST, YANDEX_IMAP_PORT, ssl_context=ssl_ctx) as M:
+
+    # Создаём IMAP-клиент: через прокси или напрямую
+    if proxy_url:
+        M = IMAP4_SSL_via_Proxy(
+            YANDEX_IMAP_HOST, YANDEX_IMAP_PORT,
+            proxy_url=proxy_url,
+            ssl_context=ssl_ctx,
+            timeout=60,
+        )
+    else:
+        M = imaplib.IMAP4_SSL(YANDEX_IMAP_HOST, YANDEX_IMAP_PORT, ssl_context=ssl_ctx, timeout=60)
+
+    try:
         try:
             M.login(email_addr, password)
         except imaplib.IMAP4.error as e:
             raise PermissionError(
                 f'Не удалось войти в почту: {e}. '
-                f'Проверьте email и пароль приложения в Streamlit Secrets.'
+                f'Проверьте: 1) email и пароль приложения в Streamlit Secrets; '
+                f'2) что IMAP включён в Яндекс-почте '
+                f'(mail.yandex.ru → Все настройки → Почтовые программы).'
             )
 
         # Папки на Яндексе с русскими именами требуют кодировки IMAP UTF-7,
@@ -393,6 +504,12 @@ def fetch_metrika_emails(
 
         if log:
             log('info', f'Успешно распарсено отчётов: {len(reports)}')
+
+    finally:
+        try:
+            M.logout()
+        except Exception:
+            pass
 
     return reports
 

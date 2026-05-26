@@ -167,6 +167,31 @@ def invalidate_sitemap_cache(project_id: str) -> None:
         p.unlink()
 
 
+def get_cached_products_info(project_id: str) -> Optional[dict]:
+    """
+    Прочитать инфу о товарах из кеша sitemap (даже если кеш не свежий).
+    Используется в UI чтобы показать «Товаров: ~N (по sitemap от DATE)».
+    
+    Возвращает {'count': int, 'fetched_at_ms': int, 'is_fresh': bool}
+    или None если кеша вообще нет.
+    """
+    p = _cache_path(project_id)
+    if not p.exists():
+        return None
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            cache = json.load(f)
+        fetched_at = cache.get('fetched_at', 0)
+        age_ms = (time.time() * 1000) - fetched_at
+        return {
+            'count': len(cache.get('pathnames', [])),
+            'fetched_at_ms': fetched_at,
+            'is_fresh': age_ms <= CACHE_TTL_MS,
+        }
+    except Exception:
+        return None
+
+
 # ── Главная функция: товарные pathname'ы ────────────────────────────
 
 
