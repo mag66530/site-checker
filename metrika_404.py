@@ -321,6 +321,77 @@ def _connect_via_http_proxy(
     return sock
 
 
+# ── IMAP UTF-7 (modified) кодек ──────────────────────────────────────
+# Имена папок на IMAP-серверах кодируются специальной кодировкой
+# IMAP UTF-7 modified (RFC 3501 §5.1.3). Это не обычный UTF-7:
+#   • Символ "&" заменяется на "&-"
+#   • Не-ASCII символы кодируются Base64 (без padding, с '+' и '/' заменёнными на '+' и ',')
+#     и обрамляются "&" ... "-"
+
+
+def _imap_utf7_encode(s: str) -> bytes:
+    """Кодировать строку в IMAP UTF-7 modified для использования в IMAP-командах."""
+    if not s:
+        return b''
+    res = []
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == '&':
+            res.append(b'&-')
+            i += 1
+        elif 0x20 <= ord(ch) <= 0x7E:
+            res.append(ch.encode('ascii'))
+            i += 1
+        else:
+            # Накапливаем все подряд не-ASCII символы
+            j = i
+            while j < len(s) and (ord(s[j]) < 0x20 or ord(s[j]) > 0x7E) and s[j] != '&':
+                j += 1
+            chunk = s[i:j]
+            # UTF-16BE → Base64 → заменить '/' на ','
+            b16 = chunk.encode('utf-16-be')
+            b64 = base64.b64encode(b16).rstrip(b'=').replace(b'/', b',')
+            res.append(b'&' + b64 + b'-')
+            i = j
+    return b''.join(res)
+
+
+def _imap_utf7_decode(b: bytes) -> str:
+    """Декодировать IMAP UTF-7 modified обратно в обычную строку."""
+    if isinstance(b, str):
+        b = b.encode('ascii', errors='replace')
+    res = []
+    i = 0
+    while i < len(b):
+        ch = b[i:i+1]
+        if ch == b'&':
+            # Ищем закрывающий '-'
+            end = b.find(b'-', i + 1)
+            if end < 0:
+                # Битая последовательность — оставим как есть
+                res.append(b[i:].decode('ascii', errors='replace'))
+                break
+            seq = b[i+1:end]
+            if not seq:
+                # "&-" → литерал '&'
+                res.append('&')
+            else:
+                # Base64: '/' было заменено на ',', возвращаем обратно, паддинг добавляем
+                b64 = seq.replace(b',', b'/')
+                padding = b'=' * (-len(b64) % 4)
+                try:
+                    raw = base64.b64decode(b64 + padding)
+                    res.append(raw.decode('utf-16-be'))
+                except Exception:
+                    res.append(seq.decode('ascii', errors='replace'))
+            i = end + 1
+        else:
+            res.append(ch.decode('ascii', errors='replace'))
+            i += 1
+    return ''.join(res)
+
+
 class IMAP4_SSL_via_Proxy(imaplib.IMAP4_SSL):
     """
     IMAP4_SSL который сначала идёт через HTTP-прокси (CONNECT),
@@ -407,26 +478,35 @@ def fetch_metrika_emails(
         # но самый надёжный способ — заключить имя в кавычки.
         # Сначала найдём папку среди списка
         status, folders = M.list()
-        target_folder = None
+        target_folder_encoded = None
         if status == 'OK':
             for f in folders:
-                # В ответе строка типа: b'(\\HasNoChildren) "|" "Я.Метрика 404 и др"'
-                line = f.decode('utf-8', errors='replace') if isinstance(f, bytes) else f
+                # В ответе строка типа: b'(\\HasNoChildren) "|" "&BB8-.&BBwAVA..."'
+                # Имя папки уже в IMAP UTF-7 (если содержит кириллицу)
+                line = f.decode('ascii', errors='replace') if isinstance(f, bytes) else f
                 # Имя в конце строки — берём из последних кавычек
                 m = re.search(r'"([^"]+)"\s*$', line)
-                if m and m.group(1) == folder:
-                    target_folder = m.group(1)
+                if not m:
+                    continue
+                name_encoded = m.group(1)
+                # Декодируем из IMAP UTF-7 чтобы сравнить с тем что ищем
+                try:
+                    name_decoded = _imap_utf7_decode(name_encoded.encode('ascii'))
+                except Exception:
+                    name_decoded = name_encoded
+                if name_decoded == folder:
+                    target_folder_encoded = name_encoded
                     break
 
-        if target_folder is None:
-            # Папка не нашлась — пробуем напрямую с экранированием
-            target_folder = folder
+        if target_folder_encoded is None:
+            # Папка не нашлась в листинге — кодируем имя сами
+            target_folder_encoded = _imap_utf7_encode(folder).decode('ascii')
 
         if log:
-            log('info', f'Открываю папку «{target_folder}»…')
+            log('info', f'Открываю папку «{folder}» (IMAP-имя: {target_folder_encoded})…')
 
         # Имя папки оборачиваем в кавычки для корректного парсинга IMAP
-        status, _ = M.select(f'"{target_folder}"', readonly=True)
+        status, _ = M.select(f'"{target_folder_encoded}"', readonly=True)
         if status != 'OK':
             raise FileNotFoundError(f'Папка «{folder}» не найдена в почте')
 

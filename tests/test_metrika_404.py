@@ -8,7 +8,52 @@ from metrika_404 import (
     parse_subject, parse_table_xlsx, is_table_attachment,
     Page404, Report404, save_report, load_report, list_stored_reports,
     COUNTRY_LABELS,
+    _imap_utf7_encode, _imap_utf7_decode,
 )
+
+
+def test_imap_utf7_ascii_unchanged():
+    """ASCII-имена не меняются."""
+    assert _imap_utf7_encode('INBOX') == b'INBOX'
+    assert _imap_utf7_encode('Sent Items') == b'Sent Items'
+    assert _imap_utf7_decode(b'INBOX') == 'INBOX'
+    print('✓ IMAP UTF-7: ASCII не меняется')
+
+
+def test_imap_utf7_ampersand():
+    """Символ & экранируется в &-."""
+    assert _imap_utf7_encode('A&B') == b'A&-B'
+    assert _imap_utf7_decode(b'A&-B') == 'A&B'
+    print('✓ IMAP UTF-7: & → &-')
+
+
+def test_imap_utf7_russian():
+    """Кириллица кодируется/декодируется правильно."""
+    # Реальная папка Яндекса
+    encoded = _imap_utf7_encode('Я.Метрика 404 и др')
+    # Должно начинаться с & и кончаться -
+    assert encoded.startswith(b'&'), f'Не закодировалось: {encoded}'
+    # Декод обратно
+    decoded = _imap_utf7_decode(encoded)
+    assert decoded == 'Я.Метрика 404 и др', f'Roundtrip сломан: {decoded!r}'
+    print(f'✓ IMAP UTF-7: «Я.Метрика 404 и др» → {encoded.decode()}')
+
+
+def test_imap_utf7_known_yandex_folders():
+    """Roundtrip для типичных имён папок Яндекса."""
+    test_cases = [
+        'Входящие',
+        'Отправленные',
+        'Спам',
+        'Корзина',
+        'Я.Метрика 404 и др',
+        'A&B & test',  # сочетание ASCII, & и не-ASCII
+    ]
+    for name in test_cases:
+        encoded = _imap_utf7_encode(name)
+        decoded = _imap_utf7_decode(encoded)
+        assert decoded == name, f'Roundtrip сломан для {name!r}: got {decoded!r}'
+    print(f'✓ IMAP UTF-7: {len(test_cases)} имён roundtrip успешно')
 
 
 def test_parse_subject_basic():
@@ -177,6 +222,10 @@ def test_list_stored_reports():
 
 
 if __name__ == '__main__':
+    test_imap_utf7_ascii_unchanged()
+    test_imap_utf7_ampersand()
+    test_imap_utf7_russian()
+    test_imap_utf7_known_yandex_folders()
     test_parse_subject_basic()
     test_parse_subject_perevod()
     test_parse_subject_all_countries()
