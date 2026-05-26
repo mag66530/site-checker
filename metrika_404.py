@@ -325,29 +325,29 @@ class IMAP4_SSL_via_Proxy(imaplib.IMAP4_SSL):
     """
     IMAP4_SSL который сначала идёт через HTTP-прокси (CONNECT),
     потом наворачивает SSL на этот сокет.
+
+    Переопределяем только _create_socket — он, согласно imaplib, должен
+    вернуть готовый SSL-сокет. Метод open() родительского класса дальше
+    сам обернёт его в makefile() как полагается. Не трогаем self.file —
+    в Python 3.12+ это property без сеттера.
     """
     def __init__(self, host, port, proxy_url, ssl_context=None, timeout=30):
         self._proxy_url = proxy_url
         self._connect_timeout = timeout
+        self._custom_ssl_context = ssl_context or ssl.create_default_context()
         super().__init__(host, port, ssl_context=ssl_context, timeout=timeout)
 
     def _create_socket(self, timeout=None):
-        # Этот метод вызывается из IMAP4.__init__ — здесь делаем CONNECT
+        # 1. Поднимаем голый TCP-сокет к Яндексу через CONNECT на прокси
         raw_sock = _connect_via_http_proxy(
             self._proxy_url, self.host, self.port,
             timeout=self._connect_timeout,
         )
-        return raw_sock
-
-    def open(self, host='', port=imaplib.IMAP4_SSL_PORT, timeout=None):
-        # Переопределяем open чтобы навернуть SSL поверх нашего проксированного сокета
-        self.host = host
-        self.port = port
-        self.sock = self._create_socket(timeout)
-        # SSL поверх сокета
-        ctx = self.ssl_context if hasattr(self, 'ssl_context') and self.ssl_context else ssl.create_default_context()
-        self.sock = ctx.wrap_socket(self.sock, server_hostname=host)
-        self.file = self.sock.makefile('rb')
+        # 2. Заворачиваем в SSL — родителю отдаём готовый ssl-сокет
+        ssl_sock = self._custom_ssl_context.wrap_socket(
+            raw_sock, server_hostname=self.host,
+        )
+        return ssl_sock
 
 
 
