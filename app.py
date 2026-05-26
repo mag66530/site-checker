@@ -173,26 +173,36 @@ CUSTOM_CSS = """
         margin-bottom: 0.75rem !important;
     }
     /* Базовый размер шрифта (унификация: всё body — ровно 16.5px).
-       Раньше где-то было 14, где-то 16, поэтому смотрелось «то крупнее,
-       то мельче». Теперь все обычные элементы — один размер. */
+       ВАЖНО: явный color на тексте — иначе streamlit где-то по умолчанию
+       рендерит тёмные элементы поверх белого с прозрачным/белым цветом
+       (так у меня получилось «все заголовки белые и текста не видно»). */
     .stApp {
         font-size: 16.5px !important;
+        color: #1E212E !important;
     }
     p, span, div, label, li, .stMarkdown, .stMarkdown *,
     [data-testid="stMarkdownContainer"],
     [data-testid="stMarkdownContainer"] * {
         font-size: 16.5px;
         line-height: 1.55;
+        color: #1E212E;
+    }
+    /* Заголовки — точно тёмные, чтобы их было видно. */
+    h1, h2, h3, h4,
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
+        color: #1E212E !important;
     }
     /* Markdown-абзацы — единый размер */
     .stMarkdown p {
         font-size: 16.5px !important;
         line-height: 1.55 !important;
+        color: #1E212E !important;
     }
-    /* Капшен — единая «вторичная» строка чуть меньше */
+    /* Капшен — единая «вторичная» строка чуть меньше и серее */
     [data-testid="stCaptionContainer"],
     [data-testid="stCaptionContainer"] * {
         font-size: 14.5px !important;
+        color: #6B7280 !important;
     }
     /* Лейблы виджетов (selectbox, checkbox, radio, expander summary) */
     [data-testid="stWidgetLabel"],
@@ -203,6 +213,7 @@ CUSTOM_CSS = """
     [data-testid="stExpander"] summary,
     [data-testid="stExpander"] summary * {
         font-size: 16.5px !important;
+        color: #1E212E !important;
     }
     /* Кнопки — тот же размер */
     div[data-testid="stButton"] > button,
@@ -217,6 +228,22 @@ CUSTOM_CSS = """
     .stNumberInput input,
     [data-baseweb="select"] {
         font-size: 16.5px !important;
+        color: #1E212E !important;
+    }
+    /* Alert-блоки (st.warning / st.info / st.success / st.error) —
+       текст внутри тёмный, не растворяется на цветном фоне. */
+    [data-testid="stAlert"],
+    [data-testid="stAlert"] *,
+    [data-baseweb="notification"],
+    [data-baseweb="notification"] * {
+        color: #1E212E !important;
+    }
+    /* Текст лейбла на прогресс-баре */
+    [data-testid="stProgress"] p,
+    [data-testid="stProgress"] label,
+    [data-testid="stProgress"] span,
+    [data-testid="stProgress"] div {
+        color: #1E212E !important;
     }
 
     /* Контейнеры-карточки */
@@ -823,6 +850,37 @@ CUSTOM_CSS = """
         font-size: 0.875rem;
         margin-left: auto;
     }
+
+    /* ════════════════════════════════════════════════════════════════
+       ПОСЛЕДНИЙ РУБЕЖ: на скриншотах внутри expander кнопка «Обновить
+       из почты» рисовалась чёрной — streamlit добавляет вложенные
+       элементы, через которые селектор «> button» не проходит.
+       Перебиваем ВСЕ button-элементы кроме primary/download.
+       ════════════════════════════════════════════════════════════════ */
+    [data-testid="stButton"] button:not([kind="primary"]):not([data-testid="stBaseButton-primary"]):not([data-testid="baseButton-primary"]),
+    [data-testid="stExpander"] [data-testid="stButton"] button {
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        background-image: none !important;
+        color: #1E212E !important;
+        border: 1px solid #C7D3E1 !important;
+    }
+    [data-testid="stButton"] button:not([kind="primary"]):not([data-testid="stBaseButton-primary"]):not([data-testid="baseButton-primary"]) *,
+    [data-testid="stExpander"] [data-testid="stButton"] button * {
+        color: #1E212E !important;
+        background: transparent !important;
+        background-color: transparent !important;
+    }
+    [data-testid="stButton"] button:not([kind="primary"]):not([data-testid="stBaseButton-primary"]):not([data-testid="baseButton-primary"]):hover:not(:disabled),
+    [data-testid="stExpander"] [data-testid="stButton"] button:hover:not(:disabled) {
+        background: #F7FBFE !important;
+        background-color: #F7FBFE !important;
+        color: #1A56E8 !important;
+        border-color: #1A56E8 !important;
+    }
+    [data-testid="stButton"] button:not([kind="primary"]):not([data-testid="stBaseButton-primary"]):not([data-testid="baseButton-primary"]):hover:not(:disabled) * {
+        color: #1A56E8 !important;
+    }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -1384,30 +1442,23 @@ elif is_project:
                                  '«Обновить из почты».',
                         )
 
-                # Маленькие сервисные кнопки — на случай если кеш надо
-                # принудительно обновить, например после смены шаблона
-                # рассылки в Метрике (добавили колонку «Адрес страницы»).
+                # Одна кнопка «Обновить из почты». Под капотом всегда работает
+                # upgrade_if_better=True — это значит: новые письма сохраняются,
+                # а уже существующие отчёты ПЕРЕЗАПИСЫВАЮТСЯ, если новый разбор
+                # извлёк больше URL'ов или страниц (например, в Метрике
+                # добавили колонку «Адрес страницы»). Поэтому отдельная галка
+                # «Перечитать всё заново» — лишняя.
                 st.divider()
-                fc1, fc2 = st.columns([2, 1])
-                with fc1:
-                    force_refresh = st.checkbox(
-                        'Перечитать всё заново',
-                        value=False,
-                        key='metrika_force_refresh',
-                        help='Перечитать письма из почты и перезаписать даже '
-                             'те отчёты, что уже сохранены. Нужно один раз '
-                             'после того, как в Метрике поменяли шаблон '
-                             'рассылки (например, добавили «Адрес страницы»).',
-                    )
-                with fc2:
-                    refresh_clicked = st.button(
-                        '🔄 Обновить из почты',
-                        use_container_width=True,
-                        key='btn_refresh_metrika',
-                        help='Зайти в ящик Метрики и забрать новые письма '
-                             'за последние 3 дня (или 14, если включена '
-                             'галочка «Перечитать всё заново»).',
-                    )
+                refresh_clicked = st.button(
+                    '🔄 Обновить из почты',
+                    use_container_width=True,
+                    key='btn_refresh_metrika',
+                    help='Зайти в ящик Метрики и забрать письма за последние '
+                         '14 дней. Новые сохраняются. Уже существующие — '
+                         'перезаписываются, если в свежем разборе появилось '
+                         'больше URL\'ов (полезно после смены шаблона рассылки '
+                         'в Метрике, когда там добавили «Адрес страницы»).',
+                )
 
                 if refresh_clicked:
                     metrika_proxy = get_proxy_url()
@@ -1431,10 +1482,10 @@ elif is_project:
                             password=m_password,
                             folder=MAILBOX_CONFIG[metrika_pid]['folder'],
                             proxy_url=metrika_proxy,
-                            lookback_days=14 if force_refresh else 3,
+                            lookback_days=14,
                             log=on_log_m,
                             progress=on_progress_m,
-                            force_refresh=force_refresh,
+                            force_refresh=False,
                             upgrade_if_better=True,
                         )
                         progress_m.empty()
