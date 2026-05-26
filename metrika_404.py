@@ -259,8 +259,8 @@ def parse_table_xlsx(xlsx_bytes: bytes, return_diagnostics: bool = False):
         referer = None
         if referer_idx is not None and referer_idx < len(row) and row[referer_idx]:
             ref_str = str(row[referer_idx]).strip()
-            # «Не определен» — это пусто
-            if ref_str and ref_str.lower() != 'не определен':
+            # «Не определен» / «Не определено» — это пусто
+            if ref_str and not ref_str.lower().startswith('не определен'):
                 referer = ref_str
 
         # URL: сначала из явной колонки, потом из заголовка
@@ -780,15 +780,25 @@ def fetch_incremental(
     lookback_days: int = 3,
     log: Optional[Callable] = None,
     progress: Optional[Callable] = None,
+    force_refresh: bool = False,
+    upgrade_if_better: bool = True,
 ) -> dict:
     """
-    Инкрементальная загрузка: идём в IMAP только за последние lookback_days дней,
-    парсим только письма за даты, которых ещё нет в кеше, сразу сохраняем.
+    Инкрементальная загрузка: идём в IMAP только за последние lookback_days дней.
 
-    Возвращает {'fetched': N_новых_отчётов, 'skipped': N_уже_было, 'errors': N_ошибок}.
+    По умолчанию (force_refresh=False):
+      • Новые письма — сохраняем как «fetched».
+      • Письма за уже известные даты — пропускаем как «skipped», ЕСЛИ только
+        upgrade_if_better=True и свежий разбор не даёт новых данных
+        (больше URL-ов или больше страниц). Иначе перезаписываем как
+        «upgraded» — это решает кейс, когда раньше парсер не вытаскивал URL,
+        а теперь умеет, или пользователь добавил в шаблоне Метрики колонку
+        «Адрес страницы».
+
+    Если force_refresh=True — перезаписываем все отчёты за период.
+
+    Возвращает {'fetched': N, 'skipped': N, 'upgraded': N, 'total_in_letters': N}.
     """
-    existing_dates = get_stored_dates(project_id)
-
     reports = fetch_metrika_emails(
         project_id=project_id,
         email_addr=email_addr,
@@ -802,16 +812,47 @@ def fetch_incremental(
 
     fetched = 0
     skipped = 0
+    upgraded = 0
     for r in reports:
-        # Проверяем: нет ли уже такого отчёта (по дате + стране)
         path = report_storage_path(r.project_id, r.country_code, r.report_date)
-        if path.exists():
-            skipped += 1
-        else:
+        if not path.exists():
             save_report(r)
             fetched += 1
+            continue
 
-    return {'fetched': fetched, 'skipped': skipped, 'total_in_letters': len(reports)}
+        if force_refresh:
+            save_report(r)
+            upgraded += 1
+            continue
+
+        if upgrade_if_better:
+            # Сравним: даёт ли свежий разбор больше URL-ов или страниц,
+            # чем то, что лежит в кеше. Если да — перезаписываем.
+            old = load_report(r.project_id, r.country_code, r.report_date)
+            if old is None:
+                save_report(r)
+                upgraded += 1
+                continue
+            new_urls = sum(1 for p in r.pages if p.page_url)
+            old_urls = sum(1 for p in old.pages if p.page_url)
+            if new_urls > old_urls or len(r.pages) > len(old.pages):
+                save_report(r)
+                upgraded += 1
+                if log:
+                    log('info', (
+                        f'  Обновил {r.country_code}/{r.report_date}: '
+                        f'URL {old_urls}→{new_urls}, страниц {len(old.pages)}→{len(r.pages)}'
+                    ))
+                continue
+
+        skipped += 1
+
+    return {
+        'fetched': fetched,
+        'skipped': skipped,
+        'upgraded': upgraded,
+        'total_in_letters': len(reports),
+    }
 
 
 def get_latest_available_date(project_id: str) -> Optional[str]:

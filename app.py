@@ -300,6 +300,17 @@ CUSTOM_CSS = """
     /* ════════════════════════════════════════════════════════════════
        РАДИО-КНОПКИ ПРОФИЛЕЙ — карточный стиль
        ════════════════════════════════════════════════════════════════ */
+    /* Полностью убираем «коллапснутый» лейбл — на скриншотах он
+       выглядел как пустая прозрачная плашка-«Профиль» над карточками. */
+    [data-testid="stWidgetLabel"][data-baseweb="form-control-label"][hidden],
+    [data-testid="stWidgetLabel"] > div[data-testid="stMarkdownContainer"]:empty,
+    [data-testid="stRadio"] > label[data-baseweb="form-control-label"],
+    [data-testid="stRadio"] [data-testid="stWidgetLabel"] {
+        display: none !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
     [data-testid="stRadio"] > div {
         gap: 8px;
     }
@@ -375,13 +386,11 @@ CUSTOM_CSS = """
        чёрный/тёмный фон по умолчанию (это и было «опять чёрный цвет»
        на кнопке «Обновить из почты»).
        ════════════════════════════════════════════════════════════════ */
-    .stButton > button,
-    .stButton button[kind="secondary"],
-    .stButton button[kind="tertiary"],
-    button[data-testid="stBaseButton-secondary"],
-    button[data-testid="stBaseButton-secondaryFormSubmit"],
-    button[data-testid="baseButton-secondary"],
-    .stButton button:not([kind="primary"]):not([kind="primaryFormSubmit"]) {
+    div[data-testid="stButton"] > button,
+    div[data-testid="stButton"] > button[kind="secondary"],
+    div[data-testid="stButton"] > button[kind="tertiary"],
+    div[data-testid="stButton"] > button[data-testid="stBaseButton-secondary"],
+    div[data-testid="stButton"] > button[data-testid="baseButton-secondary"] {
         font-weight: 600 !important;
         border-radius: 8px !important;
         border: 1px solid #C7D3E1 !important;
@@ -394,9 +403,11 @@ CUSTOM_CSS = """
         padding: 0.55rem 1.25rem !important;
         font-size: 0.95rem !important;
     }
-    .stButton > button:hover:not(:disabled),
-    button[data-testid="stBaseButton-secondary"]:hover:not(:disabled),
-    button[data-testid="baseButton-secondary"]:hover:not(:disabled) {
+    /* Светлый hover — ТОЛЬКО для обычных st.button(), не для st.download_button()
+       и не для primary. Без этого исключения зелёная «Скачать» превращалась
+       в белую при наведении. */
+    div[data-testid="stButton"] > button:hover:not(:disabled),
+    div[data-testid="stButton"] > button[data-testid="stBaseButton-secondary"]:hover:not(:disabled) {
         border-color: #1A56E8 !important;
         background: #F7FBFE !important;
         background-color: #F7FBFE !important;
@@ -412,14 +423,76 @@ CUSTOM_CSS = """
         background: transparent !important;
         background-color: transparent !important;
     }
+    /* Текст / иконки внутри обычной кнопки */
+    div[data-testid="stButton"] > button p,
+    div[data-testid="stButton"] > button span,
+    div[data-testid="stButton"] > button div {
+        color: inherit !important;
+        background: transparent !important;
+        background-color: transparent !important;
+    }
     /* disabled-кнопки */
-    .stButton > button:disabled,
-    button[data-testid="stBaseButton-secondary"]:disabled {
+    div[data-testid="stButton"] > button:disabled {
         opacity: 0.45;
         cursor: not-allowed;
         background: #FAFBFC !important;
         background-color: #FAFBFC !important;
         color: #8A93A6 !important;
+    }
+    /* Все кнопки в ряду — одинаковая высота и выравнивание (st.columns) */
+    div[data-testid="stButton"] > button,
+    div[data-testid="stDownloadButton"] > button {
+        min-height: 44px !important;
+        white-space: nowrap !important;
+    }
+    /* Выравниваем содержимое st.columns по верху, чтобы кнопки на одной линии */
+    div[data-testid="stHorizontalBlock"] {
+        align-items: stretch !important;
+    }
+
+    /* ════════════════════════════════════════════════════════════════
+       МОДАЛЬНОЕ ОКНО (например, «Clear caches» из верхнего меню) —
+       по умолчанию у Streamlit оно тёмное. Делаем светлым в тон.
+       ════════════════════════════════════════════════════════════════ */
+    div[role="dialog"],
+    div[data-testid="stModal"] > div,
+    [data-baseweb="modal"] > div,
+    [data-baseweb="modal"] [data-baseweb="modal-content"] {
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        color: #1E212E !important;
+        border-radius: 12px !important;
+        border: 1px solid #E1E8F0 !important;
+    }
+    div[role="dialog"] *,
+    [data-baseweb="modal"] * {
+        color: #1E212E !important;
+        background-color: transparent !important;
+    }
+    div[role="dialog"] code,
+    [data-baseweb="modal"] code {
+        background: #F7FBFE !important;
+        color: #1A56E8 !important;
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    /* ════════════════════════════════════════════════════════════════
+       EXPANDER — шапка тоже бывает тёмной, ставим светлую.
+       ════════════════════════════════════════════════════════════════ */
+    [data-testid="stExpander"] details > summary,
+    [data-testid="stExpander"] summary {
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        color: #1E212E !important;
+        border-radius: 10px !important;
+    }
+    [data-testid="stExpander"] details[open] > summary {
+        border-bottom: 1px solid var(--border) !important;
+        border-radius: 10px 10px 0 0 !important;
+    }
+    [data-testid="stExpander"] details > div {
+        background: #FFFFFF !important;
     }
     /* ════════════════════════════════════════════════════════════════
        Кодовые блоки (st.code) — подробный лог
@@ -1033,8 +1106,8 @@ elif is_project:
             return profile_labels[pid]
 
         new_profile = st.radio(
-            'Профиль',
-            profile_choices,
+            label='profile_radio',
+            options=profile_choices,
             index=profile_choices.index(st.session_state.profile) if st.session_state.profile in profile_choices else 0,
             format_func=profile_format,
             label_visibility='collapsed',
@@ -1121,135 +1194,153 @@ elif is_project:
         yesterday_d = today_d - _td(days=1)
         yesterday_str = yesterday_d.strftime('%Y-%m-%d')
         yesterday_display = yesterday_d.strftime('%d.%m.%Y')
-        today_display = today_d.strftime('%d.%m.%Y')
 
         latest_date = get_latest_available_date(metrika_pid)
         stored_count = len(list_stored_reports(metrika_pid))
         has_yesterday = latest_date == yesterday_str
 
-        # Грузим отчёты за вчера ОДИН раз — пригодятся и для статистики,
-        # и для кнопки скачивания (чтобы не дублировать дисковые чтения).
         yesterday_reports = (
             load_reports_for_date(metrika_pid, yesterday_str) if has_yesterday else []
         )
         yesterday_total_pages = sum(r.total_pages for r in yesterday_reports)
-        yesterday_total_views = sum(r.total_views for r in yesterday_reports)
+        yesterday_pages_with_url = sum(
+            1 for r in yesterday_reports for p in r.pages if p.page_url
+        )
+
+        # Текст для ?-тултипа на заголовке секции — длинное объяснение
+        # перенесено сюда, чтобы оно не висело простынёй на странице.
+        section_help = (
+            'Что это: блок работает отдельно от проверки сайта. '
+            'Яндекс.Метрика раз в сутки присылает по почте отчёт о 404-страницах '
+            '(по одному письму на страну). Приложение читает почту, парсит xlsx-'
+            'вложения и сохраняет их в свой кеш.\n\n'
+            'Почему нет данных «за сегодня»: Метрика формирует отчёт ночью за '
+            'прошедший день и присылает утром. Поэтому самое свежее, что бывает '
+            'сегодня — это данные за вчера.\n\n'
+            'Что делает «Обновить из почты»: заходит в ящик, забирает все '
+            'неизвестные ему письма за последние 3 дня и сохраняет их в кеш. '
+            'Если поставить галочку «Перечитать всё» — перезапишет даже уже '
+            'сохранённые отчёты (нужно, если в Метрике поменяли шаблон рассылки, '
+            'например добавили колонку «Адрес страницы»).'
+        )
 
         with st.container(border=True):
-            st.markdown(
-                '<h3>📧 404-страницы из Яндекс.Метрики</h3>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f'<p style="color:var(--text-soft);font-size:0.95rem;margin-bottom:0.75rem">'
-                f'Этот блок работает отдельно от проверки сайта. Метрика присылает '
-                f'отчёт о 404-страницах по почте раз в сутки — за прошедший день, '
-                f'утром следующего. <strong>Сегодня — {today_display}, значит самые '
-                f'свежие данные могут быть только за {yesterday_display}.</strong> '
-                f'За сегодняшний день отчёта не бывает — Метрика его ещё не сформировала.'
-                f'</p>',
-                unsafe_allow_html=True,
+            # Заголовок секции с «?» вместо простыни текста
+            st.subheader(
+                '📧 404 из Метрики',
+                help=section_help,
+                divider=False,
             )
 
-            # ─── Плашка статуса данных ──────────────────────────────
+            # Однострочная плашка статуса
             if has_yesterday:
-                st.markdown(
-                    f'<div style="background:linear-gradient(180deg, rgba(22,163,74,0.10) 0%, transparent 100%);'
-                    f'border-left:3px solid var(--ok);padding:14px 18px;border-radius:8px;margin:0.5rem 0 1rem 0">'
-                    f'<p style="margin:0;font-size:1.05rem">'
-                    f'<strong style="color:var(--ok)">✓ Данные за {yesterday_display} в наличии</strong>'
-                    f'</p>'
-                    f'<p style="margin:6px 0 0 0;color:var(--text-soft)">'
-                    f'{len(yesterday_reports)} стран, {yesterday_total_pages} 404-страниц, '
-                    f'{yesterday_total_views} просмотров. Всего в хранилище: {stored_count} отчётов.'
-                    f'</p>'
-                    f'</div>',
-                    unsafe_allow_html=True,
+                status_color = 'var(--ok)'
+                status_bg = 'rgba(22,163,74,0.08)'
+                url_note = (
+                    f' · {yesterday_pages_with_url}/{yesterday_total_pages} с URL'
+                    if yesterday_total_pages else ''
+                )
+                status_text = (
+                    f'<strong style="color:{status_color}">✓ Свежие данные за '
+                    f'{yesterday_display}</strong> '
+                    f'<span style="color:var(--text-muted)">· {len(yesterday_reports)} стран '
+                    f'· {yesterday_total_pages} страниц{url_note} · всего в хранилище '
+                    f'{stored_count} отчётов</span>'
                 )
             elif latest_date:
                 try:
-                    d_obj = _dt.strptime(latest_date, '%Y-%m-%d')
-                    latest_display = d_obj.strftime('%d.%m.%Y')
+                    latest_display = _dt.strptime(latest_date, '%Y-%m-%d').strftime('%d.%m.%Y')
                 except ValueError:
                     latest_display = latest_date
-                days_late = (yesterday_d - _dt.strptime(latest_date, '%Y-%m-%d').date()).days
-                st.markdown(
-                    f'<div style="background:linear-gradient(180deg, rgba(217,119,6,0.10) 0%, transparent 100%);'
-                    f'border-left:3px solid var(--warn);padding:14px 18px;border-radius:8px;margin:0.5rem 0 1rem 0">'
-                    f'<p style="margin:0;font-size:1.05rem">'
-                    f'<strong style="color:var(--warn)">Свежий отчёт за {yesterday_display} ещё не пришёл</strong>'
-                    f'</p>'
-                    f'<p style="margin:6px 0 0 0;color:var(--text-soft)">'
-                    f'Самые свежие данные в хранилище — за <strong>{latest_display}</strong> '
-                    f'(отстают на {days_late} {"день" if days_late == 1 else "дня" if days_late < 5 else "дней"}). '
-                    f'Нажмите «Обновить из почты» — возможно, новое письмо уже пришло.'
-                    f'</p>'
-                    f'</div>',
-                    unsafe_allow_html=True,
+                status_color = 'var(--warn)'
+                status_bg = 'rgba(217,119,6,0.08)'
+                status_text = (
+                    f'<strong style="color:{status_color}">⚠ Свежий отчёт за '
+                    f'{yesterday_display} ещё не пришёл</strong> '
+                    f'<span style="color:var(--text-muted)">· последние данные за '
+                    f'{latest_display} · всего {stored_count} отчётов</span>'
                 )
             else:
-                st.markdown(
-                    f'<div style="background:linear-gradient(180deg, rgba(26,86,232,0.08) 0%, transparent 100%);'
-                    f'border-left:3px solid var(--accent);padding:14px 18px;border-radius:8px;margin:0.5rem 0 1rem 0">'
-                    f'<p style="margin:0;font-size:1.05rem">'
-                    f'<strong style="color:var(--accent)">Хранилище пустое</strong>'
-                    f'</p>'
-                    f'<p style="margin:6px 0 0 0;color:var(--text-soft)">'
-                    f'Ни одного отчёта ещё не загружено. Нажмите «Обновить из почты» — '
-                    f'приложение зайдёт в ящик и заберёт письма Метрики за последние 30 дней.'
-                    f'</p>'
-                    f'</div>',
-                    unsafe_allow_html=True,
+                status_color = 'var(--accent)'
+                status_bg = 'rgba(26,86,232,0.06)'
+                status_text = (
+                    f'<strong style="color:{status_color}">Хранилище пустое</strong> '
+                    f'<span style="color:var(--text-muted)">· нажмите «Обновить из почты» '
+                    f'чтобы загрузить</span>'
                 )
-
-            # ─── ГЛАВНАЯ КНОПКА: скачать отчёт за вчера ─────────────
-            # Это то, ради чего блок и нужен на 90%: получить xlsx без
-            # запуска полной проверки сайта. Выводим крупно и зелёным.
-            if has_yesterday and yesterday_reports:
-                yest_buf = _build_metrika_only_xlsx(
-                    yesterday_reports,
-                    sheet_title=f'404 за {yesterday_display}',
-                )
-                st.download_button(
-                    label=f'⬇ Скачать отчёт за {yesterday_display} '
-                          f'({yesterday_total_pages} страниц)',
-                    data=yest_buf,
-                    file_name=f'metrika-404-{metrika_pid}-{yesterday_str}.xlsx',
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    use_container_width=True,
-                    key='dl_metrika_yesterday',
-                )
-                # Предупреждение если URL пустые — это типичная проблема:
-                # в шаблоне отчёта Метрики не настроена колонка «Адрес страницы».
-                pages_with_url = sum(
-                    1 for r in yesterday_reports for p in r.pages if p.page_url
-                )
-                if yesterday_total_pages > 0 and pages_with_url == 0:
-                    st.warning(
-                        '⚠ **В отчёте за вчера нет URL-адресов страниц** — '
-                        'колонка «URL страницы» будет пустая. '
-                        'Это потому, что шаблон отчёта в Метрике сейчас отдаёт только '
-                        'заголовок страницы. Чтобы получать URL: откройте в Метрике '
-                        '«Содержание → Страницы → 404», нажмите «Группировки» и '
-                        'добавьте «Адрес страницы» к группировкам, потом сохраните '
-                        'шаблон рассылки. Со следующего письма URL начнут приходить.'
-                    )
-                elif yesterday_total_pages > 0 and pages_with_url < yesterday_total_pages:
-                    st.caption(
-                        f'ℹ В отчёте {pages_with_url} из {yesterday_total_pages} страниц '
-                        f'имеют URL — у остальных в Метрике URL не сохранился.'
-                    )
-
-            # ─── Кнопка обновления почты ────────────────────────────
-            refresh_clicked = st.button(
-                '📥 Обновить из почты — проверить, не пришли ли новые отчёты',
-                use_container_width=True,
-                key='btn_refresh_metrika',
-                help='Зайдёт в ящик Яндекс.Метрики и скачает все новые письма '
-                     'за последние 3 дня. Уже сохранённые отчёты пропустит.',
+            st.markdown(
+                f'<div style="background:{status_bg};border-left:3px solid {status_color};'
+                f'padding:10px 14px;border-radius:6px;margin:0.5rem 0 1rem 0;font-size:0.95rem">'
+                f'{status_text}</div>',
+                unsafe_allow_html=True,
             )
 
-            # ─── Обработка обновления ───────────────────────────────
+            # ─── Две равные кнопки в ряд ────────────────────────────
+            col_dl, col_rf = st.columns(2, gap='small')
+
+            with col_dl:
+                if has_yesterday and yesterday_reports:
+                    yest_buf = _build_metrika_only_xlsx(
+                        yesterday_reports,
+                        sheet_title=f'404 за {yesterday_display}',
+                    )
+                    dl_help = (
+                        f'Готовый xlsx за {yesterday_display}: '
+                        f'{yesterday_total_pages} страниц, '
+                        f'{yesterday_pages_with_url} с URL.'
+                    )
+                    if (
+                        yesterday_total_pages > 0
+                        and yesterday_pages_with_url == 0
+                    ):
+                        dl_help += (
+                            '\n\n⚠ В кеше URL отсутствуют — возможно, в кеш попали '
+                            'отчёты, разобранные ранней версией парсера. '
+                            'Включите галочку «Перечитать всё» под кнопкой «Обновить '
+                            'из почты» и нажмите «Обновить» — отчёты будут перечитаны '
+                            'из писем заново, и URL подтянутся.'
+                        )
+                    st.download_button(
+                        label=f'⬇ Скачать за {yesterday_display}',
+                        data=yest_buf,
+                        file_name=f'metrika-404-{metrika_pid}-{yesterday_str}.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True,
+                        type='primary',
+                        key='dl_metrika_yesterday',
+                        help=dl_help,
+                    )
+                else:
+                    st.button(
+                        f'⬇ Нет данных за {yesterday_display}',
+                        use_container_width=True,
+                        disabled=True,
+                        key='dl_metrika_yesterday_disabled',
+                        help='Сначала нажмите «Обновить из почты» справа — '
+                             'если письмо за вчера пришло, отчёт появится.',
+                    )
+
+            with col_rf:
+                refresh_clicked = st.button(
+                    '🔄 Обновить из почты',
+                    use_container_width=True,
+                    key='btn_refresh_metrika',
+                    help='Заходит в почту Яндекс.Метрики и забирает новые '
+                         'письма за последние 3 дня. Старые письма пропускает.',
+                )
+
+            # Чек-бокс «Перечитать всё» — компактный, под кнопками
+            force_refresh = st.checkbox(
+                'Перечитать всё заново',
+                value=False,
+                key='metrika_force_refresh',
+                help='Перечитать письма и перезаписать даже те отчёты, '
+                     'что уже есть в кеше. Нужно, когда в Метрике поменяли '
+                     'шаблон рассылки (например, добавили колонку «Адрес '
+                     'страницы») — иначе старые отчёты так и останутся без URL.',
+            )
+
+            # ─── Обработка кнопки «Обновить» ────────────────────────
             if refresh_clicked:
                 metrika_proxy = get_proxy_url()
                 log_messages_m = []
@@ -1272,57 +1363,37 @@ elif is_project:
                         password=m_password,
                         folder=MAILBOX_CONFIG[metrika_pid]['folder'],
                         proxy_url=metrika_proxy,
-                        lookback_days=3,
+                        lookback_days=14 if force_refresh else 3,
                         log=on_log_m,
                         progress=on_progress_m,
+                        force_refresh=force_refresh,
+                        upgrade_if_better=True,
                     )
                     progress_m.empty()
                     fetched = summary['fetched']
+                    upgraded = summary.get('upgraded', 0)
                     skipped = summary['skipped']
-                    total_letters = summary.get('total_in_letters', fetched + skipped)
-                    if fetched > 0:
-                        # Сразу проверим: появился ли вчерашний?
-                        new_latest = get_latest_available_date(metrika_pid)
-                        if new_latest == yesterday_str:
-                            note = (
-                                f'Среди них — отчёты за **вчера ({yesterday_display})**. '
-                                f'Можно сразу нажать «Скачать отчёт за вчера» вверху блока.'
-                            )
-                        elif new_latest:
-                            try:
-                                nd = _dt.strptime(new_latest, '%Y-%m-%d').strftime('%d.%m.%Y')
-                            except ValueError:
-                                nd = new_latest
-                            note = (
-                                f'Самые свежие данные теперь за **{nd}**. '
-                                f'Отчёт за вчера ({yesterday_display}) пока не пришёл — '
-                                f'Метрика обычно присылает его ближе к обеду.'
-                            )
-                        else:
-                            note = ''
-                        st.success(
-                            f'✅ Загружено новых отчётов: **{fetched}** '
-                            f'(уже было в кеше: {skipped}). {note}'
-                        )
+                    total_letters = summary.get('total_in_letters', 0)
+
+                    parts = []
+                    if fetched:
+                        parts.append(f'новых отчётов: **{fetched}**')
+                    if upgraded:
+                        parts.append(f'обновлено: **{upgraded}**')
+                    if skipped:
+                        parts.append(f'без изменений: {skipped}')
+
+                    if fetched or upgraded:
+                        st.success('✅ Готово · ' + ' · '.join(parts))
+                        st.rerun()
                     elif total_letters > 0:
-                        st.info(
-                            f'ℹ Просмотрено {total_letters} писем — все уже есть в кеше. '
-                            f'Новых отчётов нет. '
-                            + (
-                                f'Свежие данные — за **{yesterday_display}**, '
-                                f'всё актуально.'
-                                if has_yesterday
-                                else f'За вчера ({yesterday_display}) письмо пока не пришло — '
-                                     f'попробуйте позже.'
-                            )
-                        )
+                        st.info(f'ℹ Просмотрено {total_letters} писем — всё актуально.')
                     else:
                         st.warning(
-                            '⚠ В ящике не нашлось ни одного письма от Яндекс.Метрики '
-                            f'за последние 3 дня. Проверьте, не сломалась ли рассылка в Метрике '
-                            f'(Содержание → Страницы → 404 → Отправлять по почте).'
+                            '⚠ За последние 3 дня писем от Метрики в ящике нет. '
+                            'Проверьте рассылку в Метрике.'
                         )
-                    with st.expander('Подробный лог обновления', expanded=False):
+                    with st.expander('Подробный лог', expanded=False):
                         st.code(
                             '\n'.join(log_messages_m[-100:]) or '(лог пуст)',
                             language='text',
@@ -1330,7 +1401,7 @@ elif is_project:
                 except Exception as e:
                     progress_m.empty()
                     import traceback
-                    st.error(f'❌ Не удалось обновить почту: {type(e).__name__}: {e}')
+                    st.error(f'❌ Не удалось обновить: {type(e).__name__}: {e}')
                     with st.expander('Подробный лог (с трассировкой)', expanded=True):
                         st.code(
                             '\n'.join(log_messages_m[-100:])
@@ -1339,50 +1410,50 @@ elif is_project:
                             language='text',
                         )
 
-            # ─── Скачать за период (свёрнутый по умолчанию) ─────────
-            with st.expander(
-                'Скачать сводный отчёт за период (7 / 14 / 30 дней)',
-                expanded=False,
-            ):
-                st.caption(
-                    'Если нужен не один день, а агрегат за несколько — выберите период '
-                    'и скачайте единый xlsx. Сегодняшний день никогда не входит.'
-                )
+            # ─── Сводный xlsx за период — в свёрнутом блоке ─────────
+            with st.expander('Сводный xlsx за 7 / 14 / 30 дней', expanded=False):
                 period_options = {
-                    'Последние 7 дней': 7,
-                    'Последние 2 недели': 14,
-                    'Последние 30 дней': 30,
+                    '7 дней': 7,
+                    '2 недели': 14,
+                    '30 дней': 30,
                 }
-                period_label = st.selectbox(
-                    'Период',
-                    list(period_options.keys()),
-                    label_visibility='collapsed',
-                    key='metrika_period_select',
-                )
+                pc1, pc2 = st.columns([1, 2])
+                with pc1:
+                    period_label = st.selectbox(
+                        'Период',
+                        list(period_options.keys()),
+                        label_visibility='collapsed',
+                        key='metrika_period_select',
+                        help='За сколько прошлых дней собрать единый файл. '
+                             'Сегодняшний день не входит.',
+                    )
                 selected_days = period_options[period_label]
                 period_reports = load_reports_for_period(metrika_pid, selected_days)
-                if period_reports:
-                    period_buf = _build_metrika_only_xlsx(
-                        period_reports,
-                        sheet_title=f'404 за {selected_days} дн.',
-                    )
-                    total_pages_in_period = sum(r.total_pages for r in period_reports)
-                    unique_dates = len({r.report_date for r in period_reports})
-                    st.download_button(
-                        label=f'⬇ Скачать xlsx ({period_label.lower()}, '
-                              f'{unique_dates} дней с данными, {total_pages_in_period} страниц)',
-                        data=period_buf,
-                        file_name=f'metrika-404-{metrika_pid}-{selected_days}d.xlsx',
-                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        use_container_width=True,
-                        key='dl_metrika_period',
-                    )
-                else:
-                    st.info(
-                        f'За {period_label.lower()} в кеше нет ни одного отчёта. '
-                        f'Нажмите «Обновить из почты» — если письма приходили, '
-                        f'они подтянутся.'
-                    )
+                with pc2:
+                    if period_reports:
+                        period_buf = _build_metrika_only_xlsx(
+                            period_reports,
+                            sheet_title=f'404 за {selected_days} дн.',
+                        )
+                        total_pages_in_period = sum(r.total_pages for r in period_reports)
+                        unique_dates = len({r.report_date for r in period_reports})
+                        st.download_button(
+                            label=f'⬇ Скачать ({unique_dates} дн., '
+                                  f'{total_pages_in_period} стр.)',
+                            data=period_buf,
+                            file_name=f'metrika-404-{metrika_pid}-{selected_days}d.xlsx',
+                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            use_container_width=True,
+                            type='primary',
+                            key='dl_metrika_period',
+                        )
+                    else:
+                        st.button(
+                            'Нет данных за период',
+                            use_container_width=True,
+                            disabled=True,
+                            key='dl_metrika_period_disabled',
+                        )
 
     # ─── Оценка плана + кнопка запуска в одной карточке ───────
     selected_cities_count = 1 + random_subs  # Москва + случайные
