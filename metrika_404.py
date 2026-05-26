@@ -16,6 +16,8 @@ metrika_404.py — загрузка и парсинг 404-отчётов из п
 
 Хранилище: cache/metrika-404/{project_id}/{country}/{YYYY-MM-DD}.json
 """
+from __future__ import annotations
+
 import base64
 import email
 import imaplib

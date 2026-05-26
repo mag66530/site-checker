@@ -44,13 +44,15 @@ REPORTS_DIR = PROJECT_ROOT / 'reports'
 REPORTS_DIR.mkdir(exist_ok=True)
 
 
-def get_proxy_url() -> str | None:
+def get_proxy_url():
     """
     Достать URL прокси для исходящих запросов.
     Источник в порядке приоритета:
       1. Streamlit Secrets (для деплоя): st.secrets["proxy_url"]
       2. Переменная окружения HTTP_PROXY (для локального запуска)
       3. Если ничего нет — работаем напрямую
+
+    Возвращает строку или None.
     """
     try:
         if hasattr(st, 'secrets') and 'proxy_url' in st.secrets:
@@ -61,7 +63,7 @@ def get_proxy_url() -> str | None:
     return os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy')
 
 
-def get_metrika_credentials(project_id: str) -> tuple[str | None, str | None]:
+def get_metrika_credentials(project_id):
     """
     Достать email и пароль приложения для чтения почты Метрики проекта.
     
