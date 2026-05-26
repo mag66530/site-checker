@@ -354,16 +354,25 @@ CUSTOM_CSS = """
     .stButton > button {
         font-weight: 600 !important;
         border-radius: 8px !important;
-        border: 1px solid var(--border) !important;
-        background: var(--bg) !important;
-        color: var(--text) !important;
+        border: 1px solid #E1E8F0 !important;
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        color: #1E212E !important;
         transition: all 0.15s !important;
         padding: 0.5rem 1.25rem !important;
         font-size: 0.95rem !important;
     }
     .stButton > button:hover {
-        border-color: var(--border-strong) !important;
-        background: var(--bg-elev) !important;
+        border-color: #C7D3E1 !important;
+        background: #F7FBFE !important;
+        background-color: #F7FBFE !important;
+    }
+    /* Текст и иконки внутри обычной кнопки */
+    .stButton > button p,
+    .stButton > button span,
+    .stButton > button div {
+        color: #1E212E !important;
+        background: transparent !important;
     }
     /* secondary-кнопки (не primary) — outline-стиль с синим текстом */
     .stButton > button[kind="secondary"] {
@@ -867,7 +876,7 @@ elif is_project:
             f'font-weight:600">Каталог проекта</p>',
             unsafe_allow_html=True,
         )
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric('Городов', stats['subdomains_count'])
         c2.metric('Категорий', f'{stats["categories_count"]:,}'.replace(',', ' '))
         if stats['has_filters']:
@@ -895,7 +904,13 @@ elif is_project:
                      'приложение загрузит sitemap.xml и покажет здесь число.',
             )
 
-        c5.metric('Главный город', cfg.get('mandatory_city', 'Москва'))
+        # Главный город — маленькой подписью внизу карточки
+        st.markdown(
+            f'<p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.5rem;margin-bottom:0">'
+            f'Главный город (всегда в выборке): <strong>{cfg.get("mandatory_city", "Москва")}</strong>'
+            f'</p>',
+            unsafe_allow_html=True,
+        )
 
     # ─── Шаг 2: профиль в карточке ───────────────────────────
     with st.container(border=True):
@@ -1039,7 +1054,6 @@ elif is_project:
             with cb1:
                 refresh_clicked = st.button(
                     '📥 Обновить из почты',
-                    type='secondary',
                     use_container_width=True,
                     key='btn_refresh_metrika',
                     help='Скачать новые письма из почты Яндекс.Метрики. '

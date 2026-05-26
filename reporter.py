@@ -508,13 +508,13 @@ def build_report(
         c.alignment = _align(wrap=True)
         ws4.row_dimensions[2].height = 30 if metrika_is_stale else 20
 
-        # Пояснение сшивки
+        # Пояснение сшивки — простыми словами
         ws4.merge_cells('A3:H3')
         c = ws4['A3']
         c.value = (
-            'Статус сшивки: "🔴 Подтверждено" — этот URL также упал в проверке Site Checker (двойное подтверждение, чинить срочно). '
-            '"⚠ Только в Метрике" — Site Checker эту страницу не проверял или она там не упала. '
-            'Сортировка: подтверждённые сверху, далее по количеству просмотров.'
+            'Колонка «Статус»: «🔴 Точно сломан» означает, что эта страница не работает '
+            'и в Метрике, и в нашей проверке — чинить в первую очередь. '
+            '«⚠ В Метрике» — Метрика её зафиксировала, но в нашей проверке этой страницы не было.'
         )
         c.font = _font(size=9, italic=True, color=C.text_muted)
         c.alignment = _align(wrap=True, vertical='top')
@@ -602,11 +602,11 @@ def build_report(
                 # Статус сшивки
                 cell = ws4.cell(row=row_idx, column=3)
                 if fr['confirmed']:
-                    cell.value = '🔴 Подтверждено'
+                    cell.value = '🔴 Точно сломан'
                     cell.font = _font(size=10, bold=True, color=C.err)
                     cell.fill = _fill(C.err_soft)
                 else:
-                    cell.value = '⚠ Только в Метрике'
+                    cell.value = '⚠ В Метрике'
                     cell.font = _font(size=10, color=C.warn)
                 cell.alignment = _align()
                 cell.border = _border(color=C.border_light)

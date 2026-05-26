@@ -161,8 +161,12 @@ def is_table_attachment(filename: str) -> bool:
     return 'таблица' in fn_lower and fn_lower.endswith('.xlsx')
 
 
-def parse_table_xlsx(xlsx_bytes: bytes) -> list[Page404]:
-    """Распарсить xlsx-«таблицу» отчёта Метрики в список Page404."""
+def parse_table_xlsx(xlsx_bytes: bytes, return_diagnostics: bool = False):
+    """Распарсить xlsx-«таблицу» отчёта Метрики в список Page404.
+    
+    Если return_diagnostics=True, возвращает (pages, diag_dict) где diag_dict — 
+    словарь с информацией о найденных колонках для отладки.
+    """
     try:
         wb = load_workbook(BytesIO(xlsx_bytes), data_only=True, read_only=True)
     except Exception as e:
@@ -207,8 +211,13 @@ def parse_table_xlsx(xlsx_bytes: bytes) -> list[Page404]:
     visitors_idx = None
     referer_idx = None
     for idx, h in enumerate(headers):
-        h_lower = h.lower()
-        if h_lower in ('адрес страницы', 'url'):
+        h_lower = h.lower().strip()
+        # URL/адрес — расширенный список вариантов
+        if (
+            h_lower in ('адрес страницы', 'url', 'адрес', 'путь', 'ссылка', 'page url')
+            or 'адрес' in h_lower
+            or h_lower == 'url'
+        ):
             if url_idx is None:
                 url_idx = idx
         elif 'заголовок' in h_lower or h_lower == 'страница':
@@ -231,9 +240,13 @@ def parse_table_xlsx(xlsx_bytes: bytes) -> list[Page404]:
         if all(c is None or str(c).strip() == '' for c in row):
             continue
 
-        # Если первая ячейка — «Итого и средние», это сводная строка, пропускаем
-        first_cell = str(row[0]).strip().lower() if row[0] else ''
-        if 'итого' in first_cell:
+        # Фильтр «Итого/среднее/всего» — проверяем все ячейки строки, не только первую
+        row_str = ' '.join(str(c).strip().lower() for c in row if c)
+        if ('итого' in row_str and 'средн' in row_str) or row_str.startswith('итого'):
+            continue
+        # Также часто бывает что первая колонка пуста, но во второй «Итого»
+        first_non_empty = next((str(c).strip().lower() for c in row if c is not None and str(c).strip()), '')
+        if first_non_empty.startswith('итого') or first_non_empty == 'всего':
             continue
 
         title = str(row[title_idx]).strip() if title_idx is not None and title_idx < len(row) and row[title_idx] else ''
@@ -261,6 +274,19 @@ def parse_table_xlsx(xlsx_bytes: bytes) -> list[Page404]:
             referer=referer,
         ))
 
+    if return_diagnostics:
+        diag = {
+            'headers_found': headers,
+            'header_row_idx': header_row_idx,
+            'title_idx': title_idx,
+            'url_idx': url_idx,
+            'views_idx': views_idx,
+            'visitors_idx': visitors_idx,
+            'referer_idx': referer_idx,
+            'pages_count': len(pages),
+            'pages_with_url': sum(1 for p in pages if p.page_url),
+        }
+        return pages, diag
     return pages
 
 
@@ -620,7 +646,14 @@ def fetch_metrika_emails(
                         payload = part.get_payload(decode=True)
                         if payload:
                             try:
-                                table_pages = parse_table_xlsx(payload)
+                                table_pages, diag = parse_table_xlsx(payload, return_diagnostics=True)
+                                # Логируем диагностику — какие колонки парсер нашёл (важно для отладки)
+                                if log and table_pages:
+                                    log('info', (
+                                        f'  {subj_info["country"]}: колонки={diag["headers_found"]}, '
+                                        f'URL-колонка №{diag["url_idx"]}, '
+                                        f'страниц={diag["pages_count"]}, с URL={diag["pages_with_url"]}'
+                                    ))
                             except Exception as e:
                                 if log:
                                     log('warn', f'Не удалось распарсить {fname_decoded}: {e}')
@@ -806,10 +839,20 @@ def load_reports_for_period(
     project_id: str,
     days: int,
 ) -> list[Report404]:
-    """Все отчёты за последние N дней (включая сегодня)."""
+    """
+    Все отчёты за последние N дней.
+    
+    days=1  → только вчера
+    days=7  → с вчера до 7 дней назад
+    days=14 → с вчера до 14 дней назад
+    days=30 → с вчера до 30 дней назад
+    
+    Сегодняшний день не включается — отчёт Метрики за сегодня обычно ещё не пришёл.
+    """
     from datetime import datetime as _dt, timedelta as _td
     today = _dt.now().date()
-    cutoff = today - _td(days=days - 1)
+    yesterday = today - _td(days=1)
+    cutoff = yesterday - _td(days=days - 1)  # включительно
 
     reports = []
     listing = list_stored_reports(project_id)
@@ -818,7 +861,8 @@ def load_reports_for_period(
             d = _dt.strptime(r['date'], '%Y-%m-%d').date()
         except ValueError:
             continue
-        if d >= cutoff:
+        # В диапазон: cutoff ≤ d ≤ yesterday
+        if cutoff <= d <= yesterday:
             rep = load_report(project_id, r['country_code'], r['date'])
             if rep:
                 reports.append(rep)

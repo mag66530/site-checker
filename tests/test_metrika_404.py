@@ -292,7 +292,7 @@ def test_load_reports_for_date():
 
 
 def test_load_reports_for_period():
-    """Загрузка за период N дней."""
+    """Загрузка за период N дней (от вчера на N дней назад)."""
     import metrika_404
     from metrika_404 import load_reports_for_period
     from datetime import datetime, timedelta
@@ -300,29 +300,36 @@ def test_load_reports_for_period():
     with tempfile.TemporaryDirectory() as tmp:
         metrika_404.CACHE_DIR = Path(tmp)
         today = datetime.now().date()
-        # Создаём отчёты на сегодня, вчера и 10 дней назад
-        for i, (offset, code) in enumerate([(0, 'РФ'), (1, 'РФ'), (10, 'РФ')]):
+        # Создаём отчёты на сегодня, вчера, 5 дней назад, 10 дней назад
+        for offset in [0, 1, 5, 10]:
             d = (today - timedelta(days=offset)).strftime('%Y-%m-%d')
             r = Report404(
-                project_id='smu', country_code=code, country_name='Россия',
+                project_id='smu', country_code='РФ', country_name='Россия',
                 report_date=d, received_at='x',
                 pages=[], total_views=0, total_pages=0,
             )
             save_report(r)
 
-        # За последние 7 дней — должно быть 2 (сегодня и вчера)
+        # days=1 → только вчера, без сегодня
+        period_1 = load_reports_for_period('smu', 1)
+        yesterday_str = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+        assert len(period_1) == 1
+        assert period_1[0].report_date == yesterday_str
+
+        # days=7 → вчера + 5 дней назад (но не сегодня)
         period_7 = load_reports_for_period('smu', 7)
         assert len(period_7) == 2
+        assert all(r.report_date != today.strftime('%Y-%m-%d') for r in period_7)
 
-        # За последние 30 дней — все 3
+        # days=14 → ещё 10 дней назад
+        period_14 = load_reports_for_period('smu', 14)
+        assert len(period_14) == 3
+
+        # days=30 → все кроме сегодня
         period_30 = load_reports_for_period('smu', 30)
         assert len(period_30) == 3
-
-        # За 1 день — только сегодня
-        period_1 = load_reports_for_period('smu', 1)
-        assert len(period_1) == 1
     metrika_404.CACHE_DIR = original
-    print('✓ load_reports_for_period: правильно по диапазону')
+    print('✓ load_reports_for_period: семантика «N дней до вчера»')
 
 
 if __name__ == '__main__':
