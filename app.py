@@ -37,6 +37,9 @@ from metrika_404 import (
     fetch_incremental, get_latest_available_date,
     load_reports_for_date, load_reports_for_period,
 )
+from telegram_notify import (
+    format_summary_message, send_run_notification, check_bot_alive,
+)
 
 
 PROJECT_ROOT = Path(__file__).parent
@@ -83,6 +86,45 @@ def get_metrika_credentials(project_id):
         return email, password
     except Exception:
         return None, None
+
+
+def get_telegram_bot_token():
+    """
+    Достать токен Telegram-бота из Streamlit Secrets (`telegram_bot_token`).
+    Возвращает строку или None.
+    """
+    try:
+        if hasattr(st, 'secrets') and 'telegram_bot_token' in st.secrets:
+            return st.secrets['telegram_bot_token']
+    except Exception:
+        pass
+    return None
+
+
+def get_telegram_recipients(project_id):
+    """
+    Список chat_id получателей уведомлений для проекта из Secrets:
+        telegram_recipients_smu = ["1109083536", "987654321"]
+        telegram_recipients_imp = [...]
+        telegram_recipients_mpe = [...]
+    
+    Возвращает список строк (chat_id) или пустой список.
+    """
+    if not project_id:
+        return []
+    key = f'telegram_recipients_{project_id}'
+    try:
+        if hasattr(st, 'secrets') and key in st.secrets:
+            val = st.secrets[key]
+            # Secrets может быть list или строкой
+            if isinstance(val, str):
+                # Один chat_id строкой
+                return [val.strip()]
+            elif isinstance(val, (list, tuple)):
+                return [str(v).strip() for v in val if str(v).strip()]
+    except Exception:
+        pass
+    return []
 
 
 # ── Streamlit page config ─────────────────────────────────────────
@@ -1830,6 +1872,91 @@ if st.session_state.is_running:
             metrika_is_stale=metrika_is_stale,
         )
 
+        # ─── Автоматическая отправка в Telegram ─────────────────────────
+        tg_token = get_telegram_bot_token()
+        tg_recipients = get_telegram_recipients(
+            st.session_state.project_id if not is_custom else None
+        )
+        if tg_token and tg_recipients:
+            append_log(f'Отправляю уведомление в Telegram ({len(tg_recipients)} получателей)…')
+            try:
+                # Собираем топ-проблем — самые срочные URL
+                problems_for_tg = []
+                for r in results:
+                    if r.is_error:
+                        status_text = {
+                            'not_found': '404 Не найдена',
+                            'client_error': 'Ошибка на сайте',
+                            'server_error': 'Сервер не отвечает',
+                            'timeout': 'Нет ответа',
+                            'network_error': 'Нет соединения',
+                        }.get(r.status, r.status)
+                        problems_for_tg.append({
+                            'city': r.city or '—',
+                            'url': r.url,
+                            'status': status_text,
+                        })
+                # Топ-5 по приоритету (ошибки идут первыми)
+                problems_for_tg = problems_for_tg[:5]
+
+                # Считаем метрика-страницы
+                metrika_pages_total = 0
+                if metrika_reports_for_xlsx:
+                    metrika_pages_total = sum(r.total_pages for r in metrika_reports_for_xlsx)
+
+                text_issues_total = sum(
+                    len(r.text_issues) for r in results if r.has_text_issues
+                )
+
+                from datetime import datetime as _dtt
+                started_display = _dtt.fromtimestamp(started_ms / 1000).strftime('%d.%m.%Y %H:%M')
+                duration_sec = (finished_ms - started_ms) // 1000
+
+                summary_text = format_summary_message(
+                    project_name=project_name_for_report,
+                    started_at=started_display,
+                    duration_sec=duration_sec,
+                    total_checks=len(results),
+                    ok_count=sum(1 for r in results if r.is_ok),
+                    warn_count=sum(1 for r in results if r.is_warning),
+                    err_count=sum(1 for r in results if r.is_error),
+                    text_issues_count=text_issues_total,
+                    metrika_pages_count=metrika_pages_total,
+                    metrika_data_date=metrika_data_date,
+                    top_problems=problems_for_tg,
+                )
+
+                tg_proxy = get_proxy_url()
+                tg_result = send_run_notification(
+                    bot_token=tg_token,
+                    recipients=tg_recipients,
+                    project_name=project_name_for_report,
+                    summary_text=summary_text,
+                    report_file=report_path,
+                    proxy_url=tg_proxy,
+                    log=lambda lvl, msg: append_log(msg),
+                )
+
+                if tg_result['sent'] > 0:
+                    append_log(
+                        f'✓ Telegram: отправлено {tg_result["sent"]} получателям'
+                        + (f', не доставлено {tg_result["failed"]}' if tg_result['failed'] else '')
+                    )
+                else:
+                    append_log(
+                        f'⚠ Telegram: не удалось отправить никому. '
+                        f'Ошибки: {tg_result["errors"]}'
+                    )
+            except Exception as e:
+                append_log(f'⚠ Telegram-отправка упала: {e}. Продолжаю.')
+        elif tg_token and not tg_recipients:
+            append_log(
+                f'Telegram-уведомление пропущено: '
+                f'для проекта {st.session_state.project_id} нет получателей в Secrets '
+                f'(ключ telegram_recipients_{st.session_state.project_id}).'
+            )
+        # Если нет токена — вообще ничего не пишем в лог, это нормальный сценарий
+
         st.session_state.run_results = results
         st.session_state.run_report_path = str(report_path)
         st.session_state.is_running = False
@@ -1913,6 +2040,20 @@ if st.session_state.run_results and not st.session_state.is_running:
                         type='primary',
                     )
                 st.caption(f'В отчёте: все проверки в формате xlsx с фильтрами по статусу')
+
+        # ─── Индикатор Telegram-отправки (если настроен) ──────────
+        tg_token = get_telegram_bot_token()
+        if tg_token and not is_custom and st.session_state.project_id:
+            tg_recipients = get_telegram_recipients(st.session_state.project_id)
+            if tg_recipients:
+                st.markdown(
+                    f'<p style="color:var(--text-muted);font-size:0.85rem;'
+                    f'margin-top:0.75rem;text-align:center">'
+                    f'📱 Уведомление с отчётом отправлено в Telegram '
+                    f'({len(tg_recipients)} {"получатель" if len(tg_recipients) == 1 else "получателей"})'
+                    f'</p>',
+                    unsafe_allow_html=True,
+                )
 
     # ─── Список проблем в отдельной карточке ──────────────
     problems = [r for r in results if r.is_error or r.is_warning or r.has_text_issues]
