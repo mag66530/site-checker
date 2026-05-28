@@ -51,6 +51,10 @@ YANDEX_IMAP_PORT = 993
 # Логин и пароль приложения хранятся в Streamlit Secrets:
 #   metrika_smu_email = "stalmetural19@yandex.ru"
 #   metrika_smu_password = "пароль приложения"
+#   metrika_imp_email = "inmetprom77@yandex.ru"
+#   metrika_imp_password = "..."
+#   metrika_mpe_email = "mepen88@yandex.ru"
+#   metrika_mpe_password = "..."
 # Имена папок в Яндекс-почте — на русском, важно сохранять кириллицу как есть.
 MAILBOX_CONFIG = {
     'smu': {
@@ -58,7 +62,16 @@ MAILBOX_CONFIG = {
         'secret_email': 'metrika_smu_email',
         'secret_password': 'metrika_smu_password',
     },
-    # Когда добавим ИМП и МПЭ — просто допишем сюда новые ключи
+    'imp': {
+        'folder': 'Я.Метрика 404 и др',
+        'secret_email': 'metrika_imp_email',
+        'secret_password': 'metrika_imp_password',
+    },
+    'mpe': {
+        'folder': 'Я.Метрика 404 и др',
+        'secret_email': 'metrika_mpe_email',
+        'secret_password': 'metrika_mpe_password',
+    },
 }
 
 
