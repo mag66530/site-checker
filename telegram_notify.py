@@ -57,7 +57,10 @@ def format_summary_message(
     
     lines = []
     lines.append(f'{icon} <b>Прогон {escape_html(project_name)} завершён</b>')
-    lines.append(f'<i>{escape_html(started_at)} · {duration_sec} сек</i>')
+    # Только дата — без времени и длительности
+    date_only = escape_html((started_at or '').split(' ')[0])
+    if date_only:
+        lines.append(f'<i>{date_only}</i>')
     lines.append('')
     
     # Метрики Site Checker
