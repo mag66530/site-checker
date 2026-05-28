@@ -92,23 +92,6 @@ def format_summary_message(
         lines.append('')
         lines.append(f'<b>404 из Метрики</b>{escape_html(date_str)}: <b>{metrika_pages_count}</b> страниц')
 
-    # Топ проблемных страниц (не более 5), сгруппированы по городу, ссылки кликабельны
-    if top_problems:
-        lines.append('')
-        lines.append('<b>Самые срочные</b>')
-        by_city: dict = {}
-        for p in top_problems[:5]:
-            by_city.setdefault(p.get('city') or '—', []).append(p)
-        quote = []
-        for city, items in by_city.items():
-            quote.append(f'<b>{escape_html(city)}</b>')
-            for p in items:
-                url = p.get('url', '')
-                status = escape_html(p.get('status', ''))
-                label = escape_html(_link_label(url))
-                quote.append(f'— <a href="{escape_html(url)}">{label}</a> — {status}')
-        lines.append('<blockquote>' + '\n'.join(quote) + '</blockquote>')
-
     # Финальная строка
     lines.append('')
     if has_problems:
@@ -124,24 +107,6 @@ def escape_html(text: str) -> str:
     if not text:
         return ''
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-
-
-def _link_label(url: str) -> str:
-    """Читаемая подпись для ссылки из последнего сегмента URL.
-
-    'https://stalmetural.ru/catalog/stal-hardoks-hardox/' → 'Stal hardoks hardox'
-    Если разобрать не вышло — возвращаем сам URL.
-    """
-    try:
-        from urllib.parse import urlparse, unquote
-        path = urlparse(url).path.strip('/')
-        slug = path.split('/')[-1] if path else ''
-        label = unquote(slug).replace('-', ' ').replace('_', ' ').strip()
-        if not label:
-            return url
-        return label[:1].upper() + label[1:]
-    except Exception:
-        return url
 
 
 # ── Отправка ──────────────────────────────────────────────────────
