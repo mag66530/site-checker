@@ -51,34 +51,34 @@ def format_summary_message(
     Особенности: <b>, <i>, <code>, <a href="...">.
     Скобки и спецсимволы можно использовать как есть.
     """
-    # Заголовок: эмодзи зависит от наличия проблем
     has_problems = err_count > 0 or warn_count > 0 or text_issues_count > 0 or metrika_pages_count > 0
-    icon = '🔴' if err_count > 0 else ('⚠️' if has_problems else '✅')
-    
-    lines = []
-    lines.append(f'{icon} <b>Прогон {escape_html(project_name)} завершён</b>')
+
+    # Короткое имя проекта: "СМУ — Сталметурал" → "СМУ"
+    short_name = escape_html((project_name or '').split(' — ')[0].strip())
     # Только дата — без времени и длительности
     date_only = escape_html((started_at or '').split(' ')[0])
+
+    lines = []
+    # Заголовок: "Прогон СМУ – 28.05.2026" (без иконки, дата в той же строке)
+    header = f'Прогон {short_name}'
     if date_only:
-        lines.append(f'<i>{date_only}</i>')
+        header += f' – {date_only}'
+    lines.append(f'<b>{header}</b>')
     lines.append('')
-    
-    # Метрики Site Checker
+
+    # Метрики Site Checker — каждый статус с новой строки, без символов
     lines.append(f'<b>Site Checker</b> — проверено страниц: {total_checks}')
-    parts = []
     if ok_count > 0:
-        parts.append(f'✓ работает: <b>{ok_count}</b>')
+        lines.append(f'Работает: <b>{ok_count}</b>')
     if warn_count > 0:
-        parts.append(f'⚠ предупреждения: <b>{warn_count}</b>')
+        lines.append(f'Предупреждения: <b>{warn_count}</b>')
     if err_count > 0:
-        parts.append(f'✗ не работает: <b>{err_count}</b>')
-    if parts:
-        lines.append('  ' + ' · '.join(parts))
-    
+        lines.append(f'Не работает: <b>{err_count}</b>')
+
     # Битые переменные
     if text_issues_count > 0:
-        lines.append(f'  🔤 битых переменных: <b>{text_issues_count}</b>')
-    
+        lines.append(f'Битых переменных: <b>{text_issues_count}</b>')
+
     # 404 из Метрики
     if metrika_pages_count > 0:
         date_str = ''
@@ -91,27 +91,31 @@ def format_summary_message(
                 date_str = f' (за {metrika_data_date})'
         lines.append('')
         lines.append(f'<b>404 из Метрики</b>{escape_html(date_str)}: <b>{metrika_pages_count}</b> страниц')
-    
-    # Топ проблемных страниц (не более 5)
+
+    # Топ проблемных страниц (не более 5), сгруппированы по городу, ссылки кликабельны
     if top_problems:
         lines.append('')
-        lines.append('<b>Самые срочные:</b>')
+        lines.append('<b>Самые срочные</b>')
+        by_city: dict = {}
         for p in top_problems[:5]:
-            city = escape_html(p.get('city', ''))
-            url = p.get('url', '')
-            status = escape_html(p.get('status', ''))
-            # URL делаем как code, чтобы Telegram не пытался превратить в превью
-            url_display = url[:80] + '...' if len(url) > 80 else url
-            lines.append(f'• [{city}] <code>{escape_html(url_display)}</code> — {status}')
-    
+            by_city.setdefault(p.get('city') or '—', []).append(p)
+        quote = []
+        for city, items in by_city.items():
+            quote.append(f'<b>{escape_html(city)}</b>')
+            for p in items:
+                url = p.get('url', '')
+                status = escape_html(p.get('status', ''))
+                label = escape_html(_link_label(url))
+                quote.append(f'— <a href="{escape_html(url)}">{label}</a> — {status}')
+        lines.append('<blockquote>' + '\n'.join(quote) + '</blockquote>')
+
     # Финальная строка
+    lines.append('')
     if has_problems:
-        lines.append('')
         lines.append('📎 Полный отчёт — в прикреплённом xlsx-файле')
     else:
-        lines.append('')
-        lines.append('Проблем не найдено 🎉')
-    
+        lines.append('Проблем не найдено')
+
     return '\n'.join(lines)
 
 
@@ -120,6 +124,24 @@ def escape_html(text: str) -> str:
     if not text:
         return ''
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def _link_label(url: str) -> str:
+    """Читаемая подпись для ссылки из последнего сегмента URL.
+
+    'https://stalmetural.ru/catalog/stal-hardoks-hardox/' → 'Stal hardoks hardox'
+    Если разобрать не вышло — возвращаем сам URL.
+    """
+    try:
+        from urllib.parse import urlparse, unquote
+        path = urlparse(url).path.strip('/')
+        slug = path.split('/')[-1] if path else ''
+        label = unquote(slug).replace('-', ' ').replace('_', ' ').strip()
+        if not label:
+            return url
+        return label[:1].upper() + label[1:]
+    except Exception:
+        return url
 
 
 # ── Отправка ──────────────────────────────────────────────────────
@@ -307,10 +329,15 @@ def send_run_notification(
         try:
             if report_file and report_file.exists():
                 # Отправляем файл с подписью (caption)
-                # Telegram caption ограничен 1024 символами — обрезаем если длиннее
+                # Telegram caption ограничен 1024 символами.
+                # Режем по границе строки, чтобы не порвать HTML-теги,
+                # и закрываем blockquote, если он остался открытым.
                 caption = summary_text
-                if len(caption) > 1020:
-                    caption = caption[:1020] + '…'
+                if len(caption) > 1024:
+                    caption = caption[:1000].rsplit('\n', 1)[0]
+                    if caption.count('<blockquote') > caption.count('</blockquote>'):
+                        caption += '</blockquote>'
+                    caption += '\n…'
                 send_document(
                     bot_token, chat_id, report_file,
                     caption=caption,

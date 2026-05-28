@@ -25,8 +25,9 @@ def test_format_success():
         warn_count=0,
         err_count=0,
     )
-    assert '✅' in msg
+    assert 'Прогон' in msg
     assert 'СМУ' in msg
+    assert '🔴' not in msg and '✅' not in msg  # эмодзи убраны
     assert 'Проблем не найдено' in msg
     print('✓ format_summary_message: «всё ок» отображается')
 
@@ -46,10 +47,13 @@ def test_format_critical():
             {'city': 'Казань', 'url': 'https://kazan.stalmetural.ru/catalog/test/', 'status': '404'},
         ],
     )
-    assert '🔴' in msg
-    assert 'не работает' in msg
+    assert '🔴' not in msg  # иконка убрана
+    assert 'Не работает' in msg
     assert '404' in msg
-    assert 'broken' in msg
+    assert 'broken' in msg  # URL остаётся в href ссылки
+    assert '<a href=' in msg  # ссылки кликабельны
+    assert '<code>' not in msg  # больше не сырые URL в <code>
+    assert '<b>Москва</b>' in msg  # группировка по городу
     assert 'Полный отчёт' in msg
     print('✓ format_summary_message: «есть ошибки» с топ-проблемами')
 
@@ -73,8 +77,8 @@ def test_format_with_metrika():
     print('✓ format_summary_message: данные Метрики включены')
 
 
-def test_format_truncates_long_urls():
-    """Длинные URL обрезаются."""
+def test_format_link_label():
+    """Длинный URL уходит в href, а видимая подпись — короткий слаг."""
     long_url = 'https://example.com/' + 'x' * 200 + '/page'
     msg = format_summary_message(
         project_name='СМУ',
@@ -86,9 +90,11 @@ def test_format_truncates_long_urls():
         err_count=1,
         top_problems=[{'city': 'Москва', 'url': long_url, 'status': '404'}],
     )
-    # В сообщении должно быть «...»
-    assert '...' in msg
-    print('✓ format_summary_message: длинные URL обрезаются')
+    assert '<a href=' in msg  # ссылка кликабельна
+    assert long_url in msg  # полный URL в href
+    assert 'Page' in msg  # видимая подпись — очеловеченный слаг
+    assert f'>{long_url}<' not in msg  # сырой длинный URL не показывается как текст
+    print('✓ format_summary_message: подпись ссылки — короткий слаг, URL в href')
 
 
 def test_format_escapes_in_project_name():
@@ -112,6 +118,6 @@ if __name__ == '__main__':
     test_format_success()
     test_format_critical()
     test_format_with_metrika()
-    test_format_truncates_long_urls()
+    test_format_link_label()
     test_format_escapes_in_project_name()
     print('\n✅ Все тесты telegram_notify.py прошли')
