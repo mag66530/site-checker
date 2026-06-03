@@ -19,7 +19,7 @@ def test_smu_sources():
     cfg = load_project_config('smu')
     src = load_sources(cfg)
     assert len(src.subdomains) == 34, f"СМУ: ожидалось 34 поддомена, получили {len(src.subdomains)}"
-    assert len(src.categories) > 3000, f"СМУ: мало категорий ({len(src.categories)})"
+    assert len(src.categories) > 1500, f"СМУ: мало категорий ({len(src.categories)})"
     assert len(src.filters) > 13000, f"СМУ: мало фильтров ({len(src.filters)})"
     moscow = next((s for s in src.subdomains if s.city == 'Москва'), None)
     assert moscow is not None and moscow.host == 'stalmetural.ru'

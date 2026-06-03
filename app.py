@@ -923,6 +923,56 @@ CUSTOM_CSS = """
     [data-testid="stButton"] button:not([kind="primary"]):not([data-testid="stBaseButton-primary"]):not([data-testid="baseButton-primary"]):hover:not(:disabled) * {
         color: #1A56E8 !important;
     }
+
+    /* ════════════════════════════════════════════════════════════════
+       FILE UPLOADER — приводим к светлой палитре.
+       Дефолт у Streamlit — тёмный drop-zone, который выпадает из
+       светлой темы и торчит чёрным окошком. Перекрашиваем под --bg-elev.
+       ════════════════════════════════════════════════════════════════ */
+    [data-testid="stFileUploaderDropzone"],
+    [data-testid="stFileUploader"] section,
+    [data-testid="stFileUploader"] [data-testid="stFileDropzone"] {
+        background: var(--bg-elev) !important;
+        background-color: var(--bg-elev) !important;
+        border: 1px dashed var(--border-strong) !important;
+        color: var(--text-soft) !important;
+    }
+    [data-testid="stFileUploaderDropzone"]:hover {
+        border-color: var(--accent) !important;
+        background-color: var(--accent-soft) !important;
+    }
+    /* Текст и иконка внутри зоны */
+    [data-testid="stFileUploaderDropzone"] *,
+    [data-testid="stFileUploader"] section * {
+        color: var(--text-soft) !important;
+    }
+    [data-testid="stFileUploaderDropzone"] small,
+    [data-testid="stFileUploader"] section small {
+        color: var(--text-muted) !important;
+    }
+    [data-testid="stFileUploaderDropzone"] svg,
+    [data-testid="stFileUploader"] section svg {
+        color: var(--text-muted) !important;
+        fill: var(--text-muted) !important;
+    }
+    /* Кнопка Browse files внутри dropzone */
+    [data-testid="stFileUploaderDropzone"] button,
+    [data-testid="stFileUploader"] section button {
+        background: var(--bg) !important;
+        background-color: var(--bg) !important;
+        color: var(--text) !important;
+        border: 1px solid var(--border-strong) !important;
+    }
+    [data-testid="stFileUploaderDropzone"] button:hover,
+    [data-testid="stFileUploader"] section button:hover {
+        background-color: var(--bg-elev-2) !important;
+        border-color: var(--accent) !important;
+        color: var(--accent) !important;
+    }
+    [data-testid="stFileUploaderDropzone"] button *,
+    [data-testid="stFileUploader"] section button * {
+        color: inherit !important;
+    }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
