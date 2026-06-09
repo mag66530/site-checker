@@ -137,24 +137,60 @@ def _d_footer(c: _Ctx):
 
 
 def _d_price(c: _Ctx):
+    # Число с ₽/руб (товар с ценой) ИЛИ «по запросу» (товар без цены).
+    # На сайте «Цена по запросу» свёрстана с неразрывным пробелом, поэтому
+    # ищем устойчивое «по запросу», а не всю фразу целиком.
     present = (
         bool(_PRICE_RE.search(c.text))
-        or 'цена по запросу' in c.text_lower
+        or 'по запросу' in c.text_lower
     )
     return present, None
 
 
 def _d_btn_cart(c: _Ctx):
-    return 'в корзину' in c.text_lower, None
+    # «В корзину» — на сайте это иконка-корзина (an-ico-basket), а текст
+    # спрятан в <noindex>. Поэтому надёжнее ловить по вёрстке, не по тексту.
+    present = (
+        'card-item-add-to-cart-block' in c.html_lower
+        or 'an-ico-basket' in c.html_lower
+        or 'в корзину' in c.text_lower
+    )
+    return present, None
 
 
 def _d_btn_add_cart(c: _Ctx):
-    present = 'добавить в корзину' in c.text_lower or 'в корзину' in c.text_lower
+    present = (
+        'добавить в корзину' in c.text_lower
+        or 'в корзину' in c.text_lower
+        or 'card-item-add-to-cart-block' in c.html_lower
+        or 'an-ico-basket' in c.html_lower
+    )
     return present, None
 
 
 def _d_btn_oneclick(c: _Ctx):
-    return 'купить в один клик' in c.text_lower, None
+    # «Купить в один клик»: текст в карточке + класс кнопки one-click.
+    present = (
+        'в один клик' in c.text_lower
+        or 'one-click-to-buy' in c.html_lower
+        or 'an-ico-one-click' in c.html_lower
+    )
+    return present, None
+
+
+def _d_btn_order_listing(c: _Ctx):
+    # Главная коммерческая проверка списка: есть ХОТЯ БЫ ОДНА кнопка заказа.
+    # «В корзину» (товар с ценой) и «Купить в один клик» (товар по запросу) —
+    # на сайте взаимоисключающие, поэтому обязательна не каждая, а любая из них.
+    cart, _ = _d_btn_cart(c)
+    one, _ = _d_btn_oneclick(c)
+    return (cart or one), None
+
+
+def _d_btn_order_product(c: _Ctx):
+    cart, _ = _d_btn_add_cart(c)
+    one, _ = _d_btn_oneclick(c)
+    return (cart or one), None
 
 
 def _d_availability(c: _Ctx):
@@ -162,11 +198,13 @@ def _d_availability(c: _Ctx):
 
 
 def _d_product_cards(c: _Ctx):
-    # Эвристика: у каждой карточки в плитке есть «Расчёт стоимости».
-    # Запасной маркер — «в корзину». Считаем минимум как оценку числа карточек.
-    n = _count_text(c.text_lower, 'расчёт стоимости')
+    # Надёжно — по классу карточки товара (одинаков и для товаров с ценой,
+    # и для «по запросу»). Запасные маркеры — listing-card / «расчёт стоимости».
+    n = c.html_lower.count('catalog-product-card-item')
     if n == 0:
-        n = _count_text(c.text_lower, 'в корзину')
+        n = c.html_lower.count('listing-card')
+    if n == 0:
+        n = _count_text(c.text_lower, 'расчёт стоимости')
     return n > 0, n
 
 
@@ -283,8 +321,9 @@ _COMMON = [
 _LISTING = [
     _b('product_cards', 'Карточки товаров',          True,  _d_product_cards),
     _b('price',         'Цена',                       True,  _d_price),
-    _b('btn_cart',      'Кнопка «В корзину»',         True,  _d_btn_cart),
-    _b('btn_oneclick',  'Кнопка «Купить в 1 клик»',   True,  _d_btn_oneclick),
+    _b('btn_order',     'Кнопка заказа',              True,  _d_btn_order_listing),
+    _b('btn_cart',      'Кнопка «В корзину»',         False, _d_btn_cart),
+    _b('btn_oneclick',  'Кнопка «Купить в 1 клик»',   False, _d_btn_oneclick),
     _b('availability',  'Наличие',                    False, _d_availability),
     _b('filters',       'Фильтры',                    False, _d_filters),
     _b('sort',          'Сортировка',                 False, _d_sort),
@@ -297,8 +336,9 @@ _LISTING = [
 # Блоки карточки товара
 _PRODUCT = [
     _b('price',         'Цена',                       True,  _d_price),
-    _b('btn_cart',      'Кнопка «В корзину»',         True,  _d_btn_add_cart),
-    _b('btn_oneclick',  'Кнопка «Купить в 1 клик»',   True,  _d_btn_oneclick),
+    _b('btn_order',     'Кнопка заказа',              True,  _d_btn_order_product),
+    _b('btn_cart',      'Кнопка «В корзину»',         False, _d_btn_add_cart),
+    _b('btn_oneclick',  'Кнопка «Купить в 1 клик»',   False, _d_btn_oneclick),
     _b('availability',  'Наличие',                    False, _d_availability),
     _b('payment',       'Способы оплаты',             False, _d_payment),
     _b('consultation',  'Консультация',               False, _d_consultation),
