@@ -402,25 +402,33 @@ def check_content(html: str, type_code: str) -> ContentResult:
     )
     ctx.text_lower = ctx.text.lower()
 
-    # Подтип страницы-списка (категория / тег):
-    #   listing — есть карточки товаров → строгая проверка товарных блоков;
-    #   empty   — карточек нет и на странице «Раздел пуст.» → это БАГ
-    #             (оставляем «Карточки товаров» обязательной, она загорится красным);
-    #   section — карточек нет, но есть подкатегории (Бронза → полоса/круг/…) →
-    #             это раздел-витрина, товарные блоки тут не обязательны.
+    # Подтип страницы-списка (категория / тег) — определяем по вёрстке:
+    #   listing — есть карточки товаров (catalog-product-card-item) → строгая
+    #             проверка товарных блоков;
+    #   section — есть вкладки/поиск по подкатегориям (catalog-cat-tabs /
+    #             tab-search): это раздел-витрина (Бронза, Капролон, Арматура,
+    #             Рельсы ведут в подкатегории) → товарные блоки не обязательны;
+    #   empty   — «Раздел пуст.» и нет ни товаров, ни подкатегорий → это БАГ
+    #             («Карточки товаров» остаётся обязательной и загорится красным).
     page_kind = ''
     if type_code in ('category', 'filter'):
         has_cards = (
             'catalog-product-card-item' in ctx.html_lower
             or 'listing-card' in ctx.html_lower
         )
+        has_subcats = (
+            'catalog-cat-tabs' in ctx.html_lower
+            or 'tab-search' in ctx.html_lower
+        )
         is_empty = 'раздел пуст' in ctx.text_lower
         if has_cards:
             page_kind = 'listing'
         elif is_empty:
             page_kind = 'empty'
-        else:
+        elif has_subcats:
             page_kind = 'section'
+        else:
+            page_kind = 'section'   # нет явных признаков товаров — мягко, не баг
     result.page_kind = page_kind
 
     if page_kind == 'section':
