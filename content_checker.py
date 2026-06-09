@@ -149,11 +149,12 @@ def _d_price(c: _Ctx):
 
 
 def _d_btn_cart(c: _Ctx):
-    # «В корзину» — на сайте это иконка-корзина (an-ico-basket), а текст
-    # спрятан в <noindex>. Поэтому надёжнее ловить по вёрстке, не по тексту.
+    # «В корзину»: СМУ — иконка-корзина (an-ico-basket), текст в <noindex>;
+    # ИМП — кнопка add-to-cart-btn. Поэтому ловим по вёрстке и по тексту.
     present = (
         'card-item-add-to-cart-block' in c.html_lower
         or 'an-ico-basket' in c.html_lower
+        or 'add-to-cart-btn' in c.html_lower
         or 'в корзину' in c.text_lower
     )
     return present, None
@@ -165,6 +166,7 @@ def _d_btn_add_cart(c: _Ctx):
         or 'в корзину' in c.text_lower
         or 'card-item-add-to-cart-block' in c.html_lower
         or 'an-ico-basket' in c.html_lower
+        or 'add-to-cart-btn' in c.html_lower
     )
     return present, None
 
@@ -199,11 +201,15 @@ def _d_availability(c: _Ctx):
 
 
 def _d_product_cards(c: _Ctx):
-    # Надёжно — по классу карточки товара (одинаков и для товаров с ценой,
-    # и для «по запросу»). Запасные маркеры — listing-card / «расчёт стоимости».
+    # СМУ — catalog-product-card-item; ИМП — listing__cards / card-product.
+    # Запасные маркеры — listing-card / «расчёт стоимости».
     n = c.html_lower.count('catalog-product-card-item')
     if n == 0:
         n = c.html_lower.count('listing-card')
+    if n == 0:
+        n = c.html_lower.count('listing__cards')   # контейнер выдачи ИМП
+    if n == 0:
+        n = c.html_lower.count('card-product')      # карточка товара ИМП
     if n == 0:
         n = _count_text(c.text_lower, 'расчёт стоимости')
     return n > 0, n
@@ -415,6 +421,7 @@ def check_content(html: str, type_code: str) -> ContentResult:
         has_cards = (
             'catalog-product-card-item' in ctx.html_lower
             or 'listing-card' in ctx.html_lower
+            or 'listing__cards' in ctx.html_lower      # листинг ИМП
         )
         has_subcats = (
             'catalog-cat-tabs' in ctx.html_lower
@@ -438,6 +445,11 @@ def check_content(html: str, type_code: str) -> ContentResult:
     else:
         _soft = set()                    # листинг и все прочие типы — строго
 
+    # Форма «Не нашли что искали» есть только на СМУ. На ИМП/МПЭ её нет
+    # (у ИМП другая форма — «Не нашли ответа на свой вопрос»), поэтому
+    # требовать её там нельзя — иначе ложный баг на каждой странице.
+    is_smu = 'stalmetural' in ctx.html_lower
+
     for blk in _profile_for(type_code):
         try:
             present, count = blk.detect(ctx)
@@ -445,6 +457,12 @@ def check_content(html: str, type_code: str) -> ContentResult:
             present, count = False, None
         required = blk.required
         if blk.key in _soft:
+            required = False
+        if blk.key == 'form_nf' and not is_smu:
+            required = False
+        # Каталог-корень — верхний уровень иерархии, хлебных крошек там
+        # может не быть (например, главная каталога ИМП) — это не баг.
+        if type_code == 'catalog' and blk.key == 'breadcrumbs':
             required = False
         result.blocks.append(BlockResult(
             key=blk.key,
