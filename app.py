@@ -1958,6 +1958,20 @@ if st.session_state.is_running:
                     len(r.text_issues) for r in results if r.has_text_issues
                 )
 
+                # Структурные проблемы в контенте + пустые разделы
+                content_bugs_total = sum(
+                    getattr(r, 'content_bugs', 0) or 0 for r in results
+                )
+                content_bug_pages_total = sum(
+                    1 for r in results if getattr(r, 'has_content_bugs', False)
+                )
+                empty_sections_list = [
+                    {'city': r.city or '—', 'url': r.url}
+                    for r in results
+                    if getattr(r, 'content', None) is not None
+                    and getattr(r.content, 'page_kind', '') == 'empty'
+                ]
+
                 from datetime import datetime as _dtt
                 started_display = _dtt.fromtimestamp(started_ms / 1000).strftime('%d.%m.%Y %H:%M')
                 duration_sec = (finished_ms - started_ms) // 1000
@@ -1974,6 +1988,9 @@ if st.session_state.is_running:
                     metrika_pages_count=metrika_pages_total,
                     metrika_data_date=metrika_data_date,
                     top_problems=problems_for_tg,
+                    content_bugs_count=content_bugs_total,
+                    content_bug_pages=content_bug_pages_total,
+                    empty_sections=empty_sections_list,
                 )
 
                 tg_proxy = get_proxy_url()

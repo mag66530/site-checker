@@ -31,6 +31,28 @@ TELEGRAM_API_BASE = 'https://api.telegram.org/bot'
 # ── Структуры для сводки ────────────────────────────────────────────
 
 
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    """Русская плюрализация: 1 раздел / 2 раздела / 5 разделов."""
+    n = abs(int(n))
+    if 11 <= (n % 100) <= 14:
+        return many
+    d = n % 10
+    if d == 1:
+        return one
+    if 2 <= d <= 4:
+        return few
+    return many
+
+
+def _short_path(url: str) -> str:
+    """Из полного URL оставить только путь: https://city.site.ru/catalog/x/ → /catalog/x/"""
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).path or url
+    except Exception:
+        return url
+
+
 def format_summary_message(
     project_name: str,
     started_at: str,             # "26.05.2026 19:43"
@@ -43,6 +65,9 @@ def format_summary_message(
     metrika_pages_count: int = 0,
     metrika_data_date: Optional[str] = None,
     top_problems: Optional[list] = None,  # список словарей {city, url, status}
+    content_bugs_count: int = 0,          # всего структурных проблем в контенте
+    content_bug_pages: int = 0,           # на скольких страницах
+    empty_sections: Optional[list] = None,  # пустые разделы [{city, url}]
 ) -> str:
     """
     Сформировать текст сообщения для Telegram.
@@ -51,7 +76,11 @@ def format_summary_message(
     Особенности: <b>, <i>, <code>, <a href="...">.
     Скобки и спецсимволы можно использовать как есть.
     """
-    has_problems = err_count > 0 or warn_count > 0 or text_issues_count > 0 or metrika_pages_count > 0
+    empty_sections = empty_sections or []
+    has_problems = (
+        err_count > 0 or warn_count > 0 or text_issues_count > 0
+        or metrika_pages_count > 0 or content_bugs_count > 0
+    )
 
     # Короткое имя проекта: "СМУ — Сталметурал" → "СМУ"
     short_name = escape_html((project_name or '').split(' — ')[0].strip())
