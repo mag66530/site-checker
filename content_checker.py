@@ -150,11 +150,13 @@ def _d_price(c: _Ctx):
 
 def _d_btn_cart(c: _Ctx):
     # «В корзину»: СМУ — иконка-корзина (an-ico-basket), текст в <noindex>;
-    # ИМП — кнопка add-to-cart-btn. Поэтому ловим по вёрстке и по тексту.
+    # ИМП — кнопка add-to-cart-btn; МПЭ — popup_form («Заявка», «Расчитать
+    # заказ» открывают форму). Ловим по вёрстке и по тексту.
     present = (
         'card-item-add-to-cart-block' in c.html_lower
         or 'an-ico-basket' in c.html_lower
         or 'add-to-cart-btn' in c.html_lower
+        or 'popup_form' in c.html_lower
         or 'в корзину' in c.text_lower
     )
     return present, None
@@ -167,6 +169,7 @@ def _d_btn_add_cart(c: _Ctx):
         or 'card-item-add-to-cart-block' in c.html_lower
         or 'an-ico-basket' in c.html_lower
         or 'add-to-cart-btn' in c.html_lower
+        or 'popup_form' in c.html_lower
     )
     return present, None
 
