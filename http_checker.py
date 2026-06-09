@@ -27,6 +27,7 @@ from typing import Optional, Callable
 import aiohttp
 
 from text_checker import find_text_issues, TextIssue
+from content_checker import check_content, ContentResult
 
 
 # ── Константы ────────────────────────────────────────────────────────
@@ -165,6 +166,11 @@ class CheckResult:
     text_issues: list[TextIssue] = field(default_factory=list)
     has_text_issues: bool = False
 
+    # Структурная проверка контента (блоки страницы)
+    content: Optional["ContentResult"] = None
+    content_bugs: int = 0
+    has_content_bugs: bool = False
+
     checked_at: Optional[str] = None
 
 
@@ -268,6 +274,7 @@ async def check_one(
     retry_delay_ms: int = 2500,
     check_text: bool = True,
     text_patterns: str | None = None,
+    check_structure: bool = True,
     proxy_url: Optional[str] = None,
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
@@ -296,6 +303,14 @@ async def check_one(
         except Exception:
             text_issues = []
 
+    # Структурная проверка контента — только для OK с body
+    content = None
+    if is_ok and check_structure and a['body_text']:
+        try:
+            content = check_content(a['body_text'], task.type_code)
+        except Exception:
+            content = None
+
     return CheckResult(
         url=task.url,
         city=task.city,
@@ -317,6 +332,9 @@ async def check_one(
         error_message=a['error_message'],
         text_issues=text_issues,
         has_text_issues=len(text_issues) > 0,
+        content=content,
+        content_bugs=content.bug_count if content else 0,
+        has_content_bugs=bool(content and content.has_bugs),
         checked_at=None,
     )
 
@@ -334,6 +352,7 @@ async def run_batch(
     user_agent: str = DEFAULT_USER_AGENT,
     check_text: bool = True,
     text_patterns: str | None = None,
+    check_structure: bool = True,
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
     proxy_url: Optional[str] = None,
@@ -379,6 +398,7 @@ async def run_batch(
                     retry_delay_ms=retry_delay_ms,
                     check_text=check_text,
                     text_patterns=text_patterns,
+                    check_structure=check_structure,
                     proxy_url=proxy_url,
                 )
                 done_count += 1
