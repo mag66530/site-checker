@@ -10,7 +10,37 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Светлая боковая панель в тон основной теме */
+    /* ── Светлая тема для ВСЕХ страниц (общая) ── */
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    section.main {
+        background-color: #FFFFFF !important;
+    }
+    [data-testid="stHeader"] {
+        background: transparent !important;
+    }
+    .stApp, .stApp p, .stApp span, .stApp div, .stApp label, .stApp li,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+    [data-testid="stMarkdownContainer"] {
+        color: #1E212E;
+    }
+    /* Уведомления info/success/warning/error — светлый фон, тёмный текст */
+    [data-testid="stAlert"] {
+        background-color: #EEF4FB !important;
+    }
+    [data-testid="stAlert"] * {
+        color: #1E212E !important;
+    }
+    /* Поля ввода и виджеты — на светлом */
+    [data-testid="stTextInput"] input,
+    [data-testid="stTextArea"] textarea,
+    [data-baseweb="select"] > div {
+        background-color: #FFFFFF !important;
+        color: #1E212E !important;
+    }
+
+    /* ── Боковая панель ── */
     [data-testid="stSidebar"] {
         background-color: #F7FBFE !important;
         border-right: 1px solid #E1E8F0 !important;
@@ -18,7 +48,6 @@ st.markdown(
     [data-testid="stSidebar"] * {
         color: #1E212E !important;
     }
-    /* Навигация: крупнее шрифт, аккуратные пункты */
     [data-testid="stSidebarNav"] {
         padding-top: 0.5rem !important;
     }
