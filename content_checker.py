@@ -46,6 +46,7 @@ class BlockResult:
 @dataclass
 class ContentResult:
     type_code: str
+    page_kind: str = ''            # для списков: 'listing' | 'section' | 'empty'
     blocks: list[BlockResult] = field(default_factory=list)
 
     @property
@@ -401,17 +402,33 @@ def check_content(html: str, type_code: str) -> ContentResult:
     )
     ctx.text_lower = ctx.text.lower()
 
-    # Категория-РАЗДЕЛ показывает подкатегории, а не товары (нет карточек).
-    # Пример: /catalog/kaprolon/ → «Капролон листовой», «Капролон стержневой».
-    # На таких страницах товарные блоки (карточки / цена / кнопка заказа) НЕ
-    # обязательны — это не листинг товаров. H1, хлебные крошки, шапка, подвал,
-    # форма «Не нашли что искали» остаются обязательными.
-    section_without_products = (
-        type_code in ('category', 'filter')
-        and 'catalog-product-card-item' not in ctx.html_lower
-        and 'listing-card' not in ctx.html_lower
-    )
-    _soften = {'product_cards', 'price', 'btn_order'}
+    # Подтип страницы-списка (категория / тег):
+    #   listing — есть карточки товаров → строгая проверка товарных блоков;
+    #   empty   — карточек нет и на странице «Раздел пуст.» → это БАГ
+    #             (оставляем «Карточки товаров» обязательной, она загорится красным);
+    #   section — карточек нет, но есть подкатегории (Бронза → полоса/круг/…) →
+    #             это раздел-витрина, товарные блоки тут не обязательны.
+    page_kind = ''
+    if type_code in ('category', 'filter'):
+        has_cards = (
+            'catalog-product-card-item' in ctx.html_lower
+            or 'listing-card' in ctx.html_lower
+        )
+        is_empty = 'раздел пуст' in ctx.text_lower
+        if has_cards:
+            page_kind = 'listing'
+        elif is_empty:
+            page_kind = 'empty'
+        else:
+            page_kind = 'section'
+    result.page_kind = page_kind
+
+    if page_kind == 'section':
+        _soft = {'product_cards', 'price', 'btn_order'}
+    elif page_kind == 'empty':
+        _soft = {'price', 'btn_order'}   # «Карточки товаров» остаётся обязательной → БАГ
+    else:
+        _soft = set()                    # листинг и все прочие типы — строго
 
     for blk in _profile_for(type_code):
         try:
@@ -419,7 +436,7 @@ def check_content(html: str, type_code: str) -> ContentResult:
         except Exception:
             present, count = False, None
         required = blk.required
-        if section_without_products and blk.key in _soften:
+        if blk.key in _soft:
             required = False
         result.blocks.append(BlockResult(
             key=blk.key,

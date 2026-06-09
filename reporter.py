@@ -114,13 +114,25 @@ def _build_path_description(result) -> str:
 
 # ── Лист «Структура страниц» ───────────────────────────────────────
 
-# Порядок и подписи групп страниц (по профилю структурной проверки)
+# Порядок и подписи групп страниц. Категории/теги делятся по факту наполнения:
+# страница с товарами → «Списки товаров», страница-витрина/пустая → «Разделы каталога».
+def _grp_listing(r):
+    return (r.type_code in ('category', 'filter')
+            and getattr(r.content, 'page_kind', '') == 'listing')
+
+
+def _grp_section(r):
+    return (r.type_code in ('category', 'filter')
+            and getattr(r.content, 'page_kind', '') in ('section', 'empty'))
+
+
 _STRUCT_GROUPS = [
-    ('Главная',                   {'main'}),
-    ('Каталог',                   {'catalog'}),
-    ('Списки (категории и теги)', {'category', 'filter'}),
-    ('Карточки товаров',          {'product'}),
-    ('Прочие страницы',           {'custom'}),
+    ('Главная',           lambda r: r.type_code == 'main'),
+    ('Каталог',           lambda r: r.type_code == 'catalog'),
+    ('Списки товаров',    _grp_listing),
+    ('Разделы каталога',  _grp_section),
+    ('Карточки товаров',  lambda r: r.type_code == 'product'),
+    ('Прочие страницы',   lambda r: r.type_code == 'custom'),
 ]
 
 
@@ -216,8 +228,8 @@ def _build_structure_sheet(wb, results):
 
     # ── Секции по группам страниц ──
     row = lr + 2
-    for group_label, type_set in _STRUCT_GROUPS:
-        group_pages = [r for r in pages if r.type_code in type_set]
+    for group_label, predicate in _STRUCT_GROUPS:
+        group_pages = [r for r in pages if predicate(r)]
         if not group_pages:
             continue
         block_defs = [(b.key, b.label) for b in group_pages[0].content.blocks]
