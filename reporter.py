@@ -304,9 +304,6 @@ def _build_structure_sheet(wb, results):
     for col_idx in range(5, 5 + 13):
         ws.column_dimensions[get_column_letter(col_idx)].width = 13
 
-    # Закрепляем левые колонки (Город/Открыть/Проблем) при горизонтальной прокрутке
-    ws.freeze_panes = 'E1'
-
 
 # ── Главная функция ────────────────────────────────────────────────
 

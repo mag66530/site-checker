@@ -401,15 +401,30 @@ def check_content(html: str, type_code: str) -> ContentResult:
     )
     ctx.text_lower = ctx.text.lower()
 
+    # Категория-РАЗДЕЛ показывает подкатегории, а не товары (нет карточек).
+    # Пример: /catalog/kaprolon/ → «Капролон листовой», «Капролон стержневой».
+    # На таких страницах товарные блоки (карточки / цена / кнопка заказа) НЕ
+    # обязательны — это не листинг товаров. H1, хлебные крошки, шапка, подвал,
+    # форма «Не нашли что искали» остаются обязательными.
+    section_without_products = (
+        type_code in ('category', 'filter')
+        and 'catalog-product-card-item' not in ctx.html_lower
+        and 'listing-card' not in ctx.html_lower
+    )
+    _soften = {'product_cards', 'price', 'btn_order'}
+
     for blk in _profile_for(type_code):
         try:
             present, count = blk.detect(ctx)
         except Exception:
             present, count = False, None
+        required = blk.required
+        if section_without_products and blk.key in _soften:
+            required = False
         result.blocks.append(BlockResult(
             key=blk.key,
             label=blk.label,
-            required=blk.required,
+            required=required,
             present=bool(present),
             count=count,
         ))
