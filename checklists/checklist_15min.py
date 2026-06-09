@@ -134,18 +134,18 @@ CUSTOM_CSS = """
 <style>
     /* Светлая палитра — мягкая корпоративная */
     :root {
-        --bg: #FFFFFF;
-        --bg-elev: #F7FBFE;
-        --bg-elev-2: #EEF4FB;
-        --border: #E1E8F0;
-        --border-strong: #C7D3E1;
-        --text: #1E212E;
-        --text-soft: #4B5366;
-        --text-muted: #7A8294;
-        --accent: #1A56E8;
-        --accent-hover: #1148C9;
-        --accent-soft: rgba(26, 86, 232, 0.08);
-        --accent-ring: rgba(26, 86, 232, 0.15);
+        --bg: #F3F2EE;
+        --bg-elev: #FFFFFF;
+        --bg-elev-2: #ECEAE4;
+        --border: #DEDBD4;
+        --border-strong: #C9C5BC;
+        --text: #1A1A1A;
+        --text-soft: #5B5853;
+        --text-muted: #8A867F;
+        --accent: #1A1A1A;
+        --accent-hover: #000000;
+        --accent-soft: rgba(26, 26, 26, 0.06);
+        --accent-ring: rgba(26, 26, 26, 0.12);
         --ok: #16A34A;
         --ok-soft: rgba(22, 163, 74, 0.08);
         --warn: #D97706;
@@ -209,7 +209,7 @@ CUSTOM_CSS = """
        (так у меня получилось «все заголовки белые и текста не видно»). */
     .stApp {
         font-size: 16.5px !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
     }
     p, span, div, label, li, .stMarkdown, .stMarkdown *,
     [data-testid="stMarkdownContainer"],
@@ -221,13 +221,13 @@ CUSTOM_CSS = """
     /* Заголовки — точно тёмные, чтобы их было видно. */
     h1, h2, h3, h4,
     .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
-        color: #1E212E !important;
+        color: #1A1A1A !important;
     }
     /* Markdown-абзацы — единый размер */
     .stMarkdown p {
         font-size: 16.5px !important;
         line-height: 1.55 !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
     }
     /* Капшен — единая «вторичная» строка чуть меньше и серее */
     [data-testid="stCaptionContainer"],
@@ -244,7 +244,7 @@ CUSTOM_CSS = """
     [data-testid="stExpander"] summary,
     [data-testid="stExpander"] summary * {
         font-size: 16.5px !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
     }
     /* Кнопки — тот же размер */
     div[data-testid="stButton"] > button,
@@ -259,7 +259,7 @@ CUSTOM_CSS = """
     .stNumberInput input,
     [data-baseweb="select"] {
         font-size: 16.5px !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
     }
     /* Alert-блоки (st.warning / st.info / st.success / st.error) —
        текст внутри тёмный, не растворяется на цветном фоне. */
@@ -267,14 +267,14 @@ CUSTOM_CSS = """
     [data-testid="stAlert"] *,
     [data-baseweb="notification"],
     [data-baseweb="notification"] * {
-        color: #1E212E !important;
+        color: #1A1A1A !important;
     }
     /* Текст лейбла на прогресс-баре */
     [data-testid="stProgress"] p,
     [data-testid="stProgress"] label,
     [data-testid="stProgress"] span,
     [data-testid="stProgress"] div {
-        color: #1E212E !important;
+        color: #1A1A1A !important;
     }
 
     /* Контейнеры-карточки */
@@ -358,14 +358,14 @@ CUSTOM_CSS = """
     div[data-baseweb="popover"] ul > li {
         background: #FFFFFF !important;
         background-color: #FFFFFF !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         font-size: 1rem !important;
     }
     div[data-baseweb="popover"] li *,
     div[data-baseweb="popover"] [role="option"] * {
         background: transparent !important;
         background-color: transparent !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
     }
     /* Hover на опции — голубая подсветка */
     div[data-baseweb="popover"] li:hover,
@@ -374,13 +374,13 @@ CUSTOM_CSS = """
     div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
         background: #EEF3FB !important;
         background-color: #EEF3FB !important;
-        color: #1A56E8 !important;
+        color: #1A1A1A !important;
     }
     div[data-baseweb="popover"] li:hover *,
     div[data-baseweb="popover"] [role="option"]:hover *,
     div[data-baseweb="popover"] li[aria-selected="true"] *,
     div[data-baseweb="popover"] [role="option"][aria-selected="true"] * {
-        color: #1A56E8 !important;
+        color: #1A1A1A !important;
     }
 
     /* ════════════════════════════════════════════════════════════════
@@ -421,7 +421,7 @@ CUSTOM_CSS = """
     }
     /* Выбранная карточка профиля */
     [data-testid="stRadio"] label:has(input:checked) {
-        border-color: #1A56E8 !important;
+        border-color: #1A1A1A !important;
         background: #EEF3FB !important;
         background-color: #EEF3FB !important;
     }
@@ -434,7 +434,7 @@ CUSTOM_CSS = """
     [data-testid="stRadio"] label > div:last-child,
     [data-testid="stRadio"] label p {
         flex: 1 !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         background: transparent !important;
         background-color: transparent !important;
         font-size: 1rem !important;
@@ -483,7 +483,7 @@ CUSTOM_CSS = """
         background: #FFFFFF !important;
         background-color: #FFFFFF !important;
         background-image: none !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         box-shadow: none !important;
         transition: all 0.15s !important;
         padding: 0.55rem 1.25rem !important;
@@ -494,10 +494,10 @@ CUSTOM_CSS = """
        в белую при наведении. */
     div[data-testid="stButton"] > button:hover:not(:disabled),
     div[data-testid="stButton"] > button[data-testid="stBaseButton-secondary"]:hover:not(:disabled) {
-        border-color: #1A56E8 !important;
+        border-color: #1A1A1A !important;
         background: #F7FBFE !important;
         background-color: #F7FBFE !important;
-        color: #1A56E8 !important;
+        color: #1A1A1A !important;
     }
     /* Текст, иконки и любые вложенные div внутри светлой кнопки */
     .stButton > button p,
@@ -539,7 +539,7 @@ CUSTOM_CSS = """
     div[data-baseweb="popover"][role="tooltip"] > div {
         background: #FFFFFF !important;
         background-color: #FFFFFF !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         border: 1px solid #C7D3E1 !important;
         border-radius: 10px !important;
         box-shadow: 0 6px 20px rgba(30, 33, 46, 0.14) !important;
@@ -552,7 +552,7 @@ CUSTOM_CSS = """
     div[data-baseweb="tooltip"] *,
     div[role="tooltip"] *,
     [data-testid="stTooltipContent"] * {
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         background: transparent !important;
         background-color: transparent !important;
     }
@@ -583,19 +583,19 @@ CUSTOM_CSS = """
     [data-baseweb="modal"] [data-baseweb="modal-content"] {
         background: #FFFFFF !important;
         background-color: #FFFFFF !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         border-radius: 12px !important;
         border: 1px solid #E1E8F0 !important;
     }
     div[role="dialog"] *,
     [data-baseweb="modal"] * {
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         background-color: transparent !important;
     }
     div[role="dialog"] code,
     [data-baseweb="modal"] code {
         background: #F7FBFE !important;
-        color: #1A56E8 !important;
+        color: #1A1A1A !important;
         padding: 2px 6px;
         border-radius: 4px;
     }
@@ -607,7 +607,7 @@ CUSTOM_CSS = """
     [data-testid="stExpander"] summary {
         background: #FFFFFF !important;
         background-color: #FFFFFF !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         border-radius: 10px !important;
     }
     [data-testid="stExpander"] details[open] > summary {
@@ -639,7 +639,7 @@ CUSTOM_CSS = """
     .stCode * {
         background: transparent !important;
         background-color: transparent !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
     }
     [data-testid="stCodeBlock"] pre,
     [data-testid="stCode"] pre,
@@ -648,7 +648,7 @@ CUSTOM_CSS = """
     pre code {
         background: #F7FBFE !important;
         background-color: #F7FBFE !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         font-size: 0.875rem !important;
     }
     /* Кнопка копирования в углу code-block — тоже светлая */
@@ -667,7 +667,7 @@ CUSTOM_CSS = """
     /* Inline-код */
     .stMarkdown code {
         background: #F7FBFE !important;
-        color: #1A56E8 !important;
+        color: #1A1A1A !important;
         padding: 2px 6px;
         border-radius: 4px;
         font-size: 0.9rem;
@@ -677,12 +677,12 @@ CUSTOM_CSS = """
     div[data-testid="stButton"] > button[kind="primary"],
     div[data-testid="stButton"] > button[data-testid="stBaseButton-primary"],
     div[data-testid="stButton"] > button[data-testid="baseButton-primary"] {
-        background: #1A56E8 !important;
-        background-color: #1A56E8 !important;
+        background: #1A1A1A !important;
+        background-color: #1A1A1A !important;
         background-image: none !important;
-        border: 1px solid #1A56E8 !important;
+        border: 1px solid #1A1A1A !important;
         color: #FFFFFF !important;
-        box-shadow: 0 1px 3px rgba(26, 86, 232, 0.20);
+        box-shadow: 0 1px 3px rgba(26, 26, 26, 0.20);
         font-weight: 700 !important;
         padding: 0.85rem 1.5rem !important;
     }
@@ -696,18 +696,18 @@ CUSTOM_CSS = """
     div[data-testid="stButton"] > button[kind="primary"]:hover:not(:disabled),
     div[data-testid="stButton"] > button[data-testid="stBaseButton-primary"]:hover:not(:disabled),
     div[data-testid="stButton"] > button[data-testid="baseButton-primary"]:hover:not(:disabled) {
-        background: #1148C9 !important;
-        background-color: #1148C9 !important;
-        border-color: #1148C9 !important;
+        background: #000000 !important;
+        background-color: #000000 !important;
+        border-color: #000000 !important;
         color: #FFFFFF !important;
-        box-shadow: 0 4px 12px rgba(26, 86, 232, 0.30);
+        box-shadow: 0 4px 12px rgba(26, 26, 26, 0.30);
         transform: translateY(-1px);
     }
     div[data-testid="stButton"] > button[kind="primary"]:disabled,
     div[data-testid="stButton"] > button[data-testid="stBaseButton-primary"]:disabled {
         opacity: 0.45;
         cursor: not-allowed;
-        background: #1A56E8 !important;
+        background: #1A1A1A !important;
     }
 
     /* Кнопка скачивания — зелёный градиент. Покрываем ВСЕ комбинации,
@@ -868,7 +868,7 @@ CUSTOM_CSS = """
         align-items: center;
         justify-content: center;
         font-size: 21px;
-        box-shadow: 0 2px 8px rgba(26, 86, 232, 0.25);
+        box-shadow: 0 2px 8px rgba(26, 26, 26, 0.25);
     }
     .brand-name {
         font-weight: 700;
@@ -893,12 +893,12 @@ CUSTOM_CSS = """
         background: #FFFFFF !important;
         background-color: #FFFFFF !important;
         background-image: none !important;
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         border: 1px solid #C7D3E1 !important;
     }
     [data-testid="stButton"] button:not([kind="primary"]):not([data-testid="stBaseButton-primary"]):not([data-testid="baseButton-primary"]) *,
     [data-testid="stExpander"] [data-testid="stButton"] button * {
-        color: #1E212E !important;
+        color: #1A1A1A !important;
         background: transparent !important;
         background-color: transparent !important;
     }
@@ -906,11 +906,11 @@ CUSTOM_CSS = """
     [data-testid="stExpander"] [data-testid="stButton"] button:hover:not(:disabled) {
         background: #F7FBFE !important;
         background-color: #F7FBFE !important;
-        color: #1A56E8 !important;
-        border-color: #1A56E8 !important;
+        color: #1A1A1A !important;
+        border-color: #1A1A1A !important;
     }
     [data-testid="stButton"] button:not([kind="primary"]):not([data-testid="stBaseButton-primary"]):not([data-testid="baseButton-primary"]):hover:not(:disabled) * {
-        color: #1A56E8 !important;
+        color: #1A1A1A !important;
     }
 
     /* ════════════════════════════════════════════════════════════════
@@ -1160,23 +1160,8 @@ def _build_metrika_only_xlsx(reports, sheet_title: str = '404 из Метрик�
 # ── Шапка ──────────────────────────────────────────────────────────
 
 
-st.markdown("""
-<div class="brand-bar">
-    <div class="brand-logo">🔎</div>
-    <div>
-        <div class="brand-name">Site Checker</div>
-    </div>
-    <div class="brand-sub">проверка доступности сайтов</div>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown(
-    '<p style="color:var(--text-soft);font-size:0.95rem;margin-bottom:1.5rem">'
-    'Автоматическая проверка доступности страниц СМУ, ИМП, МПЭ. '
-    'Главные страницы · Каталог · Категории · Фильтры · Товары · Битые переменные'
-    '</p>',
-    unsafe_allow_html=True,
-)
+st.title('Доступность сайтов')
+st.caption('Ежедневная проверка — СМУ · ИМП · МПЭ')
 
 
 # ── Шаг 1: выбор проекта ───────────────────────────────────────────
