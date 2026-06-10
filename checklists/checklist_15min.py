@@ -340,8 +340,7 @@ CUSTOM_CSS = """
        Рамку и фон даём ТОЛЬКО конечному содержимому.
        ════════════════════════════════════════════════════════════════ */
     div[data-baseweb="popover"],
-    div[data-baseweb="popover"] > div,
-    div[data-baseweb="popover"] > div > div {
+    div[data-baseweb="popover"] div {
         background: transparent !important;
         background-color: transparent !important;
         border: none !important;
@@ -374,8 +373,8 @@ CUSTOM_CSS = """
     /* Сам значок «?» — серый и видимый */
     [data-testid="stTooltipHoverTarget"],
     [data-testid="stTooltipHoverTarget"] svg {
-        color: #8A867F !important;
-        fill: #8A867F !important;
+        color: #5B5853 !important;
+        fill: #5B5853 !important;
         opacity: 1 !important;
         visibility: visible !important;
     }
