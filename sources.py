@@ -280,6 +280,83 @@ def build_plan(
     return Plan(tasks=tasks, selected_subdomains=selected)
 
 
+def build_custom_tasks_typed(
+    urls: list[str],
+    sources: 'Sources | None' = None,
+) -> list[CheckTask]:
+    """
+    Задачи для своего списка URL **в контексте проекта**: тип определяется
+    по адресу. Сначала точное совпадение со списками проекта (категории /
+    фильтры), затем правила пути:
+      /                    → Главная
+      /catalog/            → Каталог
+      …/filter/…           → Фильтр
+      /catalog/x/          → Категория
+      /catalog/x/y(/…)     → Товар
+      прочее               → URL (общая проверка)
+    """
+    known_cats = set(sources.categories) if sources else set()
+    known_filters = set(sources.filters) if sources else set()
+    city_by_host = {s.host: s.city for s in (sources.subdomains if sources else [])}
+
+    tasks = []
+    seen = set()
+    for raw in urls:
+        if not isinstance(raw, str):
+            continue
+        url = raw.strip()
+        if not url or url.startswith('#'):
+            continue
+        if '#' in url:
+            url = url.split('#', 1)[0].strip()
+        if not url:
+            continue
+        if not url.startswith(('http://', 'https://')):
+            if '.' in url:
+                url = 'https://' + url
+            else:
+                continue
+        if url in seen:
+            continue
+        seen.add(url)
+
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or ''
+        except ValueError:
+            continue
+
+        path = parsed.path or '/'
+        if not path.endswith('/'):
+            path += '/'
+
+        # ── Тип по адресу ──
+        if path in known_filters or '/filter/' in path:
+            tcode = 'filter'
+        elif path in known_cats:
+            tcode = 'category'
+        elif path == '/':
+            tcode = 'main'
+        elif path == '/catalog/':
+            tcode = 'catalog'
+        elif path.startswith('/catalog/'):
+            segments = [s for s in path.split('/') if s]
+            # /catalog/x/ → категория; /catalog/x/y/ и глубже → товар
+            tcode = 'category' if len(segments) == 2 else 'product'
+        else:
+            tcode = 'custom'
+
+        tasks.append(CheckTask(
+            url=url,
+            city=city_by_host.get(host, ''),
+            subdomain=host,
+            type_code=tcode,
+            type_label=TYPE_LABELS[tcode],
+        ))
+
+    return tasks
+
+
 def build_custom_plan(urls: list[str]) -> Plan:
     """План для произвольного списка URL (custom-режим)."""
     tasks = []

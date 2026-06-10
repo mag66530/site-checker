@@ -24,7 +24,7 @@ import streamlit as st
 
 from sources import (
     list_projects, load_project_config, load_sources,
-    build_plan, build_custom_plan, TYPE_LABELS,
+    build_plan, build_custom_plan, build_custom_tasks_typed, TYPE_LABELS,
 )
 from profiles import PROFILES, get_profile_kwargs
 from history import load_history, save_history
@@ -309,7 +309,7 @@ CUSTOM_CSS = """
     .stTextInput input,
     .stTextArea textarea,
     .stNumberInput input {
-        background: var(--bg) !important;
+        background: var(--bg-elev) !important;
         border: 1px solid var(--border) !important;
         border-radius: 8px !important;
         color: var(--text) !important;
@@ -337,21 +337,54 @@ CUSTOM_CSS = """
     }
 
     /* ════════════════════════════════════════════════════════════════
-       ВЫПАДАЮЩИЙ СПИСОК (popover селекта)
-       Streamlit использует BaseWeb который ставит inline-стили с тёмным
-       фоном (#262730). Перебиваем максимально специфичными селекторами.
+       ВЫПАДАЮЩИЙ СПИСОК и ПОДСКАЗКИ (?)
+       Обёртки popover делаем полностью прозрачными (без рамок/фона),
+       иначе каждый вложенный слой рисует свою рамку → «матрёшка».
+       Рамку и фон даём ТОЛЬКО конечному содержимому.
        ════════════════════════════════════════════════════════════════ */
-    div[data-baseweb="popover"] {
+    div[data-baseweb="popover"],
+    div[data-baseweb="popover"] div {
         background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
     }
-    div[data-baseweb="popover"] > div,
+    /* Выпадающий список — одна белая рамка на самом списке */
     div[data-baseweb="popover"] ul,
     div[data-baseweb="popover"] [role="listbox"] {
         background: #FFFFFF !important;
         background-color: #FFFFFF !important;
-        border: 1px solid #E1E8F0 !important;
+        border: 1px solid #DEDBD4 !important;
         border-radius: 8px !important;
-        box-shadow: 0 8px 24px rgba(30, 33, 46, 0.12) !important;
+        box-shadow: 0 8px 24px rgba(26, 26, 26, 0.12) !important;
+    }
+    /* Подсказка (?) — компонент data-baseweb="tooltip". Всё внутри делаем
+       прозрачным с ПОВЫШЕННОЙ специфичностью (body … *), а единственную
+       рамку вешаем строго на сам текст подсказки (stTooltipContent) с ещё
+       большей специфичностью — поэтому остаётся ровно одно окно. */
+    body div[data-baseweb="tooltip"],
+    body div[data-baseweb="tooltip"] * {
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: #1A1A1A !important;
+    }
+    body div[data-baseweb="tooltip"] [data-testid="stTooltipContent"],
+    [data-testid="stTooltipContent"] {
+        background: #FFFFFF !important;
+        border: 1px solid #DEDBD4 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 8px 24px rgba(26, 26, 26, 0.12) !important;
+        padding: 10px 14px !important;
+    }
+    /* Сам значок «?» — серый и видимый */
+    [data-testid="stTooltipHoverTarget"],
+    [data-testid="stTooltipHoverTarget"] svg {
+        color: #5B5853 !important;
+        fill: #5B5853 !important;
+        opacity: 1 !important;
+        visibility: visible !important;
     }
     /* Каждая опция */
     div[data-baseweb="popover"] li,
@@ -373,8 +406,8 @@ CUSTOM_CSS = """
     div[data-baseweb="popover"] [role="option"]:hover,
     div[data-baseweb="popover"] li[aria-selected="true"],
     div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
-        background: #EEF3FB !important;
-        background-color: #EEF3FB !important;
+        background: #ECEAE4 !important;
+        background-color: #ECEAE4 !important;
         color: #1A1A1A !important;
     }
     div[data-baseweb="popover"] li:hover *,
@@ -423,8 +456,8 @@ CUSTOM_CSS = """
     /* Выбранная карточка профиля */
     [data-testid="stRadio"] label:has(input:checked) {
         border-color: #1A1A1A !important;
-        background: #EEF3FB !important;
-        background-color: #EEF3FB !important;
+        background: #ECEAE4 !important;
+        background-color: #ECEAE4 !important;
     }
     /* Радио-точка (кружок) — фиксированная ширина, не сжимается */
     [data-testid="stRadio"] label > div:first-child {
@@ -991,6 +1024,7 @@ def init_session():
         'run_finished_at': None,
         'custom_urls_text': '',         # содержимое textarea в custom-режиме
         'custom_save_list': False,
+        'use_custom_urls': False,    # чекбокс «Свой список URL» в режиме проекта
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1175,29 +1209,17 @@ with st.container(border=True):
     st.markdown('<h3><span class="step-num">1</span>Какой сайт проверяем</h3>', unsafe_allow_html=True)
 
     projects = list_projects()
-    project_options = ['— выберите —'] + [p['name'] for p in projects] + ['Свой список URL']
+    project_options = ['— выберите —'] + [p['name'] for p in projects]
     project_to_id = {p['name']: p['id'] for p in projects}
-
-    # Подсчёт текущего индекса для select-box
-    current_label = '— выберите —'
-    if st.session_state.project_id == '__custom__':
-        current_label = 'Свой список URL'
-    elif st.session_state.project_id:
-        for p in projects:
-            if p['id'] == st.session_state.project_id:
-                current_label = p['name']
-                break
 
     selected_label = st.selectbox(
         'Проект',
         project_options,
-        index=project_options.index(current_label),
+        key='project_selectbox',
         label_visibility='collapsed',
     )
 
-    if selected_label == 'Свой список URL':
-        new_pid = '__custom__'
-    elif selected_label == '— выберите —':
+    if selected_label == '— выберите —':
         new_pid = None
     else:
         new_pid = project_to_id[selected_label]
@@ -1216,84 +1238,11 @@ is_project = (st.session_state.project_id is not None and not is_custom)
 
 
 # ═══════════════════════════════════════════════════════════════════
-# CUSTOM MODE — свой список URL
+# PROJECT MODE — режим проекта
 # ═══════════════════════════════════════════════════════════════════
 
 
-if is_custom:
-    with st.container(border=True):
-        st.markdown('<h3>Список URL для проверки</h3>', unsafe_allow_html=True)
-        st.caption(
-            'Вставьте ссылки – по одной на строку. Можно загрузить из файла (.txt или .csv). '
-            'Если протокол не указан, добавится https://. Строки после символа # игнорируются.'
-        )
-
-        uploaded = st.file_uploader(
-            'Загрузить .txt / .csv',
-            type=['txt', 'csv'],
-            label_visibility='collapsed',
-        )
-        if uploaded:
-            try:
-                text = uploaded.read().decode('utf-8', errors='replace')
-                # Для CSV — берём первое поле каждой строки
-                if uploaded.name.lower().endswith('.csv'):
-                    lines = []
-                    for line in text.splitlines():
-                        cells = line.split(',') if ',' in line else line.split(';')
-                        first = cells[0].strip().strip('"').strip("'")
-                        lines.append(first)
-                    text = '\n'.join(lines)
-                # Дописываем к существующему
-                existing = st.session_state.custom_urls_text.strip()
-                st.session_state.custom_urls_text = (existing + '\n' + text) if existing else text
-            except Exception as e:
-                st.error(f'Не удалось прочитать файл: {e}')
-
-        custom_text = st.text_area(
-            'URLs',
-            value=st.session_state.custom_urls_text,
-            height=240,
-            label_visibility='collapsed',
-            placeholder='https://example.com/page1\nhttps://example.com/page2\nexample.com/page3',
-            key='custom_urls_input',
-        )
-        if custom_text != st.session_state.custom_urls_text:
-            st.session_state.custom_urls_text = custom_text
-            reset_run_state()
-
-        # Парсим URL'ы из текста
-        custom_plan = build_custom_plan(custom_text.split('\n'))
-        valid_count = len(custom_plan.tasks)
-
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            if valid_count == 0:
-                st.info('Введите URL\'ы')
-            else:
-                st.success(f'Готово к проверке: {valid_count} URL')
-        with col2:
-            save_list = st.checkbox(
-                'Сохранить список',
-                value=st.session_state.custom_save_list,
-                help='Список останется в сессии и появится при следующем открытии',
-            )
-            st.session_state.custom_save_list = save_list
-
-        check_text_custom = st.checkbox(
-            'Искать битые переменные в текстах',
-            value=st.session_state.check_text,
-            help='{{переменная}}, %name%, undefined и [object Object]',
-        )
-        st.session_state.check_text = check_text_custom
-
-
-# ═══════════════════════════════════════════════════════════════════
-# PROJECT MODE — обычный режим с профилями и каталогом
-# ═══════════════════════════════════════════════════════════════════
-
-
-elif is_project:
+if is_project:
     # Загружаем каталог из cache
     try:
         cfg, src = cached_load_sources(st.session_state.project_id)
@@ -1491,6 +1440,69 @@ elif is_project:
                 st.session_state[key] = val
                 reset_run_state()
 
+        use_custom_urls = st.checkbox(
+            '📝 Свой список URL',
+            value=st.session_state.use_custom_urls,
+            help='Проверить дополнительно свои ссылки этого проекта. '
+                 'Тип каждой ссылки определяется по адресу.',
+        )
+        if use_custom_urls != st.session_state.use_custom_urls:
+            st.session_state.use_custom_urls = use_custom_urls
+            reset_run_state()
+
+    # ─── Свой список URL (в контексте проекта) ─────────────────
+    custom_extra_count = 0
+    if st.session_state.use_custom_urls:
+        with st.container(border=True):
+            st.markdown('<h3>Свой список URL</h3>', unsafe_allow_html=True)
+            st.caption(
+                'Ссылки – по одной на строку, можно загрузить из файла (.txt или .csv). '
+                'Тип определяется по адресу: /catalog/x/ — категория, /catalog/x/y/ — товар, '
+                '…/filter/… — фильтр, / — главная. Эти ссылки добавятся к обычной проверке проекта.'
+            )
+
+            uploaded = st.file_uploader(
+                'Загрузить .txt / .csv',
+                type=['txt', 'csv'],
+                label_visibility='collapsed',
+            )
+            if uploaded:
+                try:
+                    text = uploaded.read().decode('utf-8', errors='replace')
+                    if uploaded.name.lower().endswith('.csv'):
+                        lines = []
+                        for line in text.splitlines():
+                            cells = line.split(',') if ',' in line else line.split(';')
+                            first = cells[0].strip().strip('"').strip("'")
+                            lines.append(first)
+                        text = '\n'.join(lines)
+                    existing = st.session_state.custom_urls_text.strip()
+                    st.session_state.custom_urls_text = (existing + '\n' + text) if existing else text
+                except Exception as e:
+                    st.error(f'Не удалось прочитать файл: {e}')
+
+            custom_text = st.text_area(
+                'URLs',
+                value=st.session_state.custom_urls_text,
+                height=200,
+                label_visibility='collapsed',
+                placeholder='https://stalmetural.ru/catalog/armatura/\nhttps://orenburg.stalmetural.ru/catalog/truby/truba-20x20/',
+                key='custom_urls_input',
+            )
+            if custom_text != st.session_state.custom_urls_text:
+                st.session_state.custom_urls_text = custom_text
+                reset_run_state()
+
+            _typed = build_custom_tasks_typed(custom_text.split('\n'), src)
+            custom_extra_count = len(_typed)
+            if custom_extra_count:
+                from collections import Counter as _Counter
+                _by_type = _Counter(t.type_label for t in _typed)
+                _parts = ', '.join(f'{lbl}: {n}' for lbl, n in _by_type.items())
+                st.success(f'Будет добавлено {custom_extra_count} URL — {_parts}')
+            else:
+                st.info('Введите URL\'ы')
+
     # ═══════════════════════════════════════════════════════════════════
     # БЛОК 404 ИЗ МЕТРИКИ — отдельная самодостаточная карточка.
     # Работает БЕЗ запуска полной проверки сайта: можно просто скачать
@@ -1677,15 +1689,13 @@ elif is_project:
 
 if is_project or is_custom:
     can_run = False
-    if is_custom:
-        can_run = valid_count > 0
-    elif is_project:
-        can_run = total_checks > 0
+    if is_project:
+        can_run = total_checks > 0 or custom_extra_count > 0
 
     # Карточка с превью + кнопкой
     with st.container(border=True):
         if is_project:
-            if total_checks == 0:
+            if total_checks == 0 and custom_extra_count == 0:
                 st.warning('Не выбрано ни одного пункта для проверки')
             else:
                 st.markdown(
@@ -1697,7 +1707,10 @@ if is_project or is_custom:
                     f'<strong style="color:var(--accent)">{per_sub} страниц</strong> = '
                     f'<strong style="color:var(--accent)">{total_checks} проверок</strong>'
                     f'</p>'
-                    f'<p style="color:var(--text-soft);font-size:0.9rem;margin-bottom:1rem">'
+                    + (f'<p style="font-size:0.95rem;margin-bottom:0.5rem">'
+                       f'+ <strong style="color:var(--accent)">{custom_extra_count}</strong> своих URL'
+                       f'</p>' if custom_extra_count else '')
+                    + f'<p style="color:var(--text-soft);font-size:0.9rem;margin-bottom:1rem">'
                     f'Примерно <strong>{format_duration(estimated_sec)}</strong>. '
                     f'На больших каталогах или при медленных серверах может быть в 1,5–2 раза дольше.'
                     f'</p>',
@@ -1877,6 +1890,17 @@ if st.session_state.is_running:
                 mandatory_city=cfg.get('mandatory_city', 'Москва'),
                 rotation_history=recent_paths,
             )
+            # Свой список URL — добавляем в план с типом по адресу
+            if st.session_state.use_custom_urls and st.session_state.custom_urls_text.strip():
+                extra = build_custom_tasks_typed(
+                    st.session_state.custom_urls_text.split('\n'), src,
+                )
+                existing_urls = {t.url for t in plan.tasks}
+                extra = [t for t in extra if t.url not in existing_urls]
+                if extra:
+                    plan.tasks.extend(extra)
+                    append_log(f'Свой список URL: добавлено {len(extra)}')
+
             check_text_opt = check_text
             project_id_for_report = st.session_state.project_id
             project_name_for_report = cfg['name']
