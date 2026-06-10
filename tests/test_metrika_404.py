@@ -2,6 +2,8 @@
 import sys
 import tempfile
 from pathlib import Path
+
+import pytest
 sys.path.insert(0, '/home/claude/site-checker-py')
 
 from metrika_404 import (
@@ -104,17 +106,26 @@ def test_is_table_attachment():
     print('✓ is_table_attachment: «таблица» детектится')
 
 
+# Реальные письма Метрики лежали на машине разработчика и в репозиторий
+# не попали — без них эти два теста пропускаются (логика парсинга всё равно
+# покрыта синтетическим xlsx ниже).
+_EMPTY_XLSX = Path('/mnt/user-data/uploads/АЗ_404_отчет_за_25_05_2026__таблица.xlsx')
+_REAL_XLSX = Path('/mnt/user-data/uploads/АЗ_404_отчет_за_24_05_2026__таблица__1_.xlsx')
+
+
+@pytest.mark.skipif(not _EMPTY_XLSX.exists(), reason='нет файла-фикстуры с реальным письмом')
 def test_parse_empty_table_xlsx():
     """Пустой отчёт (как АЗ за 25.05.2026 — 0 строк)."""
-    with open('/mnt/user-data/uploads/АЗ_404_отчет_за_25_05_2026__таблица.xlsx', 'rb') as f:
+    with open(_EMPTY_XLSX, 'rb') as f:
         pages = parse_table_xlsx(f.read())
     assert pages == [], f'Ожидался пустой список, получили {len(pages)} страниц'
     print('✓ Пустая таблица возвращает []')
 
 
+@pytest.mark.skipif(not _REAL_XLSX.exists(), reason='нет файла-фикстуры с реальным письмом')
 def test_parse_real_table_xlsx_structure():
     """Реальный отчёт хотя бы не падает на парсинге."""
-    with open('/mnt/user-data/uploads/АЗ_404_отчет_за_24_05_2026__таблица__1_.xlsx', 'rb') as f:
+    with open(_REAL_XLSX, 'rb') as f:
         pages = parse_table_xlsx(f.read())
     # Не должно упасть, может вернуть пустой список или данные
     assert isinstance(pages, list)

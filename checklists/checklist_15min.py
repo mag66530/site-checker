@@ -28,7 +28,10 @@ from sources import (
 )
 from profiles import PROFILES, get_profile_kwargs
 from history import load_history, save_history
-from sitemap import load_product_pathnames, get_cached_products_info
+from sitemap import (
+    load_product_pathnames, get_cached_products_info, invalidate_sitemap_cache,
+)
+from product_links import load_product_links
 from http_checker import run_batch, STATUS, SPEED
 from reporter import build_report, make_report_filename
 from metrika_404 import (
@@ -1302,7 +1305,9 @@ elif is_project:
 
     # ─── Метрики проекта в одной карточке ─────────────────────
     stats = src.stats
-    # Достаём кеш товаров (если был хоть один прогон с галкой «Товары»)
+    # Источник товаров № 1 — база ссылок, собранных с листингов (в репозитории).
+    # Источник № 2 (fallback) — кеш sitemap (если был прогон с галкой «Товары»).
+    products_base = load_product_links(st.session_state.project_id)
     products_info = get_cached_products_info(st.session_state.project_id)
 
     with st.container(border=True):
@@ -1320,33 +1325,85 @@ elif is_project:
         else:
             c3.metric('Фильтров', 'нет')
 
-        # Товары — динамически из sitemap. Если ещё не загружали — показываем «—»
-        if products_info and products_info['count'] > 0:
+        from datetime import datetime as _dt
+        if products_base and products_base['pathnames']:
+            # База с листингов — главный источник
+            fmt_count = f'{len(products_base["pathnames"]):,}'.replace(',', ' ')
+            d = _dt.fromtimestamp(products_base['collected_at_ms'] / 1000)
+            stale_suffix = ' ⚠' if products_base['is_stale'] else ''
+            c4.metric(
+                'Товаров',
+                fmt_count + stale_suffix,
+                help=f'База товарных ссылок, собранных с листингов всех категорий '
+                     f'({products_base["categories_ok"]} из {products_base["categories_total"]}) '
+                     f'{d.strftime("%d.%m.%Y")}. Хранится в репозитории, '
+                     f'обновляется вручную раз в месяц скриптом collect_products.py. '
+                     f'Через 30 дней база помечается устаревшей (⚠).',
+            )
+        elif products_info and products_info['count'] > 0:
+            # Fallback — кеш sitemap
             fmt_count = f'{products_info["count"]:,}'.replace(',', ' ')
-            from datetime import datetime as _dt
             d = _dt.fromtimestamp(products_info['fetched_at_ms'] / 1000)
             label_suffix = '' if products_info['is_fresh'] else ' (устарел)'
             c4.metric(
                 'Товаров',
                 fmt_count,
                 help=f'По данным sitemap.xml от {d.strftime("%d.%m.%Y %H:%M")}{label_suffix}. '
-                     f'Обновится автоматически при следующем прогоне с галкой «Карточки товаров».',
+                     f'Обновится автоматически при следующем прогоне с галкой «Карточки товаров». '
+                     f'Точнее — база с листингов: соберите её скриптом collect_products.py.',
             )
         else:
             c4.metric(
                 'Товаров',
                 '—',
-                help='Запустите проверку с галкой «Карточки товаров» — '
-                     'приложение загрузит sitemap.xml и покажет здесь число.',
+                help='База товаров ещё не собрана. Либо запустите проверку с галкой '
+                     '«Карточки товаров» (возьмём из sitemap.xml), либо соберите базу '
+                     'с листингов скриптом collect_products.py и закоммитьте её.',
             )
 
-        # Главный город — маленькой подписью внизу карточки
+        # Главный город + предупреждение об устаревшей базе + сброс кэша
         st.markdown(
             f'<p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.5rem;margin-bottom:0">'
             f'Главный город (всегда в выборке): <strong>{cfg.get("mandatory_city", "Москва")}</strong>'
             f'</p>',
             unsafe_allow_html=True,
         )
+
+        if products_base and products_base['is_stale']:
+            st.warning(
+                '⚠ Базе товаров больше 30 дней — пересоберите её: '
+                '`python collect_products.py '
+                f'{st.session_state.project_id}` → коммит в репозиторий.'
+            )
+
+        if (products_base and products_base['pathnames']) or (products_info and products_info['count'] > 0):
+            rc1, rc2 = st.columns([1, 2])
+            with rc1:
+                reset_clicked = st.button(
+                    '♻ Сбросить кэш товаров',
+                    key='btn_reset_products_cache',
+                    help='Очищает локальный кэш приложения: sitemap-кеш и кеш каталога. '
+                         'При следующем прогоне всё перечитается заново '
+                         '(база с листингов — из репозитория, sitemap — с сайта). '
+                         'Сама база в репозитории не удаляется — её обновляет '
+                         'только ручной запуск collect_products.py раз в месяц. '
+                         'Автосброс: sitemap-кеш живёт 24 часа, база с листингов '
+                         'помечается устаревшей через 30 дней.',
+                )
+            with rc2:
+                st.caption(
+                    'Кэш сбрасывается автоматически: sitemap — раз в сутки, '
+                    'база с листингов помечается устаревшей через месяц.'
+                )
+            if reset_clicked:
+                invalidate_sitemap_cache(st.session_state.project_id)
+                cached_load_sources.clear()
+                if st.session_state.sources is not None:
+                    st.session_state.sources.products = []
+                st.session_state['products_cache_reset_done'] = True
+                st.rerun()
+            if st.session_state.pop('products_cache_reset_done', False):
+                st.success('Кэш очищен. При следующем прогоне товары перечитаются заново.')
 
     # ─── Шаг 2: профиль в карточке ───────────────────────────
     with st.container(border=True):
@@ -1770,23 +1827,36 @@ if st.session_state.is_running:
                 except Exception as e:
                     append_log(f'⚠ Не удалось обновить почту: {e}. Продолжаю без свежих 404-данных.')
 
-            # Загружаем sitemap если нужны товары
+            # Загружаем товары если нужны. Источник № 1 — база ссылок с
+            # листингов (catalogs/{proj}-products.csv, собирается вручную раз
+            # в месяц). Если базы нет — fallback на sitemap.xml как раньше.
             if st.session_state.check_products and not src.products:
-                append_log(f'Загружаю sitemap из {cfg.get("sitemap_url")}…')
-                try:
-                    sm = asyncio.run(load_product_pathnames(
-                        cfg,
-                        [c for c in src.categories],
-                        [f for f in src.filters],
-                        log=lambda lvl, msg: append_log(msg),
-                        proxy_url=proxy_url,
-                    ))
-                    src.products = sm.get('pathnames', [])
-                    append_log(f'Из sitemap: {len(src.products)} товаров')
-                    if sm.get('warning'):
-                        append_log(f'⚠ {sm["warning"]}')
-                except Exception as e:
-                    append_log(f'⚠ Не удалось загрузить sitemap: {e}')
+                base_links = load_product_links(st.session_state.project_id)
+                if base_links and base_links['pathnames']:
+                    src.products = base_links['pathnames']
+                    from datetime import datetime as _dtb
+                    _d = _dtb.fromtimestamp(base_links['collected_at_ms'] / 1000)
+                    append_log(
+                        f'Товары из базы листингов: {len(src.products)} '
+                        f'(собрана {_d.strftime("%d.%m.%Y")})'
+                        + (' ⚠ база старше 30 дней' if base_links['is_stale'] else '')
+                    )
+                else:
+                    append_log(f'База листингов не собрана. Загружаю sitemap из {cfg.get("sitemap_url")}…')
+                    try:
+                        sm = asyncio.run(load_product_pathnames(
+                            cfg,
+                            [c for c in src.categories],
+                            [f for f in src.filters],
+                            log=lambda lvl, msg: append_log(msg),
+                            proxy_url=proxy_url,
+                        ))
+                        src.products = sm.get('pathnames', [])
+                        append_log(f'Из sitemap: {len(src.products)} товаров')
+                        if sm.get('warning'):
+                            append_log(f'⚠ {sm["warning"]}')
+                    except Exception as e:
+                        append_log(f'⚠ Не удалось загрузить sitemap: {e}')
 
             # Загружаем историю ротации
             history = load_history(st.session_state.project_id)
@@ -1826,8 +1896,16 @@ if st.session_state.is_running:
                 counters['warn'] += 1
             else:
                 counters['err'] += 1
-            # Не обновляем UI на каждый чек — Streamlit сам выводит в конце
-            # (обновление UI в async-функции из Streamlit делать тяжело)
+            # on_progress зовётся из того же потока, что и скрипт (asyncio.run
+            # блокирует его), поэтому обновлять виджеты отсюда безопасно.
+            try:
+                progress_bar.progress(
+                    min(1.0, done / max(total_n, 1)),
+                    text=f'Проверено {done} из {total_n} — '
+                         f'✅ {counters["ok"]} · ⚠ {counters["warn"]} · ❌ {counters["err"]}',
+                )
+            except Exception:
+                pass
 
         results = asyncio.run(run_check_async(
             project_id_for_report,
@@ -2023,12 +2101,15 @@ if st.session_state.run_results and not st.session_state.is_running:
     warn_count = sum(1 for r in results if r.is_warning)
     err_count = total - ok_count - warn_count
     text_issues_count = sum(len(r.text_issues) for r in results if r.has_text_issues)
+    content_bugs_count = sum(getattr(r, 'content_bugs', 0) or 0 for r in results)
+    content_bug_pages = [r for r in results if getattr(r, 'has_content_bugs', False)]
     duration = (st.session_state.run_finished_at - st.session_state.run_started_at) // 1000
 
     # ─── Главная карточка результатов ─────────────────────────
     with st.container(border=True):
         # Зелёная плашка с заголовком
-        any_problems = err_count > 0 or warn_count > 0 or text_issues_count > 0
+        any_problems = (err_count > 0 or warn_count > 0
+                        or text_issues_count > 0 or content_bugs_count > 0)
         if not any_problems:
             st.markdown(
                 f'<div style="background:linear-gradient(180deg, rgba(80, 227, 194, 0.10) 0%, transparent 100%);'
@@ -2047,6 +2128,11 @@ if st.session_state.run_results and not st.session_state.is_running:
                 problems_summary.append(f'{warn_count} с предупреждениями')
             if text_issues_count > 0:
                 problems_summary.append(f'{text_issues_count} битых переменных')
+            if content_bugs_count > 0:
+                problems_summary.append(
+                    f'{content_bugs_count} проблем в контенте '
+                    f'на {len(content_bug_pages)} стр.'
+                )
             st.markdown(
                 f'<div style="background:linear-gradient(180deg, rgba(245, 166, 35, 0.10) 0%, transparent 100%);'
                 f'border-left:3px solid var(--warn);padding:14px 18px;border-radius:8px;margin-bottom:1rem">'
@@ -2058,11 +2144,17 @@ if st.session_state.run_results and not st.session_state.is_running:
             )
 
         # Метрики
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric('Всего', total)
         c2.metric('✅ Работает', ok_count)
         c3.metric('⚠ Предупреждений', warn_count)
         c4.metric('❌ Не работает', err_count, delta_color='inverse')
+        c5.metric(
+            '🧩 Контент', content_bugs_count,
+            help='Структурные проблемы: на странице нет обязательного блока — '
+                 'цены, кнопки заказа, H1, шапки… Подробности — в списке проблем '
+                 'ниже и на листе «Структура страниц» в xlsx.',
+        )
 
         # ─── ВЫДЕЛЕННАЯ кнопка скачивания ─────────────────────
         if st.session_state.run_report_path:
@@ -2095,7 +2187,11 @@ if st.session_state.run_results and not st.session_state.is_running:
                 )
 
     # ─── Список проблем в отдельной карточке ──────────────
-    problems = [r for r in results if r.is_error or r.is_warning or r.has_text_issues]
+    problems = [
+        r for r in results
+        if r.is_error or r.is_warning or r.has_text_issues
+        or getattr(r, 'has_content_bugs', False)
+    ]
     if problems:
         with st.container(border=True):
             st.markdown(
@@ -2113,13 +2209,21 @@ if st.session_state.run_results and not st.session_state.is_running:
                 'timeout': 'Нет ответа',
                 'network_error': 'Нет соединения',
             }
+            # Подпись типа страницы: для категорий/тегов уточняем по факту
+            # наполнения — листинг или раздел-витрина (как в xlsx-отчёте).
+            page_kind_labels = {'listing': 'Листинг', 'section': 'Раздел каталога',
+                                'empty': 'Пустой раздел'}
             for r in problems[:50]:
+                has_struct = getattr(r, 'has_content_bugs', False)
                 if r.is_error:
                     emoji = '❌'
                     color = 'var(--err)'
                 elif r.is_warning:
                     emoji = '⚠️'
                     color = 'var(--warn)'
+                elif has_struct:
+                    emoji = '🧩'
+                    color = 'var(--err)'
                 else:
                     emoji = '🔤'
                     color = 'var(--warn)'
@@ -2127,12 +2231,20 @@ if st.session_state.run_results and not st.session_state.is_running:
                 status_text = status_labels.get(r.status, r.status)
                 extra = ''
                 if r.has_text_issues:
-                    extra = f' · <span style="color:var(--warn)">{len(r.text_issues)} битых переменных</span>'
+                    extra += f' · <span style="color:var(--warn)">{len(r.text_issues)} битых переменных</span>'
+                if has_struct and r.content is not None:
+                    missing = ', '.join(b.label for b in r.content.bugs)
+                    extra += f' · <span style="color:var(--err)">нет: {missing}</span>'
+
+                type_label = r.type_label
+                kind = getattr(getattr(r, 'content', None), 'page_kind', '')
+                if kind in page_kind_labels:
+                    type_label = page_kind_labels[kind]
 
                 city_part = f'[{r.city}] ' if r.city else ''
                 st.markdown(
                     f'<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:0.92rem">'
-                    f'{emoji} <strong>{city_part}</strong>{r.type_label}: '
+                    f'{emoji} <strong>{city_part}</strong>{type_label}: '
                     f'<a href="{r.url}" target="_blank" style="color:var(--accent);text-decoration:none">{r.url}</a> '
                     f'— <span style="color:{color}">{status_text}</span>{extra}'
                     f'</div>',

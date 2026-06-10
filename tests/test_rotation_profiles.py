@@ -165,8 +165,11 @@ def test_build_plan_with_rotation():
     cfg = load_project_config('smu')
     src = load_sources(cfg)
 
-    # "Недавно проверены" — первая половина категорий
-    recent = set(src.categories[:1500])
+    # "Недавно проверены" — первая половина категорий.
+    # Именно половина ОТ ФАКТИЧЕСКОГО размера каталога: раньше тут стояло
+    # фиксированное 1500, а в каталоге СМУ категорий меньше — в recent
+    # попадало всё, и «свежих» не оставалось вовсе.
+    recent = set(src.categories[:len(src.categories) // 2])
 
     # Прогоняем 5 раз с разными seed-ами и считаем
     fresh_total = 0

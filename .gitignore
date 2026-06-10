@@ -1,0 +1,13 @@
+# Кеш приложения (sitemap, история ротации) — пересоздаётся сам
+cache/
+
+# Сохранённые xlsx-отчёты прогонов
+reports/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Streamlit secrets — никогда не коммитить
+.streamlit/secrets.toml

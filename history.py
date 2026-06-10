@@ -21,8 +21,15 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent
 CACHE_DIR = PROJECT_ROOT / 'cache'
 
-# Помним 7 дней
+# Окно ротации по умолчанию (ежедневный чек-лист) — 7 дней
 HISTORY_TTL_MS = 7 * 24 * 3600 * 1000
+
+# Окно ротации еженедельного чек-листа — 30 дней: прогоны идут раз в неделю,
+# и чтобы выборки соседних недель не пересекались, помнить надо дольше недели.
+WEEKLY_TTL_MS = 30 * 24 * 3600 * 1000
+
+# Сколько храним записи на диске. Должно покрывать самое длинное окно.
+RETENTION_MS = WEEKLY_TTL_MS
 
 # Вес "недавно проверенного" URL: 30% от обычного.
 # То есть он не исключается полностью, но в 3 раза реже попадает в выборку.
@@ -33,8 +40,12 @@ def _history_path(project_id: str) -> Path:
     return CACHE_DIR / f'history-{project_id}.json'
 
 
-def load_history(project_id: str) -> dict:
-    """Загрузить историю проверенных URL для проекта."""
+def load_history(project_id: str, ttl_ms: int = HISTORY_TTL_MS) -> dict:
+    """
+    Загрузить историю проверенных URL для проекта.
+    ttl_ms — окно ротации: записи старше отсекаются. 7 дней для ежедневного
+    чек-листа, WEEKLY_TTL_MS (30 дней) для еженедельного.
+    """
     p = _history_path(project_id)
     if not p.exists():
         return {}
@@ -46,15 +57,16 @@ def load_history(project_id: str) -> dict:
 
     # Чистим устаревшие записи (старше TTL)
     now_ms = time.time() * 1000
-    return {url: ts for url, ts in data.items() if now_ms - ts < HISTORY_TTL_MS}
+    return {url: ts for url, ts in data.items() if now_ms - ts < ttl_ms}
 
 
 def save_history(project_id: str, urls_just_checked: list[str]) -> None:
     """
     Обновить историю: записать что эти URL только что проверены.
-    Старые записи (>7 дней) при загрузке отсекаются автоматически.
+    На диске записи живут RETENTION_MS (30 дней), чтобы покрыть и недельное,
+    и месячное окно ротации; каждое чтение фильтрует по своему ttl_ms.
     """
-    history = load_history(project_id)
+    history = load_history(project_id, ttl_ms=RETENTION_MS)
     now_ms = int(time.time() * 1000)
     for url in urls_just_checked:
         history[url] = now_ms

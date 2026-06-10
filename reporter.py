@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 
@@ -162,7 +163,8 @@ def _build_structure_sheet(wb, results):
     c = ws['B3']
     c.value = ('Проверяем, что на каждой странице есть всё нужное для продаж: заголовок, хлебные '
                'крошки, цена, кнопки заказа, формы. Красным помечено то, что НУЖНО ЧИНИТЬ. '
-               'Серым прочерком — то, чего просто нет (это не ошибка).')
+               'Серым прочерком — то, чего просто нет (это не ошибка). '
+               'Наведите курсор на заголовок столбца — всплывёт пояснение, что именно проверяется.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 30
@@ -232,7 +234,10 @@ def _build_structure_sheet(wb, results):
         group_pages = [r for r in pages if predicate(r)]
         if not group_pages:
             continue
-        block_defs = [(b.key, b.label) for b in group_pages[0].content.blocks]
+        block_defs = [
+            (b.key, b.label, getattr(b, 'description', ''))
+            for b in group_pages[0].content.blocks
+        ]
         n_cols = len(block_defs)
         g_bugs = sum(r.content_bugs for r in group_pages)
 
@@ -247,16 +252,22 @@ def _build_structure_sheet(wb, results):
         ws.row_dimensions[row].height = 22
         row += 1
 
-        # Шапка таблицы
-        headers = ['Город', 'Открыть', 'Проблем'] + [lbl for _, lbl in block_defs]
+        # Шапка таблицы. К каждому столбцу проверки — комментарий с
+        # объяснением, что конкретно проверяется (наведите мышь на заголовок).
+        headers = (
+            [('Город', ''), ('Открыть', ''), ('Проблем', '')]
+            + [(lbl, desc) for _, lbl, desc in block_defs]
+        )
         hdr_row = row
-        for ci, h in enumerate(headers, start=2):
+        for ci, (h, desc) in enumerate(headers, start=2):
             cell = ws.cell(row=hdr_row, column=ci)
             cell.value = h
             cell.font = _font(size=9, bold=True, color=C.text_muted)
             cell.fill = _fill(C.surface)
             cell.alignment = _align(horizontal='center', wrap=True, indent=0)
             cell.border = _border()
+            if desc:
+                cell.comment = Comment(desc, 'Site Checker', height=120, width=260)
         ws.row_dimensions[hdr_row].height = 56
         row += 1
 
@@ -284,7 +295,7 @@ def _build_structure_sheet(wb, results):
             pc.fill = _fill(C.err_soft) if r.content_bugs else _fill(C.bg_elev)
             pc.border = _border(color=C.border_light)
 
-            for bi, (bkey, _lbl) in enumerate(block_defs):
+            for bi, (bkey, _lbl, _desc) in enumerate(block_defs):
                 cell = ws.cell(row=row, column=5 + bi)
                 cell.alignment = _align(horizontal='center', indent=0)
                 cell.border = _border(color=C.border_light)
