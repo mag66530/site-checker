@@ -148,6 +148,28 @@ def _d_price(c: _Ctx):
     return present, None
 
 
+def _d_price_real(c: _Ctx):
+    # Настоящая цена — число с ₽/руб.
+    return bool(_PRICE_RE.search(c.text)), None
+
+
+def _d_price_request(c: _Ctx):
+    # «Цена по запросу» — товар без цены (свёрстано с неразрывным пробелом).
+    return 'по запросу' in c.text_lower, None
+
+
+def _d_tag_tiles(c: _Ctx):
+    # Плитка тегов «Часто ищут» — блок ссылок-тегов на популярные подборки.
+    present = (
+        'часто ищут' in c.text_lower
+        or 'tag-cloud' in c.html_lower
+        or 'tags-block' in c.html_lower
+        or 'popular-tags' in c.html_lower
+        or 'seo-tags' in c.html_lower
+    )
+    return present, None
+
+
 def _d_btn_cart(c: _Ctx):
     # «В корзину»: СМУ — иконка-корзина (an-ico-basket), текст в <noindex>;
     # ИМП — кнопка add-to-cart-btn; МПЭ — popup_form («Заявка», «Расчитать
@@ -327,10 +349,21 @@ _COMMON = [
     _b('seo_text',    'SEO-текст',        False, _d_seo_text),
 ]
 
-# Блоки страницы-списка (категория / тег)
+# Общие блоки каталога-корня — БЕЗ H2 (на лендинге каталога подзаголовки не нужны)
+_COMMON_CATALOG = [
+    _b('h1',          'Заголовок H1',     True,  _d_h1),
+    _b('breadcrumbs', 'Хлебные крошки',   True,  _d_breadcrumbs),
+    _b('header',      'Шапка сайта',      True,  _d_header),
+    _b('footer',      'Подвал сайта',     True,  _d_footer),
+    _b('seo_text',    'SEO-текст',        False, _d_seo_text),
+]
+
+# ЛИСТИНГ — страница-список С ТОВАРАМИ: полная товарная проверка.
 _LISTING = [
     _b('product_cards', 'Карточки товаров',          True,  _d_product_cards),
-    _b('price',         'Цена',                       True,  _d_price),
+    _b('price',         'Цена (есть)',                True,  _d_price),
+    _b('price_real',    'Цена в рублях',              False, _d_price_real),
+    _b('price_request', 'Цена по запросу',            False, _d_price_request),
     _b('btn_order',     'Кнопка заказа',              True,  _d_btn_order_listing),
     _b('btn_cart',      'Кнопка «В корзину»',         False, _d_btn_cart),
     _b('btn_oneclick',  'Кнопка «Купить в 1 клик»',   False, _d_btn_oneclick),
@@ -338,14 +371,31 @@ _LISTING = [
     _b('filters',       'Фильтры',                    False, _d_filters),
     _b('sort',          'Сортировка',                 False, _d_sort),
     _b('pagination',    'Пагинация',                  False, _d_pagination),
+    _b('tag_tiles',     'Плитка тегов (часто ищут)',  False, _d_tag_tiles),
     _b('form_nf',       'Форма «Не нашли что искали»', True,  _d_form_not_found),
     _b('reviews',       'Отзывы',                     False, _d_reviews),
     _b('faq',           'FAQ',                        False, _d_faq),
 ]
 
+# РАЗДЕЛ — витрина подкатегорий, БЕЗ товаров. Товарные блоки не проверяем вообще
+# (на разделе нет ни карточек, ни цен, ни кнопок заказа, ни фильтров/сортировки).
+_SECTION = [
+    _b('tag_tiles',     'Плитка тегов (часто ищут)',  False, _d_tag_tiles),
+    _b('form_nf',       'Форма «Не нашли что искали»', True,  _d_form_not_found),
+]
+
+# ПУСТОЙ РАЗДЕЛ — «Раздел пуст.»: ни товаров, ни подкатегорий → это БАГ.
+_EMPTY = [
+    _b('product_cards', 'Карточки товаров',           True,  _d_product_cards),
+    _b('tag_tiles',     'Плитка тегов (часто ищут)',  False, _d_tag_tiles),
+    _b('form_nf',       'Форма «Не нашли что искали»', True,  _d_form_not_found),
+]
+
 # Блоки карточки товара
 _PRODUCT = [
-    _b('price',         'Цена',                       True,  _d_price),
+    _b('price',         'Цена (есть)',                True,  _d_price),
+    _b('price_real',    'Цена в рублях',              False, _d_price_real),
+    _b('price_request', 'Цена по запросу',            False, _d_price_request),
     _b('btn_order',     'Кнопка заказа',              True,  _d_btn_order_product),
     _b('btn_cart',      'Кнопка «В корзину»',         False, _d_btn_add_cart),
     _b('btn_oneclick',  'Кнопка «Купить в 1 клик»',   False, _d_btn_oneclick),
@@ -356,12 +406,9 @@ _PRODUCT = [
     _b('specs',         'Характеристики',             False, _d_specs),
 ]
 
-# Каталог-лендинг: списка товаров может не быть (показывает категории),
-# поэтому карточки/цены/кнопки тут НЕ обязательны — только базовое.
+# КАТАЛОГ-корень — верхний уровень, показывает разделы. Товарных блоков нет.
 _CATALOG = [
-    _b('product_cards', 'Карточки товаров', False, _d_product_cards),
-    _b('filters',       'Фильтры',          False, _d_filters),
-    _b('sort',          'Сортировка',       False, _d_sort),
+    _b('tag_tiles',     'Плитка тегов (часто ищут)',  False, _d_tag_tiles),
 ]
 
 # Главная: свои блоки, хлебных крошек/H1 строго не требуем
@@ -376,13 +423,17 @@ _MAIN = [
 ]
 
 
-def _profile_for(type_code: str) -> list[_Block]:
+def _profile_for(type_code: str, page_kind: str = '') -> list[_Block]:
     if type_code == 'product':
         return _COMMON + _PRODUCT
     if type_code in ('category', 'filter'):
-        return _COMMON + _LISTING
+        if page_kind == 'listing':
+            return _COMMON + _LISTING
+        if page_kind == 'empty':
+            return _COMMON + _EMPTY
+        return _COMMON + _SECTION          # раздел-витрина
     if type_code == 'catalog':
-        return _COMMON + _CATALOG
+        return _COMMON_CATALOG + _CATALOG
     if type_code == 'main':
         return _COMMON_MAIN + _MAIN
     # custom / неизвестный тип — только базовая структура
@@ -441,26 +492,17 @@ def check_content(html: str, type_code: str) -> ContentResult:
             page_kind = 'section'   # нет явных признаков товаров — мягко, не баг
     result.page_kind = page_kind
 
-    if page_kind == 'section':
-        _soft = {'product_cards', 'price', 'btn_order'}
-    elif page_kind == 'empty':
-        _soft = {'price', 'btn_order'}   # «Карточки товаров» остаётся обязательной → БАГ
-    else:
-        _soft = set()                    # листинг и все прочие типы — строго
-
     # Форма «Не нашли что искали» есть только на СМУ. На ИМП/МПЭ её нет
     # (у ИМП другая форма — «Не нашли ответа на свой вопрос»), поэтому
     # требовать её там нельзя — иначе ложный баг на каждой странице.
     is_smu = 'stalmetural' in ctx.html_lower
 
-    for blk in _profile_for(type_code):
+    for blk in _profile_for(type_code, page_kind):
         try:
             present, count = blk.detect(ctx)
         except Exception:
             present, count = False, None
         required = blk.required
-        if blk.key in _soft:
-            required = False
         if blk.key == 'form_nf' and not is_smu:
             required = False
         # Каталог-корень — верхний уровень иерархии, хлебных крошек там

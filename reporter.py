@@ -115,7 +115,7 @@ def _build_path_description(result) -> str:
 # ── Лист «Структура страниц» ───────────────────────────────────────
 
 # Порядок и подписи групп страниц. Категории/теги делятся по факту наполнения:
-# страница с товарами → «Списки товаров», страница-витрина/пустая → «Разделы каталога».
+# страница с товарами → «Листинг», страница-витрина/пустая → «Разделы каталога».
 def _grp_listing(r):
     return (r.type_code in ('category', 'filter')
             and getattr(r.content, 'page_kind', '') == 'listing')
@@ -129,7 +129,7 @@ def _grp_section(r):
 _STRUCT_GROUPS = [
     ('Главная',           lambda r: r.type_code == 'main'),
     ('Каталог',           lambda r: r.type_code == 'catalog'),
-    ('Списки товаров',    _grp_listing),
+    ('Листинг',           _grp_listing),
     ('Разделы каталога',  _grp_section),
     ('Карточки товаров',  lambda r: r.type_code == 'product'),
     ('Прочие страницы',   lambda r: r.type_code == 'custom'),
