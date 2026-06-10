@@ -13,7 +13,8 @@
   5. Проверка метрики (или GA) — сравнение трафика — руками.
   6. Проверка замены рекламного номера — руками.
 
-Ручные пункты отмечаются галочками; отметки живут в рамках сессии.
+Сейчас вкладка автоматизирует пункты 1–2 (прогон + отправка отчёта).
+Ручная часть (пункты 3–6 чек-листом с галочками) временно убрана.
 """
 import asyncio
 import time
@@ -137,7 +138,44 @@ def split_budget(target_urls: int, cities: int, has_filters: bool) -> dict:
 st.title('Чек-лист 30 мин')
 st.caption(
     'Еженедельная 30-минутная проверка сайта-проекта помощником/джуном. '
-    'Пункты 1–2 приложение выполняет само, пункты 3–6 — руками по списку ниже.'
+    'Доступность, визуальные ошибки и структура — по случайной выборке URL.'
+)
+
+# Локальный CSS только для этой страницы: primary-кнопка («Запустить
+# еженедельную проверку»). app.py красит белым саму кнопку, но текст лежит
+# во вложенном <p>, который глобальное правило перекрашивает в тёмный —
+# получалась чёрная кнопка без видимого текста. Здесь явно белим и текст.
+st.markdown(
+    """
+    <style>
+    div[data-testid="stButton"] > button[kind="primary"],
+    div[data-testid="stButton"] > button[data-testid="stBaseButton-primary"],
+    div[data-testid="stButton"] > button[data-testid="baseButton-primary"] {
+        background: #1A1A1A !important;
+        border: 1px solid #1A1A1A !important;
+        color: #FFFFFF !important;
+    }
+    div[data-testid="stButton"] > button[kind="primary"] *,
+    div[data-testid="stButton"] > button[data-testid="stBaseButton-primary"] *,
+    div[data-testid="stButton"] > button[data-testid="baseButton-primary"] * {
+        color: #FFFFFF !important;
+    }
+    div[data-testid="stButton"] > button[kind="primary"]:hover {
+        background: #000000 !important;
+        border-color: #000000 !important;
+    }
+    /* Зелёная кнопка скачивания отчёта — чтобы не путалась с primary */
+    div[data-testid="stDownloadButton"] > button,
+    div[data-testid="stDownloadButton"] > button * {
+        color: #FFFFFF !important;
+    }
+    div[data-testid="stDownloadButton"] > button {
+        background: #16A34A !important;
+        border: 1px solid #16A34A !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 
@@ -474,50 +512,5 @@ if pid:
                 if len(problems) > 50:
                     st.caption(f'... и ещё {len(problems) - 50}. Все детали — в xlsx-отчёте.')
 
-    # ── Пункты 2–6: ручная часть чек-листа ──────────────────────────
-    manual_items = [
-        ('p2', '**2. Отправка ошибок ответственным**',
-         'Отчёт уходит в Telegram автоматически после прогона (если настроен бот). '
-         'Если нет — скачайте xlsx выше и отправьте seo-специалисту проекта '
-         'и руководителю проекта.'),
-        ('p3', '**3. Почта проекта и уведомления**',
-         'Зайти в Яндекс- и Google-почту проекта; просмотреть уведомления '
-         'Вебмастера, Метрики и Google Search Console.'),
-        ('p4', '**4. Вебмастер и GSC: ошибки**',
-         'Сайтмапы, дубли, мусорные ссылки в донорах. Найденное локализовать; '
-         'рядовые исправления прокликать; о критических ошибках немедленно '
-         'сообщить seo-специалисту и руководителю проекта. '
-         '[Яндекс Вебмастер](https://webmaster.yandex.ru) · '
-         '[Search Console](https://search.google.com/search-console)'),
-        ('p5', '**5. Метрика / GA: трафик**',
-         'Сравнить трафик день-к-дню, месяц-к-месяцу, год-к-году. '
-         'Резкие провалы — сразу сообщить ответственным. '
-         '[Метрика](https://metrika.yandex.ru)'),
-        ('p6', '**6. Замена рекламного номера**',
-         'Открыть сайт с рекламной UTM-меткой и убедиться, что подменный '
-         'номер телефона подставляется.'),
-    ]
-
-    with st.container(border=True):
-        st.markdown('### Ручная часть чек-листа')
-        st.caption('Отметки живут в рамках сессии — на один еженедельный проход.')
-        done_count = 0
-        for key, title, desc in manual_items:
-            checked = st.checkbox(title, key=f'c30_{pid}_{key}')
-            st.markdown(
-                f'<p style="color:var(--text-soft);font-size:0.9rem;'
-                f'margin:-0.4rem 0 0.8rem 1.9rem">{desc}</p>',
-                unsafe_allow_html=True,
-            )
-            if checked:
-                done_count += 1
-
-        run_done = bool(st.session_state.c30_results)
-        total_items = len(manual_items) + 1   # + сам прогон (пункт 1)
-        st.progress(
-            (done_count + (1 if run_done else 0)) / total_items,
-            text=f'Выполнено {done_count + (1 if run_done else 0)} из {total_items} '
-                 f'(пункт 1 засчитывается после прогона)',
-        )
 else:
     st.info('Выберите проект, чтобы начать еженедельную проверку.')
