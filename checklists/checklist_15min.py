@@ -306,7 +306,7 @@ CUSTOM_CSS = """
     .stTextInput input,
     .stTextArea textarea,
     .stNumberInput input {
-        background: var(--bg) !important;
+        background: var(--bg-elev) !important;
         border: 1px solid var(--border) !important;
         border-radius: 8px !important;
         color: var(--text) !important;

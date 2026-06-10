@@ -75,9 +75,6 @@ st.markdown(
         background: #FFFFFF !important; border-radius: 10px !important;
         border-color: rgba(26,26,26,.14) !important; color: #1A1A1A !important;
     }
-    [data-testid="stNumberInput"] button {
-        background: #FFFFFF !important; border-color: rgba(26,26,26,.14) !important;
-    }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
     /* Карточки-контейнеры (с рамкой) — белые, чтобы блоки не сливались с фоном */
