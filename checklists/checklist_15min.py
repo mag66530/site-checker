@@ -355,20 +355,28 @@ CUSTOM_CSS = """
         border-radius: 8px !important;
         box-shadow: 0 8px 24px rgba(26, 26, 26, 0.12) !important;
     }
-    /* Подсказка (?) — одна белая рамка на самом тексте подсказки */
-    [data-testid="stTooltipContent"] {
+    /* Подсказка (?) — это ОТДЕЛЬНЫЙ компонент data-baseweb="tooltip",
+       а не popover. Рамку даём ТОЛЬКО внешней обёртке, всё внутри
+       (включая stTooltipContent и любые вложенные div) — без рамок,
+       фона и теней. Так не будет «матрёшки». */
+    div[data-baseweb="tooltip"] {
         background: #FFFFFF !important;
         border: 1px solid #DEDBD4 !important;
         border-radius: 10px !important;
         box-shadow: 0 8px 24px rgba(26, 26, 26, 0.12) !important;
-        color: #1A1A1A !important;
-        padding: 10px 14px !important;
+        padding: 0 !important;
     }
+    div[data-baseweb="tooltip"] *,
+    [data-testid="stTooltipContent"],
     [data-testid="stTooltipContent"] * {
         background: transparent !important;
+        background-color: transparent !important;
         border: none !important;
         box-shadow: none !important;
         color: #1A1A1A !important;
+    }
+    [data-testid="stTooltipContent"] {
+        padding: 10px 14px !important;
     }
     /* Сам значок «?» — серый и видимый */
     [data-testid="stTooltipHoverTarget"],
