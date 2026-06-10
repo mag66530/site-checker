@@ -80,6 +80,13 @@ st.markdown(
     }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
+    /* Карточки-контейнеры (с рамкой) — белые, чтобы блоки не сливались с фоном */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        background: #FFFFFF !important;
+        border: 1px solid #DEDBD4 !important;
+        border-radius: 12px !important;
+    }
+
     /* Expander */
     [data-testid="stExpander"] {
         background: #FFFFFF; border: 1px solid rgba(26,26,26,.12); border-radius: 12px;
