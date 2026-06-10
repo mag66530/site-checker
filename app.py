@@ -75,6 +75,19 @@ st.markdown(
         background: #FFFFFF !important; border-radius: 10px !important;
         border-color: rgba(26,26,26,.14) !important; color: #1A1A1A !important;
     }
+    /* Кнопки-стрелки +/− — мягкие, в тон теме (не чёрные) */
+    [data-testid="stNumberInput"] button {
+        background: #ECEAE4 !important;
+        border: 1px solid rgba(26,26,26,.12) !important;
+        color: #1A1A1A !important;
+    }
+    [data-testid="stNumberInput"] button:hover {
+        background: #DEDBD4 !important;
+    }
+    [data-testid="stNumberInput"] button svg,
+    [data-testid="stNumberInput"] button svg path {
+        fill: #1A1A1A !important; stroke: #1A1A1A !important;
+    }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
     /* Карточки-контейнеры (с рамкой) — белые, чтобы блоки не сливались с фоном */

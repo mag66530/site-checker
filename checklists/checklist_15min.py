@@ -334,14 +334,20 @@ CUSTOM_CSS = """
     }
 
     /* ════════════════════════════════════════════════════════════════
-       ВЫПАДАЮЩИЙ СПИСОК (popover селекта)
-       Streamlit использует BaseWeb который ставит inline-стили с тёмным
-       фоном (#262730). Перебиваем максимально специфичными селекторами.
+       ВЫПАДАЮЩИЙ СПИСОК и ПОДСКАЗКИ (?)
+       Обёртки popover делаем полностью прозрачными (без рамок/фона),
+       иначе каждый вложенный слой рисует свою рамку → «матрёшка».
+       Рамку и фон даём ТОЛЬКО конечному содержимому.
        ════════════════════════════════════════════════════════════════ */
-    div[data-baseweb="popover"] {
+    div[data-baseweb="popover"],
+    div[data-baseweb="popover"] > div,
+    div[data-baseweb="popover"] > div > div {
         background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
     }
-    div[data-baseweb="popover"]:has([role="listbox"]) > div,
+    /* Выпадающий список — одна белая рамка на самом списке */
     div[data-baseweb="popover"] ul,
     div[data-baseweb="popover"] [role="listbox"] {
         background: #FFFFFF !important;
@@ -350,18 +356,28 @@ CUSTOM_CSS = """
         border-radius: 8px !important;
         box-shadow: 0 8px 24px rgba(26, 26, 26, 0.12) !important;
     }
-    /* Подсказки (?) — один аккуратный бокс, без «матрёшки» */
-    div[data-baseweb="popover"]:not(:has([role="listbox"])) > div {
+    /* Подсказка (?) — одна белая рамка на самом тексте подсказки */
+    [data-testid="stTooltipContent"] {
         background: #FFFFFF !important;
         border: 1px solid #DEDBD4 !important;
         border-radius: 10px !important;
         box-shadow: 0 8px 24px rgba(26, 26, 26, 0.12) !important;
+        color: #1A1A1A !important;
+        padding: 10px 14px !important;
     }
-    div[data-baseweb="popover"]:not(:has([role="listbox"])) > div div {
+    [data-testid="stTooltipContent"] * {
         background: transparent !important;
-        background-color: transparent !important;
         border: none !important;
         box-shadow: none !important;
+        color: #1A1A1A !important;
+    }
+    /* Сам значок «?» — серый и видимый */
+    [data-testid="stTooltipHoverTarget"],
+    [data-testid="stTooltipHoverTarget"] svg {
+        color: #8A867F !important;
+        fill: #8A867F !important;
+        opacity: 1 !important;
+        visibility: visible !important;
     }
     /* Каждая опция */
     div[data-baseweb="popover"] li,
