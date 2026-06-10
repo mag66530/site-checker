@@ -1175,20 +1175,10 @@ with st.container(border=True):
     project_options = ['— выберите —'] + [p['name'] for p in projects] + ['Свой список URL']
     project_to_id = {p['name']: p['id'] for p in projects}
 
-    # Подсчёт текущего индекса для select-box
-    current_label = '— выберите —'
-    if st.session_state.project_id == '__custom__':
-        current_label = 'Свой список URL'
-    elif st.session_state.project_id:
-        for p in projects:
-            if p['id'] == st.session_state.project_id:
-                current_label = p['name']
-                break
-
     selected_label = st.selectbox(
         'Проект',
         project_options,
-        index=project_options.index(current_label),
+        key='project_selectbox',
         label_visibility='collapsed',
     )
 
