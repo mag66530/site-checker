@@ -74,6 +74,29 @@ class ContentResult:
 _PRICE_RE = re.compile(r'\d[\d\s\u00a0]{0,12}(?:₽|руб)', re.IGNORECASE)
 _PHONE_RE = re.compile(r'\+7[\s\-(]?\d{3}')
 _EMAIL_RE = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
+# Адрес: уличные маркеры (улица/ул./проспект/шоссе/переулок/набережная/бульвар)
+_ADDRESS_RE = re.compile(
+    r'\bул\.?\b|улиц|проспект|пр-?к?т|шоссе|переул|\bпер\.|набережн|наб\.|бульвар',
+    re.IGNORECASE,
+)
+
+
+def _extract_region(html: str, tag: str, side: str, fallback_frac: float = 0.28) -> str:
+    """
+    Вырезать HTML-регион шапки/подвала.
+
+    Сначала пробуем семантический тег <header>/<footer> (есть на СМУ и
+    большинстве современных сайтов). Если тега нет — берём приблизительный
+    регион по положению: шапка ≈ начало страницы, подвал ≈ конец. Этого
+    достаточно: нужные маркеры (телефон, «оставить заявку», адрес…) в
+    середине листинга не встречаются.
+    """
+    m = re.search(rf'<{tag}\b[^>]*>(.*?)</{tag}>', html, re.IGNORECASE | re.DOTALL)
+    if m:
+        return m.group(0)
+    n = len(html)
+    cut = max(1, int(n * fallback_frac))
+    return html[:cut] if side == 'top' else html[-cut:]
 
 
 def _count_tag(html_lower: str, tag: str) -> int:
@@ -97,6 +120,16 @@ class _Ctx:
     html_lower: str
     text: str
     text_lower: str
+    # Регионы шапки/подвала — чтобы проверять «телефон в шапке» и «телефон в
+    # подвале» по отдельности, а не «телефон где-то на странице».
+    # *_html — сырой HTML региона (телефон/почту ищем тут: там tel:/mailto:),
+    # *_text — видимый текст (текстовые кнопки/метки ищем тут).
+    header_html: str = ''
+    header_text: str = ''
+    header_text_lower: str = ''
+    footer_html: str = ''
+    footer_text: str = ''
+    footer_text_lower: str = ''
 
 
 # ── Детекторы. Возвращают (present: bool, count: Optional[int]) ──────
@@ -122,19 +155,71 @@ def _d_breadcrumbs(c: _Ctx):
     return present, None
 
 
-def _d_header(c: _Ctx):
+# ── Шапка: обязательные элементы (проверяются ВНУТРИ региона шапки) ──
+# По требованию: в шапке должны быть телефон, «заказать звонок»,
+# «оставить заявку» и выбор города.
+
+
+def _d_hdr_phone(c: _Ctx):
+    # Сырой HTML региона: ловит и tel:-ссылку, и форматированный «+7 (499)…».
+    return bool(_PHONE_RE.search(c.header_html)), None
+
+
+def _d_hdr_callback(c: _Ctx):
+    t = c.header_text_lower
     present = (
-        _has_tag(c.html_lower, 'header')
-        or ('каталог' in c.text_lower and 'корзин' in c.text_lower)
+        'заказать звонок' in t
+        or 'обратный звонок' in t
+        or 'заказать обратный' in t
+        or 'перезвоните мне' in t
     )
     return present, None
 
 
-def _d_footer(c: _Ctx):
+def _d_hdr_request(c: _Ctx):
+    t = c.header_text_lower
     present = (
-        _has_tag(c.html_lower, 'footer')
-        or (bool(_PHONE_RE.search(c.text)) and bool(_EMAIL_RE.search(c.text)))
+        'оставить заявку' in t
+        or 'оставить заяв' in t
+        or 'оставьте заявку' in t
     )
+    return present, None
+
+
+def _d_hdr_city(c: _Ctx):
+    t = c.header_text_lower
+    # «Город: Москва изменить», «Ваш город», «выбрать город»
+    present = 'город' in t or 'выбрать город' in t
+    return present, None
+
+
+# ── Подвал: телефон, e-mail, «написать нам», адрес ──
+
+
+def _d_ftr_phone(c: _Ctx):
+    return bool(_PHONE_RE.search(c.footer_html)), None
+
+
+def _d_ftr_email(c: _Ctx):
+    # Сырой HTML: ловит mailto: и текстовый адрес почты.
+    return bool(_EMAIL_RE.search(c.footer_html)), None
+
+
+def _d_ftr_writeus(c: _Ctx):
+    t = c.footer_text_lower
+    present = (
+        'написать нам' in t
+        or 'напишите нам' in t
+        or 'написать письмо' in t
+    )
+    return present, None
+
+
+def _d_ftr_address(c: _Ctx):
+    # Пока — наличие адреса в подвале (метка «Адрес» или уличный маркер).
+    # Сверку конкретного адреса с КП по каждому городу добавим, когда придёт КП.
+    t = c.footer_text_lower
+    present = 'адрес' in t or bool(_ADDRESS_RE.search(c.footer_text))
     return present, None
 
 
@@ -335,8 +420,14 @@ def _d_seo_text(c: _Ctx):
 BLOCK_DESCRIPTIONS = {
     'h1':            'Непустой тег <h1>. Проверяется наличие, не текст. Число = сколько H1 на странице.',
     'breadcrumbs':   'Хлебные крошки: микроразметка BreadcrumbList или класс breadcrumb в вёрстке.',
-    'header':        'Наличие шапки: тег <header>, либо в видимом тексте есть и «Каталог», и «Корзина». Наполнение шапки не проверяется.',
-    'footer':        'Наличие подвала: тег <footer>, либо в тексте есть телефон +7… и email. Наполнение подвала не проверяется.',
+    'hdr_phone':     'Телефон в шапке: номер +7… внутри региона <header>. Обязателен.',
+    'hdr_callback':  'Кнопка «Заказать звонок» (или «обратный звонок») в шапке. Обязательна.',
+    'hdr_request':   'Кнопка «Оставить заявку» в шапке. Обязательна.',
+    'hdr_city':      'Выбор города в шапке («Город: …», «Ваш город»). Обязателен.',
+    'ftr_phone':     'Телефон в подвале: номер +7… внутри региона <footer>. Обязателен.',
+    'ftr_email':     'E-mail в подвале (адрес почты). Обязателен.',
+    'ftr_writeus':   'Кнопка «Написать нам» в подвале. Обязательна.',
+    'ftr_address':   'Адрес в подвале (метка «Адрес» или улица/проспект/шоссе…). Наличие; сверку с КП по городам добавим позже.',
     'h2':            'Количество непустых подзаголовков <h2>. Отсутствие — не баг.',
     'seo_text':      'Текст-описание: хотя бы один абзац <p> длиннее 200 символов.',
     'price':         'Цена в любом виде: число с ₽/руб ИЛИ «по запросу». Если нет ни того ни другого — баг.',
@@ -375,12 +466,26 @@ def _b(key, label, required, detect):
     return _Block(key, label, required, detect)
 
 
+# Шапка (4 обязательных элемента) и подвал (4) — общий набор для переиспользования
+_HEADER = [
+    _b('hdr_phone',    'Шапка: телефон',         True, _d_hdr_phone),
+    _b('hdr_callback', 'Шапка: заказать звонок', True, _d_hdr_callback),
+    _b('hdr_request',  'Шапка: оставить заявку', True, _d_hdr_request),
+    _b('hdr_city',     'Шапка: город',           True, _d_hdr_city),
+]
+_FOOTER = [
+    _b('ftr_phone',    'Подвал: телефон',      True, _d_ftr_phone),
+    _b('ftr_email',    'Подвал: e-mail',       True, _d_ftr_email),
+    _b('ftr_writeus',  'Подвал: написать нам', True, _d_ftr_writeus),
+    _b('ftr_address',  'Подвал: адрес',        True, _d_ftr_address),
+]
+
 # Общие блоки — есть на любой странице
 _COMMON = [
     _b('h1',          'Заголовок H1',     True,  _d_h1),
     _b('breadcrumbs', 'Хлебные крошки',   True,  _d_breadcrumbs),
-    _b('header',      'Шапка сайта',      True,  _d_header),
-    _b('footer',      'Подвал сайта',     True,  _d_footer),
+    *_HEADER,
+    *_FOOTER,
     _b('h2',          'Подзаголовки H2',  False, _d_h2),
     _b('seo_text',    'SEO-текст',        False, _d_seo_text),
 ]
@@ -389,8 +494,8 @@ _COMMON = [
 _COMMON_CATALOG = [
     _b('h1',          'Заголовок H1',     True,  _d_h1),
     _b('breadcrumbs', 'Хлебные крошки',   True,  _d_breadcrumbs),
-    _b('header',      'Шапка сайта',      True,  _d_header),
-    _b('footer',      'Подвал сайта',     True,  _d_footer),
+    *_HEADER,
+    *_FOOTER,
     _b('seo_text',    'SEO-текст',        False, _d_seo_text),
 ]
 
@@ -447,10 +552,10 @@ _CATALOG = [
     _b('tag_tiles',     'Плитка тегов (часто ищут)',  False, _d_tag_tiles),
 ]
 
-# Главная: свои блоки, хлебных крошек/H1 строго не требуем
+# Главная: шапка и подвал обязательны, хлебных крошек/H1 строго не требуем
 _COMMON_MAIN = [
-    _b('header',  'Шапка сайта', True,  _d_header),
-    _b('footer',  'Подвал сайта', True,  _d_footer),
+    *_HEADER,
+    *_FOOTER,
     _b('h1',      'Заголовок H1', False, _d_h1),
 ]
 _MAIN = [
@@ -497,6 +602,16 @@ def check_content(html: str, type_code: str) -> ContentResult:
         text_lower='',
     )
     ctx.text_lower = ctx.text.lower()
+
+    # Регионы шапки/подвала: сырой HTML (для телефона/почты — там tel:/mailto:)
+    # и видимый текст (для текстовых кнопок и меток). Тег <header>/<footer>,
+    # либо приблизительно начало/конец страницы, если тегов нет.
+    ctx.header_html = _extract_region(html, 'header', 'top')
+    ctx.header_text = html_to_visible_text(ctx.header_html)
+    ctx.header_text_lower = ctx.header_text.lower()
+    ctx.footer_html = _extract_region(html, 'footer', 'bottom')
+    ctx.footer_text = html_to_visible_text(ctx.footer_html)
+    ctx.footer_text_lower = ctx.footer_text.lower()
 
     # Подтип страницы-списка (категория / тег) — определяем по вёрстке:
     #   listing — есть карточки товаров (catalog-product-card-item) → строгая
