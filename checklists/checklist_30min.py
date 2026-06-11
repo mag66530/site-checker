@@ -31,6 +31,17 @@ from product_links import load_product_links
 from http_checker import run_batch
 from reporter import build_report, make_report_filename
 from telegram_notify import format_summary_message, send_run_notification
+from metrika_404 import (
+    MAILBOX_CONFIG,
+    fetch_incremental, get_latest_available_date,
+    load_reports_for_date, load_reports_for_period,
+)
+from webmaster_notify import (
+    WEBMASTER_YANDEX_CONFIG, GSC_GMAIL_CONFIG,
+    PRIORITY_LABELS, PRIORITY_ORDER, CATEGORY_LABELS,
+    fetch_webmaster_yandex, fetch_gsc_gmail,
+    load_notifications, group_by_priority,
+)
 
 PROJECT_ROOT = Path(__file__).parent.parent
 REPORTS_DIR = PROJECT_ROOT / 'reports'
@@ -55,6 +66,20 @@ def get_proxy_url():
         return val
     import os
     return os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy')
+
+
+def get_metrika_credentials(project_id):
+    cfg = MAILBOX_CONFIG.get(project_id)
+    if not cfg:
+        return None, None
+    return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
+
+
+def get_gsc_credentials(project_id):
+    cfg = GSC_GMAIL_CONFIG.get(project_id)
+    if not cfg:
+        return None, None
+    return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
 
 
 def get_telegram_recipients(project_id):
@@ -511,6 +536,210 @@ if pid:
                     )
                 if len(problems) > 50:
                     st.caption(f'... и ещё {len(problems) - 50}. Все детали — в xlsx-отчёте.')
+
+    # ── Пункт 3: уведомления из почты ──────────────────────────────
+    yw_email, yw_password = get_metrika_credentials(pid)
+    gsc_email, gsc_password = get_gsc_credentials(pid)
+    yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
+    has_yw = bool(yw_email and yw_password and yw_cfg)
+    has_gsc = bool(gsc_email and gsc_password)
+    has_metrika = bool(yw_email and yw_password)   # Метрика — тот же ящик
+
+    if has_yw or has_gsc or has_metrika:
+        with st.container(border=True):
+            st.markdown('### 3. Уведомления из почты')
+            st.caption(
+                'Яндекс.Вебмастер, Google Search Console и 404-отчёты Метрики '
+                'за выбранный период — из кеша. Нажмите «Обновить» чтобы '
+                'забрать новые письма.'
+            )
+
+            _col_period, _col_btn = st.columns([1, 1])
+            with _col_period:
+                _nb_period = st.selectbox(
+                    'Период',
+                    ['7 дней', '14 дней', '30 дней'],
+                    index=1,
+                    label_visibility='collapsed',
+                    key='c30_notify_period',
+                )
+            _nb_days = {'7 дней': 7, '14 дней': 14, '30 дней': 30}[_nb_period]
+
+            with _col_btn:
+                _nb_refresh = st.button(
+                    '🔄 Обновить из почты',
+                    key='c30_btn_notify_refresh',
+                    use_container_width=True,
+                )
+
+            # ── Обновление при нажатии ───────────────────────────────
+            if _nb_refresh:
+                _nb_log: list[str] = []
+
+                def _nlog(lvl, msg):
+                    _nb_log.append(msg)
+
+                _steps = (1 if has_yw else 0) + (1 if has_gsc else 0) + (1 if has_metrika else 0)
+                _done = 0
+                _pb = st.progress(0, text='Подключаюсь…')
+
+                if has_yw:
+                    _pb.progress(_done / _steps, text='Яндекс.Вебмастер…')
+                    try:
+                        _r = fetch_webmaster_yandex(
+                            project_id=pid,
+                            email_addr=yw_email,
+                            password=yw_password,
+                            folder=yw_cfg['folder'],
+                            lookback_days=_nb_days,
+                            proxy_url=get_proxy_url(),
+                            log=_nlog,
+                        )
+                        _nlog('info', f'Вебмастер: +{_r["fetched"]} новых')
+                    except Exception as _e:
+                        _nlog('error', f'❌ Вебмастер: {_e}')
+                    _done += 1
+
+                if has_gsc:
+                    _pb.progress(_done / _steps, text='GSC (Gmail)…')
+                    try:
+                        _r = fetch_gsc_gmail(
+                            project_id=pid,
+                            email_addr=gsc_email,
+                            password=gsc_password,
+                            lookback_days=_nb_days,
+                            log=_nlog,
+                        )
+                        _nlog('info', f'GSC: +{_r["fetched"]} новых')
+                    except Exception as _e:
+                        _nlog('error', f'❌ GSC: {_e}')
+                    _done += 1
+
+                if has_metrika:
+                    _pb.progress(_done / _steps, text='Метрика 404…')
+                    try:
+                        _r = fetch_incremental(
+                            project_id=pid,
+                            email_addr=yw_email,
+                            password=yw_password,
+                            folder=MAILBOX_CONFIG[pid]['folder'],
+                            proxy_url=get_proxy_url(),
+                            lookback_days=_nb_days,
+                            log=_nlog,
+                            upgrade_if_better=True,
+                        )
+                        _nlog('info', f'Метрика: +{_r["fetched"]} новых')
+                    except Exception as _e:
+                        _nlog('error', f'❌ Метрика: {_e}')
+                    _done += 1
+
+                _pb.empty()
+                st.success('✅ Обновление завершено')
+                with st.expander('Лог', expanded=False):
+                    st.code('\n'.join(_nb_log[-100:]) or '(пусто)', language='text')
+                st.rerun()
+
+            # ── Рендер уведомлений ───────────────────────────────────
+
+            _P_COLOR = {
+                'critical':       '#DC2626',
+                'important':      '#D97706',
+                'recommendation': '#CA8A04',
+                'info':           '#6B7280',
+            }
+            _P_BG = {
+                'critical':       'rgba(220,38,38,0.07)',
+                'important':      'rgba(217,119,6,0.07)',
+                'recommendation': 'rgba(202,138,4,0.07)',
+                'info':           'rgba(107,114,128,0.07)',
+            }
+
+            def _render_source(notifs, title: str, icon: str):
+                if not notifs:
+                    st.caption(f'Нет уведомлений от {title} за выбранный период')
+                    return
+                groups = group_by_priority(notifs)
+                crit_n = len(groups.get('critical', []))
+                hdr_color = '#DC2626' if crit_n else '#1A1A1A'
+                crit_badge = (
+                    f' <span style="color:#DC2626">({crit_n} критических)</span>'
+                    if crit_n else ''
+                )
+                st.markdown(
+                    f'<p style="font-weight:600;font-size:1rem;color:{hdr_color}">'
+                    f'{icon} {title} — {len(notifs)} уведомлений{crit_badge}</p>',
+                    unsafe_allow_html=True,
+                )
+                for priority in PRIORITY_ORDER:
+                    items = groups.get(priority, [])
+                    if not items:
+                        continue
+                    with st.expander(
+                        f'{PRIORITY_LABELS[priority]} ({len(items)})',
+                        expanded=(priority in ('critical', 'important')),
+                    ):
+                        for n in items:
+                            cat = CATEGORY_LABELS.get(n.category, n.category)
+                            color = _P_COLOR[priority]
+                            bg = _P_BG[priority]
+                            st.markdown(
+                                f'<div style="padding:10px 14px;margin-bottom:8px;'
+                                f'border-left:3px solid {color};border-radius:0 6px 6px 0;'
+                                f'background:{bg}">'
+                                f'<span style="font-size:0.8rem;color:#6B7280">{n.date}</span>'
+                                f' · <span style="font-size:0.8rem;font-weight:600;'
+                                f'color:{color}">{cat}</span>'
+                                f'<p style="margin:4px 0 0 0;font-weight:600;'
+                                f'font-size:0.95rem;color:#1A1A1A">{n.subject}</p>'
+                                + (
+                                    f'<p style="margin:4px 0 0 0;font-size:0.85rem;'
+                                    f'color:#5B5853;white-space:pre-wrap">'
+                                    f'{n.body_preview[:300]}</p>'
+                                    if n.body_preview else ''
+                                )
+                                + '</div>',
+                                unsafe_allow_html=True,
+                            )
+
+            # Яндекс.Вебмастер
+            if has_yw:
+                _render_source(
+                    load_notifications(pid, 'yandex_webmaster', _nb_days),
+                    'Яндекс.Вебмастер', '🔍',
+                )
+
+            # GSC
+            if has_gsc:
+                if has_yw:
+                    st.divider()
+                _render_source(
+                    load_notifications(pid, 'gsc', _nb_days),
+                    'Google Search Console', '🌐',
+                )
+
+            # Метрика 404
+            if has_metrika:
+                if has_yw or has_gsc:
+                    st.divider()
+                _m_reports = load_reports_for_period(pid, days=_nb_days)
+                if _m_reports:
+                    _m_total = sum(r.total_pages for r in _m_reports)
+                    _m_dates = len({r.report_date for r in _m_reports})
+                    st.markdown(
+                        f'<p style="font-weight:600;font-size:1rem;color:#1A1A1A">'
+                        f'📊 Метрика 404 — {_m_total} страниц за {_m_dates} дней</p>',
+                        unsafe_allow_html=True,
+                    )
+                    with st.expander('Детали по странам', expanded=False):
+                        for rep in sorted(_m_reports,
+                                          key=lambda r: r.report_date, reverse=True):
+                            st.markdown(
+                                f'**{rep.report_date}** · {rep.country_name} — '
+                                f'{rep.total_pages} страниц, {rep.total_views} просмотров'
+                            )
+                else:
+                    st.caption('Нет данных Метрики 404 за выбранный период. '
+                               'Нажмите «Обновить из почты».')
 
 else:
     st.info('Выберите проект, чтобы начать еженедельную проверку.')
