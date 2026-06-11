@@ -38,8 +38,10 @@ from metrika_404 import (
 )
 from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG, GSC_GMAIL_CONFIG,
+    YABUSINESS_YANDEX_CONFIG, TWOGIS_YANDEX_CONFIG, GOOGLE_ACCOUNTS_CONFIG,
     PRIORITY_LABELS, PRIORITY_ORDER, CATEGORY_LABELS,
     fetch_webmaster_yandex, fetch_gsc_gmail,
+    fetch_yandex_folder_simple, fetch_google_accounts,
     load_notifications, group_by_priority,
 )
 
@@ -82,6 +84,27 @@ def get_gsc_credentials(project_id):
     return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
 
 
+def get_yabusiness_credentials(project_id):
+    cfg = YABUSINESS_YANDEX_CONFIG.get(project_id)
+    if not cfg:
+        return None, None, None
+    return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
+
+
+def get_twogis_credentials(project_id):
+    cfg = TWOGIS_YANDEX_CONFIG.get(project_id)
+    if not cfg:
+        return None, None, None
+    return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
+
+
+def get_google_accounts_credentials(project_id):
+    cfg = GOOGLE_ACCOUNTS_CONFIG.get(project_id)
+    if not cfg:
+        return None, None
+    return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
+
+
 def get_telegram_recipients(project_id):
     val = _secret(f'telegram_recipients_{project_id}')
     if isinstance(val, str):
@@ -112,6 +135,15 @@ def init_session():
         'c30_report_path': None,
         'c30_started_at': None,
         'c30_finished_at': None,
+        # URL-проверки
+        'c30_check_main': True,
+        'c30_check_catalog': True,
+        'c30_check_categories': True,
+        'c30_check_filters': True,
+        'c30_check_products': True,
+        # Сервисные проверки
+        'c30_check_webmaster': True,
+        'c30_check_gsc': True,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -290,6 +322,31 @@ if pid:
         st.caption(f'Примерное время: {format_duration(est_sec)}. '
                    f'Не закрывайте вкладку до конца прогона.')
 
+        st.markdown('**Что проверяем:**')
+        _cb_col1, _cb_col2 = st.columns(2)
+        with _cb_col1:
+            _ck_main = st.checkbox('🏠 Главные страницы', value=st.session_state.c30_check_main, key='c30_ck_main', help='Пункт 1.1')
+            _ck_catalog = st.checkbox('📁 Страница /catalog/', value=st.session_state.c30_check_catalog, key='c30_ck_catalog', help='Пункт 1.2')
+            _ck_cats = st.checkbox('📂 Категории', value=st.session_state.c30_check_categories, key='c30_ck_cats', help='Пункт 1.3')
+            _ck_wm = st.checkbox('🔍 Ошибки Вебмастера', value=st.session_state.c30_check_webmaster, key='c30_ck_wm', help='Сайтмапы, дубли, покрытие — из кеша почты')
+        with _cb_col2:
+            if stats['has_filters']:
+                _ck_filters = st.checkbox('🏷️ Фильтры', value=st.session_state.c30_check_filters, key='c30_ck_filters', help='Пункт 1.4')
+            else:
+                _ck_filters = False
+                st.markdown('<span style="color:#71717A">🏷️ Фильтры _(нет в каталоге)_</span>', unsafe_allow_html=True)
+            _ck_products = st.checkbox('🛒 Карточки товаров', value=st.session_state.c30_check_products, key='c30_ck_products', help='Пункт 1.5')
+            _ck_gsc = st.checkbox('🌐 Ошибки GSC', value=st.session_state.c30_check_gsc, key='c30_ck_gsc', help='Критические и важные уведомления GSC — из кеша почты')
+
+        # Сохраняем в session_state
+        for _k, _v in [
+            ('c30_check_main', _ck_main), ('c30_check_catalog', _ck_catalog),
+            ('c30_check_categories', _ck_cats), ('c30_check_filters', _ck_filters),
+            ('c30_check_products', _ck_products),
+            ('c30_check_webmaster', _ck_wm), ('c30_check_gsc', _ck_gsc),
+        ]:
+            st.session_state[_k] = _v
+
         if st.button('▶ Запустить еженедельную проверку', type='primary',
                      use_container_width=True, key='c30_run',
                      disabled=st.session_state.c30_is_running):
@@ -352,10 +409,11 @@ if pid:
                 categories_per_subdomain=budget['cats'],
                 filters_per_subdomain=budget['filters'],
                 products_per_subdomain=budget['products'],
-                check_main=True, check_catalog=True,
-                check_categories=True,
-                check_filters=stats['has_filters'],
-                check_products=True,
+                check_main=st.session_state.c30_check_main,
+                check_catalog=st.session_state.c30_check_catalog,
+                check_categories=st.session_state.c30_check_categories,
+                check_filters=st.session_state.c30_check_filters and stats['has_filters'],
+                check_products=st.session_state.c30_check_products,
                 mandatory_city=cfg.get('mandatory_city', 'Москва'),
                 rotation_history=recent,
             )
@@ -404,6 +462,9 @@ if pid:
             _notifs_for_report = (
                 load_notifications(pid, 'yandex_webmaster', 30)
                 + load_notifications(pid, 'gsc', 30)
+                + load_notifications(pid, 'ya_business', 30)
+                + load_notifications(pid, 'twogis', 30)
+                + load_notifications(pid, 'google_accounts', 3)
             )
             build_report(
                 project_name=cfg['name'],
@@ -545,19 +606,79 @@ if pid:
     # ── Пункт 3: уведомления из почты ──────────────────────────────
     yw_email, yw_password = get_metrika_credentials(pid)
     gsc_email, gsc_password = get_gsc_credentials(pid)
+    yab_email, yab_password, yab_folder = get_yabusiness_credentials(pid)
+    tg_email, tg_password, tg_folder = get_twogis_credentials(pid)
+    ga_email, ga_password = get_google_accounts_credentials(pid)
     yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
     has_yw = bool(yw_email and yw_password and yw_cfg)
     has_gsc = bool(gsc_email and gsc_password)
-    has_metrika = bool(yw_email and yw_password)   # Метрика — тот же ящик
+    has_metrika = bool(yw_email and yw_password)
+    has_yab = bool(yab_email and yab_password and yab_folder)
+    has_tgis = bool(tg_email and tg_password and tg_folder)
+    has_ga = bool(ga_email and ga_password)
 
-    if has_yw or has_gsc or has_metrika:
+    if has_yw or has_gsc or has_metrika or has_yab or has_tgis or has_ga:
         with st.container(border=True):
-            st.markdown('### 3. Уведомления из почты')
+            st.markdown('### 2. Уведомления из почты')
             st.caption(
-                'Яндекс.Вебмастер, Google Search Console и 404-отчёты Метрики '
+                'Яндекс.Вебмастер, GSC, Я.Бизнес, 2ГИС, Google и 404-отчёты Метрики '
                 'за выбранный период — из кеша. Нажмите «Обновить» чтобы '
                 'забрать новые письма.'
             )
+
+            # ── Ошибки Вебмастера и GSC (если выбраны чекбоксы) ─────
+            _show_wm = st.session_state.get('c30_check_webmaster', True)
+            _show_gsc_err = st.session_state.get('c30_check_gsc', True)
+
+            if _show_wm or _show_gsc_err:
+                _P_ERR_COLOR = {'critical': '#DC2626', 'important': '#D97706'}
+                _P_ERR_BG = {'critical': 'rgba(220,38,38,0.07)', 'important': 'rgba(217,119,6,0.07)'}
+
+                def _render_errors(notifs, title, icon):
+                    err_notifs = [n for n in notifs if n.priority in ('critical', 'important')]
+                    if not err_notifs:
+                        st.success(f'{icon} {title} — ошибок не найдено')
+                        return
+                    crit_n = sum(1 for n in err_notifs if n.priority == 'critical')
+                    color = '#DC2626' if crit_n else '#D97706'
+                    st.markdown(
+                        f'<p style="font-weight:600;font-size:0.95rem;color:{color}">'
+                        f'{icon} {title} — {len(err_notifs)} ошибок'
+                        + (f' · <span style="color:#DC2626">{crit_n} критических</span>' if crit_n else '')
+                        + '</p>',
+                        unsafe_allow_html=True,
+                    )
+                    for n in sorted(err_notifs, key=lambda x: (x.priority, x.date), reverse=False):
+                        c = _P_ERR_COLOR[n.priority]
+                        bg = _P_ERR_BG[n.priority]
+                        from webmaster_notify import CATEGORY_LABELS as _CL
+                        cat = _CL.get(n.category, n.category)
+                        st.markdown(
+                            f'<div style="padding:8px 14px;margin-bottom:6px;'
+                            f'border-left:3px solid {c};border-radius:0 6px 6px 0;background:{bg}">'
+                            f'<span style="font-size:0.8rem;color:#6B7280">{n.date} · {cat}</span>'
+                            f'<p style="margin:4px 0 0 0;font-weight:600;font-size:0.9rem;color:{c}">{n.subject}</p>'
+                            + (f'<p style="margin:3px 0 0 0;font-size:0.82rem;color:#5B5853">{n.body_preview[:250]}</p>' if n.body_preview else '')
+                            + '</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                with st.expander('🚨 Ошибки Вебмастера и GSC', expanded=True):
+                    _err_col1, _err_col2 = st.columns(2)
+                    with _err_col1:
+                        if _show_wm:
+                            _render_errors(
+                                load_notifications(pid, 'yandex_webmaster', 30),
+                                'Яндекс.Вебмастер', '🔍',
+                            )
+                    with _err_col2:
+                        if _show_gsc_err:
+                            _render_errors(
+                                load_notifications(pid, 'gsc', 30),
+                                'Google Search Console', '🌐',
+                            )
+
+                st.divider()
 
             _col_period, _col_btn = st.columns([1, 1])
             with _col_period:
@@ -584,7 +705,11 @@ if pid:
                 def _nlog(lvl, msg):
                     _nb_log.append(msg)
 
-                _steps = (1 if has_yw else 0) + (1 if has_gsc else 0) + (1 if has_metrika else 0)
+                _steps = (
+                    (1 if has_yw else 0) + (1 if has_gsc else 0)
+                    + (1 if has_metrika else 0) + (1 if has_yab else 0)
+                    + (1 if has_tgis else 0) + (1 if has_ga else 0)
+                )
                 _done = 0
                 _pb = st.progress(0, text='Подключаюсь…')
 
@@ -636,6 +761,57 @@ if pid:
                         _nlog('info', f'Метрика: +{_r["fetched"]} новых')
                     except Exception as _e:
                         _nlog('error', f'❌ Метрика: {_e}')
+                    _done += 1
+
+                if has_yab:
+                    _pb.progress(_done / _steps, text='Я.Бизнес…')
+                    try:
+                        _r = fetch_yandex_folder_simple(
+                            project_id=pid,
+                            email_addr=yab_email,
+                            password=yab_password,
+                            folder=yab_folder,
+                            source_key='ya_business',
+                            lookback_days=_nb_days,
+                            proxy_url=get_proxy_url(),
+                            log=_nlog,
+                        )
+                        _nlog('info', f'Я.Бизнес: +{_r["fetched"]} новых')
+                    except Exception as _e:
+                        _nlog('error', f'❌ Я.Бизнес: {_e}')
+                    _done += 1
+
+                if has_tgis:
+                    _pb.progress(_done / _steps, text='2ГИС…')
+                    try:
+                        _r = fetch_yandex_folder_simple(
+                            project_id=pid,
+                            email_addr=tg_email,
+                            password=tg_password,
+                            folder=tg_folder,
+                            source_key='twogis',
+                            lookback_days=_nb_days,
+                            proxy_url=get_proxy_url(),
+                            log=_nlog,
+                        )
+                        _nlog('info', f'2ГИС: +{_r["fetched"]} новых')
+                    except Exception as _e:
+                        _nlog('error', f'❌ 2ГИС: {_e}')
+                    _done += 1
+
+                if has_ga:
+                    _pb.progress(_done / _steps, text='Google (аккаунт)…')
+                    try:
+                        _r = fetch_google_accounts(
+                            project_id=pid,
+                            email_addr=ga_email,
+                            password=ga_password,
+                            lookback_days=3,
+                            log=_nlog,
+                        )
+                        _nlog('info', f'Google: +{_r["fetched"]} новых')
+                    except Exception as _e:
+                        _nlog('error', f'❌ Google: {_e}')
                     _done += 1
 
                 _pb.empty()
@@ -721,6 +897,90 @@ if pid:
                     load_notifications(pid, 'gsc', _nb_days),
                     'Google Search Console', '🌐',
                 )
+
+            # Я.Бизнес (без приоритетов — плоский список)
+            if has_yab:
+                if has_yw or has_gsc:
+                    st.divider()
+                _yab_items = load_notifications(pid, 'ya_business', _nb_days)
+                if _yab_items:
+                    st.markdown(
+                        '<p style="font-weight:600;font-size:1rem;color:#1A1A1A">'
+                        '🏢 Я.Бизнес — {} уведомлений</p>'.format(len(_yab_items)),
+                        unsafe_allow_html=True,
+                    )
+                    with st.expander(f'Показать все ({len(_yab_items)})', expanded=False):
+                        for n in _yab_items:
+                            st.markdown(
+                                f'<div style="padding:8px 14px;margin-bottom:6px;'
+                                f'border-left:3px solid #6B7280;border-radius:0 6px 6px 0;'
+                                f'background:rgba(107,114,128,0.06)">'
+                                f'<span style="font-size:0.8rem;color:#6B7280">{n.date}</span>'
+                                f'<p style="margin:4px 0 0 0;font-size:0.95rem;color:#1A1A1A">'
+                                f'{n.subject}</p>'
+                                + (f'<p style="margin:4px 0 0 0;font-size:0.85rem;color:#5B5853">'
+                                   f'{n.body_preview[:300]}</p>' if n.body_preview else '')
+                                + '</div>',
+                                unsafe_allow_html=True,
+                            )
+                else:
+                    st.caption('Нет уведомлений от Я.Бизнес за выбранный период.')
+
+            # 2ГИС (без приоритетов)
+            if has_tgis:
+                if has_yw or has_gsc or has_yab:
+                    st.divider()
+                _tg_items = load_notifications(pid, 'twogis', _nb_days)
+                if _tg_items:
+                    st.markdown(
+                        '<p style="font-weight:600;font-size:1rem;color:#1A1A1A">'
+                        '🗺 2ГИС — {} уведомлений</p>'.format(len(_tg_items)),
+                        unsafe_allow_html=True,
+                    )
+                    with st.expander(f'Показать все ({len(_tg_items)})', expanded=False):
+                        for n in _tg_items:
+                            st.markdown(
+                                f'<div style="padding:8px 14px;margin-bottom:6px;'
+                                f'border-left:3px solid #6B7280;border-radius:0 6px 6px 0;'
+                                f'background:rgba(107,114,128,0.06)">'
+                                f'<span style="font-size:0.8rem;color:#6B7280">{n.date}</span>'
+                                f'<p style="margin:4px 0 0 0;font-size:0.95rem;color:#1A1A1A">'
+                                f'{n.subject}</p>'
+                                + (f'<p style="margin:4px 0 0 0;font-size:0.85rem;color:#5B5853">'
+                                   f'{n.body_preview[:300]}</p>' if n.body_preview else '')
+                                + '</div>',
+                                unsafe_allow_html=True,
+                            )
+                else:
+                    st.caption('Нет уведомлений от 2ГИС за выбранный период.')
+
+            # Google (без приоритетов, только 3 дня)
+            if has_ga:
+                if has_yw or has_gsc or has_yab or has_tgis:
+                    st.divider()
+                _ga_items = load_notifications(pid, 'google_accounts', 3)
+                if _ga_items:
+                    st.markdown(
+                        '<p style="font-weight:600;font-size:1rem;color:#1A1A1A">'
+                        '📧 Google — {} уведомлений (3 дня)</p>'.format(len(_ga_items)),
+                        unsafe_allow_html=True,
+                    )
+                    with st.expander(f'Показать все ({len(_ga_items)})', expanded=False):
+                        for n in _ga_items:
+                            st.markdown(
+                                f'<div style="padding:8px 14px;margin-bottom:6px;'
+                                f'border-left:3px solid #6B7280;border-radius:0 6px 6px 0;'
+                                f'background:rgba(107,114,128,0.06)">'
+                                f'<span style="font-size:0.8rem;color:#6B7280">{n.date}</span>'
+                                f'<p style="margin:4px 0 0 0;font-size:0.95rem;color:#1A1A1A">'
+                                f'{n.subject}</p>'
+                                + (f'<p style="margin:4px 0 0 0;font-size:0.85rem;color:#5B5853">'
+                                   f'{n.body_preview[:300]}</p>' if n.body_preview else '')
+                                + '</div>',
+                                unsafe_allow_html=True,
+                            )
+                else:
+                    st.caption('Нет уведомлений от Google за последние 3 дня.')
 
             # Метрика 404
             if has_metrika:

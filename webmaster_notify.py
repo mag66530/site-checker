@@ -1,10 +1,14 @@
 """
-webmaster_notify.py — уведомления Яндекс.Вебмастера и Google Search Console.
+webmaster_notify.py — уведомления из Яндекс-почты и Gmail.
 
-Яндекс.Вебмастер: та же Яндекс-почта что и Метрика, папка «Вебмастер».
-GSC: Gmail (sc-noreply@google.com), INBOX.
+Источники:
+    yandex_webmaster  — Яндекс-почта, папка «Вебмастер», с классификацией по приоритету
+    ya_business       — Яндекс-почта, папка «Я.Бизнес», без классификации
+    twogis            — Яндекс-почта, папка «2ГИС», без классификации
+    gsc               — Gmail, от sc-noreply@google.com, с классификацией по приоритету
+    google_accounts   — Gmail, от no-reply@accounts.google.com, без классификации (3 дня)
 
-Приоритеты (4 уровня):
+Приоритеты (4 уровня, только для yandex_webmaster и gsc):
     critical        — критические: сайт недоступен, долгий ответ сервера
     important       — важные: ошибки индексации, значительные проблемы
     recommendation  — рекомендации по улучшению
@@ -64,7 +68,7 @@ WEBMASTER_YANDEX_CONFIG = {
     },
 }
 
-# Gmail — отдельные ящики для GSC
+# Gmail — отдельные ящики для GSC и Google-уведомлений
 GSC_GMAIL_CONFIG = {
     'smu': {
         'secret_email': 'gsc_smu_email',
@@ -78,6 +82,27 @@ GSC_GMAIL_CONFIG = {
         'secret_email': 'gsc_mpe_email',
         'secret_password': 'gsc_mpe_password',
     },
+}
+
+# Яндекс-почта — папка «Я.Бизнес» (те же credentials что у Метрики/Вебмастера)
+YABUSINESS_YANDEX_CONFIG = {
+    'smu': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_smu_email', 'secret_password': 'metrika_smu_password'},
+    'imp': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_imp_email', 'secret_password': 'metrika_imp_password'},
+    'mpe': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_mpe_email', 'secret_password': 'metrika_mpe_password'},
+}
+
+# Яндекс-почта — папка «2ГИС»
+TWOGIS_YANDEX_CONFIG = {
+    'smu': {'folder': '2ГИС', 'secret_email': 'metrika_smu_email', 'secret_password': 'metrika_smu_password'},
+    'imp': {'folder': '2ГИС', 'secret_email': 'metrika_imp_email', 'secret_password': 'metrika_imp_password'},
+    'mpe': {'folder': '2ГИС', 'secret_email': 'metrika_mpe_email', 'secret_password': 'metrika_mpe_password'},
+}
+
+# Gmail — те же ящики что GSC, письма от no-reply@accounts.google.com
+GOOGLE_ACCOUNTS_CONFIG = {
+    'smu': {'secret_email': 'gsc_smu_email', 'secret_password': 'gsc_smu_password'},
+    'imp': {'secret_email': 'gsc_imp_email', 'secret_password': 'gsc_imp_password'},
+    'mpe': {'secret_email': 'gsc_mpe_email', 'secret_password': 'gsc_mpe_password'},
 }
 
 # Порядок приоритетов для сортировки (меньший индекс = выше)
@@ -611,6 +636,253 @@ def fetch_gsc_gmail(
         'skipped': skipped,
         'error': error,
     }
+
+
+# ── Fetch Yandex folder (generic, no priority classification) ────────
+
+
+def fetch_yandex_folder_simple(
+    project_id: str,
+    email_addr: str,
+    password: str,
+    folder: str,
+    source_key: str,
+    lookback_days: int = 14,
+    proxy_url: Optional[str] = None,
+    log: Optional[Callable] = None,
+) -> dict:
+    """
+    Скачать письма из произвольной папки Яндекс-почты без классификации по приоритету.
+    Используется для Я.Бизнес, 2ГИС и других папок.
+    priority='info', category='other' для всех писем.
+    """
+    def _log(msg):
+        if log:
+            log('info', msg)
+
+    existing = _load_cached(project_id, source_key)
+    fetched = 0
+    skipped = 0
+    error = None
+
+    ssl_ctx = ssl.create_default_context()
+
+    try:
+        if proxy_url:
+            M = IMAP4_SSL_via_Proxy(
+                YANDEX_IMAP_HOST, YANDEX_IMAP_PORT,
+                proxy_url=proxy_url,
+                ssl_context=ssl_ctx,
+                timeout=60,
+            )
+        else:
+            M = imaplib.IMAP4_SSL(
+                YANDEX_IMAP_HOST, YANDEX_IMAP_PORT,
+                ssl_context=ssl_ctx,
+                timeout=60,
+            )
+
+        try:
+            M.login(email_addr, password)
+        except imaplib.IMAP4.error as e:
+            raise PermissionError(f'Ошибка входа: {e}')
+
+        _log(f'Вошли в {email_addr}. Открываю папку «{folder}»…')
+
+        if not _select_folder(M, folder, log=log):
+            raise FileNotFoundError(f'Папка «{folder}» не найдена')
+
+        since_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%d-%b-%Y')
+        status, nums_raw = M.search(None, f'SINCE {since_date}')
+        if status != 'OK' or not nums_raw[0]:
+            _log(f'Писем в «{folder}» за {lookback_days} дней нет')
+            M.logout()
+            return {'notifications': list(existing.values()), 'fetched': 0, 'skipped': 0, 'error': None}
+
+        nums = nums_raw[0].split()
+        _log(f'Найдено {len(nums)} писем в «{folder}»')
+
+        for num in nums[-100:]:
+            try:
+                status, data = M.fetch(num, '(RFC822)')
+                if status != 'OK' or not data or not data[0]:
+                    continue
+
+                raw = data[0][1]
+                msg = email.message_from_bytes(raw)
+
+                raw_id = msg.get('Message-ID', '')
+                if raw_id:
+                    msg_id = raw_id.strip('<>').strip()
+                else:
+                    msg_id = _msg_uid_hash(
+                        msg.get('Subject', ''), msg.get('Date', ''), msg.get('From', ''),
+                    )
+
+                if msg_id in existing:
+                    skipped += 1
+                    continue
+
+                subject = _decode_mime_header(msg.get('Subject', '(без темы)'))
+                date_raw = msg.get('Date', '')
+                try:
+                    from email.utils import parsedate_to_datetime
+                    dt = parsedate_to_datetime(date_raw)
+                    date_iso = dt.strftime('%Y-%m-%d')
+                except Exception:
+                    date_iso = datetime.now().strftime('%Y-%m-%d')
+
+                body = _extract_text_body(msg)
+
+                n = WebmasterNotification(
+                    msg_id=msg_id,
+                    project_id=project_id,
+                    source=source_key,
+                    date=date_iso,
+                    subject=subject,
+                    body_preview=body[:400].strip(),
+                    priority='info',
+                    category='other',
+                )
+                _save_notification(n)
+                existing[msg_id] = n
+                fetched += 1
+
+            except Exception as e:
+                _log(f'⚠ Ошибка при разборе письма: {e}')
+
+        M.logout()
+
+    except Exception as e:
+        error = str(e)
+        _log(f'❌ Ошибка Яндекс IMAP ({folder}): {e}')
+
+    all_n = list(existing.values())
+    cutoff = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+    all_n = [n for n in all_n if n.date >= cutoff]
+    all_n.sort(key=lambda n: n.date, reverse=True)
+
+    _log(f'{source_key}: +{fetched} новых, {skipped} в кеше, итого {len(all_n)} за {lookback_days} дней')
+    return {'notifications': all_n, 'fetched': fetched, 'skipped': skipped, 'error': error}
+
+
+# ── Fetch Google Accounts (Gmail, no priority classification) ────────
+
+
+def fetch_google_accounts(
+    project_id: str,
+    email_addr: str,
+    password: str,
+    lookback_days: int = 3,
+    log: Optional[Callable] = None,
+) -> dict:
+    """
+    Скачать письма от no-reply@accounts.google.com из Gmail.
+    Без классификации по приоритету (priority='info', category='other').
+    """
+    def _log(msg):
+        if log:
+            log('info', msg)
+
+    existing = _load_cached(project_id, 'google_accounts')
+    fetched = 0
+    skipped = 0
+    error = None
+
+    ssl_ctx = ssl.create_default_context()
+
+    try:
+        M = imaplib.IMAP4_SSL(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT, ssl_context=ssl_ctx, timeout=60)
+
+        try:
+            M.login(email_addr, password)
+        except imaplib.IMAP4.error as e:
+            raise PermissionError(
+                f'Ошибка входа в Gmail: {e}. '
+                f'Проверьте пароль приложения (не основной пароль Gmail).'
+            )
+
+        _log(f'Gmail: вошли как {email_addr}. Ищу письма от Google…')
+
+        status, _ = M.select('INBOX', readonly=True)
+        if status != 'OK':
+            raise FileNotFoundError('INBOX не открылся')
+
+        since_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%d-%b-%Y')
+        status, nums_raw = M.search(
+            None,
+            f'FROM "no-reply@accounts.google.com" SINCE {since_date}',
+        )
+        if status != 'OK' or not nums_raw[0]:
+            _log('Писем от Google за последние дни нет')
+            M.logout()
+            return {'notifications': list(existing.values()), 'fetched': 0, 'skipped': 0, 'error': None}
+
+        nums = nums_raw[0].split()
+        _log(f'Найдено {len(nums)} писем от Google')
+
+        for num in nums[-50:]:
+            try:
+                status, data = M.fetch(num, '(RFC822)')
+                if status != 'OK' or not data or not data[0]:
+                    continue
+
+                raw = data[0][1]
+                msg = email.message_from_bytes(raw)
+
+                raw_id = msg.get('Message-ID', '')
+                if raw_id:
+                    msg_id = raw_id.strip('<>').strip()
+                else:
+                    msg_id = _msg_uid_hash(
+                        msg.get('Subject', ''), msg.get('Date', ''), msg.get('From', ''),
+                    )
+
+                if msg_id in existing:
+                    skipped += 1
+                    continue
+
+                subject = _decode_mime_header(msg.get('Subject', '(без темы)'))
+                date_raw = msg.get('Date', '')
+                try:
+                    from email.utils import parsedate_to_datetime
+                    dt = parsedate_to_datetime(date_raw)
+                    date_iso = dt.strftime('%Y-%m-%d')
+                except Exception:
+                    date_iso = datetime.now().strftime('%Y-%m-%d')
+
+                body = _extract_text_body(msg)
+
+                n = WebmasterNotification(
+                    msg_id=msg_id,
+                    project_id=project_id,
+                    source='google_accounts',
+                    date=date_iso,
+                    subject=subject,
+                    body_preview=body[:400].strip(),
+                    priority='info',
+                    category='other',
+                )
+                _save_notification(n)
+                existing[msg_id] = n
+                fetched += 1
+
+            except Exception as e:
+                _log(f'⚠ Ошибка при разборе письма Google: {e}')
+
+        M.logout()
+
+    except Exception as e:
+        error = str(e)
+        _log(f'❌ Ошибка Gmail IMAP (Google Accounts): {e}')
+
+    all_n = list(existing.values())
+    cutoff = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
+    all_n = [n for n in all_n if n.date >= cutoff]
+    all_n.sort(key=lambda n: n.date, reverse=True)
+
+    _log(f'Google Accounts: +{fetched} новых, {skipped} в кеше, итого {len(all_n)} за {lookback_days} дней')
+    return {'notifications': all_n, 'fetched': fetched, 'skipped': skipped, 'error': error}
 
 
 # ── Группировка для UI ───────────────────────────────────────────────

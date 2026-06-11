@@ -330,13 +330,13 @@ def _build_structure_sheet(wb, results):
 
 # ── Лист уведомлений ──────────────────────────────────────────────
 
+_NOTIF_PRIORITY_ORDER = ['critical', 'important', 'recommendation', 'info']
 _NOTIF_PRIORITY_LABEL = {
     'critical':       '🔴 Критические',
     'important':      '🟠 Важные',
     'recommendation': '🟡 Рекомендации',
     'info':           '⚪ Инфо',
 }
-_NOTIF_PRIORITY_ORDER = ['critical', 'important', 'recommendation', 'info']
 _NOTIF_PRIORITY_COLOR = {
     'critical':       C.err,
     'important':      C.warn,
@@ -358,29 +358,34 @@ _NOTIF_CATEGORY_LABEL = {
     'coverage':   'Покрытие',
     'other':      'Прочее',
 }
-_NOTIF_SOURCE_LABEL = {
-    'yandex_webmaster': 'Яндекс.Вебмастер',
-    'gsc':              'Google Search Console',
-}
+
+# Секции в порядке убывания релевантности:
+# (source_key, title, has_priority)
+_NOTIF_SECTIONS = [
+    ('yandex_webmaster', 'Яндекс.Вебмастер',       True),
+    ('gsc',              'Google Search Console',   True),
+    ('ya_business',      'Я.Бизнес',                False),
+    ('twogis',           '2ГИС',                    False),
+    ('google_accounts',  'Google',                  False),
+]
 
 
 def _build_notifications_sheet(wb, notifications):
-    """Лист «Уведомления» — письма от Вебмастера и GSC, сгруппированные по приоритету."""
+    """Лист «Уведомления» — письма по источникам, структурированные секциями."""
     ws = wb.create_sheet('Уведомления')
     ws.sheet_view.showGridLines = False
 
-    # Есть ли критические — красный таб
     has_critical = any(n.priority == 'critical' for n in notifications)
     ws.sheet_properties.tabColor = C.err if has_critical else C.accent
 
     ws.column_dimensions['A'].width = 3
     ws.column_dimensions['B'].width = 14   # Дата
-    ws.column_dimensions['C'].width = 22   # Источник
-    ws.column_dimensions['D'].width = 20   # Категория
-    ws.column_dimensions['E'].width = 55   # Тема
+    ws.column_dimensions['C'].width = 20   # Приоритет / пусто
+    ws.column_dimensions['D'].width = 20   # Категория / пусто
+    ws.column_dimensions['E'].width = 58   # Тема
     ws.column_dimensions['F'].width = 80   # Превью
 
-    # Заголовок
+    # ── Заголовок листа ──
     ws.merge_cells('B2:F2')
     c = ws['B2']
     c.value = 'Уведомления из почты'
@@ -390,94 +395,127 @@ def _build_notifications_sheet(wb, notifications):
     ws.merge_cells('B3:F3')
     c = ws['B3']
     c.value = (
-        'Письма от Яндекс.Вебмастера и Google Search Console за период проверки, '
-        'отсортированные по приоритету. Красная вкладка = есть критические.'
+        'Письма от Яндекс.Вебмастера, GSC, Я.Бизнеса, 2ГИС и Google '
+        'за период проверки. Красная вкладка = есть критические уведомления.'
     )
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 24
 
-    # Группировка по приоритету
+    # Разбиваем по источникам
     from collections import defaultdict
-    by_priority = defaultdict(list)
+    by_source = defaultdict(list)
     for n in notifications:
-        by_priority[n.priority].append(n)
+        by_source[n.source].append(n)
 
     row = 5
-    for priority in _NOTIF_PRIORITY_ORDER:
-        items = by_priority.get(priority, [])
+
+    for source_key, section_title, has_priority in _NOTIF_SECTIONS:
+        items = by_source.get(source_key, [])
         if not items:
             continue
 
-        p_color = _NOTIF_PRIORITY_COLOR[priority]
-        p_bg = _NOTIF_PRIORITY_BG[priority]
-        p_label = _NOTIF_PRIORITY_LABEL[priority]
-
-        # Заголовок группы
+        # ── Заголовок секции ──
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        gc = ws.cell(row=row, column=2)
-        gc.value = f'{p_label}  ({len(items)})'
-        gc.font = _font(size=12, bold=True, color=p_color)
-        gc.fill = _fill(p_bg)
-        gc.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 22
+        sc = ws.cell(row=row, column=2)
+        sc.value = f'{section_title}  ({len(items)})'
+        sc.font = _font(size=13, bold=True, color=C.accent)
+        sc.fill = _fill(C.accent_soft)
+        sc.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
         row += 1
 
-        # Шапка таблицы
-        hdr_row = row
-        hdrs = ['Дата', 'Источник', 'Категория', 'Тема', 'Превью']
-        for ci, h in enumerate(hdrs, 2):
-            cell = ws.cell(row=hdr_row, column=ci)
-            cell.value = h
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
-            cell.fill = _fill(C.surface)
-            cell.alignment = _align()
-            cell.border = _border()
-        ws.row_dimensions[hdr_row].height = 22
-        row += 1
+        if has_priority:
+            # ── Источник с классификацией: группируем по приоритету ──
+            p_groups = defaultdict(list)
+            for n in items:
+                p_groups[n.priority].append(n)
 
-        # Строки
-        items_sorted = sorted(items, key=lambda n: n.date, reverse=True)
-        for n in items_sorted:
-            ws.row_dimensions[row].height = 42
+            for priority in _NOTIF_PRIORITY_ORDER:
+                p_items = p_groups.get(priority, [])
+                if not p_items:
+                    continue
 
-            cell = ws.cell(row=row, column=2)
-            cell.value = n.date
-            cell.font = _font(size=10, color=C.text_soft)
-            cell.alignment = _align()
-            cell.border = _border(color=C.border_light)
+                p_color = _NOTIF_PRIORITY_COLOR[priority]
+                p_bg = _NOTIF_PRIORITY_BG[priority]
+                p_label = _NOTIF_PRIORITY_LABEL[priority]
 
-            cell = ws.cell(row=row, column=3)
-            cell.value = _NOTIF_SOURCE_LABEL.get(n.source, n.source)
-            cell.font = _font(size=10)
-            cell.alignment = _align()
-            cell.border = _border(color=C.border_light)
+                # Подзаголовок приоритета
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+                pc = ws.cell(row=row, column=2)
+                pc.value = f'  {p_label}  ({len(p_items)})'
+                pc.font = _font(size=10, bold=True, color=p_color)
+                pc.fill = _fill(p_bg)
+                pc.alignment = _align(indent=2)
+                ws.row_dimensions[row].height = 20
+                row += 1
 
-            cell = ws.cell(row=row, column=4)
-            cell.value = _NOTIF_CATEGORY_LABEL.get(n.category, n.category)
-            cell.font = _font(size=10, color=C.text_soft)
-            cell.alignment = _align()
-            cell.border = _border(color=C.border_light)
+                # Шапка
+                for ci, h in enumerate(['Дата', 'Приоритет', 'Категория', 'Тема', 'Превью'], 2):
+                    cell = ws.cell(row=row, column=ci)
+                    cell.value = h
+                    cell.font = _font(size=9, bold=True, color=C.text_muted)
+                    cell.fill = _fill(C.surface)
+                    cell.alignment = _align()
+                    cell.border = _border()
+                ws.row_dimensions[row].height = 20
+                row += 1
 
-            cell = ws.cell(row=row, column=5)
-            cell.value = n.subject
-            cell.font = _font(size=10, bold=(priority == 'critical'), color=p_color)
-            cell.alignment = _align(wrap=True)
-            cell.border = _border(color=C.border_light)
-            if priority == 'critical':
-                cell.fill = _fill(p_bg)
+                # Строки
+                for n in sorted(p_items, key=lambda x: x.date, reverse=True):
+                    ws.row_dimensions[row].height = 44
 
-            cell = ws.cell(row=row, column=6)
-            cell.value = (n.body_preview or '')[:400]
-            cell.font = _font(size=9, color=C.text_soft)
-            cell.alignment = _align(wrap=True)
-            cell.border = _border(color=C.border_light)
+                    for ci, (val, kw) in enumerate([
+                        (n.date, {'color': C.text_soft}),
+                        (_NOTIF_PRIORITY_LABEL[n.priority], {'bold': priority == 'critical', 'color': p_color}),
+                        (_NOTIF_CATEGORY_LABEL.get(n.category, n.category), {'color': C.text_soft}),
+                        (n.subject, {'bold': priority == 'critical', 'color': p_color}),
+                        ((n.body_preview or '')[:400], {'size': 9, 'color': C.text_soft}),
+                    ], 2):
+                        cell = ws.cell(row=row, column=ci)
+                        cell.value = val
+                        cell.font = _font(**kw)
+                        cell.alignment = _align(wrap=True)
+                        cell.border = _border(color=C.border_light)
+                        if priority == 'critical' and ci in (5, 6):
+                            cell.fill = _fill(p_bg)
 
+                    row += 1
+
+                row += 1  # пробел между приоритетами
+
+        else:
+            # ── Источник без классификации: плоский список ──
+            # Шапка
+            for ci, h in enumerate(['Дата', '', '', 'Тема', 'Превью'], 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = h
+                cell.font = _font(size=9, bold=True, color=C.text_muted)
+                cell.fill = _fill(C.surface)
+                cell.alignment = _align()
+                cell.border = _border()
+            ws.row_dimensions[row].height = 20
             row += 1
 
-        row += 1  # пробел между группами
+            for n in sorted(items, key=lambda x: x.date, reverse=True):
+                ws.row_dimensions[row].height = 44
 
-    ws.auto_filter.ref = f'B{5 + 1}:F{row - 1}'  # приблизительно — не критично
+                for ci, (val, kw) in enumerate([
+                    (n.date, {'color': C.text_soft}),
+                    ('', {}),
+                    ('', {}),
+                    (n.subject, {'bold': False, 'color': C.text}),
+                    ((n.body_preview or '')[:400], {'size': 9, 'color': C.text_soft}),
+                ], 2):
+                    cell = ws.cell(row=row, column=ci)
+                    cell.value = val
+                    cell.font = _font(**kw)
+                    cell.alignment = _align(wrap=True)
+                    cell.border = _border(color=C.border_light)
+
+                row += 1
+
+        row += 2  # пробел между секциями
 
 
 # ── Главная функция ────────────────────────────────────────────────
