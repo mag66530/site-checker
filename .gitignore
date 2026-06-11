@@ -11,3 +11,8 @@ __pycache__/
 
 # Streamlit secrets — никогда не коммитить
 .streamlit/secrets.toml
+
+# GSC автоматизация — сессия и профиль Chrome
+gsc_session.json
+gsc_chrome_profile/
+gsc_reindex_log.json
