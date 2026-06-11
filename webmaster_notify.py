@@ -542,11 +542,17 @@ def fetch_gsc_gmail(
                 f'Проверьте пароль приложения (не основной пароль Gmail).'
             )
 
-        _log(f'Gmail: вошли как {email_addr}. Открываю INBOX…')
+        _log(f'Gmail: вошли как {email_addr}. Открываю All Mail…')
 
-        status, _ = M.select('INBOX', readonly=True)
+        # Gmail раскладывает входящие по вкладкам (Primary/Updates/Promotions).
+        # В INBOX через IMAP попадает только Primary — GSC-письма туда не идут.
+        # Ищем во всём почтовом ящике через [Gmail]/All Mail.
+        status, _ = M.select('"[Gmail]/All Mail"', readonly=True)
         if status != 'OK':
-            raise FileNotFoundError('INBOX не открылся')
+            # Fallback: у некоторых аккаунтов другое имя папки
+            status, _ = M.select('INBOX', readonly=True)
+            if status != 'OK':
+                raise FileNotFoundError('Не удалось открыть папку')
 
         since_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%d-%b-%Y')
         # Ищем только письма от GSC
@@ -804,9 +810,11 @@ def fetch_google_accounts(
 
         _log(f'Gmail: вошли как {email_addr}. Ищу письма от Google…')
 
-        status, _ = M.select('INBOX', readonly=True)
+        status, _ = M.select('"[Gmail]/All Mail"', readonly=True)
         if status != 'OK':
-            raise FileNotFoundError('INBOX не открылся')
+            status, _ = M.select('INBOX', readonly=True)
+            if status != 'OK':
+                raise FileNotFoundError('Не удалось открыть папку')
 
         since_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%d-%b-%Y')
         status, nums_raw = M.search(

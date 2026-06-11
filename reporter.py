@@ -69,6 +69,40 @@ SPEED_COLOR = {
     'very_slow': C.err,
 }
 
+_NOTIF_CAT_DEPT = {
+    'server':    ['разработка'],
+    'speed':     ['разработка'],
+    'security':  ['разработка'],
+    'indexing':  ['SEO'],
+    'coverage':  ['SEO'],
+    'structure': ['SEO'],
+    'other':     ['SEO'],
+}
+
+
+def _dept_result(r) -> str:
+    tags: list[str] = []
+    if r.is_error:
+        if r.status in ('server_error', 'timeout', 'network_error'):
+            tags.append('разработка')
+        elif r.status == 'not_found':
+            tags += ['SEO', 'разработка']
+        else:
+            tags.append('разработка')
+    elif r.is_warning:
+        tags.append('SEO')
+    if r.speed_rating in ('slow', 'very_slow') and 'разработка' not in tags:
+        tags.append('разработка')
+    if r.has_text_issues and 'разработка' not in tags:
+        tags.append('разработка')
+    if getattr(r, 'has_content_bugs', False) and 'разработка' not in tags:
+        tags.append('разработка')
+    return ', '.join(dict.fromkeys(tags))
+
+
+def _dept_notif(n) -> str:
+    return ', '.join(_NOTIF_CAT_DEPT.get(n.category, ['SEO']))
+
 
 def _font(size=10, bold=False, italic=False, underline=None, color=C.text, name='Arial'):
     return Font(
@@ -383,16 +417,17 @@ def _build_notifications_sheet(wb, notifications):
     ws.column_dimensions['C'].width = 20   # Приоритет / пусто
     ws.column_dimensions['D'].width = 20   # Категория / пусто
     ws.column_dimensions['E'].width = 58   # Тема
-    ws.column_dimensions['F'].width = 80   # Превью
+    ws.column_dimensions['F'].width = 70   # Превью
+    ws.column_dimensions['G'].width = 22   # Отдел
 
     # ── Заголовок листа ──
-    ws.merge_cells('B2:F2')
+    ws.merge_cells('B2:G2')
     c = ws['B2']
     c.value = 'Уведомления из почты'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
-    ws.merge_cells('B3:F3')
+    ws.merge_cells('B3:G3')
     c = ws['B3']
     c.value = (
         'Письма от Яндекс.Вебмастера, GSC, Я.Бизнеса, 2ГИС и Google '
@@ -416,7 +451,7 @@ def _build_notifications_sheet(wb, notifications):
             continue
 
         # ── Заголовок секции ──
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
         sc = ws.cell(row=row, column=2)
         sc.value = f'{section_title}  ({len(items)})'
         sc.font = _font(size=13, bold=True, color=C.accent)
@@ -441,7 +476,7 @@ def _build_notifications_sheet(wb, notifications):
                 p_label = _NOTIF_PRIORITY_LABEL[priority]
 
                 # Подзаголовок приоритета
-                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
                 pc = ws.cell(row=row, column=2)
                 pc.value = f'  {p_label}  ({len(p_items)})'
                 pc.font = _font(size=10, bold=True, color=p_color)
@@ -451,7 +486,7 @@ def _build_notifications_sheet(wb, notifications):
                 row += 1
 
                 # Шапка
-                for ci, h in enumerate(['Дата', 'Приоритет', 'Категория', 'Тема', 'Превью'], 2):
+                for ci, h in enumerate(['Дата', 'Приоритет', 'Категория', 'Тема', 'Превью', 'Отдел'], 2):
                     cell = ws.cell(row=row, column=ci)
                     cell.value = h
                     cell.font = _font(size=9, bold=True, color=C.text_muted)
@@ -471,6 +506,7 @@ def _build_notifications_sheet(wb, notifications):
                         (_NOTIF_CATEGORY_LABEL.get(n.category, n.category), {'color': C.text_soft}),
                         (n.subject, {'bold': priority == 'critical', 'color': p_color}),
                         ((n.body_preview or '')[:400], {'size': 9, 'color': C.text_soft}),
+                        (_dept_notif(n), {'size': 9, 'color': C.text_soft}),
                     ], 2):
                         cell = ws.cell(row=row, column=ci)
                         cell.value = val
@@ -487,7 +523,7 @@ def _build_notifications_sheet(wb, notifications):
         else:
             # ── Источник без классификации: плоский список ──
             # Шапка
-            for ci, h in enumerate(['Дата', '', '', 'Тема', 'Превью'], 2):
+            for ci, h in enumerate(['Дата', '', '', 'Тема', 'Превью', 'Отдел'], 2):
                 cell = ws.cell(row=row, column=ci)
                 cell.value = h
                 cell.font = _font(size=9, bold=True, color=C.text_muted)
@@ -506,6 +542,7 @@ def _build_notifications_sheet(wb, notifications):
                     ('', {}),
                     (n.subject, {'bold': False, 'color': C.text}),
                     ((n.body_preview or '')[:400], {'size': 9, 'color': C.text_soft}),
+                    (_dept_notif(n), {'size': 9, 'color': C.text_soft}),
                 ], 2):
                     cell = ws.cell(row=row, column=ci)
                     cell.value = val
@@ -715,7 +752,7 @@ def build_report(
         ('Город', 18), ('Поддомен', 28), ('Тип', 12), ('URL', 55),
         ('Код', 8), ('Статус', 22), ('Скорость, с', 12),
         ('Оценка скорости', 18), ('Битые переменные', 18),
-        ('Откуда перешли', 50),
+        ('Откуда перешли', 50), ('Отдел', 22),
     ]
     for i, (header, width) in enumerate(headers, 1):
         col_letter = get_column_letter(i)
@@ -761,6 +798,7 @@ def build_report(
             speed_label,                       # H
             text_issue_text,                   # I
             _build_path_description(r),        # J
+            _dept_result(r),                   # K
         ]
 
         for col_idx, value in enumerate(values, 1):
@@ -802,7 +840,7 @@ def build_report(
         status_color = C.ok if r.is_ok else C.warn if r.is_warning else C.err
         ws2.cell(row=row_idx, column=6).font = _font(size=10, bold=True, color=status_color)
 
-    ws2.auto_filter.ref = f'A1:J{len(sorted_results) + 1}'
+    ws2.auto_filter.ref = f'A1:K{len(sorted_results) + 1}'
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 3: Битые тексты (только если есть)

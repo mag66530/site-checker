@@ -124,6 +124,65 @@ def format_duration(sec: int) -> str:
     return f'{h} ч {m} мин' if m else f'{h} ч'
 
 
+# ── Теги отдела ──────────────────────────────────────────────────────
+
+_TAG_META = {
+    'разработка': ('💻', '#1D4ED8', 'rgba(29,78,216,0.09)'),
+    'SEO':        ('🔎', '#16A34A', 'rgba(22,163,74,0.09)'),
+    'контент':    ('✏️', '#D97706', 'rgba(217,119,6,0.09)'),
+}
+
+
+def _tags_html(tags: list[str]) -> str:
+    parts = []
+    for t in tags:
+        if t in _TAG_META:
+            icon, color, bg = _TAG_META[t]
+            parts.append(
+                f'<span style="display:inline-block;padding:1px 8px;margin-left:6px;'
+                f'border-radius:10px;background:{bg};color:{color};'
+                f'font-size:0.72rem;font-weight:700;vertical-align:middle">'
+                f'{icon} {t}</span>'
+            )
+    return ''.join(parts)
+
+
+def _dept_tags_result(r) -> list[str]:
+    tags: list[str] = []
+    if r.is_error:
+        if r.status in ('server_error', 'timeout', 'network_error'):
+            tags.append('разработка')
+        elif r.status == 'not_found':
+            tags += ['SEO', 'разработка']
+        else:
+            tags.append('разработка')
+    elif r.is_warning:
+        tags.append('SEO')
+    if r.speed_rating in ('slow', 'very_slow') and 'разработка' not in tags:
+        tags.append('разработка')
+    if r.has_text_issues:
+        tags.append('разработка')
+    if getattr(r, 'has_content_bugs', False):
+        if 'разработка' not in tags:
+            tags.append('разработка')
+    return list(dict.fromkeys(tags))
+
+
+_NOTIF_CAT_DEPT = {
+    'server':    ['разработка'],
+    'speed':     ['разработка'],
+    'security':  ['разработка'],
+    'indexing':  ['SEO'],
+    'coverage':  ['SEO'],
+    'structure': ['SEO'],
+    'other':     ['SEO'],
+}
+
+
+def _dept_tags_notif(n) -> list[str]:
+    return _NOTIF_CAT_DEPT.get(n.category, ['SEO'])
+
+
 # ── Session state ───────────────────────────────────────────────────
 
 
@@ -144,6 +203,7 @@ def init_session():
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
+        'c30_fetch_notifications': True,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -338,12 +398,20 @@ if pid:
             _ck_products = st.checkbox('🛒 Карточки товаров', value=st.session_state.c30_check_products, key='c30_ck_products', help='Пункт 1.5')
             _ck_gsc = st.checkbox('🌐 Ошибки GSC', value=st.session_state.c30_check_gsc, key='c30_ck_gsc', help='Критические и важные уведомления GSC — из кеша почты')
 
+        _ck_notif = st.checkbox(
+            '📬 Собрать уведомления из почты (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google)',
+            value=st.session_state.c30_fetch_notifications,
+            key='c30_ck_notif',
+            help='Подключится к почте и заберёт новые письма во время прогона',
+        )
+
         # Сохраняем в session_state
         for _k, _v in [
             ('c30_check_main', _ck_main), ('c30_check_catalog', _ck_catalog),
             ('c30_check_categories', _ck_cats), ('c30_check_filters', _ck_filters),
             ('c30_check_products', _ck_products),
             ('c30_check_webmaster', _ck_wm), ('c30_check_gsc', _ck_gsc),
+            ('c30_fetch_notifications', _ck_notif),
         ]:
             st.session_state[_k] = _v
 
@@ -527,6 +595,68 @@ if pid:
             else:
                 append_log('Telegram не настроен — отправьте отчёт ответственным вручную (пункт 2).')
 
+            # ── Сбор уведомлений из почты (если чекбокс включён) ────
+            if st.session_state.get('c30_fetch_notifications', True):
+                append_log('Собираю уведомления из почты…')
+                _nlog_run = lambda lvl, msg: append_log(msg)
+                _proxy = get_proxy_url()
+
+                _yw_e, _yw_p = get_metrika_credentials(pid)
+                _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
+                if _yw_e and _yw_p and _yw_cfg:
+                    try:
+                        fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_cfg['folder'], 30, _proxy, _nlog_run)
+                    except Exception as _e:
+                        append_log(f'⚠ Вебмастер: {_e}')
+
+                _gsc_e, _gsc_p = get_gsc_credentials(pid)
+                if _gsc_e and _gsc_p:
+                    try:
+                        fetch_gsc_gmail(pid, _gsc_e, _gsc_p, 30, _nlog_run)
+                    except Exception as _e:
+                        append_log(f'⚠ GSC: {_e}')
+
+                _yab_e, _yab_p, _yab_f = get_yabusiness_credentials(pid)
+                if _yab_e and _yab_p and _yab_f:
+                    try:
+                        fetch_yandex_folder_simple(pid, _yab_e, _yab_p, _yab_f, 'ya_business', 30, _proxy, _nlog_run)
+                    except Exception as _e:
+                        append_log(f'⚠ Я.Бизнес: {_e}')
+
+                _tg_e, _tg_p, _tg_f = get_twogis_credentials(pid)
+                if _tg_e and _tg_p and _tg_f:
+                    try:
+                        fetch_yandex_folder_simple(pid, _tg_e, _tg_p, _tg_f, 'twogis', 30, _proxy, _nlog_run)
+                    except Exception as _e:
+                        append_log(f'⚠ 2ГИС: {_e}')
+
+                _ga_e, _ga_p = get_google_accounts_credentials(pid)
+                if _ga_e and _ga_p:
+                    try:
+                        fetch_google_accounts(pid, _ga_e, _ga_p, 3, _nlog_run)
+                    except Exception as _e:
+                        append_log(f'⚠ Google: {_e}')
+
+                # Обновляем уведомления в отчёте с актуальным кешем
+                _notifs_for_report = (
+                    load_notifications(pid, 'yandex_webmaster', 30)
+                    + load_notifications(pid, 'gsc', 30)
+                    + load_notifications(pid, 'ya_business', 30)
+                    + load_notifications(pid, 'twogis', 30)
+                    + load_notifications(pid, 'google_accounts', 3)
+                )
+                if _notifs_for_report:
+                    build_report(
+                        project_name=cfg['name'],
+                        started_at_ms=started_ms,
+                        finished_at_ms=finished_ms,
+                        selected_subdomains=plan.selected_subdomains,
+                        results=results,
+                        output_path=report_path,
+                        notifications=_notifs_for_report,
+                    )
+                    append_log(f'✓ Отчёт обновлён с уведомлениями ({len(_notifs_for_report)} шт.)')
+
             st.session_state.c30_results = results
             st.session_state.c30_report_path = str(report_path)
             st.session_state.c30_is_running = False
@@ -596,415 +726,138 @@ if pid:
                     type_label = kind_labels.get(
                         getattr(getattr(r, 'content', None), 'page_kind', ''), r.type_label)
                     city = f'[{r.city}] ' if r.city else ''
+                    tags_html = _tags_html(_dept_tags_result(r))
                     st.markdown(
                         f'{emoji} **{city}**{type_label}: [{r.url}]({r.url})'
                         + (' — ' + ' · '.join(extra) if extra else '')
+                        + tags_html,
+                        unsafe_allow_html=True,
                     )
                 if len(problems) > 50:
                     st.caption(f'... и ещё {len(problems) - 50}. Все детали — в xlsx-отчёте.')
 
-    # ── Пункт 3: уведомления из почты ──────────────────────────────
-    yw_email, yw_password = get_metrika_credentials(pid)
-    gsc_email, gsc_password = get_gsc_credentials(pid)
-    yab_email, yab_password, yab_folder = get_yabusiness_credentials(pid)
-    tg_email, tg_password, tg_folder = get_twogis_credentials(pid)
-    ga_email, ga_password = get_google_accounts_credentials(pid)
-    yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
-    has_yw = bool(yw_email and yw_password and yw_cfg)
-    has_gsc = bool(gsc_email and gsc_password)
-    has_metrika = bool(yw_email and yw_password)
-    has_yab = bool(yab_email and yab_password and yab_folder)
-    has_tgis = bool(tg_email and tg_password and tg_folder)
-    has_ga = bool(ga_email and ga_password)
+    # ── Блок 2: уведомления из почты ───────────────────────────────
+    _yw_e2, _yw_p2 = get_metrika_credentials(pid)
+    _gsc_e2, _gsc_p2 = get_gsc_credentials(pid)
+    _has_any_notif = bool(_yw_e2 or _gsc_e2)
 
-    if has_yw or has_gsc or has_metrika or has_yab or has_tgis or has_ga:
+    if _has_any_notif:
         with st.container(border=True):
             st.markdown('### 2. Уведомления из почты')
-            st.caption(
-                'Яндекс.Вебмастер, GSC, Я.Бизнес, 2ГИС, Google и 404-отчёты Метрики '
-                'за выбранный период — из кеша. Нажмите «Обновить» чтобы '
-                'забрать новые письма.'
+            st.caption('Данные из кеша — обновляются при запуске прогона (чекбокс «Собрать уведомления»).')
+
+            _nb_days = st.selectbox(
+                'Период',
+                [7, 14, 30],
+                index=1,
+                format_func=lambda x: f'{x} дней',
+                key='c30_notify_period',
+                label_visibility='collapsed',
             )
 
-            # ── Ошибки Вебмастера и GSC (если выбраны чекбоксы) ─────
-            _show_wm = st.session_state.get('c30_check_webmaster', True)
-            _show_gsc_err = st.session_state.get('c30_check_gsc', True)
+            # ── Ошибки Вебмастера / GSC (всегда раскрыты, если есть) ─
+            _P_ERR = {'critical': ('#DC2626', 'rgba(220,38,38,0.07)'),
+                      'important': ('#D97706', 'rgba(217,119,6,0.07)')}
 
-            if _show_wm or _show_gsc_err:
-                _P_ERR_COLOR = {'critical': '#DC2626', 'important': '#D97706'}
-                _P_ERR_BG = {'critical': 'rgba(220,38,38,0.07)', 'important': 'rgba(217,119,6,0.07)'}
+            _PRIO_C = {'critical': '#DC2626', 'important': '#D97706',
+                       'recommendation': '#CA8A04', 'info': '#6B7280'}
+            _PRIO_BG = {'critical': 'rgba(220,38,38,0.06)', 'important': 'rgba(217,119,6,0.06)',
+                        'recommendation': 'rgba(202,138,4,0.06)', 'info': 'rgba(107,114,128,0.04)'}
 
-                def _render_errors(notifs, title, icon):
-                    err_notifs = [n for n in notifs if n.priority in ('critical', 'important')]
-                    if not err_notifs:
-                        st.success(f'{icon} {title} — ошибок не найдено')
-                        return
-                    crit_n = sum(1 for n in err_notifs if n.priority == 'critical')
-                    color = '#DC2626' if crit_n else '#D97706'
-                    st.markdown(
-                        f'<p style="font-weight:600;font-size:0.95rem;color:{color}">'
-                        f'{icon} {title} — {len(err_notifs)} ошибок'
-                        + (f' · <span style="color:#DC2626">{crit_n} критических</span>' if crit_n else '')
-                        + '</p>',
-                        unsafe_allow_html=True,
-                    )
-                    for n in sorted(err_notifs, key=lambda x: (x.priority, x.date), reverse=False):
-                        c = _P_ERR_COLOR[n.priority]
-                        bg = _P_ERR_BG[n.priority]
-                        from webmaster_notify import CATEGORY_LABELS as _CL
-                        cat = _CL.get(n.category, n.category)
-                        st.markdown(
-                            f'<div style="padding:8px 14px;margin-bottom:6px;'
-                            f'border-left:3px solid {c};border-radius:0 6px 6px 0;background:{bg}">'
-                            f'<span style="font-size:0.8rem;color:#6B7280">{n.date} · {cat}</span>'
-                            f'<p style="margin:4px 0 0 0;font-weight:600;font-size:0.9rem;color:{c}">{n.subject}</p>'
-                            + (f'<p style="margin:3px 0 0 0;font-size:0.82rem;color:#5B5853">{n.body_preview[:250]}</p>' if n.body_preview else '')
-                            + '</div>',
-                            unsafe_allow_html=True,
-                        )
+            def _group_by_subject(items):
+                """Группировка по теме: одинаковые subject → одна запись с датами."""
+                from collections import OrderedDict
+                groups: dict = OrderedDict()
+                for n in items:
+                    key = n.subject.strip()
+                    if key not in groups:
+                        groups[key] = {'rep': n, 'dates': [], 'count': 0}
+                    groups[key]['dates'].append(n.date)
+                    groups[key]['count'] += 1
+                return list(groups.values())
 
-                with st.expander('🚨 Ошибки Вебмастера и GSC', expanded=True):
-                    _err_col1, _err_col2 = st.columns(2)
-                    with _err_col1:
-                        if _show_wm:
-                            _render_errors(
-                                load_notifications(pid, 'yandex_webmaster', 30),
-                                'Яндекс.Вебмастер', '🔍',
-                            )
-                    with _err_col2:
-                        if _show_gsc_err:
-                            _render_errors(
-                                load_notifications(pid, 'gsc', 30),
-                                'Google Search Console', '🌐',
-                            )
-
-                st.divider()
-
-            _col_period, _col_btn = st.columns([1, 1])
-            with _col_period:
-                _nb_period = st.selectbox(
-                    'Период',
-                    ['7 дней', '14 дней', '30 дней'],
-                    index=1,
-                    label_visibility='collapsed',
-                    key='c30_notify_period',
-                )
-            _nb_days = {'7 дней': 7, '14 дней': 14, '30 дней': 30}[_nb_period]
-
-            with _col_btn:
-                _nb_refresh = st.button(
-                    '🔄 Обновить из почты',
-                    key='c30_btn_notify_refresh',
-                    use_container_width=True,
-                )
-
-            # ── Обновление при нажатии ───────────────────────────────
-            if _nb_refresh:
-                _nb_log: list[str] = []
-
-                def _nlog(lvl, msg):
-                    _nb_log.append(msg)
-
-                _steps = (
-                    (1 if has_yw else 0) + (1 if has_gsc else 0)
-                    + (1 if has_metrika else 0) + (1 if has_yab else 0)
-                    + (1 if has_tgis else 0) + (1 if has_ga else 0)
-                )
-                _done = 0
-                _pb = st.progress(0, text='Подключаюсь…')
-
-                if has_yw:
-                    _pb.progress(_done / _steps, text='Яндекс.Вебмастер…')
-                    try:
-                        _r = fetch_webmaster_yandex(
-                            project_id=pid,
-                            email_addr=yw_email,
-                            password=yw_password,
-                            folder=yw_cfg['folder'],
-                            lookback_days=_nb_days,
-                            proxy_url=get_proxy_url(),
-                            log=_nlog,
-                        )
-                        _nlog('info', f'Вебмастер: +{_r["fetched"]} новых')
-                    except Exception as _e:
-                        _nlog('error', f'❌ Вебмастер: {_e}')
-                    _done += 1
-
-                if has_gsc:
-                    _pb.progress(_done / _steps, text='GSC (Gmail)…')
-                    try:
-                        _r = fetch_gsc_gmail(
-                            project_id=pid,
-                            email_addr=gsc_email,
-                            password=gsc_password,
-                            lookback_days=_nb_days,
-                            log=_nlog,
-                        )
-                        _nlog('info', f'GSC: +{_r["fetched"]} новых')
-                    except Exception as _e:
-                        _nlog('error', f'❌ GSC: {_e}')
-                    _done += 1
-
-                if has_metrika:
-                    _pb.progress(_done / _steps, text='Метрика 404…')
-                    try:
-                        _r = fetch_incremental(
-                            project_id=pid,
-                            email_addr=yw_email,
-                            password=yw_password,
-                            folder=MAILBOX_CONFIG[pid]['folder'],
-                            proxy_url=get_proxy_url(),
-                            lookback_days=_nb_days,
-                            log=_nlog,
-                            upgrade_if_better=True,
-                        )
-                        _nlog('info', f'Метрика: +{_r["fetched"]} новых')
-                    except Exception as _e:
-                        _nlog('error', f'❌ Метрика: {_e}')
-                    _done += 1
-
-                if has_yab:
-                    _pb.progress(_done / _steps, text='Я.Бизнес…')
-                    try:
-                        _r = fetch_yandex_folder_simple(
-                            project_id=pid,
-                            email_addr=yab_email,
-                            password=yab_password,
-                            folder=yab_folder,
-                            source_key='ya_business',
-                            lookback_days=_nb_days,
-                            proxy_url=get_proxy_url(),
-                            log=_nlog,
-                        )
-                        _nlog('info', f'Я.Бизнес: +{_r["fetched"]} новых')
-                    except Exception as _e:
-                        _nlog('error', f'❌ Я.Бизнес: {_e}')
-                    _done += 1
-
-                if has_tgis:
-                    _pb.progress(_done / _steps, text='2ГИС…')
-                    try:
-                        _r = fetch_yandex_folder_simple(
-                            project_id=pid,
-                            email_addr=tg_email,
-                            password=tg_password,
-                            folder=tg_folder,
-                            source_key='twogis',
-                            lookback_days=_nb_days,
-                            proxy_url=get_proxy_url(),
-                            log=_nlog,
-                        )
-                        _nlog('info', f'2ГИС: +{_r["fetched"]} новых')
-                    except Exception as _e:
-                        _nlog('error', f'❌ 2ГИС: {_e}')
-                    _done += 1
-
-                if has_ga:
-                    _pb.progress(_done / _steps, text='Google (аккаунт)…')
-                    try:
-                        _r = fetch_google_accounts(
-                            project_id=pid,
-                            email_addr=ga_email,
-                            password=ga_password,
-                            lookback_days=3,
-                            log=_nlog,
-                        )
-                        _nlog('info', f'Google: +{_r["fetched"]} новых')
-                    except Exception as _e:
-                        _nlog('error', f'❌ Google: {_e}')
-                    _done += 1
-
-                _pb.empty()
-                st.success('✅ Обновление завершено')
-                with st.expander('Лог', expanded=False):
-                    st.code('\n'.join(_nb_log[-100:]) or '(пусто)', language='text')
-                st.rerun()
-
-            # ── Рендер уведомлений ───────────────────────────────────
-
-            _P_COLOR = {
-                'critical':       '#DC2626',
-                'important':      '#D97706',
-                'recommendation': '#CA8A04',
-                'info':           '#6B7280',
-            }
-            _P_BG = {
-                'critical':       'rgba(220,38,38,0.07)',
-                'important':      'rgba(217,119,6,0.07)',
-                'recommendation': 'rgba(202,138,4,0.07)',
-                'info':           'rgba(107,114,128,0.07)',
-            }
-
-            def _render_source(notifs, title: str, icon: str):
-                if not notifs:
-                    st.caption(f'Нет уведомлений от {title} за выбранный период')
-                    return
-                groups = group_by_priority(notifs)
-                crit_n = len(groups.get('critical', []))
-                hdr_color = '#DC2626' if crit_n else '#1A1A1A'
-                crit_badge = (
-                    f' <span style="color:#DC2626">({crit_n} критических)</span>'
-                    if crit_n else ''
-                )
+            def _notif_card_grouped(rep_n, dates, count, color, bg):
+                cat = CATEGORY_LABELS.get(rep_n.category, rep_n.category)
+                tags_h = _tags_html(_dept_tags_notif(rep_n))
+                date_str = dates[0] if count == 1 else f'{min(dates)} – {max(dates)} · ×{count}'
                 st.markdown(
-                    f'<p style="font-weight:600;font-size:1rem;color:{hdr_color}">'
-                    f'{icon} {title} — {len(notifs)} уведомлений{crit_badge}</p>',
-                    unsafe_allow_html=True,
-                )
-                for priority in PRIORITY_ORDER:
-                    items = groups.get(priority, [])
-                    if not items:
-                        continue
-                    with st.expander(
-                        f'{PRIORITY_LABELS[priority]} ({len(items)})',
-                        expanded=(priority in ('critical', 'important')),
-                    ):
-                        for n in items:
-                            cat = CATEGORY_LABELS.get(n.category, n.category)
-                            color = _P_COLOR[priority]
-                            bg = _P_BG[priority]
-                            st.markdown(
-                                f'<div style="padding:10px 14px;margin-bottom:8px;'
-                                f'border-left:3px solid {color};border-radius:0 6px 6px 0;'
-                                f'background:{bg}">'
-                                f'<span style="font-size:0.8rem;color:#6B7280">{n.date}</span>'
-                                f' · <span style="font-size:0.8rem;font-weight:600;'
-                                f'color:{color}">{cat}</span>'
-                                f'<p style="margin:4px 0 0 0;font-weight:600;'
-                                f'font-size:0.95rem;color:#1A1A1A">{n.subject}</p>'
-                                + (
-                                    f'<p style="margin:4px 0 0 0;font-size:0.85rem;'
-                                    f'color:#5B5853;white-space:pre-wrap">'
-                                    f'{n.body_preview[:300]}</p>'
-                                    if n.body_preview else ''
-                                )
-                                + '</div>',
-                                unsafe_allow_html=True,
-                            )
-
-            # Яндекс.Вебмастер
-            if has_yw:
-                _render_source(
-                    load_notifications(pid, 'yandex_webmaster', _nb_days),
-                    'Яндекс.Вебмастер', '🔍',
+                    f'<div style="padding:7px 12px;margin-bottom:5px;border-left:3px solid {color};'
+                    f'border-radius:0 5px 5px 0;background:{bg}">'
+                    f'<span style="font-size:0.78rem;color:#6B7280">{date_str} · {cat}</span>'
+                    f'{tags_h}'
+                    f'<p style="margin:3px 0 0;font-size:0.9rem;font-weight:600;color:{color}">'
+                    f'{rep_n.subject}</p>'
+                    + (f'<p style="margin:2px 0 0;font-size:0.82rem;color:#5B5853">'
+                       f'{rep_n.body_preview[:220]}</p>' if rep_n.body_preview and count == 1 else '')
+                    + '</div>', unsafe_allow_html=True,
                 )
 
-            # GSC
-            if has_gsc:
-                if has_yw:
-                    st.divider()
-                _render_source(
-                    load_notifications(pid, 'gsc', _nb_days),
-                    'Google Search Console', '🌐',
-                )
+            def _render_errors_compact(source_key, title, icon):
+                items = [n for n in load_notifications(pid, source_key, _nb_days)
+                         if n.priority in ('critical', 'important')]
+                if not items:
+                    st.success(f'{icon} {title} — ошибок нет')
+                    return
+                crit = sum(1 for n in items if n.priority == 'critical')
+                badge = f' · **{crit} крит.**' if crit else ''
+                with st.expander(f'{icon} {title} — {len(items)} ошибок{badge}', expanded=True):
+                    for g in _group_by_subject(
+                            sorted(items, key=lambda x: (PRIORITY_ORDER.index(x.priority), x.date))):
+                        c, bg = _P_ERR[g['rep'].priority]
+                        _notif_card_grouped(g['rep'], g['dates'], g['count'], c, bg)
 
-            # Я.Бизнес (без приоритетов — плоский список)
-            if has_yab:
-                if has_yw or has_gsc:
-                    st.divider()
-                _yab_items = load_notifications(pid, 'ya_business', _nb_days)
-                if _yab_items:
-                    st.markdown(
-                        '<p style="font-weight:600;font-size:1rem;color:#1A1A1A">'
-                        '🏢 Я.Бизнес — {} уведомлений</p>'.format(len(_yab_items)),
-                        unsafe_allow_html=True,
-                    )
-                    with st.expander(f'Показать все ({len(_yab_items)})', expanded=False):
-                        for n in _yab_items:
-                            st.markdown(
-                                f'<div style="padding:8px 14px;margin-bottom:6px;'
-                                f'border-left:3px solid #6B7280;border-radius:0 6px 6px 0;'
-                                f'background:rgba(107,114,128,0.06)">'
-                                f'<span style="font-size:0.8rem;color:#6B7280">{n.date}</span>'
-                                f'<p style="margin:4px 0 0 0;font-size:0.95rem;color:#1A1A1A">'
-                                f'{n.subject}</p>'
-                                + (f'<p style="margin:4px 0 0 0;font-size:0.85rem;color:#5B5853">'
-                                   f'{n.body_preview[:300]}</p>' if n.body_preview else '')
-                                + '</div>',
-                                unsafe_allow_html=True,
-                            )
-                else:
-                    st.caption('Нет уведомлений от Я.Бизнес за выбранный период.')
+            def _render_source_compact(source_key, title, icon, days=None):
+                items = load_notifications(pid, source_key, days or _nb_days)
+                if not items:
+                    return
+                groups = group_by_priority(items)
+                crit_n = len(groups.get('critical', []))
+                badge = f' · **{crit_n} крит.**' if crit_n else ''
+                with st.expander(f'{icon} {title} — {len(items)} уведомлений{badge}', expanded=False):
+                    for priority in PRIORITY_ORDER:
+                        prio_items = groups.get(priority, [])
+                        if not prio_items:
+                            continue
+                        c, bg = _PRIO_C[priority], _PRIO_BG[priority]
+                        for g in _group_by_subject(prio_items):
+                            _notif_card_grouped(g['rep'], g['dates'], g['count'], c, bg)
 
-            # 2ГИС (без приоритетов)
-            if has_tgis:
-                if has_yw or has_gsc or has_yab:
-                    st.divider()
-                _tg_items = load_notifications(pid, 'twogis', _nb_days)
-                if _tg_items:
-                    st.markdown(
-                        '<p style="font-weight:600;font-size:1rem;color:#1A1A1A">'
-                        '🗺 2ГИС — {} уведомлений</p>'.format(len(_tg_items)),
-                        unsafe_allow_html=True,
-                    )
-                    with st.expander(f'Показать все ({len(_tg_items)})', expanded=False):
-                        for n in _tg_items:
-                            st.markdown(
-                                f'<div style="padding:8px 14px;margin-bottom:6px;'
-                                f'border-left:3px solid #6B7280;border-radius:0 6px 6px 0;'
-                                f'background:rgba(107,114,128,0.06)">'
-                                f'<span style="font-size:0.8rem;color:#6B7280">{n.date}</span>'
-                                f'<p style="margin:4px 0 0 0;font-size:0.95rem;color:#1A1A1A">'
-                                f'{n.subject}</p>'
-                                + (f'<p style="margin:4px 0 0 0;font-size:0.85rem;color:#5B5853">'
-                                   f'{n.body_preview[:300]}</p>' if n.body_preview else '')
-                                + '</div>',
-                                unsafe_allow_html=True,
-                            )
-                else:
-                    st.caption('Нет уведомлений от 2ГИС за выбранный период.')
+            def _render_flat_compact(source_key, title, icon, days=None):
+                items = load_notifications(pid, source_key, days or _nb_days)
+                if not items:
+                    return
+                with st.expander(f'{icon} {title} — {len(items)} уведомлений', expanded=False):
+                    for g in _group_by_subject(items):
+                        _notif_card_grouped(g['rep'], g['dates'], g['count'],
+                                            '#6B7280', 'rgba(107,114,128,0.04)')
 
-            # Google (без приоритетов, только 3 дня)
-            if has_ga:
-                if has_yw or has_gsc or has_yab or has_tgis:
-                    st.divider()
-                _ga_items = load_notifications(pid, 'google_accounts', 3)
-                if _ga_items:
-                    st.markdown(
-                        '<p style="font-weight:600;font-size:1rem;color:#1A1A1A">'
-                        '📧 Google — {} уведомлений (3 дня)</p>'.format(len(_ga_items)),
-                        unsafe_allow_html=True,
-                    )
-                    with st.expander(f'Показать все ({len(_ga_items)})', expanded=False):
-                        for n in _ga_items:
-                            st.markdown(
-                                f'<div style="padding:8px 14px;margin-bottom:6px;'
-                                f'border-left:3px solid #6B7280;border-radius:0 6px 6px 0;'
-                                f'background:rgba(107,114,128,0.06)">'
-                                f'<span style="font-size:0.8rem;color:#6B7280">{n.date}</span>'
-                                f'<p style="margin:4px 0 0 0;font-size:0.95rem;color:#1A1A1A">'
-                                f'{n.subject}</p>'
-                                + (f'<p style="margin:4px 0 0 0;font-size:0.85rem;color:#5B5853">'
-                                   f'{n.body_preview[:300]}</p>' if n.body_preview else '')
-                                + '</div>',
-                                unsafe_allow_html=True,
-                            )
-                else:
-                    st.caption('Нет уведомлений от Google за последние 3 дня.')
+            _show_wm = st.session_state.get('c30_check_webmaster', True)
+            _show_gsc_chk = st.session_state.get('c30_check_gsc', True)
+
+            if _show_wm and _yw_e2:
+                _render_errors_compact('yandex_webmaster', 'Яндекс.Вебмастер', '🔍')
+            if _show_gsc_chk and _gsc_e2:
+                _render_errors_compact('gsc', 'Google Search Console', '🌐')
+
+            if _yw_e2:
+                _render_source_compact('yandex_webmaster', 'Вебмастер (все)', '📋')
+                _render_flat_compact('ya_business', 'Я.Бизнес', '🏢')
+                _render_flat_compact('twogis', '2ГИС', '🗺')
+            if _gsc_e2:
+                _render_source_compact('gsc', 'GSC (все)', '🌐')
+                _render_flat_compact('google_accounts', 'Google', '📧', days=3)
 
             # Метрика 404
-            if has_metrika:
-                if has_yw or has_gsc:
-                    st.divider()
+            if _yw_e2:
                 _m_reports = load_reports_for_period(pid, days=_nb_days)
                 if _m_reports:
                     _m_total = sum(r.total_pages for r in _m_reports)
-                    _m_dates = len({r.report_date for r in _m_reports})
-                    st.markdown(
-                        f'<p style="font-weight:600;font-size:1rem;color:#1A1A1A">'
-                        f'📊 Метрика 404 — {_m_total} страниц за {_m_dates} дней</p>',
-                        unsafe_allow_html=True,
-                    )
-                    with st.expander('Детали по странам', expanded=False):
-                        for rep in sorted(_m_reports,
-                                          key=lambda r: r.report_date, reverse=True):
+                    with st.expander(f'📊 Метрика 404 — {_m_total} страниц', expanded=False):
+                        for rep in sorted(_m_reports, key=lambda r: r.report_date, reverse=True):
                             st.markdown(
                                 f'**{rep.report_date}** · {rep.country_name} — '
-                                f'{rep.total_pages} страниц, {rep.total_views} просмотров'
+                                f'{rep.total_pages} стр., {rep.total_views} просмотров'
                             )
-                else:
-                    st.caption('Нет данных Метрики 404 за выбранный период. '
-                               'Нажмите «Обновить из почты».')
 
 else:
     st.info('Выберите проект, чтобы начать еженедельную проверку.')
