@@ -328,6 +328,158 @@ def _build_structure_sheet(wb, results):
         ws.column_dimensions[get_column_letter(col_idx)].width = 13
 
 
+# ── Лист уведомлений ──────────────────────────────────────────────
+
+_NOTIF_PRIORITY_LABEL = {
+    'critical':       '🔴 Критические',
+    'important':      '🟠 Важные',
+    'recommendation': '🟡 Рекомендации',
+    'info':           '⚪ Инфо',
+}
+_NOTIF_PRIORITY_ORDER = ['critical', 'important', 'recommendation', 'info']
+_NOTIF_PRIORITY_COLOR = {
+    'critical':       C.err,
+    'important':      C.warn,
+    'recommendation': 'CA8A04',
+    'info':           C.text_muted,
+}
+_NOTIF_PRIORITY_BG = {
+    'critical':       C.err_soft,
+    'important':      C.warn_soft,
+    'recommendation': 'FEFCE8',
+    'info':           C.surface,
+}
+_NOTIF_CATEGORY_LABEL = {
+    'server':     'Сервер',
+    'indexing':   'Индексирование',
+    'speed':      'Скорость',
+    'security':   'Безопасность',
+    'structure':  'Структура',
+    'coverage':   'Покрытие',
+    'other':      'Прочее',
+}
+_NOTIF_SOURCE_LABEL = {
+    'yandex_webmaster': 'Яндекс.Вебмастер',
+    'gsc':              'Google Search Console',
+}
+
+
+def _build_notifications_sheet(wb, notifications):
+    """Лист «Уведомления» — письма от Вебмастера и GSC, сгруппированные по приоритету."""
+    ws = wb.create_sheet('Уведомления')
+    ws.sheet_view.showGridLines = False
+
+    # Есть ли критические — красный таб
+    has_critical = any(n.priority == 'critical' for n in notifications)
+    ws.sheet_properties.tabColor = C.err if has_critical else C.accent
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 14   # Дата
+    ws.column_dimensions['C'].width = 22   # Источник
+    ws.column_dimensions['D'].width = 20   # Категория
+    ws.column_dimensions['E'].width = 55   # Тема
+    ws.column_dimensions['F'].width = 80   # Превью
+
+    # Заголовок
+    ws.merge_cells('B2:F2')
+    c = ws['B2']
+    c.value = 'Уведомления из почты'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:F3')
+    c = ws['B3']
+    c.value = (
+        'Письма от Яндекс.Вебмастера и Google Search Console за период проверки, '
+        'отсортированные по приоритету. Красная вкладка = есть критические.'
+    )
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 24
+
+    # Группировка по приоритету
+    from collections import defaultdict
+    by_priority = defaultdict(list)
+    for n in notifications:
+        by_priority[n.priority].append(n)
+
+    row = 5
+    for priority in _NOTIF_PRIORITY_ORDER:
+        items = by_priority.get(priority, [])
+        if not items:
+            continue
+
+        p_color = _NOTIF_PRIORITY_COLOR[priority]
+        p_bg = _NOTIF_PRIORITY_BG[priority]
+        p_label = _NOTIF_PRIORITY_LABEL[priority]
+
+        # Заголовок группы
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        gc = ws.cell(row=row, column=2)
+        gc.value = f'{p_label}  ({len(items)})'
+        gc.font = _font(size=12, bold=True, color=p_color)
+        gc.fill = _fill(p_bg)
+        gc.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+        # Шапка таблицы
+        hdr_row = row
+        hdrs = ['Дата', 'Источник', 'Категория', 'Тема', 'Превью']
+        for ci, h in enumerate(hdrs, 2):
+            cell = ws.cell(row=hdr_row, column=ci)
+            cell.value = h
+            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.fill = _fill(C.surface)
+            cell.alignment = _align()
+            cell.border = _border()
+        ws.row_dimensions[hdr_row].height = 22
+        row += 1
+
+        # Строки
+        items_sorted = sorted(items, key=lambda n: n.date, reverse=True)
+        for n in items_sorted:
+            ws.row_dimensions[row].height = 42
+
+            cell = ws.cell(row=row, column=2)
+            cell.value = n.date
+            cell.font = _font(size=10, color=C.text_soft)
+            cell.alignment = _align()
+            cell.border = _border(color=C.border_light)
+
+            cell = ws.cell(row=row, column=3)
+            cell.value = _NOTIF_SOURCE_LABEL.get(n.source, n.source)
+            cell.font = _font(size=10)
+            cell.alignment = _align()
+            cell.border = _border(color=C.border_light)
+
+            cell = ws.cell(row=row, column=4)
+            cell.value = _NOTIF_CATEGORY_LABEL.get(n.category, n.category)
+            cell.font = _font(size=10, color=C.text_soft)
+            cell.alignment = _align()
+            cell.border = _border(color=C.border_light)
+
+            cell = ws.cell(row=row, column=5)
+            cell.value = n.subject
+            cell.font = _font(size=10, bold=(priority == 'critical'), color=p_color)
+            cell.alignment = _align(wrap=True)
+            cell.border = _border(color=C.border_light)
+            if priority == 'critical':
+                cell.fill = _fill(p_bg)
+
+            cell = ws.cell(row=row, column=6)
+            cell.value = (n.body_preview or '')[:400]
+            cell.font = _font(size=9, color=C.text_soft)
+            cell.alignment = _align(wrap=True)
+            cell.border = _border(color=C.border_light)
+
+            row += 1
+
+        row += 1  # пробел между группами
+
+    ws.auto_filter.ref = f'B{5 + 1}:F{row - 1}'  # приблизительно — не критично
+
+
 # ── Главная функция ────────────────────────────────────────────────
 
 
@@ -342,6 +494,7 @@ def build_report(
     metrika_reports: list = None,  # список Report404 — добавит лист «404 из Метрики»
     metrika_data_date: str = None, # дата отчёта Метрики (YYYY-MM-DD)
     metrika_is_stale: bool = False,# True если данные не за вчера, а за более ранний день
+    notifications: list = None,    # список WebmasterNotification — добавит лист «Уведомления»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -495,6 +648,7 @@ def build_report(
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист — страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист — страницы, куда заходили люди и упёрлись в 404.'),
+        ('Уведомления', 'если есть лист — письма от Яндекс.Вебмастера и GSC за выбранный период.'),
     ]
     for i, (sheet_name, desc) in enumerate(nav_items):
         r = nav_row + 1 + i
@@ -935,6 +1089,12 @@ def build_report(
                 row_idx += 1
 
             ws4.auto_filter.ref = f'A{hdr_row}:H{row_idx - 1}'
+
+    # ═══════════════════════════════════════════════════════════════
+    # ЛИСТ 5: Уведомления (Вебмастер + GSC) — если есть данные
+    # ═══════════════════════════════════════════════════════════════
+    if notifications:
+        _build_notifications_sheet(wb, notifications)
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)

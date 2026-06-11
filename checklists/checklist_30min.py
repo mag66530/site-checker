@@ -401,6 +401,10 @@ if pid:
             append_log('Формирую xlsx-отчёт…')
             report_filename = make_report_filename(pid, started_ms, REPORTS_DIR)
             report_path = REPORTS_DIR / report_filename
+            _notifs_for_report = (
+                load_notifications(pid, 'yandex_webmaster', 30)
+                + load_notifications(pid, 'gsc', 30)
+            )
             build_report(
                 project_name=cfg['name'],
                 started_at_ms=started_ms,
@@ -408,6 +412,7 @@ if pid:
                 selected_subdomains=plan.selected_subdomains,
                 results=results,
                 output_path=report_path,
+                notifications=_notifs_for_report or None,
             )
 
             # Пункт 2 чек-листа: отправка ошибок ответственным
