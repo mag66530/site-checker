@@ -751,8 +751,8 @@ def build_report(
     headers = [
         ('Город', 18), ('Поддомен', 28), ('Тип', 12), ('URL', 55),
         ('Код', 8), ('Статус', 22), ('Скорость, с', 12),
-        ('Оценка скорости', 18), ('Битые переменные', 18),
-        ('Откуда перешли', 50), ('Отдел', 22),
+        ('Оценка скорости', 18), ('Отдел', 22),
+        ('Битые переменные', 18), ('Откуда перешли', 50),
     ]
     for i, (header, width) in enumerate(headers, 1):
         col_letter = get_column_letter(i)
@@ -788,17 +788,17 @@ def build_report(
             text_issue_text = f'{n} {"находка" if n == 1 else "находок"}'
 
         values = [
-            r.city,                            # A
-            r.subdomain,                       # B
-            r.type_label,                      # C
-            r.url,                             # D
-            r.http_code if r.http_code else '–',  # E
-            STATUS_LABEL.get(r.status, r.status),  # F
-            speed_sec,                         # G
-            speed_label,                       # H
-            text_issue_text,                   # I
-            _build_path_description(r),        # J
-            _dept_result(r),                   # K
+            r.city,                            # 1 Город
+            r.subdomain,                       # 2 Поддомен
+            r.type_label,                      # 3 Тип
+            r.url,                             # 4 URL
+            r.http_code if r.http_code else '–',  # 5 Код
+            STATUS_LABEL.get(r.status, r.status),  # 6 Статус
+            speed_sec,                         # 7 Скорость, с
+            speed_label,                       # 8 Оценка скорости
+            _dept_result(r),                   # 9 Отдел
+            text_issue_text,                   # 10 Битые переменные
+            _build_path_description(r),        # 11 Откуда перешли
         ]
 
         for col_idx, value in enumerate(values, 1):
@@ -817,7 +817,7 @@ def build_report(
         url_cell.font = _font(name='Consolas', size=10, color=C.accent, underline='single')
 
         # Откуда перешли — моноширинный для цепочек, курсивный для прямых
-        path_cell = ws2.cell(row=row_idx, column=10)
+        path_cell = ws2.cell(row=row_idx, column=11)
         if r.redirect_chain:
             path_cell.font = _font(name='Consolas', size=9, color=C.text_soft)
         elif not r.is_ok:
@@ -825,7 +825,7 @@ def build_report(
 
         # Битые переменные — подсветка
         if r.has_text_issues:
-            issue_cell = ws2.cell(row=row_idx, column=9)
+            issue_cell = ws2.cell(row=row_idx, column=10)
             issue_cell.font = _font(size=10, bold=True, color=C.warn)
             issue_cell.fill = _fill(C.warn_soft)
 

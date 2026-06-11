@@ -542,23 +542,24 @@ def fetch_gsc_gmail(
                 f'Проверьте пароль приложения (не основной пароль Gmail).'
             )
 
-        _log(f'Gmail: вошли как {email_addr}. Открываю All Mail…')
+        _log(f'Gmail: вошли как {email_addr}. Ищу письма GSC…')
 
-        # Gmail раскладывает входящие по вкладкам (Primary/Updates/Promotions).
-        # В INBOX через IMAP попадает только Primary — GSC-письма туда не идут.
-        # Ищем во всём почтовом ящике через [Gmail]/All Mail.
-        status, _ = M.select('"[Gmail]/All Mail"', readonly=True)
-        if status != 'OK':
-            # Fallback: у некоторых аккаунтов другое имя папки
-            status, _ = M.select('INBOX', readonly=True)
-            if status != 'OK':
-                raise FileNotFoundError('Не удалось открыть папку')
+        # Пробуем несколько папок: INBOX → All Mail → [Gmail]/All Mail.
+        # На некоторых аккаунтах GSC идёт в INBOX, на других — в Updates (не видна в INBOX).
+        _folder_ok = False
+        for _folder in ('INBOX', '"[Gmail]/All Mail"', '"[Google Mail]/All Mail"'):
+            _s, _ = M.select(_folder, readonly=True)
+            if _s == 'OK':
+                _log(f'Открыта папка {_folder}')
+                _folder_ok = True
+                break
+        if not _folder_ok:
+            raise FileNotFoundError('Не удалось открыть ни одну папку Gmail')
 
         since_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%d-%b-%Y')
         # Ищем только письма от GSC
         status, nums_raw = M.search(
-            None,
-            f'FROM "sc-noreply@google.com" SINCE {since_date}',
+            None, 'FROM', '"sc-noreply@google.com"', 'SINCE', since_date,
         )
         if status != 'OK' or not nums_raw[0]:
             _log('Писем от GSC нет')
@@ -810,16 +811,18 @@ def fetch_google_accounts(
 
         _log(f'Gmail: вошли как {email_addr}. Ищу письма от Google…')
 
-        status, _ = M.select('"[Gmail]/All Mail"', readonly=True)
-        if status != 'OK':
-            status, _ = M.select('INBOX', readonly=True)
-            if status != 'OK':
-                raise FileNotFoundError('Не удалось открыть папку')
+        _folder_ok = False
+        for _folder in ('INBOX', '"[Gmail]/All Mail"', '"[Google Mail]/All Mail"'):
+            _s, _ = M.select(_folder, readonly=True)
+            if _s == 'OK':
+                _folder_ok = True
+                break
+        if not _folder_ok:
+            raise FileNotFoundError('Не удалось открыть ни одну папку Gmail')
 
         since_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%d-%b-%Y')
         status, nums_raw = M.search(
-            None,
-            f'FROM "no-reply@accounts.google.com" SINCE {since_date}',
+            None, 'FROM', '"no-reply@accounts.google.com"', 'SINCE', since_date,
         )
         if status != 'OK' or not nums_raw[0]:
             _log('Писем от Google за последние дни нет')

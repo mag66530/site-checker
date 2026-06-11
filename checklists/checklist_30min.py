@@ -134,14 +134,16 @@ _TAG_META = {
 
 
 def _tags_html(tags: list[str]) -> str:
-    parts = []
+    if not tags:
+        return ''
+    parts = ['<span style="margin-left:10px;font-size:0.75rem;color:#9CA3AF">Отдел:</span>']
     for t in tags:
         if t in _TAG_META:
             icon, color, bg = _TAG_META[t]
             parts.append(
-                f'<span style="display:inline-block;padding:1px 8px;margin-left:6px;'
+                f'<span style="display:inline-block;padding:2px 10px;margin-left:4px;'
                 f'border-radius:10px;background:{bg};color:{color};'
-                f'font-size:0.72rem;font-weight:700;vertical-align:middle">'
+                f'font-size:0.78rem;font-weight:700;vertical-align:middle">'
                 f'{icon} {t}</span>'
             )
     return ''.join(parts)
@@ -710,6 +712,7 @@ if pid:
                 r for r in results
                 if r.is_error or r.is_warning or r.has_text_issues
                 or getattr(r, 'has_content_bugs', False)
+                or r.speed_rating in ('slow', 'very_slow')
             ]
             if problems:
                 kind_labels = {'listing': 'Листинг', 'section': 'Раздел каталога',
@@ -792,60 +795,53 @@ if pid:
                     + '</div>', unsafe_allow_html=True,
                 )
 
-            def _render_errors_compact(source_key, title, icon):
-                items = [n for n in load_notifications(pid, source_key, _nb_days)
-                         if n.priority in ('critical', 'important')]
-                if not items:
-                    st.success(f'{icon} {title} — ошибок нет')
-                    return
-                crit = sum(1 for n in items if n.priority == 'critical')
-                badge = f' · **{crit} крит.**' if crit else ''
-                with st.expander(f'{icon} {title} — {len(items)} ошибок{badge}', expanded=True):
-                    for g in _group_by_subject(
-                            sorted(items, key=lambda x: (PRIORITY_ORDER.index(x.priority), x.date))):
-                        c, bg = _P_ERR[g['rep'].priority]
-                        _notif_card_grouped(g['rep'], g['dates'], g['count'], c, bg)
-
-            def _render_source_compact(source_key, title, icon, days=None):
+            def _render_service_block(source_key, title, icon, days=None, with_priority=False):
+                """Один сворачиваемый блок на сервис. Критические — раскрыт по умолчанию."""
                 items = load_notifications(pid, source_key, days or _nb_days)
                 if not items:
+                    st.caption(f'{icon} {title} — нет уведомлений за период')
                     return
-                groups = group_by_priority(items)
-                crit_n = len(groups.get('critical', []))
-                badge = f' · **{crit_n} крит.**' if crit_n else ''
-                with st.expander(f'{icon} {title} — {len(items)} уведомлений{badge}', expanded=False):
-                    for priority in PRIORITY_ORDER:
-                        prio_items = groups.get(priority, [])
-                        if not prio_items:
-                            continue
-                        c, bg = _PRIO_C[priority], _PRIO_BG[priority]
-                        for g in _group_by_subject(prio_items):
-                            _notif_card_grouped(g['rep'], g['dates'], g['count'], c, bg)
-
-            def _render_flat_compact(source_key, title, icon, days=None):
-                items = load_notifications(pid, source_key, days or _nb_days)
-                if not items:
-                    return
-                with st.expander(f'{icon} {title} — {len(items)} уведомлений', expanded=False):
-                    for g in _group_by_subject(items):
-                        _notif_card_grouped(g['rep'], g['dates'], g['count'],
-                                            '#6B7280', 'rgba(107,114,128,0.04)')
-
-            _show_wm = st.session_state.get('c30_check_webmaster', True)
-            _show_gsc_chk = st.session_state.get('c30_check_gsc', True)
-
-            if _show_wm and _yw_e2:
-                _render_errors_compact('yandex_webmaster', 'Яндекс.Вебмастер', '🔍')
-            if _show_gsc_chk and _gsc_e2:
-                _render_errors_compact('gsc', 'Google Search Console', '🌐')
+                crit_n = sum(1 for n in items if n.priority == 'critical')
+                imp_n = sum(1 for n in items if n.priority == 'important')
+                badge_parts = []
+                if crit_n:
+                    badge_parts.append(f'🔴 {crit_n} крит.')
+                if imp_n:
+                    badge_parts.append(f'🟠 {imp_n} важных')
+                badge = '  ' + '  '.join(badge_parts) if badge_parts else ''
+                expand_default = bool(crit_n)
+                with st.expander(f'{icon} **{title}** — {len(items)} уведомлений{badge}',
+                                 expanded=expand_default):
+                    if with_priority:
+                        groups = group_by_priority(items)
+                        _prio_labels = {
+                            'critical': '🔴 Критические',
+                            'important': '🟠 Важные',
+                            'recommendation': '🟡 Рекомендации',
+                            'info': '⚪ Инфо',
+                        }
+                        for priority in PRIORITY_ORDER:
+                            prio_items = groups.get(priority, [])
+                            if not prio_items:
+                                continue
+                            st.markdown(f'**{_prio_labels[priority]}**')
+                            c, bg = _PRIO_C[priority], _PRIO_BG[priority]
+                            for g in _group_by_subject(prio_items):
+                                _notif_card_grouped(g['rep'], g['dates'], g['count'], c, bg)
+                    else:
+                        for g in _group_by_subject(items):
+                            _notif_card_grouped(g['rep'], g['dates'], g['count'],
+                                                '#6B7280', 'rgba(107,114,128,0.04)')
 
             if _yw_e2:
-                _render_source_compact('yandex_webmaster', 'Вебмастер (все)', '📋')
-                _render_flat_compact('ya_business', 'Я.Бизнес', '🏢')
-                _render_flat_compact('twogis', '2ГИС', '🗺')
+                _render_service_block('yandex_webmaster', 'Яндекс.Вебмастер', '🔍',
+                                      with_priority=True)
+                _render_service_block('ya_business', 'Я.Бизнес', '🏢')
+                _render_service_block('twogis', '2ГИС', '🗺')
             if _gsc_e2:
-                _render_source_compact('gsc', 'GSC (все)', '🌐')
-                _render_flat_compact('google_accounts', 'Google', '📧', days=3)
+                _render_service_block('gsc', 'Google Search Console', '🌐',
+                                      with_priority=True)
+                _render_service_block('google_accounts', 'Google', '📧', days=3)
 
             # Метрика 404
             if _yw_e2:
