@@ -205,10 +205,15 @@ def _dept_tags_notif(n) -> list[str]:
 _RUNS: dict = {}  # project_id -> состояние прогона
 
 
+class _RunCancelled(Exception):
+    pass
+
+
 def _run_state_new() -> dict:
     return {'running': True, 'progress': 0.0, 'progress_text': 'Подготовка…',
             'log': [], 'results': None, 'report_path': None,
-            'started_at': None, 'finished_at': None, 'error': None}
+            'started_at': None, 'finished_at': None, 'error': None,
+            'cancel': False, 'cancelled': False}
 
 
 def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
@@ -286,6 +291,8 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
         counters = {'ok': 0, 'warn': 0, 'err': 0}
 
         def on_progress(result, done, total_n):
+            if state.get('cancel'):
+                raise _RunCancelled()
             if result.is_ok:
                 counters['ok'] += 1
             elif result.is_warning:
@@ -457,6 +464,9 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
         state['finished_at'] = finished_ms
         set_progress(1.0, 'Готово')
 
+    except _RunCancelled:
+        state['cancelled'] = True
+        append_log('⛔ Прогон отменён пользователем')
     except Exception as e:
         state['error'] = str(e)
         append_log(f'❌ Ошибка: {e}')
@@ -746,6 +756,12 @@ if pid:
             st.caption('Можно переключаться на другие вкладки — прогон идёт в фоне '
                        'и не прервётся.')
             st.progress(_state['progress'], text=_state['progress_text'])
+            if st.button('⛔ Отменить проверку', key='c30_cancel'):
+                _state['cancel'] = True
+                _state['running'] = False
+                _RUNS.pop(pid, None)
+                st.session_state.c30_last_error = 'Проверка отменена'
+                st.rerun()
             with st.expander('Подробный лог', expanded=False):
                 st.code('\n'.join(_state['log'][-120:]) or '…', language='text')
         time.sleep(1.5)

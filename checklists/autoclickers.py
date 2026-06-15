@@ -22,7 +22,46 @@ import streamlit as st
 ROOT = Path(__file__).parent.parent
 PY = sys.executable
 LOG_FILE = ROOT / 'cache' / 'autoclick.log'
+PID_FILE = ROOT / 'cache' / 'autoclick.pid'
 DONE_MARK = '✅ ВСЁ ГОТОВО'
+
+
+def _read_pid():
+    try:
+        return int(PID_FILE.read_text().strip())
+    except Exception:
+        return None
+
+
+def _pid_alive(pid) -> bool:
+    if not pid:
+        return False
+    if os.name == 'nt':
+        try:
+            out = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'],
+                                 capture_output=True, text=True).stdout
+            return str(pid) in out
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _kill_tree(pid):
+    if not pid:
+        return
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)],
+                       capture_output=True)
+    else:
+        import signal
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
 
 PROJECTS = {
     'smu': {'name': 'СМУ — Сталметурал', 'google': 'stalmeturalru@gmail.com',
@@ -57,6 +96,10 @@ def _launch_background(args: list[str], log_path: Path):
         stdout=f, stderr=subprocess.STDOUT, env=env,
         creationflags=creationflags,
     )
+    try:
+        PID_FILE.write_text(str(proc.pid), encoding='utf-8')
+    except Exception:
+        pass
     return proc.pid
 
 
@@ -130,25 +173,37 @@ do_wm = st.checkbox('Прокликать Вебмастер', value=False)
 st.caption('Запуск фоновый — интерфейс сразу свободен. Можно уйти в чек-листы '
            'и работать параллельно, кликер крутится сам.')
 
-if st.button('Запустить', use_container_width=True):
-    if not do_gsc and not do_wm:
-        st.info('Отметь хотя бы один пункт выше.')
-    else:
-        args = ['autoclick_run.py', '--project', pid]
-        if do_gsc:
-            args.append('--gsc')
-        if do_wm:
-            args.append('--wm')
-        # очищаем лог и стартуем фоном
+_alive = _pid_alive(_read_pid())
+
+_run_col, _cancel_col = st.columns([3, 1])
+with _run_col:
+    if st.button('Запустить', use_container_width=True, disabled=_alive):
+        if not do_gsc and not do_wm:
+            st.info('Отметь хотя бы один пункт выше.')
+        else:
+            args = ['autoclick_run.py', '--project', pid]
+            if do_gsc:
+                args.append('--gsc')
+            if do_wm:
+                args.append('--wm')
+            try:
+                LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+                LOG_FILE.write_text('', encoding='utf-8')
+            except Exception:
+                pass
+            bg_pid = _launch_background(args, LOG_FILE)
+            st.session_state['autoclick_started'] = datetime.now().strftime('%H:%M:%S')
+            st.rerun()
+with _cancel_col:
+    if st.button('⛔ Отменить', use_container_width=True, disabled=not _alive):
+        _kill_tree(_read_pid())
         try:
-            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            LOG_FILE.write_text('', encoding='utf-8')
+            PID_FILE.unlink(missing_ok=True)
+            with open(LOG_FILE, 'a', encoding='utf-8') as _f:
+                _f.write('\n⛔ ОТМЕНЕНО пользователем\n')
         except Exception:
             pass
-        bg_pid = _launch_background(args, LOG_FILE)
-        st.session_state['autoclick_started'] = datetime.now().strftime('%H:%M:%S')
-        st.success(f'Запущено в фоне (PID {bg_pid}). Интерфейс свободен — '
-                   f'можешь идти в чек-листы. Прогресс ниже по кнопке «Обновить лог».')
+        st.rerun()
 
 st.divider()
 
@@ -157,14 +212,16 @@ st.subheader('Прогресс')
 if st.session_state.get('autoclick_started'):
     st.caption(f'Последний запуск: {st.session_state["autoclick_started"]}')
 
-if st.button('🔄 Обновить лог', use_container_width=True):
-    pass  # просто перерисовка
+st.button('🔄 Обновить лог', use_container_width=True)  # просто перерисовка
+
+if _alive:
+    st.markdown('**Статус:** ⏳ идёт…')
+elif LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
+    st.markdown('**Статус:** ✅ завершено / остановлено')
 
 if LOG_FILE.exists():
     txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore')
     if txt.strip():
-        done = DONE_MARK in txt
-        st.markdown('**Статус:** ' + ('✅ завершено' if done else '⏳ идёт…'))
         st.code('\n'.join(txt.splitlines()[-300:]), language='text')
     else:
         st.caption('Лог пуст — кликер ещё не запускали.')
