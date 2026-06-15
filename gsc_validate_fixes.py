@@ -81,6 +81,12 @@ async def _open_report(page, rid: str):
     await page.goto(INDEX_REPORT.format(rid=quote(rid, safe='')),
                     wait_until='domcontentloaded')
     await page.wait_for_timeout(5000)
+    # Скроллим до конца — второй блок «Проблемы с представлением страниц
+    # в результатах поиска» подгружается ниже.
+    for _ in range(6):
+        await page.mouse.wheel(0, 1600)
+        await page.wait_for_timeout(400)
+    await page.wait_for_timeout(800)
 
 
 async def _read_reasons(page) -> list[dict]:
@@ -102,8 +108,9 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
     res = {'resource': rid, 'reason': reason['name'],
            'status': 'error', 'message': ''}
     try:
-        # Клик по строке причины (по data-rowid)
-        row = page.locator(f'tr[data-rowid="{reason["rowid"]}"]').first
+        # Клик по причине ПО ИМЕНИ (rowid повторяется между двумя блоками,
+        # поэтому по rowid нельзя — попадём не в тот блок).
+        row = page.get_by_text(reason['name'], exact=False).first
         await row.click(timeout=8000)
         await page.wait_for_timeout(4000)
 
