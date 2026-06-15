@@ -270,8 +270,63 @@ def _build_structure_sheet(wb, results):
         dc.alignment = _align(horizontal='left')
         lr += 1
 
-    # ── Секции по группам страниц ──
+    # ── «Что чинить» — понятный список проблем сразу под сводкой ──
+    # Главное для читателя: не грид целиком, а короткий список «где и что
+    # сломано». Грид ниже — для деталей.
+    _kind_label = {'listing': 'Листинг', 'section': 'Раздел каталога',
+                   'empty': 'Пустой раздел'}
+    bug_pages = [r for r in pages if r.content_bugs > 0]
     row = lr + 2
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+    hc = ws.cell(row=row, column=2)
+    if bug_pages:
+        hc.value = f'Что чинить — {total_bugs} на {len(bug_pages)} стр.'
+        hc.font = _font(size=13, bold=True, color=C.err)
+    else:
+        hc.value = '✓ Структурных проблем не найдено — чинить нечего'
+        hc.font = _font(size=13, bold=True, color=C.ok)
+    hc.fill = _fill(C.err_soft if bug_pages else C.ok_soft)
+    hc.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 24
+    row += 1
+
+    if bug_pages:
+        # сортируем: больше всего проблем — выше
+        bug_pages.sort(key=lambda r: -r.content_bugs)
+        ws.column_dimensions['B'].width = 18
+        for r in bug_pages[:40]:
+            kind = _kind_label.get(getattr(r.content, 'page_kind', ''), r.type_label)
+            missing = ', '.join(b.label for b in r.content.bugs)
+
+            cc = ws.cell(row=row, column=2, value=f'[{r.city}] {kind}')
+            cc.font = _font(size=10, bold=True)
+            cc.alignment = _align(indent=1)
+            cc.border = _border(color=C.border_light)
+
+            uc = ws.cell(row=row, column=3, value='открыть')
+            uc.hyperlink = r.url
+            uc.font = _font(size=10, color=C.accent, underline='single')
+            uc.alignment = _align(horizontal='center', indent=0)
+            uc.border = _border(color=C.border_light)
+
+            ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=8)
+            mc = ws.cell(row=row, column=4, value=f'нет: {missing}')
+            mc.font = _font(size=10, color=C.err)
+            mc.alignment = _align(indent=1, wrap=True)
+            mc.border = _border(color=C.border_light)
+            row += 1
+        if len(bug_pages) > 40:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+            ws.cell(row=row, column=2,
+                    value=f'… и ещё {len(bug_pages) - 40} страниц — см. таблицы ниже').font = \
+                _font(size=10, italic=True, color=C.text_muted)
+            row += 1
+
+    # ── Подробные таблицы по группам страниц ──
+    row += 2
+    sect_title = ws.cell(row=row, column=2, value='Подробно по типам страниц')
+    sect_title.font = _font(size=12, bold=True, color=C.text_soft)
+    row += 2
     for group_label, predicate in _STRUCT_GROUPS:
         group_pages = [r for r in pages if predicate(r)]
         if not group_pages:
@@ -585,6 +640,142 @@ def _build_notifications_sheet(wb, notifications):
         row += 2  # пробел между секциями
 
 
+# ── Лист «Контакты по городам» (сверка с КП) ───────────────────────
+
+
+def _build_kp_sheet(wb, results):
+    """
+    Сверка контактов (телефон / почта / адрес) на главных страницах
+    поддоменов с «Картой присутствия». По одному городу в строке —
+    наглядно видно, где номер/почта/адрес не совпали с КП.
+    """
+    rows = [r for r in results if getattr(r, 'kp_result', None)]
+    if not rows:
+        return
+
+    # Сортировка: сначала города с проблемами, потом по алфавиту
+    rows.sort(key=lambda r: (not r.kp_result.get('has_issues'),
+                             r.kp_result.get('city') or ''))
+
+    total = len(rows)
+    with_problems = sum(1 for r in rows if r.kp_result.get('has_issues'))
+
+    ws = wb.create_sheet('Контакты по городам')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if with_problems else C.accent
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 22   # Город
+    ws.column_dimensions['C'].width = 10   # Открыть
+    ws.column_dimensions['D'].width = 12   # Телефон
+    ws.column_dimensions['E'].width = 12   # Почта
+    ws.column_dimensions['F'].width = 12   # Адрес
+    ws.column_dimensions['G'].width = 78   # Что не так
+
+    # Заголовок + пояснение
+    ws.merge_cells('B2:G2')
+    c = ws['B2']
+    c.value = 'Контакты по городам — сверка с КП'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 24
+
+    ws.merge_cells('B3:G3')
+    c = ws['B3']
+    c.value = ('Сверяем телефон, почту и адрес на главной каждого города с '
+               '«Картой присутствия». Телефон: ожидается SEO-номер (если нет — '
+               'рекламный, затем общий). Зелёное — совпало, красное — нет. '
+               'Что именно не так — в последнем столбце.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 30
+
+    # Плитки сводки
+    tiles = [
+        ('Проверено городов', total, C.accent, C.accent_soft),
+        ('С расхождениями', with_problems,
+         C.err if with_problems else C.ok, C.err_soft if with_problems else C.ok_soft),
+    ]
+    col = 2
+    for label, value, color, bg in tiles:
+        ws.merge_cells(start_row=5, start_column=col, end_row=5, end_column=col + 1)
+        ws.merge_cells(start_row=6, start_column=col, end_row=6, end_column=col + 1)
+        vc = ws.cell(row=5, column=col, value=value)
+        vc.font = _font(size=22, bold=True, color=color)
+        vc.fill = _fill(bg); vc.alignment = _align(horizontal='center')
+        vc.border = _border(color=C.border_light)
+        ws.cell(row=5, column=col + 1).fill = _fill(bg)
+        ws.cell(row=5, column=col + 1).border = _border(color=C.border_light)
+        lc = ws.cell(row=6, column=col, value=label)
+        lc.font = _font(size=9, color=C.text_muted)
+        lc.fill = _fill(bg); lc.alignment = _align(horizontal='center')
+        lc.border = _border(color=C.border_light)
+        ws.cell(row=6, column=col + 1).fill = _fill(bg)
+        ws.cell(row=6, column=col + 1).border = _border(color=C.border_light)
+        col += 3
+    ws.row_dimensions[5].height = 30
+
+    # Шапка таблицы
+    hdr_row = 8
+    headers = ['Город', 'Открыть', 'Телефон', 'Почта', 'Адрес', 'Что не так']
+    for ci, h in enumerate(headers, start=2):
+        cell = ws.cell(row=hdr_row, column=ci, value=h)
+        cell.font = _font(size=10, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align(horizontal='center' if ci > 3 else 'left')
+        cell.border = _border()
+    ws.row_dimensions[hdr_row].height = 24
+    ws.freeze_panes = f'B{hdr_row + 1}'
+
+    field_to_col = {'Телефон': 4, 'Почта': 5, 'Адрес': 6}
+    row = hdr_row + 1
+    for r in rows:
+        kp = r.kp_result
+        issues = {i['field']: i for i in kp.get('issues', [])}
+
+        cc = ws.cell(row=row, column=2, value=kp.get('city') or r.city)
+        cc.font = _font(size=10); cc.alignment = _align(indent=1)
+        cc.border = _border(color=C.border_light)
+
+        uc = ws.cell(row=row, column=3, value='открыть')
+        uc.hyperlink = r.url
+        uc.font = _font(size=10, color=C.accent, underline='single')
+        uc.alignment = _align(horizontal='center', indent=0)
+        uc.border = _border(color=C.border_light)
+
+        # Ячейки статусов
+        for field, col_idx in field_to_col.items():
+            cell = ws.cell(row=row, column=col_idx)
+            cell.alignment = _align(horizontal='center', indent=0)
+            cell.border = _border(color=C.border_light)
+            iss = issues.get(field)
+            if iss is None:
+                cell.value = '—'           # поле в КП не задано — не сверяем
+                cell.font = _font(size=10, color=C.text_muted)
+            elif iss['status'] == 'ok':
+                cell.value = '✓'
+                cell.font = _font(size=10, bold=True, color=C.ok)
+                cell.fill = _fill(C.ok_soft)
+            elif iss['status'] == 'critical':
+                cell.value = 'КРИТ'
+                cell.font = _font(size=9, bold=True, color=C.err)
+                cell.fill = _fill(C.err_soft)
+            else:
+                cell.value = 'БАГ'
+                cell.font = _font(size=10, bold=True, color=C.err)
+                cell.fill = _fill(C.err_soft)
+
+        # Что не так — комментарии по проблемным полям
+        problems = [f'{i["field"]}: {i["comment"]}'
+                    for i in kp.get('issues', [])
+                    if i['status'] in ('bug', 'critical') and i.get('comment')]
+        wc = ws.cell(row=row, column=7, value='\n'.join(problems))
+        wc.font = _font(size=9, color=C.err if problems else C.text_muted)
+        wc.alignment = _align(wrap=True, vertical='top')
+        wc.border = _border(color=C.border_light)
+        ws.row_dimensions[row].height = max(22, 15 * (len(problems) or 1))
+        row += 1
+
+
 # ── Главная функция ────────────────────────────────────────────────
 
 
@@ -770,6 +961,9 @@ def build_report(
 
     # ─── Лист структурной проверки (идёт сразу после «Обзора») ──────
     _build_structure_sheet(wb, results)
+
+    # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
+    _build_kp_sheet(wb, results)
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 2: Все детали

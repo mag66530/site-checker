@@ -533,6 +533,16 @@ if pid:
                 except Exception:
                     pass
 
+            # КП для сверки контактов на главных страницах поддоменов
+            try:
+                from kp import load_kp
+                kp_map = load_kp(pid) or None
+                if kp_map:
+                    append_log(f'КП для сверки контактов: {len(kp_map)} городов')
+            except Exception as e:
+                kp_map = None
+                append_log(f'⚠ Не удалось загрузить КП: {e}')
+
             results = asyncio.run(run_batch(
                 plan.tasks,
                 concurrency=6,
@@ -542,6 +552,7 @@ if pid:
                 check_text=True,
                 on_progress=on_progress,
                 proxy_url=proxy_url,
+                kp_map=kp_map,
             ))
 
             finished_ms = int(time.time() * 1000)
