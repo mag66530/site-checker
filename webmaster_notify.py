@@ -535,11 +535,15 @@ def fetch_gsc_gmail(
         M = imaplib.IMAP4_SSL(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT, ssl_context=ssl_ctx, timeout=60)
 
         try:
-            M.login(email_addr, password)
+            # App Password Google показывает с пробелами ("abcd efgh ijkl mnop"),
+            # а IMAP-логин требует без пробелов — убираем все пробелы.
+            M.login(email_addr, ''.join((password or '').split()))
         except imaplib.IMAP4.error as e:
             raise PermissionError(
                 f'Ошибка входа в Gmail: {e}. '
-                f'Проверьте пароль приложения (не основной пароль Gmail).'
+                f'Нужен ПАРОЛЬ ПРИЛОЖЕНИЯ (16 букв), не основной пароль Gmail. '
+                f'Создать: Google Аккаунт → Безопасность → Двухэтапная аутентификация '
+                f'→ Пароли приложений.'
             )
 
         _log(f'Gmail: вошли как {email_addr}. Ищу письма GSC…')
@@ -821,11 +825,15 @@ def fetch_google_accounts(
         M = imaplib.IMAP4_SSL(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT, ssl_context=ssl_ctx, timeout=60)
 
         try:
-            M.login(email_addr, password)
+            # App Password Google показывает с пробелами ("abcd efgh ijkl mnop"),
+            # а IMAP-логин требует без пробелов — убираем все пробелы.
+            M.login(email_addr, ''.join((password or '').split()))
         except imaplib.IMAP4.error as e:
             raise PermissionError(
                 f'Ошибка входа в Gmail: {e}. '
-                f'Проверьте пароль приложения (не основной пароль Gmail).'
+                f'Нужен ПАРОЛЬ ПРИЛОЖЕНИЯ (16 букв), не основной пароль Gmail. '
+                f'Создать: Google Аккаунт → Безопасность → Двухэтапная аутентификация '
+                f'→ Пароли приложений.'
             )
 
         _log(f'Gmail: вошли как {email_addr}. Ищу письма от Google…')
