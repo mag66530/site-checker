@@ -753,6 +753,24 @@ if pid:
                             use_container_width=True, type='primary',
                         )
 
+            # Лог прогона — для диагностики почты/GSC
+            _log_path = Path('cache') / 'last_run.log'
+            if _log_path.exists():
+                _log_txt = _log_path.read_text(encoding='utf-8', errors='ignore')
+                st.download_button(
+                    label='🧾 Скачать лог прогона (для диагностики GSC/почты)',
+                    data=_log_txt.encode('utf-8'),
+                    file_name='last_run.log', mime='text/plain',
+                    use_container_width=True,
+                )
+                _gsc_lines = [ln for ln in _log_txt.splitlines()
+                              if any(k in ln for k in
+                                     ('GSC', 'креды', 'секрет', 'Отправители',
+                                      'Gmail', 'папк', 'Вебмастер', 'уведомлени'))]
+                if _gsc_lines:
+                    with st.expander('🔎 Строки лога про почту/GSC', expanded=True):
+                        st.code('\n'.join(_gsc_lines), language='text')
+
             problems = [
                 r for r in results
                 if r.is_error or r.is_warning or r.has_text_issues
