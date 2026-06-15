@@ -98,15 +98,21 @@ async def _read_reasons(page) -> list[dict]:
             txt = (await tr.inner_text()).strip().replace('\n', ' ')
             if not txt:
                 continue
-            # Статус берём из ЯЧЕЙКИ, что точно равна одному из известных
-            # статусов — иначе слово «Ошибка» в названии причины
-            # («Ошибка сервера (5xx)») спутало бы со статусом «Ошибка».
+            # Статус берём из ЭЛЕМЕНТА-бейджа, чей текст ТОЧНО равен известному
+            # статусу (бейдж — это span/div, напр. div.OOHai = «Ошибка»).
+            # Так слово «Ошибка» в названии причины «Ошибка сервера (5xx)»
+            # не спутается со статусом.
             status = '?'
-            for cell in await tr.query_selector_all('td, [role="cell"], [role="gridcell"]'):
+            for cell in await tr.query_selector_all(
+                    'span, div, td, [role="cell"], [role="gridcell"]'):
                 ct = (await cell.inner_text()).strip()
                 if ct in KNOWN_STATUSES:
                     status = ct
                     break
+            # Фоллбэк: «Не начато» в названии причины не встречается,
+            # поэтому подстрока безопасна, если бейдж не нашли.
+            if status == '?' and STATUS_NOT_STARTED in txt:
+                status = STATUS_NOT_STARTED
             out.append({'rowid': rid, 'name': _reason_name(txt),
                         'status': status, 'text': txt})
         except Exception:
