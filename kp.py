@@ -75,21 +75,48 @@ _STREET_WORDS = {
 
 
 def normalize_phone(s: Optional[str]) -> str:
-    """Телефон → последние 10 цифр (для сравнения вне зависимости от формата)."""
-    if not s:
+    """
+    Телефон → национальный номер для сравнения вне зависимости от формата.
+    Учитываем коды стран: Россия/Казахстан +7/8 → 10 цифр; Беларусь +375 и
+    Узбекистан +998 → 9 цифр. Excel иногда хранит номер числом («…448.0») —
+    отбрасываем хвост «.0».
+    """
+    if s is None:
         return ''
-    digits = re.sub(r'\D', '', str(s))
-    return digits[-10:] if len(digits) >= 10 else digits
+    s = str(s)
+    if s.endswith('.0'):
+        s = s[:-2]
+    d = re.sub(r'\D', '', s)
+    if not d:
+        return ''
+    if d.startswith('998') and len(d) >= 12:
+        return d[-9:]                 # Узбекистан: 9-значный нац. номер
+    if d.startswith('375') and len(d) >= 12:
+        return d[-9:]                 # Беларусь
+    if len(d) >= 11 and d[0] in '78':
+        return d[-10:]                # Россия/Казахстан
+    if len(d) == 10:
+        return d
+    return d[-10:]
+
+
+_PHONE_FIND = re.compile(
+    r'\+?998[\s\-()]*\d{2}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'   # Узбекистан
+    r'|\+?375[\s\-()]*\d{2}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'  # Беларусь
+    r'|\+?[78][\s\-()]*\d{3}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'  # Россия/Казахстан
+    r'|\b\d{11,12}\b'                                               # «голый» из tel:/числа
+)
 
 
 def split_phones(s: Optional[str]) -> list[str]:
-    """Из ячейки/текста выбрать все номера (последние 10 цифр каждого)."""
-    if not s:
+    """Найти в тексте/ячейке все телефоны (нормализованные). Понимает любые
+    коды стран (+7/8/375/998), формат со скобками и «голые» числа из tel:."""
+    if s is None:
         return []
     out = []
-    for m in re.findall(r'\+?[78]?[\s\-()]*\d{3}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}', str(s)):
+    for m in _PHONE_FIND.findall(str(s)):
         n = normalize_phone(m)
-        if len(n) == 10 and n not in out:
+        if 9 <= len(n) <= 10 and n not in out:
             out.append(n)
     return out
 
@@ -269,43 +296,49 @@ def check_against_kp(html: str, domain: str, kp: dict[str, KPRow]) -> KPCheckRes
     site = extract_site_contacts(html)
 
     # ── Телефон ──
-    # Сверяем с ЛЮБЫМ номером города из КП (Общий/SEO/Реклама/Сотовый):
-    # сайт статически показывает один из них, и какой именно — зависит от
-    # города (где-то SEO, где-то общий). Баг — только если на сайте номер,
-    # которого нет в КП этого города вовсе, либо номера нет совсем.
+    # Сверяем с номерами города из КП. Но у сети филиальная модель: город
+    # может обслуживаться филиалом и показывать ЕГО номер (напр. Актау →
+    # номер Алматы, в КП так и помечено «Филиал: Алматы»). Поэтому:
+    #   • номер совпал с номером своего города → ок;
+    #   • номер — это номер другого города из КП проекта → ок (филиал);
+    #   • номера нет ни в одном городе КП → баг (чужой/неизвестный номер);
+    #   • в КП у города нет номеров → критическая;
+    #   • на сайте телефона нет совсем → баг.
     kp_phones = row.phone_set()
-    expected, src = row.expected_phone()
+    all_kp_phones = set()
+    for _rr in kp.values():
+        all_kp_phones |= _rr.phone_set()
+    site_ph = set(site['phones'])
     if not kp_phones:
         res.issues.append({
-            'field': 'Телефон',
-            'status': 'critical',
-            'comment': f'В КП нет ни одного номера для города «{row.city}» — '
-                       f'заполнить КП.',
+            'field': 'Телефон', 'status': 'critical',
+            'comment': f'В КП нет ни одного номера для города «{row.city}» — заполнить КП.',
         })
-    elif not site['phones']:
+    elif not site_ph:
         res.issues.append({
-            'field': 'Телефон',
-            'status': 'bug',
+            'field': 'Телефон', 'status': 'bug',
             'comment': 'На сайте не найден телефон в шапке/подвале.',
         })
-    elif set(site['phones']) & kp_phones:
+    elif site_ph & kp_phones:
         res.issues.append({'field': 'Телефон', 'status': 'ok',
                            'comment': 'Номер на сайте есть в КП этого города.'})
+    elif site_ph & all_kp_phones:
+        res.issues.append({
+            'field': 'Телефон', 'status': 'ok',
+            'comment': 'Номер обслуживающего филиала (есть в КП проекта).',
+        })
     else:
         res.issues.append({
-            'field': 'Телефон',
-            'status': 'bug',
-            'comment': f'На сайте номер, которого нет в КП города «{row.city}»: '
-                       f'{", ".join(_fmt(p) for p in site["phones"])}. '
-                       f'Ожидался один из номеров города (напр. {src}: {_fmt(expected)}).'
-                       if expected else
-                       f'На сайте номер, которого нет в КП: '
+            'field': 'Телефон', 'status': 'bug',
+            'comment': f'На сайте номер, которого нет в КП проекта: '
                        f'{", ".join(_fmt(p) for p in site["phones"])}.',
         })
 
     # ── Почта ──
+    # Сверяем, только если в КП реально e-mail. Иногда в поле почты стоит
+    # заметка («надо заказывать», «-») — это не адрес, сверять не с чем.
     kp_email = (row.email or '').strip().lower()
-    if kp_email:
+    if kp_email and '@' in kp_email:
         if not site['emails']:
             res.issues.append({'field': 'Почта', 'status': 'bug',
                                'comment': 'На сайте не найдена почта в подвале.'})
