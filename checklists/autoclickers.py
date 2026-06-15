@@ -106,28 +106,21 @@ st.divider()
 # ── Шаг 2: что прокликать ───────────────────────────────────────────
 st.subheader('Шаг 2. Что прокликать')
 
-do_gsc = st.checkbox('✅ Прокликать ошибки ГСК (проверить исправления)', value=False)
-do_wm = st.checkbox('✅ Прокликать ошибки Вебмастера', value=False)
-dry = st.checkbox('Сначала проверка без кликов (dry-run)', value=True,
-                  help='Покажет что нашёл и где есть кнопки, но не нажмёт. '
-                       'Убедился — сними галку и запусти боевой.')
+do_gsc = st.checkbox('Прокликать ГСК', value=False)
+do_wm = st.checkbox('Прокликать Вебмастер', value=False)
 
-st.caption('ГСК работает по доменам/поддоменам проекта из списка — собирать ничего не надо.')
+st.caption('Работает по доменам/поддоменам проекта из списка — собирать ничего не надо.')
 
-if st.button('▶ Запустить выбранное', type='primary', use_container_width=True):
+if st.button('Запустить', use_container_width=True):
     if not do_gsc and not do_wm:
         st.info('Отметь хотя бы один пункт выше.')
     else:
         if do_gsc:
-            args = ['gsc_validate_fixes.py', '--project', pid]
-            if dry:
-                args.append('--dry-run')
-            run_stream(args, 'ГСК: проверка исправлений…')
+            run_stream(['gsc_validate_fixes.py', '--project', pid],
+                       'ГСК: проверка исправлений…')
         if do_wm:
-            args = ['webmaster_recheck.py', '--project', pid]
-            if dry:
-                args.append('--dry-run')
-            run_stream(args, 'Вебмастер: проверка ошибок…')
+            run_stream(['webmaster_recheck.py', '--project', pid],
+                       'Вебмастер: проверка ошибок…')
 
 st.divider()
 st.caption('Логи: gsc_validate_log.json, webmaster_recheck_log.json — в папке проекта.')

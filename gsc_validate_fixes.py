@@ -41,10 +41,20 @@ LOG_FILE = Path('gsc_validate_log.json')
 
 INDEX_REPORT = 'https://search.google.com/search-console/index?resource_id={rid}'
 VALIDATE_TEXT = 'Проверить исправление'
+DETAILS_TEXT = 'Подробности'            # span.Zfuf2d на странице причины-ошибки
+NEW_CHECK_TEXT = 'Начать новую проверку'  # span.b88Yg на странице деталей
 
 # Статусы столбца «Проверка»
 STATUS_NOT_STARTED = 'Не начато'
-STATUS_OTHERS = ('Идёт проверка', 'Начата', 'Пройдена', 'Не удалось')
+STATUS_ERROR = 'Ошибка'
+# Обрабатываем эти статусы (каждый своим путём)
+STATUS_PROCESS = (STATUS_NOT_STARTED, STATUS_ERROR)
+# Все известные статусы — чтобы читать значение из ячейки «Проверка» точно
+# (а не ловить слово «Ошибка» внутри названия причины «Ошибка сервера (5xx)»).
+KNOWN_STATUSES = (
+    'Не начато', 'Ошибка', 'Отсутствует', 'Идёт проверка', 'Начата',
+    'Пройдена', 'Выполнено', 'Не удалось',
+)
 
 
 def _log(msg, level='info'):
@@ -57,15 +67,6 @@ def _save_log(entries):
     LOG_FILE.write_text(
         json.dumps({'run_at': datetime.now().isoformat(), 'entries': entries},
                    ensure_ascii=False, indent=2), encoding='utf-8')
-
-
-def _parse_status(row_text: str) -> str:
-    if STATUS_NOT_STARTED in row_text:
-        return STATUS_NOT_STARTED
-    for s in STATUS_OTHERS:
-        if s in row_text:
-            return s
-    return '?'
 
 
 def _reason_name(row_text: str) -> str:
@@ -97,14 +98,85 @@ async def _read_reasons(page) -> list[dict]:
             txt = (await tr.inner_text()).strip().replace('\n', ' ')
             if not txt:
                 continue
+            # Статус берём из ЯЧЕЙКИ, что точно равна одному из известных
+            # статусов — иначе слово «Ошибка» в названии причины
+            # («Ошибка сервера (5xx)») спутало бы со статусом «Ошибка».
+            status = '?'
+            for cell in await tr.query_selector_all('td, [role="cell"], [role="gridcell"]'):
+                ct = (await cell.inner_text()).strip()
+                if ct in KNOWN_STATUSES:
+                    status = ct
+                    break
             out.append({'rowid': rid, 'name': _reason_name(txt),
-                        'status': _parse_status(txt), 'text': txt})
+                        'status': status, 'text': txt})
         except Exception:
             pass
     return out
 
 
+async def _validate_error(page, rid: str, reason: dict, dry_run: bool) -> dict:
+    """Путь для статуса «Ошибка»: причина → ПОДРОБНОСТИ → НАЧАТЬ НОВУЮ ПРОВЕРКУ."""
+    res = {'resource': rid, 'reason': reason['name'],
+           'status': 'error', 'message': ''}
+    try:
+        row = page.get_by_text(reason['name'], exact=False).first
+        await row.click(timeout=8000)
+        await page.wait_for_timeout(4000)
+
+        # «Подробности» (span.Zfuf2d)
+        details = page.locator('span.Zfuf2d').first
+        if await details.count() == 0:
+            details = page.get_by_text(DETAILS_TEXT, exact=False).first
+        try:
+            await details.wait_for(state='visible', timeout=8000)
+        except Exception:
+            res['status'] = 'no_button'
+            res['message'] = 'кнопки «Подробности» нет'
+            _log(f'  {reason["name"][:50]} (Ошибка) — нет «Подробности»', 'warn')
+            return res
+
+        if dry_run:
+            res['status'] = 'dry_run'
+            res['message'] = '«Ошибка»: «Подробности» найдена, клик пропущен'
+            _log(f'  [DRY RUN] {reason["name"][:50]} (Ошибка) — путь есть', 'ok')
+            return res
+
+        await details.click()
+        await page.wait_for_timeout(3000)
+
+        # «Начать новую проверку» (span.b88Yg)
+        newcheck = page.locator('span.b88Yg').first
+        if await newcheck.count() == 0:
+            newcheck = page.get_by_text(NEW_CHECK_TEXT, exact=False).first
+        try:
+            await newcheck.wait_for(state='visible', timeout=8000)
+            await newcheck.click()
+            res['status'] = 'ok'
+            res['message'] = '«Ошибка»: новая проверка запущена'
+            _log(f'  ✓ (Ошибка) новая проверка: {reason["name"][:50]}', 'ok')
+        except Exception:
+            res['status'] = 'warn'
+            res['message'] = '«Ошибка»: кнопки «Начать новую проверку» нет'
+            _log('  (Ошибка) нет «Начать новую проверку»', 'warn')
+
+        # Назад дважды к таблице причин
+        await page.go_back()
+        await page.wait_for_timeout(1500)
+        await page.go_back()
+        await page.wait_for_timeout(1500)
+
+    except Exception as e:
+        res['status'] = 'error'
+        res['message'] = str(e)
+        _log(f'  ошибка (Ошибка-путь): {e}', 'error')
+    return res
+
+
 async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
+    # Статус «Ошибка» — отдельный путь (Подробности → Начать новую проверку)
+    if reason['status'] == STATUS_ERROR:
+        return await _validate_error(page, rid, reason, dry_run)
+
     res = {'resource': rid, 'reason': reason['name'],
            'status': 'error', 'message': ''}
     try:
@@ -177,7 +249,8 @@ async def process_resource(page, rid: str, dry_run: bool,
         return entries
 
     _log(f'  причин в отчёте: {len(reasons)}; '
-         f'«Не начато»: {sum(1 for r in reasons if r["status"] == STATUS_NOT_STARTED)}')
+         f'«Не начато»: {sum(1 for r in reasons if r["status"] == STATUS_NOT_STARTED)}, '
+         f'«Ошибка»: {sum(1 for r in reasons if r["status"] == STATUS_ERROR)}')
 
     processed = set()
     while True:
@@ -186,7 +259,7 @@ async def process_resource(page, rid: str, dry_run: bool,
             break
         reasons = await _read_reasons(page)
         target = next((r for r in reasons
-                       if r['status'] == STATUS_NOT_STARTED
+                       if r['status'] in STATUS_PROCESS
                        and r['name'] not in processed), None)
         if not target:
             break
