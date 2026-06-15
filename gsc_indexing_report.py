@@ -100,37 +100,24 @@ async def main(resource_id: str, open_first: bool):
         if open_first:
             print('\n=== ПРОБУЮ ОТКРЫТЬ ПЕРВУЮ ПРИЧИНУ ===')
             opened = False
-            # 1) читаем имена причин из строк таблицы
-            reasons = []
-            for r in await page.query_selector_all('[role="row"]'):
+            # Строки причин — <tr data-rowid="N"> с jsaction.
+            rows = await page.query_selector_all('tr[data-rowid]')
+            print(f'  Найдено строк tr[data-rowid]: {len(rows)}')
+            for tr in rows:
                 try:
-                    txt = (await r.inner_text()).strip()
+                    rid = await tr.get_attribute('data-rowid')
+                    txt = (await tr.inner_text()).strip().replace('\n', ' ')
+                    print(f'    rowid={rid}: {txt[:80]}')
                 except Exception:
-                    continue
-                if not txt or 'Причина' in txt:
-                    continue
-                # имя причины — до метки источника
-                name = txt
-                for src in ('Системы Google', 'Сайт'):
-                    if src in name:
-                        name = name.split(src)[0]
-                        break
-                name = name.strip().strip('|').strip()
-                if name:
-                    reasons.append(name)
-            print(f'  Причины: {reasons}')
-
-            # 2) кликаем первую причину через get_by_text
-            for name in reasons:
-                try:
-                    loc = page.get_by_text(name, exact=False).first
-                    await loc.click(timeout=6000)
-                    opened = True
-                    print(f'  Кликнул причину: {name[:70]}')
-                    break
-                except Exception as e:
-                    print(f'  "{name[:40]}" клик не удался: {type(e).__name__}')
-                    continue
+                    pass
+            # Кликаем первую строку
+            try:
+                first = page.locator('tr[data-rowid]').first
+                await first.click(timeout=6000)
+                opened = True
+                print('  Кликнул первую причину (tr[data-rowid])')
+            except Exception as e:
+                print(f'  Клик не удался: {type(e).__name__}: {e}')
             if opened:
                 await page.wait_for_timeout(6000)
                 print(f'  URL после клика: {page.url}')
