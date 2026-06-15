@@ -37,9 +37,12 @@ LOG_FILE = Path('webmaster_recheck_log.json')
 SEL_PROBLEM = '.DiagnosisChecklistProblem'
 SEL_STATUS_INPROGRESS = '.DiagnosisChecklistProblemTitle-Status_status_IN_PROGRESS'
 SEL_CHEVRON = '.DiagnosisChecklistProblem-Chevron'
-SEL_LINKS = '.DiagnosisChecklistProblemLandingLinksContainer a.link_theme_normal'
+SEL_TITLE = '.DiagnosisChecklistAccordion-TitleContainer, .DiagnosisChecklistProblemTitle'
+# Кнопку ищем по всему блоку (не только в landing-контейнере)
+SEL_LINKS = 'a.link_theme_normal, a[class*="link"], button'
 TXT_CHECKING = 'Проверяем сайт на ошибку'
-TXT_CHECK_BTN = ('Проверьте', 'Проверить')
+# Текст кнопки перепроверки бывает разный
+TXT_CHECK_BTN = ('Проверьте', 'Проверить', 'исправил', 'заново', 'перепровер')
 
 
 def _log(msg, level='info'):
@@ -159,25 +162,31 @@ async def _process_problems(page, dry_run: bool) -> dict:
                 _log('      статус «Проверяем» — пропуск', 'warn')
                 continue
 
-            # раскрыть аккордеон кликом по шеврону, чтобы показались ссылки
-            chevron = await prob.query_selector(SEL_CHEVRON)
-            if chevron:
-                try:
-                    await chevron.click(timeout=3000)
-                    await page.wait_for_timeout(900)
-                except Exception:
-                    pass
+            # раскрыть аккордеон — пробуем шеврон, затем заголовок
+            for sel in (SEL_CHEVRON, SEL_TITLE):
+                el = await prob.query_selector(sel)
+                if el:
+                    try:
+                        await el.click(timeout=3000)
+                        await page.wait_for_timeout(700)
+                        break
+                    except Exception:
+                        continue
 
-            # ищем ссылку-кнопку «Проверьте» в контейнере landing-ссылок
+            # ищем кнопку перепроверки по всему блоку
             btn = None
+            link_texts = []
             for a in await prob.query_selector_all(SEL_LINKS):
                 bt = (await a.inner_text()).strip()
-                if any(k.lower() in bt.lower() for k in TXT_CHECK_BTN):
+                if bt:
+                    link_texts.append(bt)
+                if bt and any(k.lower() in bt.lower() for k in TXT_CHECK_BTN):
                     btn = a
                     break
             if btn is None:
                 stat['no_button'] += 1
-                _log('      кнопки «Проверьте» нет', 'warn')
+                # Дамп ссылок блока — чтобы увидеть реальный текст кнопки
+                _log(f'      кнопки нет. Ссылки/кнопки блока: {link_texts[:12]}', 'warn')
                 continue
 
             if dry_run:
