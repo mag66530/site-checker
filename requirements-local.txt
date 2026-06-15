@@ -1,0 +1,12 @@
+# Зависимости ТОЛЬКО для локального лаунчера автокликеров (launcher.py).
+# НЕ нужны облачному чек-листу — не добавляй в requirements.txt,
+# иначе Streamlit Cloud будет ставить тяжёлый playwright.
+#
+# Установка (один раз):
+#   pip install -r requirements-local.txt
+#   playwright install chromium
+#
+# (Chrome для автокликеров используется реальный, но playwright нужен как драйвер.)
+
+streamlit>=1.40.0
+playwright>=1.40.0
