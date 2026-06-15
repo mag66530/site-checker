@@ -447,9 +447,23 @@ if pid:
             log_area = log_expander.empty()
             log_messages = []
 
+        # Файл лога прогона — чтобы можно было найти строки про GSC/почту.
+        _run_log_path = Path('cache') / 'last_run.log'
+        try:
+            _run_log_path.parent.mkdir(parents=True, exist_ok=True)
+            _run_log_path.write_text('', encoding='utf-8')  # очистка перед прогоном
+        except Exception:
+            pass
+
         def append_log(msg):
             log_messages.append(msg)
             log_area.code('\n'.join(log_messages[-100:]), language='text')
+            try:
+                _run_log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(_run_log_path, 'a', encoding='utf-8') as _f:
+                    _f.write(f'{datetime.now().strftime("%H:%M:%S")}  {msg}\n')
+            except Exception:
+                pass
 
         started_ms = int(time.time() * 1000)
         st.session_state.c30_started_at = started_ms
