@@ -1424,6 +1424,19 @@ if is_project:
     with st.container(border=True):
         st.markdown('<h3><span class="step-num">3</span>Какие пункты включить</h3>', unsafe_allow_html=True)
 
+        # «Выбрать все» — включает все пункты проверки, КРОМЕ «Свой список URL»
+        # (его галочку намеренно не трогаем). Через on_click — значения
+        # выставляются до отрисовки чек-боксов, поэтому срабатывает с первого раза.
+        def _select_all_checks():
+            for _k in ('check_main', 'check_catalog', 'check_categories',
+                       'check_filters', 'check_products', 'check_text'):
+                st.session_state[_k] = True
+            reset_run_state()
+
+        st.button('✓ Выбрать все', key='btn_select_all',
+                  on_click=_select_all_checks,
+                  help='Включить все пункты проверки (кроме «Свой список URL»)')
+
         # Чек-боксы привязаны к session_state через key= (без value= и ручной
         # перезаписи) – иначе Streamlit реагировал на клик только со второго раза.
         # on_change сбрасывает баннер прошлого прогона при изменении набора.
