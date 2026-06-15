@@ -27,7 +27,7 @@ PROJECTS = {
             'yandex': 'stalmetural19@yandex.ru', 'domain': 'stalmetural.ru'},
     'mpe': {'name': 'МПЭ — Mepen', 'google': 'mepen888@gmail.com',
             'yandex': 'mepen88@yandex.ru', 'domain': 'mepen.ru'},
-    'inp': {'name': 'ИНП — Inmetprom', 'google': 'inmetprom77@gmail.com',
+    'imp': {'name': 'ИМП — Инметпром', 'google': 'inmetprom77@gmail.com',
             'yandex': 'inmetprom77@yandex.ru', 'domain': 'inmetprom.ru'},
 }
 
@@ -112,16 +112,14 @@ dry = st.checkbox('Сначала проверка без кликов (dry-run)
                   help='Покажет что нашёл и где есть кнопки, но не нажмёт. '
                        'Убедился — сними галку и запусти боевой.')
 
-st.caption('Для ГСК перед первым запуском обнови список ресурсов текущего аккаунта.')
-if st.button('🔄 Обновить список ресурсов ГСК', use_container_width=True):
-    run_stream(['gsc_list_properties.py'], 'Сбор ресурсов ГСК…')
+st.caption('ГСК работает по доменам/поддоменам проекта из списка — собирать ничего не надо.')
 
 if st.button('▶ Запустить выбранное', type='primary', use_container_width=True):
     if not do_gsc and not do_wm:
         st.info('Отметь хотя бы один пункт выше.')
     else:
         if do_gsc:
-            args = ['gsc_validate_fixes.py', '--filter', proj['domain']]
+            args = ['gsc_validate_fixes.py', '--project', pid]
             if dry:
                 args.append('--dry-run')
             run_stream(args, 'ГСК: проверка исправлений…')

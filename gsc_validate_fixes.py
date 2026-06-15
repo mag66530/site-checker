@@ -236,12 +236,36 @@ async def run(resources: list, dry_run: bool, limit: int):
     _log(f'Лог → {LOG_FILE.resolve()}')
 
 
-def _load_resources(filter_sub: str | None, single: str | None) -> list:
+def _resources_from_project(pid: str) -> list:
+    """Ресурсы GSC из списка поддоменов проекта (catalogs/<pid>-subdomains.csv).
+    Каждый URL-префикс домена/поддомена — это ресурс GSC. Ничего собирать не надо."""
+    import csv
+    csv_path = Path(__file__).parent / 'catalogs' / f'{pid}-subdomains.csv'
+    if not csv_path.exists():
+        _log(f'Нет файла поддоменов: {csv_path}', 'error')
+        return []
+    urls = []
+    with open(csv_path, encoding='utf-8-sig', newline='') as f:
+        for row in csv.DictReader(f):
+            u = (row.get('url') or '').strip()
+            if u.startswith('http'):
+                if not u.endswith('/'):
+                    u += '/'
+                if u not in urls:
+                    urls.append(u)
+    return urls
+
+
+def _load_resources(project: str | None, filter_sub: str | None,
+                    single: str | None) -> list:
     if single:
         return [single]
+    if project:
+        return _resources_from_project(project)
+    # Фоллбэк: ранее собранный список ресурсов (gsc_list_properties.py)
     if not PROPS_FILE.exists():
-        _log(f'{PROPS_FILE} не найден — запусти gsc_list_properties.py '
-             f'или укажи --resource', 'error')
+        _log(f'Укажи --project <smu|mpe|imp> или --resource. '
+             f'({PROPS_FILE} не найден)', 'error')
         return []
     try:
         items = json.loads(PROPS_FILE.read_text(encoding='utf-8'))
@@ -255,9 +279,11 @@ def _load_resources(filter_sub: str | None, single: str | None) -> list:
 def parse_args():
     ap = argparse.ArgumentParser(
         description='Авто-«Проверить исправление» в Google Search Console')
+    ap.add_argument('--project', default=None,
+                    help='проект: smu|mpe|imp — ресурсы из catalogs/<pid>-subdomains.csv')
     ap.add_argument('--resource', default=None, help='один ресурс (resource_id)')
     ap.add_argument('--filter', default=None,
-                    help='обрабатывать только ресурсы с этой подстрокой')
+                    help='фильтр подстрокой (только для фоллбэка gsc_properties.json)')
     ap.add_argument('--dry-run', action='store_true', help='без клика кнопки')
     ap.add_argument('--limit', type=int, default=0, help='максимум причин за запуск')
     return ap.parse_args()
@@ -265,7 +291,7 @@ def parse_args():
 
 if __name__ == '__main__':
     a = parse_args()
-    res = _load_resources(a.filter, a.resource)
+    res = _load_resources(a.project, a.filter, a.resource)
     if not res:
         _log('Нет ресурсов для обработки.', 'error')
         sys.exit(1)
