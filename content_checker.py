@@ -72,7 +72,9 @@ class ContentResult:
 
 # Цена: число + ₽ (с учётом пробелов/неразрывных пробелов), либо «руб»
 _PRICE_RE = re.compile(r'\d[\d\s\u00a0]{0,12}(?:₽|руб)', re.IGNORECASE)
-_PHONE_RE = re.compile(r'\+7[\s\-(]?\d{3}')
+_PHONE_RE = re.compile(
+    r'(?:\+7|\b8|\b7)[\s\-(]*\d{3}[\s\-)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'
+)
 _EMAIL_RE = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 # Адрес: уличные маркеры со всеми ходовыми сокращениями.
 # ИМП пишет «Рязанский пр., 86/1c1» — поэтому ловим и «пр.», и «пр-кт».
@@ -95,7 +97,15 @@ def _extract_region(html: str, tag: str, side: str, fallback_frac: float = 0.28)
     """
     m = re.search(rf'<{tag}\b[^>]*>(.*?)</{tag}>', html, re.IGNORECASE | re.DOTALL)
     if m:
-        return m.group(0)
+        if side != 'bottom':
+            return m.group(0)
+        # Подвал: контактный блок (телефон/почта/адрес) часто свёрстан ВЫШЕ
+        # семантического <footer> (у МПЭ в <footer> только меню и копирайт).
+        # Поэтому берём не только сам тег, а ещё ~24 КБ перед ним — там и лежит
+        # «нижний» блок контактов.
+        pad = 24000
+        start = max(0, m.start() - pad)
+        return html[start:m.end()]
     n = len(html)
     cut = max(1, int(n * fallback_frac))
     return html[:cut] if side == 'top' else html[-cut:]

@@ -273,6 +273,26 @@ def test_every_block_has_description():
             assert b.key in BLOCK_DESCRIPTIONS
 
 
+def test_phone_formats_and_footer_above_tag():
+    """МПЭ-кейс: телефон в tel: без «+» и формате «+7 (495)»; контакты подвала
+    свёрстаны ВЫШЕ тега <footer> (внутри него — только меню)."""
+    html = (
+        '<header><a href="tel:74957991438">7 (495) 799-14-38</a>'
+        'Заявка Выберите город</header>'
+        '<h1>Главная</h1>'
+        # контактный блок ДО <footer>
+        '<div class="contacts"><a href="tel:74957991438">7 (495) 799-14-38</a>'
+        '<a href="mailto:moscow@mepen.ru">moscow@mepen.ru</a>'
+        '<span>г. Москва, ул. Примерная, 5</span><a>Написать нам</a></div>'
+        '<footer>Каталог Карта сайта © 2026</footer>'
+    )
+    b = _by_key(check_content(html, 'main'))
+    assert b['hdr_phone'].present, 'телефон в tel: без + должен ловиться'
+    assert b['ftr_phone'].present, 'телефон над <footer> должен ловиться'
+    assert b['ftr_email'].present
+    assert b['ftr_address'].present
+
+
 def test_header_footer_only_on_main():
     """Сквозные блоки шапки/подвала проверяются только на главной.
 
