@@ -100,24 +100,36 @@ async def main(resource_id: str, open_first: bool):
         if open_first:
             print('\n=== ПРОБУЮ ОТКРЫТЬ ПЕРВУЮ ПРИЧИНУ ===')
             opened = False
-            # Причины — это ссылки-строки, каждая содержит статус проверки.
-            STATUSES = ('Не начато', 'Идёт проверка', 'Начато',
-                        'Пройдена', 'Не удалось')
-            for a in await page.query_selector_all('a, [role="link"], [role="row"]'):
+            # 1) читаем имена причин из строк таблицы
+            reasons = []
+            for r in await page.query_selector_all('[role="row"]'):
                 try:
-                    txt = (await a.inner_text()).strip()
-                    if not txt or 'Причина' in txt:
-                        continue
-                    if not any(s in txt for s in STATUSES):
-                        continue
-                    if not await a.is_visible():
-                        continue
-                    await a.click()
+                    txt = (await r.inner_text()).strip()
+                except Exception:
+                    continue
+                if not txt or 'Причина' in txt:
+                    continue
+                # имя причины — до метки источника
+                name = txt
+                for src in ('Системы Google', 'Сайт'):
+                    if src in name:
+                        name = name.split(src)[0]
+                        break
+                name = name.strip().strip('|').strip()
+                if name:
+                    reasons.append(name)
+            print(f'  Причины: {reasons}')
+
+            # 2) кликаем первую причину через get_by_text
+            for name in reasons:
+                try:
+                    loc = page.get_by_text(name, exact=False).first
+                    await loc.click(timeout=6000)
                     opened = True
-                    print(f'  Кликнул причину: {txt[:70]}')
+                    print(f'  Кликнул причину: {name[:70]}')
                     break
                 except Exception as e:
-                    print(f'  попытка клика не удалась: {type(e).__name__}')
+                    print(f'  "{name[:40]}" клик не удался: {type(e).__name__}')
                     continue
             if opened:
                 await page.wait_for_timeout(6000)
