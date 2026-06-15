@@ -432,35 +432,6 @@ def _build_structure_sheet(wb, results):
                 _font(size=10, italic=True, color=C.text_muted)
             row += 1
 
-    # ── Сводка по типам страниц ──
-    row += 2
-    ws.cell(row=row, column=2, value='Сводка по типам страниц').font = \
-        _font(size=13, bold=True, color=C.text)
-    row += 1
-    for ci, h in [(2, 'Тип страницы'), (3, 'Проверено'), (4, 'Без проблем'),
-                  (5, 'Проблем')]:
-        cell = ws.cell(row=row, column=ci, value=h)
-        cell.font = _font(size=9, bold=True, color=C.text_muted)
-        cell.fill = _fill(C.surface)
-        cell.alignment = _align(horizontal='center' if ci > 2 else 'left', indent=1)
-        cell.border = _border()
-    row += 1
-    for group_label, predicate in _STRUCT_GROUPS:
-        gp = [r for r in pages if predicate(r)]
-        if not gp:
-            continue
-        gbug = sum(1 for r in gp if r.content_bugs > 0)
-        gok = len(gp) - gbug
-        vals = [(2, group_label, 'left', C.text), (3, len(gp), 'center', C.text_soft),
-                (4, gok, 'center', C.ok),
-                (5, gbug, 'center', C.err if gbug else C.text_muted)]
-        for ci, val, al, color in vals:
-            cell = ws.cell(row=row, column=ci, value=val)
-            cell.font = _font(size=10, bold=(ci == 2), color=color)
-            cell.alignment = _align(horizontal=al, indent=1)
-            cell.border = _border(color=C.border_light)
-        row += 1
-
     # ── Подробные таблицы по типам ──
     row += 2
     ws.cell(row=row, column=2, value='Подробно по типам страниц').font = \
