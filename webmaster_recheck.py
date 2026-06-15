@@ -42,8 +42,10 @@ SEL_TITLE = '.DiagnosisChecklistAccordion-TitleContainer, .DiagnosisChecklistPro
 # Кнопку ищем по всему блоку (не только в landing-контейнере)
 SEL_LINKS = 'a.link_theme_normal, a[class*="link"], button'
 TXT_CHECKING = 'Проверяем сайт на ошибку'
-# Текст кнопки перепроверки бывает разный
-TXT_CHECK_BTN = ('Проверьте', 'Проверить', 'исправил', 'заново', 'перепровер')
+# Жмём ТОЛЬКО кнопку «Проверить». Ссылка «Проверьте» уводит на robots.txt
+# и ломает обход — её игнорируем (TXT_SKIP_LINK).
+TXT_CHECK_BTN = ('Проверить',)
+TXT_SKIP_LINK = 'Проверьте'
 
 
 def _log(msg, level='info'):
@@ -181,6 +183,9 @@ async def _process_problems(page, dry_run: bool) -> dict:
                 bt = (await a.inner_text()).strip()
                 if bt:
                     link_texts.append(bt)
+                # «Проверьте» (ведёт на robots.txt) — пропускаем
+                if TXT_SKIP_LINK.lower() in bt.lower():
+                    continue
                 if bt and any(k.lower() in bt.lower() for k in TXT_CHECK_BTN):
                     btn = a
                     break
