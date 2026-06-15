@@ -25,6 +25,7 @@ webmaster_recheck.py
 import argparse
 import asyncio
 import json
+import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -108,28 +109,40 @@ async def _collect_sites(page) -> list[str]:
     return sites
 
 
-async def _open_checklist(page, site_root: str) -> bool:
-    """Открыть страницу ошибок диагностики сайта."""
-    # Идём на сводку, ищем ссылку «N ошибок» в блоке диагностики
-    await page.goto(site_root, wait_until='domcontentloaded')
-    await page.wait_for_timeout(3500)
-
-    # Прямая попытка: ссылка-проблема диагностики
-    prob = page.locator(f'a{SEL_PROBLEM}, {SEL_PROBLEM} a, a:has-text("ошиб")').first
-    try:
-        if await prob.count() > 0:
-            await prob.click(timeout=5000)
-            await page.wait_for_timeout(3500)
-            return True
-    except Exception:
-        pass
-
-    # Fallback: прямой переход на checklist
-    for path in ('optimization/checklist/', 'diagnostics/', 'health/'):
+async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
+    """Переход с защитой от 429 (Too Many Requests): экспоненциальный бэкофф."""
+    delay = 20
+    for i in range(tries):
         try:
-            await page.goto(site_root + path, wait_until='domcontentloaded')
-            await page.wait_for_timeout(3000)
-            if '/checklist' in page.url or 'diagnostic' in page.url or 'health' in page.url:
+            resp = await page.goto(url, wait_until='domcontentloaded')
+        except Exception as e:
+            _log(f'goto упал ({e}) — пауза {delay}с', 'warn')
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
+            continue
+        await page.wait_for_timeout(2000)
+        status = resp.status if resp else 0
+        head = (await page.inner_text('body'))[:300]
+        if status == 429 or 'Too many requests' in head or 'Слишком много запросов' in head:
+            _log(f'⚠ 429 (слишком много запросов) — пауза {delay}с (попытка {i+1})', 'warn')
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
+            continue
+        return True
+    _log('429 не прошёл после ретраев — пропускаю сайт', 'error')
+    return False
+
+
+async def _open_checklist(page, site_root: str) -> bool:
+    """Открыть страницу ошибок диагностики сайта (прямой переход с бэкоффом)."""
+    if await _goto_backoff(page, site_root + 'optimization/checklist/'):
+        await page.wait_for_timeout(2000)
+        return True
+
+    # Fallback: другие разделы диагностики
+    for path in ('diagnostics/', 'health/'):
+        try:
+            if await _goto_backoff(page, site_root + path):
                 return True
         except Exception:
             continue
@@ -270,7 +283,7 @@ async def run(single_site: str | None, dry_run: bool, limit: int,
         if limit:
             sites = sites[:limit]
 
-        for site in sites:
+        for si, site in enumerate(sites):
             _log(f'\n── Сайт: {site} ──')
             try:
                 await _open_checklist(page, site)
@@ -280,6 +293,9 @@ async def run(single_site: str | None, dry_run: bool, limit: int,
                 _log(f'  сайт упал: {e}', 'error')
                 entries.append({'site': site, 'error': str(e)})
             _save_log(entries)
+            # Пауза между сайтами с джиттером — снижает риск 429
+            if si < len(sites) - 1:
+                await asyncio.sleep(4 + random.random() * 4)
 
         await browser.close()
 

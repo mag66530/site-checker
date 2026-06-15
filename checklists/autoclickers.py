@@ -96,7 +96,7 @@ st.divider()
 
 # ── Шаг 1: вход ─────────────────────────────────────────────────────
 st.subheader('Шаг 1. Открыть браузер и войти')
-st.caption('Откроется Chrome (порт 9222). Войди в Google и Yandex аккаунты проекта. '
+st.caption('Откроется Chrome. Войди в Google и Yandex аккаунты проекта. '
            'Окно не закрывай — кликеры к нему подключаются.')
 if st.button('🌐 Открыть браузер для входа', use_container_width=True):
     run_stream(['gsc_save_session.py'], 'Запуск браузера…')

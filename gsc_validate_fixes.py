@@ -30,6 +30,7 @@ gsc_validate_fixes.py
 import argparse
 import asyncio
 import json
+import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -78,16 +79,42 @@ def _reason_name(row_text: str) -> str:
     return name.strip().strip('|').strip()
 
 
-async def _open_report(page, rid: str):
-    await page.goto(INDEX_REPORT.format(rid=quote(rid, safe='')),
-                    wait_until='domcontentloaded')
-    await page.wait_for_timeout(5000)
+async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
+    """Переход с защитой от 429 (Too Many Requests): экспоненциальный бэкофф."""
+    delay = 20
+    for i in range(tries):
+        try:
+            resp = await page.goto(url, wait_until='domcontentloaded')
+        except Exception as e:
+            _log(f'goto упал ({e}) — пауза {delay}с', 'warn')
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
+            continue
+        await page.wait_for_timeout(2000)
+        status = resp.status if resp else 0
+        head = (await page.inner_text('body'))[:300]
+        if status == 429 or 'Too many requests' in head or 'Слишком много запросов' in head:
+            _log(f'⚠ 429 (слишком много запросов) — пауза {delay}с (попытка {i+1})', 'warn')
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
+            continue
+        return True
+    _log('429 не прошёл после ретраев — пропускаю ресурс', 'error')
+    return False
+
+
+async def _open_report(page, rid: str) -> bool:
+    ok = await _goto_backoff(page, INDEX_REPORT.format(rid=quote(rid, safe='')))
+    if not ok:
+        return False
+    await page.wait_for_timeout(3000)
     # Скроллим до конца — второй блок «Проблемы с представлением страниц
     # в результатах поиска» подгружается ниже.
     for _ in range(6):
         await page.mouse.wheel(0, 1600)
         await page.wait_for_timeout(400)
     await page.wait_for_timeout(800)
+    return True
 
 
 async def _read_reasons(page) -> list[dict]:
@@ -247,7 +274,8 @@ async def process_resource(page, rid: str, dry_run: bool,
                            limit: int, done_counter: list) -> list:
     entries = []
     _log(f'\n── Ресурс: {rid} ──')
-    await _open_report(page, rid)
+    if not await _open_report(page, rid):
+        return entries
 
     reasons = await _read_reasons(page)
     if not reasons:
@@ -276,8 +304,12 @@ async def process_resource(page, rid: str, dry_run: bool,
         if res['status'] in ('ok', 'dry_run'):
             done_counter[0] += 1
 
+        # Небольшая пауза между причинами — снижает риск 429
+        await asyncio.sleep(2 + random.random() * 2)
+
         # Возврат к отчёту для следующей причины
-        await _open_report(page, rid)
+        if not await _open_report(page, rid):
+            break
 
     return entries
 
@@ -303,7 +335,7 @@ async def run(resources: list, dry_run: bool, limit: int):
         ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
-        for rid in resources:
+        for idx, rid in enumerate(resources):
             if limit and done_counter[0] >= limit:
                 break
             try:
@@ -311,6 +343,9 @@ async def run(resources: list, dry_run: bool, limit: int):
             except Exception as e:
                 _log(f'Ресурс {rid} упал: {e}', 'error')
             _save_log(all_entries)
+            # Пауза между ресурсами с джиттером — снижает риск 429
+            if idx < len(resources) - 1:
+                await asyncio.sleep(4 + random.random() * 4)
 
         await browser.close()
 
