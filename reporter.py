@@ -81,24 +81,30 @@ _NOTIF_CAT_DEPT = {
 
 
 def _dept_result(r) -> str:
-    """Отдел, ответственный за проблему. Пусто — если страница работает.
-    Совпадает с логикой UI (_dept_tags_result в checklist_30min.py)."""
+    """Отдел для колонки «Отдел» листа «Все детали».
+
+    Тег ставим ТОЛЬКО при проблеме со статусом или скоростью.
+    Если статус «Работает» и скорость «ОК» — поле пустое, всё в порядке.
+    (Битые переменные и контент-баги показаны в своих колонках/листе,
+    здесь их не дублируем — иначе тег появлялся бы у рабочих страниц.)
+
+    Карта:
+      • сервер не отвечает / таймаут / нет соединения (5xx) → разработка
+      • прочие ошибки на сайте (4xx, кроме 404)              → разработка
+      • долгий ответ сервера (медленно)                      → разработка
+      • 404 / страница не найдена                            → SEO
+      • редиректы (предупреждение)                           → SEO
+    """
     tags: list[str] = []
     if r.is_error:
-        if r.status in ('server_error', 'timeout', 'network_error'):
-            tags.append('разработка')
-        elif r.status == 'not_found':
+        if r.status == 'not_found':
             tags.append('SEO')
-        else:
+        else:  # server_error, timeout, network_error, client_error
             tags.append('разработка')
     elif r.is_warning:
         tags.append('SEO')
     if r.speed_rating in ('slow', 'very_slow') and 'разработка' not in tags:
         tags.append('разработка')
-    if r.has_text_issues and 'разработка' not in tags:
-        tags.append('разработка')
-    if getattr(r, 'has_content_bugs', False) and 'контент' not in tags:
-        tags.append('контент')
     return ', '.join(dict.fromkeys(tags))
 
 
