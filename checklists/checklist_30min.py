@@ -150,23 +150,34 @@ def _tags_html(tags: list[str]) -> str:
 
 
 def _dept_tags_result(r) -> list[str]:
+    """Кто отвечает за конкретную проблему. Пусто — если страница работает.
+
+    Карта проблема → отдел:
+      • сервер не отвечает / таймаут / нет соединения (5xx) → разработка
+      • долгий ответ сервера (медленно)                    → разработка
+      • битые переменные в шаблоне ({{city}} и т.п.)        → разработка
+      • 404 / страница не найдена                           → SEO
+      • редиректы (предупреждение)                          → SEO
+      • прочие ошибки на сайте (4xx)                         → разработка
+      • нет цены / H1 / кнопок заказа (контентные баги)     → контент
+    """
     tags: list[str] = []
     if r.is_error:
         if r.status in ('server_error', 'timeout', 'network_error'):
             tags.append('разработка')
         elif r.status == 'not_found':
-            tags += ['SEO', 'разработка']
-        else:
+            tags.append('SEO')
+        else:  # client_error и прочее
             tags.append('разработка')
     elif r.is_warning:
+        # Предупреждение = редирект → зона SEO
         tags.append('SEO')
     if r.speed_rating in ('slow', 'very_slow') and 'разработка' not in tags:
         tags.append('разработка')
-    if r.has_text_issues:
+    if r.has_text_issues and 'разработка' not in tags:
         tags.append('разработка')
-    if getattr(r, 'has_content_bugs', False):
-        if 'разработка' not in tags:
-            tags.append('разработка')
+    if getattr(r, 'has_content_bugs', False) and 'контент' not in tags:
+        tags.append('контент')
     return list(dict.fromkeys(tags))
 
 
@@ -610,13 +621,20 @@ if pid:
                         fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_cfg['folder'], 30, _proxy, _nlog_run)
                     except Exception as _e:
                         append_log(f'⚠ Вебмастер: {_e}')
+                else:
+                    append_log('⚠ Вебмастер: креды не найдены '
+                               f'(секреты metrika_{pid}_email / metrika_{pid}_password)')
 
                 _gsc_e, _gsc_p = get_gsc_credentials(pid)
                 if _gsc_e and _gsc_p:
+                    append_log(f'GSC: креды найдены ({_gsc_e}), подключаюсь к Gmail…')
                     try:
                         fetch_gsc_gmail(pid, _gsc_e, _gsc_p, 30, _nlog_run)
                     except Exception as _e:
                         append_log(f'⚠ GSC: {_e}')
+                else:
+                    append_log('⚠ GSC: креды не найдены '
+                               f'(секреты gsc_{pid}_email / gsc_{pid}_password)')
 
                 _yab_e, _yab_p, _yab_f = get_yabusiness_credentials(pid)
                 if _yab_e and _yab_p and _yab_f:
@@ -658,6 +676,11 @@ if pid:
                         notifications=_notifs_for_report,
                     )
                     append_log(f'✓ Отчёт обновлён с уведомлениями ({len(_notifs_for_report)} шт.)')
+                else:
+                    append_log('Уведомлений нет — лист «Уведомления» в отчёт не добавлен. '
+                               'Проверьте секреты почты выше в логе.')
+            else:
+                append_log('Чекбокс «Собрать уведомления из почты» выключен — почту не проверяю.')
 
             st.session_state.c30_results = results
             st.session_state.c30_report_path = str(report_path)

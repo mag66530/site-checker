@@ -81,12 +81,14 @@ _NOTIF_CAT_DEPT = {
 
 
 def _dept_result(r) -> str:
+    """Отдел, ответственный за проблему. Пусто — если страница работает.
+    Совпадает с логикой UI (_dept_tags_result в checklist_30min.py)."""
     tags: list[str] = []
     if r.is_error:
         if r.status in ('server_error', 'timeout', 'network_error'):
             tags.append('разработка')
         elif r.status == 'not_found':
-            tags += ['SEO', 'разработка']
+            tags.append('SEO')
         else:
             tags.append('разработка')
     elif r.is_warning:
@@ -95,8 +97,8 @@ def _dept_result(r) -> str:
         tags.append('разработка')
     if r.has_text_issues and 'разработка' not in tags:
         tags.append('разработка')
-    if getattr(r, 'has_content_bugs', False) and 'разработка' not in tags:
-        tags.append('разработка')
+    if getattr(r, 'has_content_bugs', False) and 'контент' not in tags:
+        tags.append('контент')
     return ', '.join(dict.fromkeys(tags))
 
 
