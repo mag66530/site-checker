@@ -92,9 +92,35 @@ async def main(resource_id: str, open_first: bool):
         if 'не найден' in body.lower():
             print('⚠ Ресурс не открылся — проверь resource_id.')
 
-        await dump_rows(page)
+        # Скроллим до конца — второй блок «Проблемы с представлением страниц»
+        # подгружается ниже по странице.
+        for _ in range(8):
+            await page.mouse.wheel(0, 1600)
+            await page.wait_for_timeout(500)
+        await page.wait_for_timeout(1500)
+
+        # Заголовки разделов отчёта
+        print('\n=== ЗАГОЛОВКИ РАЗДЕЛОВ ===')
+        for el in await page.query_selector_all('h1, h2, h3, [role="heading"]'):
+            try:
+                t = (await el.inner_text()).strip().replace('\n', ' ')
+                if t and any(k in t.lower() for k in
+                             ('индексир', 'представлен', 'поиск', 'причин', 'проблем')):
+                    print(f'  • {t[:90]}')
+            except Exception:
+                pass
+
+        # Все строки tr[data-rowid] на странице (оба блока)
+        print('\n=== ВСЕ tr[data-rowid] (оба блока) ===')
+        for tr in await page.query_selector_all('tr[data-rowid]'):
+            try:
+                rid = await tr.get_attribute('data-rowid')
+                t = (await tr.inner_text()).strip().replace('\n', ' ')
+                print(f'  rowid={rid}: {t[:100]}')
+            except Exception:
+                pass
+
         await dump_buttons(page)
-        await dump_links(page)
 
         # Пробуем кликнуть первую причину и показать детальную страницу
         if open_first:

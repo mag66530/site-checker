@@ -25,6 +25,7 @@ webmaster_recheck.py
 import argparse
 import asyncio
 import json
+import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -60,6 +61,28 @@ def _save_log(entries):
                    ensure_ascii=False, indent=2), encoding='utf-8')
 
 
+def _sites_from_project(pid: str) -> list[str]:
+    """Сайты Вебмастера из списка поддоменов проекта.
+    Site-id Вебмастера = https:<host>:443 → корень /site/<id>/."""
+    import csv
+    csv_path = Path(__file__).parent / 'catalogs' / f'{pid}-subdomains.csv'
+    if not csv_path.exists():
+        _log(f'Нет файла поддоменов: {csv_path}', 'error')
+        return []
+    sites = []
+    with open(csv_path, encoding='utf-8-sig', newline='') as f:
+        for row in csv.DictReader(f):
+            u = (row.get('url') or '').strip()
+            if not u.startswith('http'):
+                continue
+            host = u.split('//', 1)[-1].strip('/').split('/')[0]
+            site_id = f'https:{host}:443'
+            root = f'https://webmaster.yandex.ru/site/{site_id}/'
+            if root not in sites:
+                sites.append(root)
+    return sites
+
+
 async def _collect_sites(page) -> list[str]:
     await page.goto(SITES_URL, wait_until='domcontentloaded')
     await page.wait_for_timeout(4000)
@@ -86,28 +109,40 @@ async def _collect_sites(page) -> list[str]:
     return sites
 
 
-async def _open_checklist(page, site_root: str) -> bool:
-    """Открыть страницу ошибок диагностики сайта."""
-    # Идём на сводку, ищем ссылку «N ошибок» в блоке диагностики
-    await page.goto(site_root, wait_until='domcontentloaded')
-    await page.wait_for_timeout(3500)
-
-    # Прямая попытка: ссылка-проблема диагностики
-    prob = page.locator(f'a{SEL_PROBLEM}, {SEL_PROBLEM} a, a:has-text("ошиб")').first
-    try:
-        if await prob.count() > 0:
-            await prob.click(timeout=5000)
-            await page.wait_for_timeout(3500)
-            return True
-    except Exception:
-        pass
-
-    # Fallback: прямой переход на checklist
-    for path in ('optimization/checklist/', 'diagnostics/', 'health/'):
+async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
+    """Переход с защитой от 429 (Too Many Requests): экспоненциальный бэкофф."""
+    delay = 20
+    for i in range(tries):
         try:
-            await page.goto(site_root + path, wait_until='domcontentloaded')
-            await page.wait_for_timeout(3000)
-            if '/checklist' in page.url or 'diagnostic' in page.url or 'health' in page.url:
+            resp = await page.goto(url, wait_until='domcontentloaded')
+        except Exception as e:
+            _log(f'goto упал ({e}) — пауза {delay}с', 'warn')
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
+            continue
+        await page.wait_for_timeout(2000)
+        status = resp.status if resp else 0
+        head = (await page.inner_text('body'))[:300]
+        if status == 429 or 'Too many requests' in head or 'Слишком много запросов' in head:
+            _log(f'⚠ 429 (слишком много запросов) — пауза {delay}с (попытка {i+1})', 'warn')
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
+            continue
+        return True
+    _log('429 не прошёл после ретраев — пропускаю сайт', 'error')
+    return False
+
+
+async def _open_checklist(page, site_root: str) -> bool:
+    """Открыть страницу ошибок диагностики сайта (прямой переход с бэкоффом)."""
+    if await _goto_backoff(page, site_root + 'optimization/checklist/'):
+        await page.wait_for_timeout(2000)
+        return True
+
+    # Fallback: другие разделы диагностики
+    for path in ('diagnostics/', 'health/'):
+        try:
+            if await _goto_backoff(page, site_root + path):
                 return True
         except Exception:
             continue
@@ -213,7 +248,8 @@ async def _process_problems(page, dry_run: bool) -> dict:
     return stat
 
 
-async def run(single_site: str | None, dry_run: bool, limit: int):
+async def run(single_site: str | None, dry_run: bool, limit: int,
+              project: str | None = None):
     try:
         from playwright.async_api import async_playwright
     except ImportError:
@@ -234,9 +270,12 @@ async def run(single_site: str | None, dry_run: bool, limit: int):
 
         if single_site:
             sites = [single_site]
+        elif project:
+            sites = _sites_from_project(project)
+            _log(f'Сайтов из списка проекта {project}: {len(sites)}')
         else:
             sites = await _collect_sites(page)
-            _log(f'Сайтов в Вебмастере: {len(sites)}')
+            _log(f'Сайтов собрано со страницы Вебмастера: {len(sites)}')
         if not sites:
             await browser.close()
             return
@@ -244,7 +283,7 @@ async def run(single_site: str | None, dry_run: bool, limit: int):
         if limit:
             sites = sites[:limit]
 
-        for site in sites:
+        for si, site in enumerate(sites):
             _log(f'\n── Сайт: {site} ──')
             try:
                 await _open_checklist(page, site)
@@ -254,6 +293,9 @@ async def run(single_site: str | None, dry_run: bool, limit: int):
                 _log(f'  сайт упал: {e}', 'error')
                 entries.append({'site': site, 'error': str(e)})
             _save_log(entries)
+            # Пауза между сайтами с джиттером — снижает риск 429
+            if si < len(sites) - 1:
+                await asyncio.sleep(4 + random.random() * 4)
 
         await browser.close()
 
@@ -267,6 +309,8 @@ async def run(single_site: str | None, dry_run: bool, limit: int):
 
 def parse_args():
     ap = argparse.ArgumentParser(description='Автокликер «Проверить» в Я.Вебмастере')
+    ap.add_argument('--project', default=None,
+                    help='проект: smu|mpe|imp — сайты из catalogs/<pid>-subdomains.csv')
     ap.add_argument('--site', default=None, help='один сайт (URL корня /site/<id>/)')
     ap.add_argument('--dry-run', action='store_true', help='не кликать, только лог')
     ap.add_argument('--limit', type=int, default=0, help='максимум сайтов')
@@ -276,4 +320,4 @@ def parse_args():
 if __name__ == '__main__':
     a = parse_args()
     _log('Старт' + ('  [DRY RUN]' if a.dry_run else ''))
-    asyncio.run(run(a.site, a.dry_run, a.limit))
+    asyncio.run(run(a.site, a.dry_run, a.limit, a.project))
