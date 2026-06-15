@@ -124,7 +124,7 @@ if st.button('▶ Запустить выбранное', type='primary', use_co
                 args.append('--dry-run')
             run_stream(args, 'ГСК: проверка исправлений…')
         if do_wm:
-            args = ['webmaster_recheck.py']
+            args = ['webmaster_recheck.py', '--project', pid]
             if dry:
                 args.append('--dry-run')
             run_stream(args, 'Вебмастер: проверка ошибок…')

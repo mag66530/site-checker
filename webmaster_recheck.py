@@ -60,6 +60,28 @@ def _save_log(entries):
                    ensure_ascii=False, indent=2), encoding='utf-8')
 
 
+def _sites_from_project(pid: str) -> list[str]:
+    """Сайты Вебмастера из списка поддоменов проекта.
+    Site-id Вебмастера = https:<host>:443 → корень /site/<id>/."""
+    import csv
+    csv_path = Path(__file__).parent / 'catalogs' / f'{pid}-subdomains.csv'
+    if not csv_path.exists():
+        _log(f'Нет файла поддоменов: {csv_path}', 'error')
+        return []
+    sites = []
+    with open(csv_path, encoding='utf-8-sig', newline='') as f:
+        for row in csv.DictReader(f):
+            u = (row.get('url') or '').strip()
+            if not u.startswith('http'):
+                continue
+            host = u.split('//', 1)[-1].strip('/').split('/')[0]
+            site_id = f'https:{host}:443'
+            root = f'https://webmaster.yandex.ru/site/{site_id}/'
+            if root not in sites:
+                sites.append(root)
+    return sites
+
+
 async def _collect_sites(page) -> list[str]:
     await page.goto(SITES_URL, wait_until='domcontentloaded')
     await page.wait_for_timeout(4000)
@@ -213,7 +235,8 @@ async def _process_problems(page, dry_run: bool) -> dict:
     return stat
 
 
-async def run(single_site: str | None, dry_run: bool, limit: int):
+async def run(single_site: str | None, dry_run: bool, limit: int,
+              project: str | None = None):
     try:
         from playwright.async_api import async_playwright
     except ImportError:
@@ -234,9 +257,12 @@ async def run(single_site: str | None, dry_run: bool, limit: int):
 
         if single_site:
             sites = [single_site]
+        elif project:
+            sites = _sites_from_project(project)
+            _log(f'Сайтов из списка проекта {project}: {len(sites)}')
         else:
             sites = await _collect_sites(page)
-            _log(f'Сайтов в Вебмастере: {len(sites)}')
+            _log(f'Сайтов собрано со страницы Вебмастера: {len(sites)}')
         if not sites:
             await browser.close()
             return
@@ -267,6 +293,8 @@ async def run(single_site: str | None, dry_run: bool, limit: int):
 
 def parse_args():
     ap = argparse.ArgumentParser(description='Автокликер «Проверить» в Я.Вебмастере')
+    ap.add_argument('--project', default=None,
+                    help='проект: smu|mpe|imp — сайты из catalogs/<pid>-subdomains.csv')
     ap.add_argument('--site', default=None, help='один сайт (URL корня /site/<id>/)')
     ap.add_argument('--dry-run', action='store_true', help='не кликать, только лог')
     ap.add_argument('--limit', type=int, default=0, help='максимум сайтов')
@@ -276,4 +304,4 @@ def parse_args():
 if __name__ == '__main__':
     a = parse_args()
     _log('Старт' + ('  [DRY RUN]' if a.dry_run else ''))
-    asyncio.run(run(a.site, a.dry_run, a.limit))
+    asyncio.run(run(a.site, a.dry_run, a.limit, a.project))
