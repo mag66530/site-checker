@@ -87,12 +87,24 @@ def test_all_match():
 
 
 def test_phone_mismatch_is_bug_with_comment():
-    kp = _kp(phone_seo='+7 (499) 999-99-99', email='msk@x.ru',
-             address='улица Ленина, 5')
+    # На сайте номер, которого нет среди номеров города в КП → баг
+    kp = _kp(phone_seo='+7 (499) 999-99-99', all_phones='4999999999',
+             email='msk@x.ru', address='улица Ленина, 5')
     res = check_against_kp(_page(), 'x.ru', kp)
     phone_issue = next(i for i in res.issues if i['field'] == 'Телефон')
     assert phone_issue['status'] == 'bug'
-    assert 'не совпадает с КП' in phone_issue['comment']
+    assert 'нет в КП' in phone_issue['comment']
+
+
+def test_phone_ok_when_matches_any_city_number():
+    """Случай Воронежа: SEO пустой, сайт показывает «Общий» — он в КП → ОК."""
+    kp = _kp(phone_seo='', phone_ad='+7 (962) 388-79-12',
+             phone_common='+7 (499) 130-60-28',
+             all_phones='4991306028;9623887912',
+             email='msk@x.ru', address='улица Ленина, 5')
+    res = check_against_kp(_page(), 'x.ru', kp)  # сайт показывает 499 130-60-28
+    phone_issue = next(i for i in res.issues if i['field'] == 'Телефон')
+    assert phone_issue['status'] == 'ok'
 
 
 def test_phone_critical_when_kp_has_none():

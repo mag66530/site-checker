@@ -234,9 +234,35 @@ def test_form_nf_required_only_on_smu():
     assert _by_key(r_smu)['form_nf'].required
     assert any(bug.key == 'form_nf' for bug in r_smu.bugs)
 
-    html_other = COMMON + CARD_WITH_PRICE                      # не-СМУ
+    # Не-СМУ: формы «Не нашли что искали» нет по дизайну → столбца быть не должно
+    html_other = COMMON + CARD_WITH_PRICE
     r_other = check_content(html_other, 'category')
-    assert not _by_key(r_other)['form_nf'].required
+    assert 'form_nf' not in _by_key(r_other)
+
+
+def test_project_absent_elements_not_shown():
+    """У ИМП нет «Заказать звонок», у МПЭ — ещё и «Написать нам»:
+    этих столбцов в отчёте быть не должно (не ложный баг)."""
+    imp = '<a href="https://inmetprom.ru/">inmetprom</a>'
+    mpe = '<a href="https://mepen.ru/">mepen</a>'
+    base = ('<header><a href="tel:+74951234567">+7</a>Заявка Город</header>'
+            '<h1>Гл</h1><footer><a href="mailto:a@b.ru">a@b.ru</a>ул. Ленина 1</footer>')
+    imp_keys = {b.key for b in check_content(base + imp, 'main').blocks}
+    assert 'hdr_callback' not in imp_keys
+    assert 'ftr_writeus' in imp_keys      # у ИМП «Написать нам» есть
+    mpe_keys = {b.key for b in check_content(base + mpe, 'main').blocks}
+    assert 'hdr_callback' not in mpe_keys
+    assert 'ftr_writeus' not in mpe_keys  # у МПЭ его нет
+
+
+def test_soft_404_detected():
+    """Страница отдала 200, но контент — «страница не найдена» → soft-404,
+    одна проблема (404), а не «нет цены»."""
+    html = (COMMON + SMU_MARKER
+            + '<h1>Страница не найдена</h1><p>Ошибка 404</p>')
+    r = check_content(html, 'category')
+    assert r.is_soft_404
+    assert r.bug_count == 1
 
 
 # ── Карточка товара ──────────────────────────────────────────────────

@@ -133,12 +133,22 @@ class KPRow:
     phone_seo: str = ''
     phone_ad: str = ''
     phone_common: str = ''
+    all_phones: str = ''        # все номера города из КП, через ';' (10-значные)
     email: str = ''
     address: str = ''
 
+    def phone_set(self) -> set[str]:
+        """Все номера города из КП (нормализованные)."""
+        nums = {n for n in (self.all_phones or '').split(';') if n}
+        for v in (self.phone_seo, self.phone_ad, self.phone_common):
+            n = normalize_phone(v)
+            if n:
+                nums.add(n)
+        return nums
+
     def expected_phone(self) -> tuple[str, str]:
         """
-        Ожидаемый на сайте номер по приоритету SEO → реклама → общий.
+        Предпочтительный номер по приоритету SEO → реклама → общий (для пояснения).
         Возвращает (normalized_phone, источник) или ('', 'critical') если в КП
         вообще нет номера для города.
         """
@@ -189,6 +199,7 @@ def load_kp(project_id: str) -> dict[str, KPRow]:
                 phone_seo=row.get('phone_seo', ''),
                 phone_ad=row.get('phone_ad', ''),
                 phone_common=row.get('phone_common', ''),
+                all_phones=row.get('all_phones', ''),
                 email=row.get('email', ''),
                 address=row.get('address', ''),
             )
@@ -216,7 +227,10 @@ def extract_site_contacts(html: str) -> dict:
     region_html = (_extract_region(html, 'header', 'top') + '\n'
                    + _extract_region(html, 'footer', 'bottom'))
     text = html_to_visible_text(region_html)
-    phones = split_phones(text) + split_phones(region_html)
+    # Маски ввода телефона («+7 (000) 000-00-00») и заглушки с кодом 000 —
+    # не настоящие номера, отбрасываем, чтобы не считать их расхождением.
+    phones = [p for p in (split_phones(text) + split_phones(region_html))
+              if not p.startswith('000')]
     emails = [e.lower() for e in re.findall(
         r'[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}', region_html, re.IGNORECASE)]
     # Текст адреса — кусок видимого текста вокруг уличного маркера
@@ -255,32 +269,39 @@ def check_against_kp(html: str, domain: str, kp: dict[str, KPRow]) -> KPCheckRes
     site = extract_site_contacts(html)
 
     # ── Телефон ──
+    # Сверяем с ЛЮБЫМ номером города из КП (Общий/SEO/Реклама/Сотовый):
+    # сайт статически показывает один из них, и какой именно — зависит от
+    # города (где-то SEO, где-то общий). Баг — только если на сайте номер,
+    # которого нет в КП этого города вовсе, либо номера нет совсем.
+    kp_phones = row.phone_set()
     expected, src = row.expected_phone()
-    if not expected:
+    if not kp_phones:
         res.issues.append({
             'field': 'Телефон',
             'status': 'critical',
-            'comment': f'В КП нет номера для города «{row.city}» (ни SEO, ни '
-                       f'рекламного, ни общего) — заполнить КП.',
+            'comment': f'В КП нет ни одного номера для города «{row.city}» — '
+                       f'заполнить КП.',
         })
     elif not site['phones']:
         res.issues.append({
             'field': 'Телефон',
             'status': 'bug',
-            'comment': f'На сайте не найден телефон в шапке/подвале. По КП '
-                       f'ожидался {src}-номер.',
+            'comment': 'На сайте не найден телефон в шапке/подвале.',
         })
-    elif expected not in site['phones']:
+    elif set(site['phones']) & kp_phones:
+        res.issues.append({'field': 'Телефон', 'status': 'ok',
+                           'comment': 'Номер на сайте есть в КП этого города.'})
+    else:
         res.issues.append({
             'field': 'Телефон',
             'status': 'bug',
-            'comment': f'Номер на сайте есть, но не совпадает с КП. Ожидался '
-                       f'{src}-номер из КП, на сайте: '
+            'comment': f'На сайте номер, которого нет в КП города «{row.city}»: '
+                       f'{", ".join(_fmt(p) for p in site["phones"])}. '
+                       f'Ожидался один из номеров города (напр. {src}: {_fmt(expected)}).'
+                       if expected else
+                       f'На сайте номер, которого нет в КП: '
                        f'{", ".join(_fmt(p) for p in site["phones"])}.',
         })
-    else:
-        res.issues.append({'field': 'Телефон', 'status': 'ok',
-                           'comment': f'Совпадает с {src}-номером КП.'})
 
     # ── Почта ──
     kp_email = (row.email or '').strip().lower()
