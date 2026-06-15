@@ -117,6 +117,23 @@ async def _open_report(page, rid: str) -> bool:
     return True
 
 
+def _status_from_text(txt: str) -> str:
+    """Статус столбца «Проверка». Ищем в части строки ПОСЛЕ источника
+    («Сайт»/«Системы Google») — там название причины уже отрезано, поэтому
+    слово «Ошибка» из названия «Ошибка сервера (5xx)» не мешает.
+    Бейдж может содержать иконку/дату ('error Ошибка', 'Ошибка 11.06.2026'),
+    поэтому ищем подстрокой, а не точным равенством."""
+    tail = txt
+    for src in ('Системы Google', 'Сайт'):
+        if src in tail:
+            tail = tail.split(src, 1)[1]
+            break
+    for s in KNOWN_STATUSES:
+        if s in tail:
+            return s
+    return '?'
+
+
 async def _read_reasons(page) -> list[dict]:
     out = []
     for tr in await page.query_selector_all('tr[data-rowid]'):
@@ -125,23 +142,8 @@ async def _read_reasons(page) -> list[dict]:
             txt = (await tr.inner_text()).strip().replace('\n', ' ')
             if not txt:
                 continue
-            # Статус берём из ЭЛЕМЕНТА-бейджа, чей текст ТОЧНО равен известному
-            # статусу (бейдж — это span/div, напр. div.OOHai = «Ошибка»).
-            # Так слово «Ошибка» в названии причины «Ошибка сервера (5xx)»
-            # не спутается со статусом.
-            status = '?'
-            for cell in await tr.query_selector_all(
-                    'span, div, td, [role="cell"], [role="gridcell"]'):
-                ct = (await cell.inner_text()).strip()
-                if ct in KNOWN_STATUSES:
-                    status = ct
-                    break
-            # Фоллбэк: «Не начато» в названии причины не встречается,
-            # поэтому подстрока безопасна, если бейдж не нашли.
-            if status == '?' and STATUS_NOT_STARTED in txt:
-                status = STATUS_NOT_STARTED
             out.append({'rowid': rid, 'name': _reason_name(txt),
-                        'status': status, 'text': txt})
+                        'status': _status_from_text(txt), 'text': txt})
         except Exception:
             pass
     return out
@@ -282,9 +284,9 @@ async def process_resource(page, rid: str, dry_run: bool,
         _log('  причин не найдено (всё проиндексировано или другой layout)')
         return entries
 
-    _log(f'  причин в отчёте: {len(reasons)}; '
-         f'«Не начато»: {sum(1 for r in reasons if r["status"] == STATUS_NOT_STARTED)}, '
-         f'«Ошибка»: {sum(1 for r in reasons if r["status"] == STATUS_ERROR)}')
+    from collections import Counter
+    _dist = Counter(r['status'] for r in reasons)
+    _log(f'  причин в отчёте: {len(reasons)}; статусы: {dict(_dist)}')
 
     processed = set()
     while True:
