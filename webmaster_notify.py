@@ -270,6 +270,7 @@ def _select_folder(M: imaplib.IMAP4_SSL, folder: str, log: Callable = None) -> b
             log('info', msg)
 
     target_encoded = None
+    available = []  # человекочитаемые имена всех папок (для диагностики)
     try:
         status, folders = M.list()
         if status == 'OK' and folders:
@@ -289,16 +290,21 @@ def _select_folder(M: imaplib.IMAP4_SSL, folder: str, log: Callable = None) -> b
                     name_dec = _imap_utf7_decode(name_enc.encode('ascii'))
                 except Exception:
                     name_dec = name_enc
-                if name_dec == folder:
+                available.append(name_dec)
+                # Сравнение без учёта регистра и пробелов по краям
+                if name_dec.strip().lower() == folder.strip().lower():
                     target_encoded = name_enc
-                    _log(f'Папка найдена: {name_enc}')
+                    _log(f'Папка найдена: {name_dec} ({name_enc})')
                     break
     except Exception as e:
         _log(f'⚠ list() не удался: {e}')
 
     if target_encoded is None:
+        # Показываем что реально доступно — частая причина «нет писем».
+        if available:
+            _log(f'Папка «{folder}» не найдена. Доступные папки: {available}')
         target_encoded = _imap_utf7_encode(folder).decode('ascii')
-        _log(f'Папка не в листинге, кодирую вручную: {target_encoded}')
+        _log(f'Пробую закодировать вручную: {target_encoded}')
 
     folder_bytes = target_encoded.encode('ascii', errors='replace')
     select_arg = b'"' + folder_bytes + b'"'

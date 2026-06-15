@@ -660,17 +660,25 @@ if pid:
 
                 _yab_e, _yab_p, _yab_f = get_yabusiness_credentials(pid)
                 if _yab_e and _yab_p and _yab_f:
+                    append_log(f'Я.Бизнес: подключаюсь к {_yab_e}, папка «{_yab_f}»…')
                     try:
                         fetch_yandex_folder_simple(pid, _yab_e, _yab_p, _yab_f, 'ya_business', 30, _proxy, _nlog_run)
                     except Exception as _e:
                         append_log(f'⚠ Я.Бизнес: {_e}')
+                else:
+                    append_log('⚠ Я.Бизнес: креды/папка не найдены '
+                               f'(секреты metrika_{pid}_email / metrika_{pid}_password)')
 
                 _tg_e, _tg_p, _tg_f = get_twogis_credentials(pid)
                 if _tg_e and _tg_p and _tg_f:
+                    append_log(f'2ГИС: подключаюсь к {_tg_e}, папка «{_tg_f}»…')
                     try:
                         fetch_yandex_folder_simple(pid, _tg_e, _tg_p, _tg_f, 'twogis', 30, _proxy, _nlog_run)
                     except Exception as _e:
                         append_log(f'⚠ 2ГИС: {_e}')
+                else:
+                    append_log('⚠ 2ГИС: креды/папка не найдены '
+                               f'(секреты metrika_{pid}_email / metrika_{pid}_password)')
 
                 _ga_e, _ga_p = get_google_accounts_credentials(pid)
                 if _ga_e and _ga_p:
