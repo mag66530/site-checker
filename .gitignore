@@ -17,3 +17,5 @@ gsc_session.json
 gsc_chrome_profile/
 gsc_reindex_log.json
 gsc_properties.json
+urls.txt
+gsc_validate_log.json
