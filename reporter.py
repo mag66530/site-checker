@@ -392,7 +392,13 @@ def _build_structure_sheet(wb, results):
         ws.column_dimensions['B'].width = 18
         for r in bug_pages[:40]:
             kind = _kind_label.get(getattr(r.content, 'page_kind', ''), r.type_label)
-            missing = ', '.join(b.label for b in r.content.bugs)
+            if getattr(r.content, 'is_soft_404', False):
+                # Страница отдала 200, но это «не найдена» — суть проблемы 404,
+                # а не «нет цены». Так и пишем.
+                problem_text = ('страница отдаёт 404 (не найдена) — проверить '
+                                'ссылку/убрать из каталога')
+            else:
+                problem_text = 'нет: ' + ', '.join(b.label for b in r.content.bugs)
 
             cc = ws.cell(row=row, column=2, value=f'[{r.city}] {kind}')
             cc.font = _font(size=10, bold=True)
@@ -406,7 +412,7 @@ def _build_structure_sheet(wb, results):
             uc.border = _border(color=C.border_light)
 
             ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=8)
-            mc = ws.cell(row=row, column=4, value=f'нет: {missing}')
+            mc = ws.cell(row=row, column=4, value=problem_text)
             mc.font = _font(size=10, color=C.err)
             mc.alignment = _align(indent=1, wrap=True)
             mc.border = _border(color=C.border_light)
@@ -483,6 +489,21 @@ def _build_structure_sheet(wb, results):
             pc.alignment = _align(horizontal='center', indent=0)
             pc.fill = _fill(C.err_soft) if r.content_bugs else _fill(C.bg_elev)
             pc.border = _border(color=C.border_light)
+
+            # Soft-404: не сыплем БАГ по каждому столбцу — одна заметка на строку.
+            if getattr(r.content, 'is_soft_404', False) and n_cols:
+                ws.merge_cells(start_row=row, start_column=5,
+                               end_row=row, end_column=4 + n_cols)
+                cell = ws.cell(row=row, column=5,
+                               value='Страница отдаёт 404 (не найдена)')
+                cell.font = _font(size=10, bold=True, color=C.err)
+                cell.fill = _fill(C.err_soft)
+                cell.alignment = _align(indent=1)
+                cell.border = _border(color=C.border_light)
+                for k in range(1, n_cols):
+                    ws.cell(row=row, column=5 + k).border = _border(color=C.border_light)
+                row += 1
+                continue
 
             for ci, col in enumerate(columns):
                 cell = ws.cell(row=row, column=5 + ci)

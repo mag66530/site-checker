@@ -378,11 +378,19 @@ CUSTOM_CSS = """
         box-shadow: 0 8px 24px rgba(26, 26, 26, 0.12) !important;
         padding: 10px 14px !important;
     }
-    /* Сам значок «?» – серый и видимый */
-    [data-testid="stTooltipHoverTarget"],
-    [data-testid="stTooltipHoverTarget"] svg {
-        color: #5B5853 !important;
-        fill: #5B5853 !important;
+    /* Значок «?» — КОНТУРНЫЙ кружок (Streamlit рисует его через stroke).
+       Раньше тут стоял fill, который заливал контур сплошной точкой —
+       поэтому «?» был не виден. Делаем fill:none и красим обводку. */
+    [data-testid="stTooltipHoverTarget"] {
+        color: #8A867F !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+    }
+    [data-testid="stTooltipHoverTarget"] svg,
+    [data-testid="stTooltipHoverTarget"] svg.icon,
+    [data-testid="stTooltipHoverTarget"] svg * {
+        fill: none !important;
+        stroke: #8A867F !important;
         opacity: 1 !important;
         visibility: visible !important;
     }

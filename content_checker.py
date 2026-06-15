@@ -49,6 +49,7 @@ class ContentResult:
     type_code: str
     page_kind: str = ''            # для списков: 'listing' | 'section' | 'empty'
     blocks: list[BlockResult] = field(default_factory=list)
+    is_soft_404: bool = False      # 200, но контент — «страница не найдена»
 
     @property
     def bugs(self) -> list[BlockResult]:
@@ -57,6 +58,9 @@ class ContentResult:
 
     @property
     def bug_count(self) -> int:
+        # Soft-404 — это одна проблема (страница-404), а не «нет цены/кнопки».
+        if self.is_soft_404:
+            return 1
         return len(self.bugs)
 
     @property
@@ -657,19 +661,48 @@ def check_content(html: str, type_code: str) -> ContentResult:
             page_kind = 'section'   # нет явных признаков товаров — мягко, не баг
     result.page_kind = page_kind
 
-    # Форма «Не нашли что искали» есть только на СМУ. На ИМП/МПЭ её нет
-    # (у ИМП другая форма — «Не нашли ответа на свой вопрос»), поэтому
-    # требовать её там нельзя — иначе ложный баг на каждой странице.
-    is_smu = 'stalmetural' in ctx.html_lower
+    # Soft-404: страница отдала 200, но по контенту это «страница не найдена».
+    # Тогда «нет цены/кнопок» — следствие, а не суть; в отчёте пишем «404».
+    _404_MARKERS = (
+        'страница не найдена', 'страница, которую вы ищете', 'ошибка 404',
+        '404 ошибка', 'page not found', 'такой страницы не существует',
+        'нет такой страницы', 'запрашиваемая страница не найдена',
+    )
+    title = ''
+    mt = re.search(r'<title[^>]*>(.*?)</title>', ctx.html, re.IGNORECASE | re.DOTALL)
+    if mt:
+        title = re.sub(r'<[^>]+>', '', mt.group(1)).lower()
+    h1_text = ''
+    mh = re.search(r'<h1[^>]*>(.*?)</h1>', ctx.html_lower, re.DOTALL)
+    if mh:
+        h1_text = re.sub(r'<[^>]+>', '', mh.group(1))
+    result.is_soft_404 = (
+        any(m in ctx.text_lower for m in _404_MARKERS)
+        or '404' in title or 'не найден' in title
+        or '404' in h1_text or 'не найден' in h1_text
+    )
+
+    # Проект по хосту в HTML — у каждого свой набор элементов шапки/подвала/форм.
+    # Чего у проекта нет ПО ДИЗАЙНУ — не проверяем и не выводим столбцом
+    # (иначе ложный баг: у ИМП/МПЭ нет «Заказать звонок», у МПЭ — «Написать нам»,
+    # форма «Не нашли что искали» есть только у СМУ).
+    if 'stalmetural' in ctx.html_lower:
+        absent = set()
+    elif 'inmetprom' in ctx.html_lower:
+        absent = {'hdr_callback', 'form_nf'}
+    elif 'mepen' in ctx.html_lower:
+        absent = {'hdr_callback', 'ftr_writeus', 'form_nf'}
+    else:
+        absent = {'form_nf'}
 
     for blk in _profile_for(type_code, page_kind):
+        if blk.key in absent:
+            continue        # этого элемента у проекта нет по дизайну — не показываем
         try:
             present, count = blk.detect(ctx)
         except Exception:
             present, count = False, None
         required = blk.required
-        if blk.key == 'form_nf' and not is_smu:
-            required = False
         # Каталог-корень — верхний уровень иерархии, хлебных крошек там
         # может не быть (например, главная каталога ИМП) — это не баг.
         if type_code == 'catalog' and blk.key == 'breadcrumbs':
