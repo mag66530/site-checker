@@ -181,7 +181,7 @@ async def main():
         print('Готово! Запусти проверку:')
         print('  python gsc_reindex.py --dry-run')
 
-        await browser.disconnect()
+        await browser.close()  # отключиться от CDP, Chrome остаётся открытым
 
     # Не убиваем Chrome — пусть пользователь закроет сам
     print()

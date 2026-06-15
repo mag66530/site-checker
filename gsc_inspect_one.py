@@ -89,7 +89,7 @@ async def main(resource_id: str, url: str):
             print(f'  "{needle}": найдено {cnt}')
 
         print('\nГотово. Браузер оставляю открытым.')
-        await browser.disconnect()
+        await browser.close()  # отключиться от CDP, Chrome остаётся открытым
 
 
 if __name__ == '__main__':
