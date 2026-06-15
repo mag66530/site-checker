@@ -95,31 +95,35 @@ async def main(resource_id: str, url: str | None):
         if url:
             print(f'\n=== ПРОБУЮ ПРОВЕРИТЬ URL ЧЕРЕЗ ОМНИБОКС ===\n  {url}')
             filled = False
-            # Кандидаты на строку проверки URL
+            # Строка проверки URL: input с aria-label "Проверка всех URL на ресурсе…"
             for sel in (
-                '[aria-label*="Проверка"]',
-                '[aria-label*="Проверить"]',
-                '[placeholder*="Проверка"]',
-                '[aria-label*="Inspect"]',
-                '[placeholder*="Inspect"]',
-                '[role="combobox"]',
+                'input[aria-label*="Проверка всех URL"]',
+                'input[aria-label*="Проверка"]',
+                'input[aria-label*="Inspect"]',
             ):
                 try:
-                    el = await page.wait_for_selector(sel, timeout=2500)
-                    if el and await el.is_visible():
-                        await el.click()
-                        await el.fill(url)
-                        await page.keyboard.press('Enter')
-                        filled = True
-                        print(f'  Ввёл в поле: {sel}')
-                        break
-                except Exception:
+                    omni = page.locator(sel).first
+                    await omni.wait_for(state='attached', timeout=4000)
+                    await omni.click(timeout=6000)
+                    await omni.fill(url, timeout=6000)
+                    await page.keyboard.press('Enter')
+                    filled = True
+                    print(f'  Ввёл URL в поле: {sel}')
+                    break
+                except Exception as e:
+                    print(f'  {sel} — не подошёл ({type(e).__name__})')
                     continue
             if not filled:
                 print('  Не нашёл строку проверки — смотри список полей выше.')
             else:
-                print('  Жду результат проверки (до 30 сек)...')
-                await page.wait_for_timeout(30000)
+                print('  Жду результат проверки (до 45 сек)...')
+                # Ждём появления кнопки индексации или текста статуса
+                try:
+                    await page.wait_for_selector(
+                        'text=Запросить индексирование', timeout=45000)
+                    print('  ✓ Кнопка «Запросить индексирование» появилась')
+                except Exception:
+                    print('  Кнопка не появилась за 45 сек — дамп ниже покажет что есть')
                 await dump_buttons(page)
 
         print('\nГотово. Браузер оставляю открытым.')
