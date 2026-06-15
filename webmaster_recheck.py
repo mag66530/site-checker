@@ -33,9 +33,11 @@ CDP_URL = 'http://127.0.0.1:9222'
 SITES_URL = 'https://webmaster.yandex.ru/sites/'
 LOG_FILE = Path('webmaster_recheck_log.json')
 
-# Селекторы (из DevTools)
-SEL_PROBLEM = '.DiagnosticProblem'
-SEL_CHECK_LINK = 'a.link_theme_normal'
+# Селекторы (реальные классы Я.Вебмастера, из DevTools)
+SEL_PROBLEM = '.DiagnosisChecklistProblem'
+SEL_STATUS_INPROGRESS = '.DiagnosisChecklistProblemTitle-Status_status_IN_PROGRESS'
+SEL_CHEVRON = '.DiagnosisChecklistProblem-Chevron'
+SEL_LINKS = '.DiagnosisChecklistProblemLandingLinksContainer a.link_theme_normal'
 TXT_CHECKING = 'Проверяем сайт на ошибку'
 TXT_CHECK_BTN = ('Проверьте', 'Проверить')
 
@@ -150,22 +152,25 @@ async def _process_problems(page, dry_run: bool) -> dict:
             txt = (await prob.inner_text()).strip().replace('\n', ' ')
             _log(f'  [{i}] {txt[:80]}')
 
-            # уже проверяется?
-            if TXT_CHECKING in txt:
+            # уже проверяется? (по классу статуса или по тексту)
+            in_progress = await prob.query_selector(SEL_STATUS_INPROGRESS)
+            if in_progress or TXT_CHECKING in txt:
                 stat['checking'] += 1
                 _log('      статус «Проверяем» — пропуск', 'warn')
                 continue
 
-            # раскрыть аккордеон (клик по заголовку), чтобы показалась кнопка
-            try:
-                await prob.click(timeout=3000)
-                await page.wait_for_timeout(800)
-            except Exception:
-                pass
+            # раскрыть аккордеон кликом по шеврону, чтобы показались ссылки
+            chevron = await prob.query_selector(SEL_CHEVRON)
+            if chevron:
+                try:
+                    await chevron.click(timeout=3000)
+                    await page.wait_for_timeout(900)
+                except Exception:
+                    pass
 
-            # ищем кнопку «Проверьте» внутри блока
+            # ищем ссылку-кнопку «Проверьте» в контейнере landing-ссылок
             btn = None
-            for a in await prob.query_selector_all(SEL_CHECK_LINK):
+            for a in await prob.query_selector_all(SEL_LINKS):
                 bt = (await a.inner_text()).strip()
                 if any(k.lower() in bt.lower() for k in TXT_CHECK_BTN):
                     btn = a
@@ -176,7 +181,8 @@ async def _process_problems(page, dry_run: bool) -> dict:
                 continue
 
             if dry_run:
-                _log('      [DRY RUN] кнопка есть, не кликаю', 'ok')
+                bt = (await btn.inner_text()).strip()
+                _log(f'      [DRY RUN] кнопка есть: «{bt[:30]}», не кликаю', 'ok')
                 stat['clicked'] += 1
                 continue
 
