@@ -179,6 +179,102 @@ _STRUCT_GROUPS = [
 ]
 
 
+# «Схлопнутые» столбцы грида: 3 столбца цены и 3 столбца кнопок сводим в один
+# смысловой каждый — так таблица читается, а тип цены/кнопки виден в ячейке.
+
+def _price_cell(bk):
+    price = bk.get('price'); real = bk.get('price_real'); req = bk.get('price_request')
+    if price and price.required and not price.present:
+        return ('БАГ', 'bug')
+    has_real = bool(real and real.present); has_req = bool(req and req.present)
+    if has_real and has_req:
+        return ('₽ + запрос', 'okinfo')
+    if has_real:
+        return ('₽', 'ok')
+    if has_req:
+        return ('по запросу', 'okinfo')
+    if price and price.present:
+        return ('✓', 'ok')
+    return ('—', 'absent')
+
+
+def _btn_cell(bk):
+    order = bk.get('btn_order'); cart = bk.get('btn_cart'); one = bk.get('btn_oneclick')
+    if order and order.required and not order.present:
+        return ('БАГ', 'bug')
+    has_cart = bool(cart and cart.present); has_one = bool(one and one.present)
+    if has_cart and has_one:
+        return ('в корзину + 1 клик', 'okinfo')
+    if has_cart:
+        return ('в корзину', 'okinfo')
+    if has_one:
+        return ('1 клик', 'okinfo')
+    if order and order.present:
+        return ('✓', 'ok')
+    return ('—', 'absent')
+
+
+_COLLAPSE = [
+    {'trigger': 'price', 'label': 'Цена',
+     'desc': 'Цена на карточках: «₽» — рублёвая, «по запросу» — цена по запросу. '
+             '«БАГ» — цены нет вовсе.',
+     'keys': {'price', 'price_real', 'price_request'}, 'fn': _price_cell},
+    {'trigger': 'btn_order', 'label': 'Кнопка заказа',
+     'desc': 'Кнопка заказа: «в корзину» (товар с ценой) или «1 клик» (по запросу). '
+             '«БАГ» — нет ни одной.',
+     'keys': {'btn_order', 'btn_cart', 'btn_oneclick'}, 'fn': _btn_cell},
+]
+
+
+def _grid_columns(blocks):
+    """Столбцы грида: реальные блоки + схлопнутые «Цена»/«Кнопка заказа»."""
+    by_trigger = {c['trigger']: c for c in _COLLAPSE}
+    consumed = set().union(*(c['keys'] for c in _COLLAPSE))
+    cols = []
+    for b in blocks:
+        if b.key in by_trigger:
+            c = by_trigger[b.key]
+            cols.append({'kind': 'virtual', 'label': c['label'],
+                         'desc': c['desc'], 'fn': c['fn']})
+        elif b.key in consumed:
+            continue                       # под-блок схлопнут — пропускаем
+        else:
+            cols.append({'kind': 'block', 'key': b.key, 'label': b.label,
+                         'desc': getattr(b, 'description', '')})
+    return cols
+
+
+def _cell_state(col, by_key):
+    """(значение, состояние) для ячейки грида."""
+    if col['kind'] == 'virtual':
+        return col['fn'](by_key)
+    b = by_key.get(col['key'])
+    if b is None:
+        return ('', 'absent')
+    if b.required and not b.present:
+        return ('БАГ', 'bug')
+    if b.present:
+        if b.count is not None:
+            return (b.count, 'count')
+        return ('✓', 'ok')
+    return ('—', 'absent')
+
+
+def _style_cell(cell, value, state):
+    cell.value = value
+    if state == 'bug':
+        cell.font = _font(size=10, bold=True, color=C.err); cell.fill = _fill(C.err_soft)
+    elif state == 'ok':
+        cell.font = _font(size=10, bold=True, color=C.ok); cell.fill = _fill(C.ok_soft)
+    elif state == 'okinfo':       # значение-текст (по запросу / в корзину…)
+        cell.font = _font(size=9, color=C.ok)
+    elif state == 'count':
+        cell.font = _font(size=10, color=C.text_soft)
+    else:                          # absent
+        cell.value = '—'
+        cell.font = _font(size=10, color=C.text_muted)
+
+
 def _build_structure_sheet(wb, results):
     """Лист структурной проверки — рассчитан на читателя без подготовки."""
     pages = [r for r in results if getattr(r, 'content', None) is not None]
@@ -331,11 +427,8 @@ def _build_structure_sheet(wb, results):
         group_pages = [r for r in pages if predicate(r)]
         if not group_pages:
             continue
-        block_defs = [
-            (b.key, b.label, getattr(b, 'description', ''))
-            for b in group_pages[0].content.blocks
-        ]
-        n_cols = len(block_defs)
+        columns = _grid_columns(group_pages[0].content.blocks)
+        n_cols = len(columns)
         g_bugs = sum(r.content_bugs for r in group_pages)
 
         # Заголовок секции
@@ -349,11 +442,10 @@ def _build_structure_sheet(wb, results):
         ws.row_dimensions[row].height = 22
         row += 1
 
-        # Шапка таблицы. К каждому столбцу проверки — комментарий с
-        # объяснением, что конкретно проверяется (наведите мышь на заголовок).
+        # Шапка таблицы. К каждому столбцу — комментарий-пояснение (по наведению).
         headers = (
             [('Город', ''), ('Открыть', ''), ('Проблем', '')]
-            + [(lbl, desc) for _, lbl, desc in block_defs]
+            + [(c['label'], c['desc']) for c in columns]
         )
         hdr_row = row
         for ci, (h, desc) in enumerate(headers, start=2):
@@ -392,28 +484,12 @@ def _build_structure_sheet(wb, results):
             pc.fill = _fill(C.err_soft) if r.content_bugs else _fill(C.bg_elev)
             pc.border = _border(color=C.border_light)
 
-            for bi, (bkey, _lbl, _desc) in enumerate(block_defs):
-                cell = ws.cell(row=row, column=5 + bi)
+            for ci, col in enumerate(columns):
+                cell = ws.cell(row=row, column=5 + ci)
                 cell.alignment = _align(horizontal='center', indent=0)
                 cell.border = _border(color=C.border_light)
-                b = by_key.get(bkey)
-                if b is None:
-                    continue
-                if b.required and not b.present:
-                    cell.value = 'БАГ'
-                    cell.font = _font(size=10, bold=True, color=C.err)
-                    cell.fill = _fill(C.err_soft)
-                elif b.present:
-                    if b.count is not None:
-                        cell.value = b.count
-                        cell.font = _font(size=10, color=C.text_soft)
-                    else:
-                        cell.value = '✓'
-                        cell.font = _font(size=10, bold=True, color=C.ok)
-                        cell.fill = _fill(C.ok_soft)
-                else:
-                    cell.value = '—'
-                    cell.font = _font(size=10, color=C.text_muted)
+                value, state = _cell_state(col, by_key)
+                _style_cell(cell, value, state)
             row += 1
         row += 1  # пробел между секциями
 
