@@ -59,8 +59,10 @@ def _by_key(result):
 
 
 def test_header_footer_all_present():
-    """Полные шапка и подвал — все 8 элементов найдены, багов нет."""
-    r = check_content(COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER, 'category')
+    """Полные шапка и подвал — все 8 элементов найдены, багов нет.
+
+    Шапка/подвал — сквозные блоки, проверяются только на главной ('main')."""
+    r = check_content(COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER, 'main')
     b = _by_key(r)
     for key in ('hdr_phone', 'hdr_callback', 'hdr_request', 'hdr_city',
                 'ftr_phone', 'ftr_email', 'ftr_writeus', 'ftr_address'):
@@ -80,7 +82,7 @@ def test_header_missing_request_is_bug():
             '<footer><a href="tel:+74951234567">+7</a>'
             '<a href="mailto:a@b.ru">a@b.ru</a>Написать нам Адрес: ул. Мира 5</footer>'
             + CARD_WITH_PRICE + FORM_NF + SMU_MARKER)
-    r = check_content(html, 'category')
+    r = check_content(html, 'main')
     b = _by_key(r)
     assert not b['hdr_request'].present
     assert any(bug.key == 'hdr_request' for bug in r.bugs)
@@ -100,14 +102,14 @@ def test_footer_missing_email_is_bug():
     )
     html = (header_full + '<div class="breadcrumb">x</div><h1>K</h1>' + footer_no_email
             + CARD_WITH_PRICE + FORM_NF + SMU_MARKER)
-    r = check_content(html, 'category')
+    r = check_content(html, 'main')
     assert any(bug.key == 'ftr_email' for bug in r.bugs)
 
 
 def test_phone_in_region_caught_via_tel_link():
     """Телефон ловится по tel:-ссылке, даже если видимый формат «+7 (495)…»."""
     html = COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER
-    b = _by_key(check_content(html, 'category'))
+    b = _by_key(check_content(html, 'main'))
     assert b['hdr_phone'].present
     assert b['ftr_phone'].present
 
@@ -269,6 +271,22 @@ def test_every_block_has_description():
         for b in r.blocks:
             assert b.description, f'Нет описания для столбца {b.key} ({type_code})'
             assert b.key in BLOCK_DESCRIPTIONS
+
+
+def test_header_footer_only_on_main():
+    """Сквозные блоки шапки/подвала проверяются только на главной.
+
+    На категории/листинге/товаре/каталоге их в отчёте быть не должно —
+    иначе одна и та же ошибка размножится на сотни строк."""
+    hf_keys = {'hdr_phone', 'hdr_callback', 'hdr_request', 'hdr_city',
+               'ftr_phone', 'ftr_email', 'ftr_writeus', 'ftr_address'}
+    html = COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER
+    for tc in ('category', 'product', 'catalog'):
+        keys = {b.key for b in check_content(html, tc).blocks}
+        assert not (keys & hf_keys), f'шапка/подвал не должны проверяться на {tc}'
+    # А на главной — должны
+    main_keys = {b.key for b in check_content(html, 'main').blocks}
+    assert hf_keys <= main_keys, 'на главной шапка/подвал обязаны быть'
 
 
 def test_empty_html_returns_no_blocks():
