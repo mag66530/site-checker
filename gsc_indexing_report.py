@@ -100,19 +100,19 @@ async def main(resource_id: str, open_first: bool):
         if open_first:
             print('\n=== ПРОБУЮ ОТКРЫТЬ ПЕРВУЮ ПРИЧИНУ ===')
             opened = False
-            for r in await page.query_selector_all('[role="row"]'):
+            # Причины — это ссылки-строки, каждая содержит статус проверки.
+            STATUSES = ('Не начато', 'Идёт проверка', 'Начато',
+                        'Пройдена', 'Не удалось')
+            for a in await page.query_selector_all('a, [role="link"], [role="row"]'):
                 try:
-                    txt = (await r.inner_text()).strip()
-                    if not txt or 'Причина' in txt or 'Источник' in txt:
+                    txt = (await a.inner_text()).strip()
+                    if not txt or 'Причина' in txt:
                         continue
-                    if not await r.is_visible():
+                    if not any(s in txt for s in STATUSES):
                         continue
-                    # Кликаем по ПЕРВОЙ ячейке строки (там название причины-ссылка),
-                    # а не по самой строке — клик по row часто перехватывается.
-                    cell = await r.query_selector(
-                        '[role="gridcell"], [role="cell"], td, a, span')
-                    target = cell or r
-                    await target.click()
+                    if not await a.is_visible():
+                        continue
+                    await a.click()
                     opened = True
                     print(f'  Кликнул причину: {txt[:70]}')
                     break
