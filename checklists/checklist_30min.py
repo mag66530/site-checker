@@ -633,8 +633,16 @@ if pid:
                     except Exception as _e:
                         append_log(f'⚠ GSC: {_e}')
                 else:
-                    append_log('⚠ GSC: креды не найдены '
-                               f'(секреты gsc_{pid}_email / gsc_{pid}_password)')
+                    # Показываем какие ключи реально есть в секретах (только имена).
+                    try:
+                        _avail = [k for k in list(st.secrets.keys())
+                                  if 'gsc' in k.lower() or pid in k.lower()]
+                    except Exception:
+                        _avail = []
+                    append_log(
+                        f'⚠ GSC: креды не найдены. Ожидаю секреты '
+                        f'gsc_{pid}_email и gsc_{pid}_password. '
+                        f'Сейчас в секретах есть похожие ключи: {_avail or "нет"}')
 
                 _yab_e, _yab_p, _yab_f = get_yabusiness_credentials(pid)
                 if _yab_e and _yab_p and _yab_f:
