@@ -391,12 +391,16 @@ def _build_structure_sheet(wb, results):
         bug_pages.sort(key=lambda r: -r.content_bugs)
         ws.column_dimensions['B'].width = 18
         for r in bug_pages[:40]:
-            kind = _kind_label.get(getattr(r.content, 'page_kind', ''), r.type_label)
+            pk = getattr(r.content, 'page_kind', '')
+            kind = _kind_label.get(pk, r.type_label)
             if getattr(r.content, 'is_soft_404', False):
                 # Страница отдала 200, но это «не найдена» — суть проблемы 404,
                 # а не «нет цены». Так и пишем.
                 problem_text = ('страница отдаёт 404 (не найдена) — проверить '
                                 'ссылку/убрать из каталога')
+            elif pk == 'empty':
+                # «Раздел пуст.» — нет ни товаров, ни подразделов.
+                problem_text = 'раздел пуст — нет ни товаров, ни подразделов'
             else:
                 problem_text = 'нет: ' + ', '.join(b.label for b in r.content.bugs)
 
@@ -829,7 +833,7 @@ def _build_kp_sheet(wb, results):
         kp = r.kp_result
         issues = {i['field']: i for i in kp.get('issues', [])}
 
-        cc = ws.cell(row=row, column=2, value=kp.get('city') or r.city)
+        cc = ws.cell(row=row, column=2, value=r.city or kp.get('city'))
         cc.font = _font(size=10); cc.alignment = _align(indent=1)
         cc.border = _border(color=C.border_light)
 
