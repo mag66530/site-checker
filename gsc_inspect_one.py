@@ -1,27 +1,20 @@
 """
 gsc_inspect_one.py
 ==================
-Helper для отладки: открывает проверку ОДНОГО URL в уже запущенном Chrome
-(через CDP, порт 9222 — повторный вход не нужен) и выводит все кнопки на
-странице. Нужен чтобы поймать точный селектор кнопки «Запросить индексирование».
+Отладочный helper. Открывает ОБЗОР ресурса GSC (не сломанный deep-link),
+по желанию вставляет URL в строку проверки и жмёт Enter, затем выводит
+все поля ввода и кнопки — чтобы поймать селекторы омнибокса и кнопки
+«Запросить индексирование».
 
 Перед запуском:
-    1. Запусти gsc_save_session.py — он откроет Chrome с debug-портом 9222
-       и оставит его открытым (авторизованным).
-    2. НЕ закрывай этот Chrome.
+    python gsc_save_session.py   # держит авторизованный Chrome на порту 9222
 
 Запуск:
-    python gsc_inspect_one.py --resource "sc-domain:stalmetural.ru" --url "https://stalmetural.ru/broken-page"
+    # Только разведка страницы ресурса (поля + кнопки):
+    python gsc_inspect_one.py --resource "https://vladimir.mepen.ru/"
 
-    # Если знаешь resource_id из адресной строки GSC — подставь его.
-    # Для домена-ресурса формат: sc-domain:example.com
-    # Для URL-префикса: https://example.com/
-
-Что делает:
-    - Открывает инспекцию URL
-    - Ждёт загрузки
-    - Печатает ВСЕ кнопки (текст + role + ключевые атрибуты)
-    - НИЧЕГО не кликает (только разведка)
+    # + попытка проверить конкретный URL через омнибокс:
+    python gsc_inspect_one.py --resource "https://vladimir.mepen.ru/" --url "https://vladimir.mepen.ru/"
 """
 
 import argparse
@@ -29,73 +22,114 @@ import asyncio
 from urllib.parse import quote
 
 CDP_URL = 'http://127.0.0.1:9222'
-INSPECT = 'https://search.google.com/search-console/inspect?resource_id={rid}&id={url}'
+# Рабочая страница ресурса — отчёт «Эффективность» (стабильный маршрут).
+OVERVIEW = 'https://search.google.com/search-console/performance/search-analytics?resource_id={rid}'
 
 
-async def main(resource_id: str, url: str):
+async def dump_inputs(page):
+    print('\n=== ПОЛЯ ВВОДА (input / textarea / combobox) ===')
+    inputs = await page.query_selector_all(
+        'input, textarea, [role="combobox"], [contenteditable="true"]')
+    if not inputs:
+        print('  Полей не найдено.')
+    for i, el in enumerate(inputs):
+        try:
+            al = await el.get_attribute('aria-label') or ''
+            ph = await el.get_attribute('placeholder') or ''
+            nm = await el.get_attribute('name') or ''
+            tp = await el.get_attribute('type') or ''
+            vis = await el.is_visible()
+            print(f'[{i:2}] vis={vis} type="{tp}" aria-label="{al[:50]}" '
+                  f'placeholder="{ph[:40]}" name="{nm}"')
+        except Exception:
+            pass
+
+
+async def dump_buttons(page):
+    print('\n=== КНОПКИ ===')
+    buttons = await page.query_selector_all('button, [role="button"], a[role="button"]')
+    if not buttons:
+        print('  Кнопок не найдено.')
+    for i, b in enumerate(buttons):
+        try:
+            txt = (await b.inner_text()).strip().replace('\n', ' ')
+            if not txt:
+                txt = await b.get_attribute('aria-label') or ''
+            vis = await b.is_visible()
+            if txt:
+                print(f'[{i:2}] vis={vis} "{txt[:70]}"')
+        except Exception:
+            pass
+
+
+async def main(resource_id: str, url: str | None):
     from playwright.async_api import async_playwright
 
-    inspect_url = INSPECT.format(
-        rid=quote(resource_id, safe=''),
-        url=quote(url, safe=''),
-    )
+    overview_url = OVERVIEW.format(rid=quote(resource_id, safe=''))
 
     async with async_playwright() as p:
         try:
             browser = await p.chromium.connect_over_cdp(CDP_URL)
         except Exception as e:
-            print(f'Не удалось подключиться к Chrome на {CDP_URL}: {e}')
-            print('Сначала запусти gsc_save_session.py (он держит Chrome открытым).')
+            print(f'Нет подключения к Chrome ({CDP_URL}): {e}')
+            print('Сначала запусти gsc_save_session.py.')
             return
 
         context = browser.contexts[0] if browser.contexts else await browser.new_context()
         page = context.pages[0] if context.pages else await context.new_page()
 
-        print(f'Открываю инспекцию:\n  {url}\n')
-        await page.goto(inspect_url, wait_until='domcontentloaded')
-        await page.wait_for_timeout(6000)  # ждём прогрузки SPA
+        print(f'Открываю обзор ресурса:\n  {resource_id}\n')
+        await page.goto(overview_url, wait_until='domcontentloaded')
+        await page.wait_for_timeout(6000)
+        print(f'URL вкладки: {page.url}')
 
-        print(f'Текущий URL вкладки: {page.url}\n')
+        body = (await page.inner_text('body'))[:300]
+        if 'не найден' in body.lower() or 'not found' in body.lower():
+            print('\n⚠ Похоже ресурс не открылся (404/не найден).')
+            print('Проверь точный resource_id из gsc_properties.json.')
 
-        # Дамп всех кнопок
-        print('=== КНОПКИ НА СТРАНИЦЕ ===')
-        buttons = await page.query_selector_all(
-            'button, [role="button"], a[role="button"]')
-        if not buttons:
-            print('Кнопок не найдено — возможно страница ещё грузится или нужен скролл.')
-        for i, b in enumerate(buttons):
-            try:
-                txt = (await b.inner_text()).strip().replace('\n', ' ')
-            except Exception:
-                txt = ''
-            if not txt:
-                txt = (await b.get_attribute('aria-label')) or ''
-            jsname = await b.get_attribute('jsname') or ''
-            data_id = await b.get_attribute('data-id') or ''
-            visible = await b.is_visible()
-            if txt or jsname:
-                print(f'[{i:2}] vis={visible} text="{txt[:60]}" '
-                      f'jsname="{jsname}" data-id="{data_id}"')
+        await dump_inputs(page)
+        await dump_buttons(page)
 
-        # Подсказка: ищем кнопку индексации по тексту
-        print('\n=== ПОИСК КНОПКИ ИНДЕКСАЦИИ ===')
-        for needle in ('Запросить индексирование', 'Запросить повторную индексацию',
-                       'Request indexing', 'индексир'):
-            loc = page.get_by_text(needle, exact=False)
-            try:
-                cnt = await loc.count()
-            except Exception:
-                cnt = 0
-            print(f'  "{needle}": найдено {cnt}')
+        # Попытка проверить URL через омнибокс
+        if url:
+            print(f'\n=== ПРОБУЮ ПРОВЕРИТЬ URL ЧЕРЕЗ ОМНИБОКС ===\n  {url}')
+            filled = False
+            # Кандидаты на строку проверки URL
+            for sel in (
+                '[aria-label*="Проверка"]',
+                '[aria-label*="Проверить"]',
+                '[placeholder*="Проверка"]',
+                '[aria-label*="Inspect"]',
+                '[placeholder*="Inspect"]',
+                '[role="combobox"]',
+            ):
+                try:
+                    el = await page.wait_for_selector(sel, timeout=2500)
+                    if el and await el.is_visible():
+                        await el.click()
+                        await el.fill(url)
+                        await page.keyboard.press('Enter')
+                        filled = True
+                        print(f'  Ввёл в поле: {sel}')
+                        break
+                except Exception:
+                    continue
+            if not filled:
+                print('  Не нашёл строку проверки — смотри список полей выше.')
+            else:
+                print('  Жду результат проверки (до 30 сек)...')
+                await page.wait_for_timeout(30000)
+                await dump_buttons(page)
 
         print('\nГотово. Браузер оставляю открытым.')
-        await browser.close()  # отключиться от CDP, Chrome остаётся открытым
+        await browser.close()
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--resource', required=True,
-                    help='resource_id: "sc-domain:example.com" или "https://example.com/"')
-    ap.add_argument('--url', required=True, help='Полный URL страницы для проверки')
+                    help='resource_id: "https://host/" или "sc-domain:example.com"')
+    ap.add_argument('--url', default=None, help='URL для проверки через омнибокс (опц.)')
     args = ap.parse_args()
     asyncio.run(main(args.resource, args.url))
