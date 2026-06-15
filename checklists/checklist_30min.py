@@ -17,6 +17,7 @@
 Ручная часть (пункты 3–6 чек-листом с галочками) временно убрана.
 """
 import asyncio
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -194,6 +195,275 @@ _NOTIF_CAT_DEPT = {
 
 def _dept_tags_notif(n) -> list[str]:
     return _NOTIF_CAT_DEPT.get(n.category, ['SEO'])
+
+
+# ── Фоновый прогон (переживает переключение вкладок) ─────────────────
+# Состояние прогона хранится в модульной переменной (живёт в процессе
+# сервера, не в session_state), поэтому переход на другую вкладку и обратно
+# не перезапускает прогон — поток продолжает работать сам.
+
+_RUNS: dict = {}  # project_id -> состояние прогона
+
+
+def _run_state_new() -> dict:
+    return {'running': True, 'progress': 0.0, 'progress_text': 'Подготовка…',
+            'log': [], 'results': None, 'report_path': None,
+            'started_at': None, 'finished_at': None, 'error': None}
+
+
+def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
+    """Выполняет прогон в фоне. НЕ обращается к st.* — все секреты переданы
+    в creds из основного потока. Пишет прогресс/лог/результат в _RUNS[pid]."""
+    state = _RUNS[pid]
+    _run_log_path = Path('cache') / 'last_run.log'
+    try:
+        _run_log_path.parent.mkdir(parents=True, exist_ok=True)
+        _run_log_path.write_text('', encoding='utf-8')
+    except Exception:
+        pass
+
+    def append_log(msg):
+        state['log'].append(msg)
+        try:
+            with open(_run_log_path, 'a', encoding='utf-8') as _f:
+                _f.write(f'{datetime.now().strftime("%H:%M:%S")}  {msg}\n')
+        except Exception:
+            pass
+
+    def set_progress(frac, text):
+        state['progress'] = min(1.0, max(0.0, frac))
+        state['progress_text'] = text
+
+    started_ms = int(time.time() * 1000)
+    state['started_at'] = started_ms
+
+    try:
+        proxy_url = creds['proxy_url'] if cfg.get('use_proxy') else None
+        if cfg.get('use_proxy') and not proxy_url:
+            append_log(f'⚠ Прокси нужен для {cfg["name"]}, но не настроен в Secrets')
+        elif proxy_url:
+            append_log(f'Прокси: включён для проекта {cfg["name"]}')
+
+        # Товары: база листингов → fallback sitemap
+        if not src.products:
+            base_links = load_product_links(pid)
+            if base_links and base_links['pathnames']:
+                src.products = base_links['pathnames']
+                append_log(f'Товары из базы листингов: {len(src.products)}')
+            else:
+                append_log('Загружаю sitemap для товаров…')
+                try:
+                    sm = asyncio.run(load_product_pathnames(
+                        cfg, src.categories, src.filters,
+                        log=lambda lvl, msg: append_log(msg),
+                        proxy_url=proxy_url,
+                    ))
+                    src.products = sm.get('pathnames', [])
+                    append_log(f'Из sitemap: {len(src.products)} товаров')
+                except Exception as e:
+                    append_log(f'⚠ Sitemap не загрузился: {e}. Прогон без товаров.')
+
+        recent = set(load_history(pid, ttl_ms=WEEKLY_TTL_MS).keys())
+        append_log(f'История ротации (30 дней): {len(recent)} URL')
+
+        plan = build_plan(
+            src,
+            random_subdomains_count=int(random_cities),
+            categories_per_subdomain=budget['cats'],
+            filters_per_subdomain=budget['filters'],
+            products_per_subdomain=budget['products'],
+            check_main=flags['check_main'],
+            check_catalog=flags['check_catalog'],
+            check_categories=flags['check_categories'],
+            check_filters=flags['check_filters'],
+            check_products=flags['check_products'],
+            mandatory_city=cfg.get('mandatory_city', 'Москва'),
+            rotation_history=recent,
+        )
+        append_log(f'Города: {", ".join(s.city for s in plan.selected_subdomains)}')
+        append_log(f'Всего проверок: {len(plan.tasks)}')
+
+        counters = {'ok': 0, 'warn': 0, 'err': 0}
+
+        def on_progress(result, done, total_n):
+            if result.is_ok:
+                counters['ok'] += 1
+            elif result.is_warning:
+                counters['warn'] += 1
+            else:
+                counters['err'] += 1
+            set_progress(
+                done / max(total_n, 1),
+                f'Проверено {done} из {total_n} — '
+                f'✅ {counters["ok"]} · ⚠ {counters["warn"]} · ❌ {counters["err"]}',
+            )
+
+        try:
+            from kp import load_kp
+            kp_map = load_kp(pid) or None
+            if kp_map:
+                append_log(f'КП для сверки контактов: {len(kp_map)} городов')
+        except Exception as e:
+            kp_map = None
+            append_log(f'⚠ Не удалось загрузить КП: {e}')
+
+        results = asyncio.run(run_batch(
+            plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
+            retry_delay_ms=2500, check_text=True, on_progress=on_progress,
+            proxy_url=proxy_url, kp_map=kp_map,
+        ))
+
+        finished_ms = int(time.time() * 1000)
+        save_history(pid, list({urlparse(r.url).path for r in results}))
+
+        append_log('Формирую xlsx-отчёт…')
+        report_filename = make_report_filename(pid, started_ms, REPORTS_DIR)
+        report_path = REPORTS_DIR / report_filename
+        _notifs = (
+            load_notifications(pid, 'yandex_webmaster', 30)
+            + load_notifications(pid, 'gsc', 30)
+            + load_notifications(pid, 'ya_business', 30)
+            + load_notifications(pid, 'twogis', 30)
+            + load_notifications(pid, 'google_accounts', 3)
+        )
+        build_report(
+            project_name=cfg['name'], started_at_ms=started_ms,
+            finished_at_ms=finished_ms,
+            selected_subdomains=plan.selected_subdomains, results=results,
+            output_path=report_path, notifications=_notifs or None,
+        )
+
+        # Telegram
+        tg_token = creds['tg_token']
+        tg_recipients = creds['tg_recipients']
+        if tg_token and tg_recipients:
+            append_log(f'Отправляю отчёт в Telegram ({len(tg_recipients)} получателей)…')
+            try:
+                problems_for_tg = [
+                    {'city': r.city or '—', 'url': r.url,
+                     'status': {'not_found': '404 Не найдена',
+                                'client_error': 'Ошибка на сайте',
+                                'server_error': 'Сервер не отвечает',
+                                'timeout': 'Нет ответа',
+                                'network_error': 'Нет соединения'}.get(r.status, r.status)}
+                    for r in results if r.is_error][:5]
+                empty_sections = [
+                    {'city': r.city or '—', 'url': r.url} for r in results
+                    if getattr(r, 'content', None) is not None
+                    and getattr(r.content, 'page_kind', '') == 'empty']
+                summary_text = format_summary_message(
+                    project_name=f'{cfg["name"]} · еженедельная проверка',
+                    started_at=datetime.fromtimestamp(started_ms / 1000).strftime('%d.%m.%Y %H:%M'),
+                    duration_sec=(finished_ms - started_ms) // 1000,
+                    total_checks=len(results),
+                    ok_count=sum(1 for r in results if r.is_ok),
+                    warn_count=sum(1 for r in results if r.is_warning),
+                    err_count=sum(1 for r in results if r.is_error),
+                    text_issues_count=sum(len(r.text_issues) for r in results if r.has_text_issues),
+                    top_problems=problems_for_tg,
+                    content_bugs_count=sum(getattr(r, 'content_bugs', 0) or 0 for r in results),
+                    content_bug_pages=sum(1 for r in results if getattr(r, 'has_content_bugs', False)),
+                    empty_sections=empty_sections,
+                )
+                tg_result = send_run_notification(
+                    bot_token=tg_token, recipients=tg_recipients,
+                    project_name=cfg['name'], summary_text=summary_text,
+                    report_file=report_path, proxy_url=creds['proxy_url'],
+                    log=lambda lvl, msg: append_log(msg),
+                )
+                append_log(f'✓ Telegram: отправлено {tg_result["sent"]}, '
+                           f'не доставлено {tg_result["failed"]}')
+            except Exception as e:
+                append_log(f'⚠ Telegram-отправка упала: {e}')
+        else:
+            append_log('Telegram не настроен — отправьте отчёт ответственным вручную (пункт 2).')
+
+        # Сбор уведомлений из почты
+        if flags['fetch_notifications']:
+            append_log('Собираю уведомления из почты…')
+            _nlog = lambda lvl, msg: append_log(msg)
+            _proxy = creds['proxy_url']
+
+            _yw_e, _yw_p = creds['metrika']
+            _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
+            if _yw_e and _yw_p and _yw_cfg:
+                try:
+                    fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_cfg['folder'], 30, _proxy, _nlog)
+                except Exception as _e:
+                    append_log(f'⚠ Вебмастер: {_e}')
+            else:
+                append_log(f'⚠ Вебмастер: креды не найдены (metrika_{pid}_email / metrika_{pid}_password)')
+
+            _gsc_e, _gsc_p = creds['gsc']
+            if _gsc_e and _gsc_p:
+                append_log(f'GSC: креды найдены ({_gsc_e}), подключаюсь к Gmail…')
+                try:
+                    fetch_gsc_gmail(pid, _gsc_e, _gsc_p, 30, _nlog)
+                except Exception as _e:
+                    append_log(f'⚠ GSC: {_e}')
+            else:
+                append_log(f'⚠ GSC: креды не найдены (gsc_{pid}_email / gsc_{pid}_password). '
+                           f'Похожие ключи в секретах: {creds.get("secret_keys_hint") or "нет"}')
+
+            _yab_e, _yab_p, _yab_f = creds['yab']
+            if _yab_e and _yab_p and _yab_f:
+                append_log(f'Я.Бизнес: подключаюсь к {_yab_e}, папка «{_yab_f}»…')
+                try:
+                    fetch_yandex_folder_simple(pid, _yab_e, _yab_p, _yab_f, 'ya_business', 30, _proxy, _nlog)
+                except Exception as _e:
+                    append_log(f'⚠ Я.Бизнес: {_e}')
+            else:
+                append_log(f'⚠ Я.Бизнес: креды/папка не найдены (metrika_{pid}_*)')
+
+            _tg_e, _tg_p, _tg_f = creds['twogis']
+            if _tg_e and _tg_p and _tg_f:
+                append_log(f'2ГИС: подключаюсь к {_tg_e}, папка «{_tg_f}»…')
+                try:
+                    fetch_yandex_folder_simple(pid, _tg_e, _tg_p, _tg_f, 'twogis', 30, _proxy, _nlog)
+                except Exception as _e:
+                    append_log(f'⚠ 2ГИС: {_e}')
+            else:
+                append_log(f'⚠ 2ГИС: креды/папка не найдены (metrika_{pid}_*)')
+
+            _ga_e, _ga_p = creds['google']
+            if _ga_e and _ga_p:
+                try:
+                    fetch_google_accounts(pid, _ga_e, _ga_p, 3, _nlog)
+                except Exception as _e:
+                    append_log(f'⚠ Google: {_e}')
+
+            _notifs2 = (
+                load_notifications(pid, 'yandex_webmaster', 30)
+                + load_notifications(pid, 'gsc', 30)
+                + load_notifications(pid, 'ya_business', 30)
+                + load_notifications(pid, 'twogis', 30)
+                + load_notifications(pid, 'google_accounts', 3)
+            )
+            if _notifs2:
+                build_report(
+                    project_name=cfg['name'], started_at_ms=started_ms,
+                    finished_at_ms=finished_ms,
+                    selected_subdomains=plan.selected_subdomains, results=results,
+                    output_path=report_path, notifications=_notifs2,
+                )
+                append_log(f'✓ Отчёт обновлён с уведомлениями ({len(_notifs2)} шт.)')
+            else:
+                append_log('Уведомлений нет — лист «Уведомления» в отчёт не добавлен.')
+        else:
+            append_log('Чекбокс «Собрать уведомления из почты» выключен — почту не проверяю.')
+
+        state['results'] = results
+        state['report_path'] = str(report_path)
+        state['finished_at'] = finished_ms
+        set_progress(1.0, 'Готово')
+
+    except Exception as e:
+        state['error'] = str(e)
+        append_log(f'❌ Ошибка: {e}')
+    finally:
+        if state['finished_at'] is None:
+            state['finished_at'] = int(time.time() * 1000)
+        state['running'] = False
 
 
 # ── Session state ───────────────────────────────────────────────────
@@ -393,7 +663,7 @@ if pid:
         )
         est_sec = max(60, int((plan_total / 6) * 5 * (1.3 if cfg.get('use_proxy') else 1.0) * 1.2))
         st.caption(f'Примерное время: {format_duration(est_sec)}. '
-                   f'Не закрывайте вкладку до конца прогона.')
+                   f'Прогон идёт в фоне — можно переключаться на другие вкладки приложения.')
 
         st.markdown('**Что проверяем:**')
         _cb_col1, _cb_col2 = st.columns(2)
@@ -428,20 +698,73 @@ if pid:
         ]:
             st.session_state[_k] = _v
 
+        _is_running = bool(_RUNS.get(pid, {}).get('running'))
         if st.button('▶ Запустить еженедельную проверку', type='primary',
                      use_container_width=True, key='c30_run',
-                     disabled=st.session_state.c30_is_running):
-            st.session_state.c30_is_running = True
+                     disabled=_is_running):
+            flags = {
+                'check_main': st.session_state.c30_check_main,
+                'check_catalog': st.session_state.c30_check_catalog,
+                'check_categories': st.session_state.c30_check_categories,
+                'check_filters': st.session_state.c30_check_filters and stats['has_filters'],
+                'check_products': st.session_state.c30_check_products,
+                'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
+            }
+            # Собираем все секреты в основном потоке (в фоне st.secrets недоступен)
+            try:
+                _sk_hint = [k for k in list(st.secrets.keys())
+                            if 'gsc' in k.lower() or pid in k.lower()]
+            except Exception:
+                _sk_hint = []
+            creds = {
+                'proxy_url': get_proxy_url(),
+                'tg_token': _secret('telegram_bot_token'),
+                'tg_recipients': get_telegram_recipients(pid),
+                'metrika': get_metrika_credentials(pid),
+                'gsc': get_gsc_credentials(pid),
+                'yab': get_yabusiness_credentials(pid),
+                'twogis': get_twogis_credentials(pid),
+                'google': get_google_accounts_credentials(pid),
+                'secret_keys_hint': _sk_hint,
+            }
+            _RUNS[pid] = _run_state_new()
             st.session_state.c30_results = None
             st.session_state.c30_report_path = None
+            st.session_state.c30_last_error = None
+            threading.Thread(
+                target=_run_worker,
+                args=(pid, cfg, src, stats, budget, random_cities, flags, creds),
+                daemon=True,
+            ).start()
             st.rerun()
 
-    # ── Прогон ──────────────────────────────────────────────────────
-    if st.session_state.c30_is_running:
+    # ── Прогон: показываем прогресс ФОНОВОГО потока ──────────────────
+    _state = _RUNS.get(pid)
+    if _state and _state['running']:
         with st.container(border=True):
             st.markdown('### ⏳ Идёт проверка')
-            st.warning('⚠ **Не закрывайте вкладку до окончания проверки** — '
-                       'иначе прогон оборвётся и отчёт не сохранится.')
+            st.caption('Можно переключаться на другие вкладки — прогон идёт в фоне '
+                       'и не прервётся.')
+            st.progress(_state['progress'], text=_state['progress_text'])
+            with st.expander('Подробный лог', expanded=False):
+                st.code('\n'.join(_state['log'][-120:]) or '…', language='text')
+        time.sleep(1.5)
+        st.rerun()
+    elif _state and not _state['running']:
+        # Прогон завершился в фоне — переносим результат и убираем состояние
+        if _state['results'] is not None:
+            st.session_state.c30_results = _state['results']
+            st.session_state.c30_report_path = _state['report_path']
+            st.session_state.c30_started_at = _state['started_at']
+            st.session_state.c30_finished_at = _state['finished_at']
+        st.session_state.c30_last_error = _state.get('error')
+        del _RUNS[pid]
+        st.rerun()
+
+    if False:  # старый синхронный блок отключён — прогон перенесён в _run_worker
+        with st.container(border=True):
+            st.markdown('### ⏳ Идёт проверка')
+            st.warning('⚠ устаревший блок')
             progress_bar = st.progress(0, text='Подготовка…')
             log_expander = st.expander('Подробный лог', expanded=False)
             log_area = log_expander.empty()
@@ -733,6 +1056,10 @@ if pid:
             st.session_state.c30_is_running = False
             st.error(f'Ошибка: {e}')
             append_log(f'❌ Ошибка: {e}')
+
+    # ── Ошибка прогона (если была) ──────────────────────────────────
+    if st.session_state.get('c30_last_error'):
+        st.error(f'Прогон завершился с ошибкой: {st.session_state.c30_last_error}')
 
     # ── Результаты прогона ──────────────────────────────────────────
     if st.session_state.c30_results and not st.session_state.c30_is_running:
