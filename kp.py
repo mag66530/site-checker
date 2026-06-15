@@ -319,18 +319,20 @@ def check_against_kp(html: str, domain: str, kp: dict[str, KPRow]) -> KPCheckRes
             res.issues.append({'field': 'Почта', 'status': 'ok', 'comment': ''})
 
     # ── Адрес (мягко) ──
+    # Сверяем по ВСЕМУ тексту шапки+подвала: есть ли там улица и дом из КП.
+    # Так надёжнее, чем вытаскивать строку адреса: на сайтах адрес бывает без
+    # слова «улица» («Сухобруса 27») и без метки «Адрес» (тогда экстрактор
+    # промахивался и писал ложное «не найден»).
     if row.address:
-        if not site['address']:
-            res.issues.append({'field': 'Адрес', 'status': 'bug',
-                               'comment': 'На сайте не найден адрес в подвале.'})
-        elif not address_match(site['address'], row.address):
+        haystack = site.get('full_text') or site.get('address') or ''
+        if address_match(haystack, row.address):
+            res.issues.append({'field': 'Адрес', 'status': 'ok', 'comment': ''})
+        else:
             res.issues.append({
                 'field': 'Адрес', 'status': 'bug',
-                'comment': f'Адрес не совпадает с КП. По КП: «{row.address}», '
-                           f'на сайте: «{site["address"]}».',
+                'comment': f'Адрес из КП не найден в шапке/подвале. По КП: '
+                           f'«{row.address}».',
             })
-        else:
-            res.issues.append({'field': 'Адрес', 'status': 'ok', 'comment': ''})
 
     return res
 
