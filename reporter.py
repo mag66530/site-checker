@@ -284,14 +284,6 @@ def _plural_pages(n):
     return 'страниц'
 
 
-def _health_color(p):
-    return C.ok if p >= 90 else (C.warn if p >= 70 else C.err)
-
-
-def _health_bg(p):
-    return C.ok_soft if p >= 90 else (C.warn_soft if p >= 70 else C.err_soft)
-
-
 _KIND_LABEL = {'listing': 'Листинг', 'section': 'Раздел каталога',
                'empty': 'Пустой раздел'}
 
@@ -319,7 +311,6 @@ def _build_structure_sheet(wb, results):
     pages_with_bugs = sum(1 for r in pages if r.content_bugs > 0)
     ok_pages = total_pages - pages_with_bugs
     total_bugs = sum(r.content_bugs for r in pages)
-    health = round(ok_pages / total_pages * 100) if total_pages else 100
     ws.sheet_properties.tabColor = C.err if total_bugs else C.ok
 
     # ── Ширины ──
@@ -356,19 +347,18 @@ def _build_structure_sheet(wb, results):
     c.alignment = _align(wrap=True, vertical='center')
     ws.row_dimensions[3].height = 18
 
-    # ── Дашборд: 4 карточки (B-D, E-G, H-J, K-M) ──
+    # ── Дашборд: 3 карточки на всю ширину (B-E, F-I, J-M) ──
     cards = [
         (total_pages, 'ПРОВЕРЕНО СТРАНИЦ', C.accent, C.accent_soft),
         (ok_pages, 'БЕЗ ПРОБЛЕМ', C.ok, C.ok_soft),
         (pages_with_bugs, 'НУЖНО ПОЧИНИТЬ',
          C.err if pages_with_bugs else C.ok, C.err_soft if pages_with_bugs else C.ok_soft),
-        (f'{health}%', 'ЗДОРОВЬЕ СТРАНИЦ', _health_color(health), _health_bg(health)),
     ]
     ws.row_dimensions[5].height = 30
     ws.row_dimensions[6].height = 16
     for i, (value, label, color, bg) in enumerate(cards):
-        c1 = 2 + i * 3
-        c2 = c1 + 2
+        c1 = 2 + i * 4
+        c2 = c1 + 3
         fill_block(5, c1, 6, c2, bg)
         ws.merge_cells(start_row=5, start_column=c1, end_row=5, end_column=c2)
         v = ws.cell(row=5, column=c1, value=value)
@@ -448,7 +438,7 @@ def _build_structure_sheet(wb, results):
         _font(size=13, bold=True, color=C.text)
     row += 1
     for ci, h in [(2, 'Тип страницы'), (3, 'Проверено'), (4, 'Без проблем'),
-                  (5, 'Проблем'), (6, 'Здоровье')]:
+                  (5, 'Проблем')]:
         cell = ws.cell(row=row, column=ci, value=h)
         cell.font = _font(size=9, bold=True, color=C.text_muted)
         cell.fill = _fill(C.surface)
@@ -461,17 +451,14 @@ def _build_structure_sheet(wb, results):
             continue
         gbug = sum(1 for r in gp if r.content_bugs > 0)
         gok = len(gp) - gbug
-        gh = round(gok / len(gp) * 100) if gp else 100
         vals = [(2, group_label, 'left', C.text), (3, len(gp), 'center', C.text_soft),
-                (4, gok, 'center', C.ok), (5, gbug, 'center', C.err if gbug else C.text_muted),
-                (6, f'{gh}%', 'center', _health_color(gh))]
+                (4, gok, 'center', C.ok),
+                (5, gbug, 'center', C.err if gbug else C.text_muted)]
         for ci, val, al, color in vals:
             cell = ws.cell(row=row, column=ci, value=val)
-            cell.font = _font(size=10, bold=(ci in (2, 6)), color=color)
+            cell.font = _font(size=10, bold=(ci == 2), color=color)
             cell.alignment = _align(horizontal=al, indent=1)
             cell.border = _border(color=C.border_light)
-            if ci == 6:
-                cell.fill = _fill(_health_bg(gh))
         row += 1
 
     # ── Подробные таблицы по типам ──
