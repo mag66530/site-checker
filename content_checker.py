@@ -497,27 +497,27 @@ _FOOTER = [
     _b('ftr_address',  'Подвал: адрес',        True, _d_ftr_address),
 ]
 
-# Общие блоки — есть на любой странице.
-# ВАЖНО: шапку и подвал тут НЕ проверяем. Это сквозные блоки — одинаковые на
-# всех страницах сайта, поэтому проверяются ОДИН раз, на главной (_COMMON_MAIN).
-# Если они сломаны на главной — сломаны везде; дублировать на каждой странице
-# незачем (иначе одна и та же ошибка размножается на сотни строк отчёта).
-_COMMON = [
-    _b('h1',          'Заголовок H1',     True,  _d_h1),
+# Столбцы расставлены В ПОРЯДКЕ, КАК ИДЁТ НА СТРАНИЦЕ (сверху вниз):
+# крошки → H1 → … контент типа страницы … → SEO-текст внизу.
+# Шапку/подвал тут НЕ проверяем — это сквозные блоки, их сверяем один раз на
+# главной (если сломаны там — сломаны везде; не плодим ошибку на сотни строк).
+_TOP = [
     _b('breadcrumbs', 'Хлебные крошки',   True,  _d_breadcrumbs),
+    _b('h1',          'Заголовок H1',     True,  _d_h1),
+]
+_BOTTOM = [
     _b('h2',          'Подзаголовки H2',  False, _d_h2),
     _b('seo_text',    'SEO-текст',        False, _d_seo_text),
 ]
-
-# Общие блоки каталога-корня — БЕЗ H2 (на лендинге каталога подзаголовки не нужны)
-_COMMON_CATALOG = [
-    _b('h1',          'Заголовок H1',     True,  _d_h1),
-    _b('breadcrumbs', 'Хлебные крошки',   True,  _d_breadcrumbs),
+_BOTTOM_CATALOG = [
     _b('seo_text',    'SEO-текст',        False, _d_seo_text),
 ]
 
-# ЛИСТИНГ — страница-список С ТОВАРАМИ: полная товарная проверка.
+# ЛИСТИНГ — порядок: фильтры/сортировка над списком, затем карточки с ценой и
+# кнопкой, наличие, пагинация под списком, плитка тегов, отзывы/FAQ, форма.
 _LISTING = [
+    _b('filters',       'Фильтры',                    False, _d_filters),
+    _b('sort',          'Сортировка',                 False, _d_sort),
     _b('product_cards', 'Карточки товаров',          True,  _d_product_cards),
     _b('price',         'Цена (есть)',                True,  _d_price),
     _b('price_real',    'Цена в рублях',              False, _d_price_real),
@@ -526,17 +526,14 @@ _LISTING = [
     _b('btn_cart',      'Кнопка «В корзину»',         False, _d_btn_cart),
     _b('btn_oneclick',  'Кнопка «Купить в 1 клик»',   False, _d_btn_oneclick),
     _b('availability',  'Наличие',                    False, _d_availability),
-    _b('filters',       'Фильтры',                    False, _d_filters),
-    _b('sort',          'Сортировка',                 False, _d_sort),
     _b('pagination',    'Пагинация',                  False, _d_pagination),
     _b('tag_tiles',     'Плитка тегов (часто ищут)',  False, _d_tag_tiles),
-    _b('form_nf',       'Форма «Не нашли что искали»', True,  _d_form_not_found),
     _b('reviews',       'Отзывы',                     False, _d_reviews),
     _b('faq',           'FAQ',                        False, _d_faq),
+    _b('form_nf',       'Форма «Не нашли что искали»', True,  _d_form_not_found),
 ]
 
-# РАЗДЕЛ — витрина подкатегорий, БЕЗ товаров. Товарные блоки не проверяем вообще
-# (на разделе нет ни карточек, ни цен, ни кнопок заказа, ни фильтров/сортировки).
+# РАЗДЕЛ — витрина подкатегорий, БЕЗ товаров. Товарные блоки не проверяем вообще.
 _SECTION = [
     _b('tag_tiles',     'Плитка тегов (часто ищут)',  False, _d_tag_tiles),
     _b('form_nf',       'Форма «Не нашли что искали»', True,  _d_form_not_found),
@@ -549,7 +546,8 @@ _EMPTY = [
     _b('form_nf',       'Форма «Не нашли что искали»', True,  _d_form_not_found),
 ]
 
-# Блоки карточки товара
+# Карточка товара — порядок: цена и кнопки сверху (блок покупки), наличие,
+# характеристики, оплата, консультация, «нашли дешевле».
 _PRODUCT = [
     _b('price',         'Цена (есть)',                True,  _d_price),
     _b('price_real',    'Цена в рублях',              False, _d_price_real),
@@ -558,10 +556,10 @@ _PRODUCT = [
     _b('btn_cart',      'Кнопка «В корзину»',         False, _d_btn_add_cart),
     _b('btn_oneclick',  'Кнопка «Купить в 1 клик»',   False, _d_btn_oneclick),
     _b('availability',  'Наличие',                    False, _d_availability),
+    _b('specs',         'Характеристики',             False, _d_specs),
     _b('payment',       'Способы оплаты',             False, _d_payment),
     _b('consultation',  'Консультация',               False, _d_consultation),
     _b('found_cheaper', '«Нашли дешевле»',            False, _d_found_cheaper),
-    _b('specs',         'Характеристики',             False, _d_specs),
 ]
 
 # КАТАЛОГ-корень — верхний уровень, показывает разделы. Товарных блоков нет.
@@ -569,33 +567,32 @@ _CATALOG = [
     _b('tag_tiles',     'Плитка тегов (часто ищут)',  False, _d_tag_tiles),
 ]
 
-# Главная: шапка и подвал обязательны, хлебных крошек/H1 строго не требуем
-_COMMON_MAIN = [
+# Главная: шапка (сверху) → H1 → формы/поиск → подвал (снизу). Порядок как на
+# странице. Шапка и подвал обязательны, H1 на главной строго не требуем.
+_MAIN_PROFILE = [
     *_HEADER,
+    _b('h1',     'Заголовок H1', False, _d_h1),
+    _b('forms',  'Формы',        False, _d_forms),
+    _b('search', 'Поиск',        False, _d_search),
     *_FOOTER,
-    _b('h1',      'Заголовок H1', False, _d_h1),
-]
-_MAIN = [
-    _b('forms',   'Формы',  False, _d_forms),
-    _b('search',  'Поиск',  False, _d_search),
 ]
 
 
 def _profile_for(type_code: str, page_kind: str = '') -> list[_Block]:
     if type_code == 'product':
-        return _COMMON + _PRODUCT
+        return _TOP + _PRODUCT + _BOTTOM
     if type_code in ('category', 'filter'):
         if page_kind == 'listing':
-            return _COMMON + _LISTING
+            return _TOP + _LISTING + _BOTTOM
         if page_kind == 'empty':
-            return _COMMON + _EMPTY
-        return _COMMON + _SECTION          # раздел-витрина
+            return _TOP + _EMPTY + _BOTTOM
+        return _TOP + _SECTION + _BOTTOM   # раздел-витрина
     if type_code == 'catalog':
-        return _COMMON_CATALOG + _CATALOG
+        return _TOP + _CATALOG + _BOTTOM_CATALOG
     if type_code == 'main':
-        return _COMMON_MAIN + _MAIN
+        return _MAIN_PROFILE
     # custom / неизвестный тип — только базовая структура
-    return _COMMON
+    return _TOP
 
 
 # ── Точка входа ─────────────────────────────────────────────────────

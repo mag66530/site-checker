@@ -18,6 +18,23 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from kp import KP_LAYOUT, CATALOGS_DIR, _norm_host
+from kp import split_phones as _split_phones
+
+
+def _phone_columns(headers):
+    """Индексы всех телефонных колонок (Общий/Реклама/SEO/Сотовый/основной/
+    подменные/ватсап). Городскую колонку «Город» (название города) исключаем."""
+    out = []
+    for i, h in enumerate(headers):
+        if h is None:
+            continue
+        ht = str(h).lower().replace('\n', ' ').strip()
+        if ht == 'город':
+            continue
+        if any(k in ht for k in ('город', 'сотов', 'мобильн', 'основн',
+                                 'подменн', 'ватсап', 'для ватсап')):
+            out.append(i)
+    return out
 
 
 def _find_header_row(ws, max_scan=6):
@@ -60,6 +77,7 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     ci_seo = _col(headers, *layout['phone_seo'])
     ci_ad = _col(headers, *layout['phone_ad'])
     ci_common = _col(headers, *layout['phone_common'])
+    phone_cols = _phone_columns(headers)
 
     def cell(row, idx):
         if idx is None or idx >= len(row):
@@ -83,12 +101,20 @@ def convert(project_id: str, xlsx_path: str) -> Path:
         if not host or host in seen:
             continue
         seen.add(host)
+        # Все телефоны города (нормализованные, 10 цифр) из всех тел. колонок —
+        # сайт может статически показывать любой из них (Общий/SEO/Сотовый).
+        all_norm = []
+        for idx in phone_cols:
+            for n in _split_phones(cell(row, idx)):
+                if n not in all_norm:
+                    all_norm.append(n)
         rows_out.append({
             'domain': host,
             'city': city,
             'phone_seo': cell(row, ci_seo),
             'phone_ad': cell(row, ci_ad),
             'phone_common': cell(row, ci_common),
+            'all_phones': ';'.join(all_norm),
             'email': cell(row, ci_email),
             'address': cell(row, ci_addr),
         })
@@ -98,7 +124,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     out = CATALOGS_DIR / f'{project_id}-kp.csv'
     with open(out, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=['domain', 'city', 'phone_seo',
-                                          'phone_ad', 'phone_common', 'email', 'address'])
+                                          'phone_ad', 'phone_common', 'all_phones',
+                                          'email', 'address'])
         w.writeheader()
         w.writerows(rows_out)
     print(f'{project_id}: {len(rows_out)} городов → {out}')
