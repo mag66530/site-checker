@@ -1752,6 +1752,7 @@ async def run_check_async(project_id, plan, options, on_progress):
         check_text=options.get('check_text', True),
         on_progress=on_progress,
         proxy_url=options.get('proxy_url'),
+        kp_map=options.get('kp_map'),
     )
 
 
@@ -1922,6 +1923,18 @@ if st.session_state.is_running:
             except Exception:
                 pass
 
+        # КП для сверки контактов (телефон/почта/адрес на главных). Только
+        # для обычных проектов (для custom-режима города/домены не из КП).
+        kp_map = None
+        if is_project:
+            try:
+                from kp import load_kp
+                kp_map = load_kp(st.session_state.project_id) or None
+                if kp_map:
+                    append_log(f'КП для сверки контактов: {len(kp_map)} городов')
+            except Exception as e:
+                append_log(f'⚠ Не удалось загрузить КП: {e}')
+
         results = asyncio.run(run_check_async(
             project_id_for_report,
             plan,
@@ -1932,6 +1945,7 @@ if st.session_state.is_running:
                 'retry_delay_ms': 2500,
                 'check_text': check_text_opt,
                 'proxy_url': proxy_url,
+                'kp_map': kp_map,
             },
             on_progress=on_progress,
         ))

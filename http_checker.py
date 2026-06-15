@@ -171,6 +171,9 @@ class CheckResult:
     content_bugs: int = 0
     has_content_bugs: bool = False
 
+    # Сверка контактов с КП (только для главных страниц поддоменов)
+    kp_result: Optional[dict] = None
+
     checked_at: Optional[str] = None
 
 
@@ -276,6 +279,7 @@ async def check_one(
     text_patterns: str | None = None,
     check_structure: bool = True,
     proxy_url: Optional[str] = None,
+    kp_map: Optional[dict] = None,
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
@@ -311,6 +315,21 @@ async def check_one(
         except Exception:
             content = None
 
+    # Сверка контактов с КП — только на главной поддомена (шапка/подвал —
+    # сквозные, контакты привязаны к городу/домену).
+    kp_result = None
+    if is_ok and kp_map and task.type_code == 'main' and a['body_text']:
+        try:
+            from kp import check_against_kp
+            kp_res = check_against_kp(a['body_text'], task.subdomain, kp_map)
+            if kp_res.matched_kp:
+                kp_result = {
+                    'domain': kp_res.domain, 'city': kp_res.city,
+                    'issues': kp_res.issues, 'has_issues': kp_res.has_issues,
+                }
+        except Exception:
+            kp_result = None
+
     return CheckResult(
         url=task.url,
         city=task.city,
@@ -335,6 +354,7 @@ async def check_one(
         content=content,
         content_bugs=content.bug_count if content else 0,
         has_content_bugs=bool(content and content.has_bugs),
+        kp_result=kp_result,
         checked_at=None,
     )
 
@@ -356,6 +376,7 @@ async def run_batch(
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
     proxy_url: Optional[str] = None,
+    kp_map: Optional[dict] = None,
 ) -> list[CheckResult]:
     """
     Прогнать все задачи параллельно с ограничением concurrency.
@@ -400,6 +421,7 @@ async def run_batch(
                     text_patterns=text_patterns,
                     check_structure=check_structure,
                     proxy_url=proxy_url,
+                    kp_map=kp_map,
                 )
                 done_count += 1
                 if on_progress:
