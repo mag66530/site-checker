@@ -270,6 +270,7 @@ def _select_folder(M: imaplib.IMAP4_SSL, folder: str, log: Callable = None) -> b
             log('info', msg)
 
     target_encoded = None
+    available = []  # человекочитаемые имена всех папок (для диагностики)
     try:
         status, folders = M.list()
         if status == 'OK' and folders:
@@ -289,16 +290,21 @@ def _select_folder(M: imaplib.IMAP4_SSL, folder: str, log: Callable = None) -> b
                     name_dec = _imap_utf7_decode(name_enc.encode('ascii'))
                 except Exception:
                     name_dec = name_enc
-                if name_dec == folder:
+                available.append(name_dec)
+                # Сравнение без учёта регистра и пробелов по краям
+                if name_dec.strip().lower() == folder.strip().lower():
                     target_encoded = name_enc
-                    _log(f'Папка найдена: {name_enc}')
+                    _log(f'Папка найдена: {name_dec} ({name_enc})')
                     break
     except Exception as e:
         _log(f'⚠ list() не удался: {e}')
 
     if target_encoded is None:
+        # Показываем что реально доступно — частая причина «нет писем».
+        if available:
+            _log(f'Папка «{folder}» не найдена. Доступные папки: {available}')
         target_encoded = _imap_utf7_encode(folder).decode('ascii')
-        _log(f'Папка не в листинге, кодирую вручную: {target_encoded}')
+        _log(f'Пробую закодировать вручную: {target_encoded}')
 
     folder_bytes = target_encoded.encode('ascii', errors='replace')
     select_arg = b'"' + folder_bytes + b'"'
@@ -535,19 +541,24 @@ def fetch_gsc_gmail(
         M = imaplib.IMAP4_SSL(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT, ssl_context=ssl_ctx, timeout=60)
 
         try:
-            M.login(email_addr, password)
+            # App Password Google показывает с пробелами ("abcd efgh ijkl mnop"),
+            # а IMAP-логин требует без пробелов — убираем все пробелы.
+            M.login(email_addr, ''.join((password or '').split()))
         except imaplib.IMAP4.error as e:
             raise PermissionError(
                 f'Ошибка входа в Gmail: {e}. '
-                f'Проверьте пароль приложения (не основной пароль Gmail).'
+                f'Нужен ПАРОЛЬ ПРИЛОЖЕНИЯ (16 букв), не основной пароль Gmail. '
+                f'Создать: Google Аккаунт → Безопасность → Двухэтапная аутентификация '
+                f'→ Пароли приложений.'
             )
 
         _log(f'Gmail: вошли как {email_addr}. Ищу письма GSC…')
 
-        # Пробуем несколько папок: INBOX → All Mail → [Gmail]/All Mail.
-        # На некоторых аккаунтах GSC идёт в INBOX, на других — в Updates (не видна в INBOX).
+        # Открываем All Mail — это надмножество ВСЕХ писем Gmail (любые ярлыки и
+        # вкладки Primary/Updates/Promotions). INBOX через IMAP может не содержать
+        # письма из вкладки «Оповещения», поэтому All Mail надёжнее.
         _folder_ok = False
-        for _folder in ('INBOX', '"[Gmail]/All Mail"', '"[Google Mail]/All Mail"'):
+        for _folder in ('"[Gmail]/All Mail"', '"[Google Mail]/All Mail"', 'INBOX'):
             _s, _ = M.select(_folder, readonly=True)
             if _s == 'OK':
                 _log(f'Открыта папка {_folder}')
@@ -557,19 +568,37 @@ def fetch_gsc_gmail(
             raise FileNotFoundError('Не удалось открыть ни одну папку Gmail')
 
         since_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%d-%b-%Y')
-        # Ищем только письма от GSC
-        status, nums_raw = M.search(
-            None, 'FROM', '"sc-noreply@google.com"', 'SINCE', since_date,
-        )
-        if status != 'OK' or not nums_raw[0]:
-            _log('Писем от GSC нет')
+        # Ищем письма от GSC по нескольким известным адресам-отправителям.
+        nums = []
+        for _from in ('sc-noreply@google.com', 'noreply-search-console@google.com'):
+            _st, _raw = M.search(None, f'(FROM "{_from}" SINCE {since_date})')
+            if _st == 'OK' and _raw and _raw[0]:
+                nums += _raw[0].split()
+
+        # Диагностика: если по FROM ничего, смотрим кто вообще писал за период,
+        # чтобы в логе увидеть реальный адрес отправителя GSC.
+        if not nums:
+            _st, _raw = M.search(None, f'(SINCE {since_date})')
+            sample = _raw[0].split()[-40:] if (_st == 'OK' and _raw and _raw[0]) else []
+            senders = set()
+            for _n in sample:
+                try:
+                    _sth, _dh = M.fetch(_n, '(BODY.PEEK[HEADER.FIELDS (FROM)])')
+                    if _sth == 'OK' and _dh and _dh[0]:
+                        senders.add(_decode_mime_header(
+                            _dh[0][1].decode('utf-8', 'ignore')).strip())
+                except Exception:
+                    pass
+            _log(f'Писем от GSC нет за {lookback_days} дн. '
+                 f'Отправители в ящике (последние): {sorted(senders)[:15]}')
             M.logout()
             return {
                 'notifications': list(existing.values()),
                 'fetched': 0, 'skipped': 0, 'error': None,
             }
 
-        nums = nums_raw[0].split()
+        # Убираем дубли (письмо могло попасть под оба адреса/поиска)
+        nums = list(dict.fromkeys(nums))
         _log(f'Найдено {len(nums)} писем от GSC')
 
         for num in nums[-100:]:
@@ -802,11 +831,15 @@ def fetch_google_accounts(
         M = imaplib.IMAP4_SSL(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT, ssl_context=ssl_ctx, timeout=60)
 
         try:
-            M.login(email_addr, password)
+            # App Password Google показывает с пробелами ("abcd efgh ijkl mnop"),
+            # а IMAP-логин требует без пробелов — убираем все пробелы.
+            M.login(email_addr, ''.join((password or '').split()))
         except imaplib.IMAP4.error as e:
             raise PermissionError(
                 f'Ошибка входа в Gmail: {e}. '
-                f'Проверьте пароль приложения (не основной пароль Gmail).'
+                f'Нужен ПАРОЛЬ ПРИЛОЖЕНИЯ (16 букв), не основной пароль Gmail. '
+                f'Создать: Google Аккаунт → Безопасность → Двухэтапная аутентификация '
+                f'→ Пароли приложений.'
             )
 
         _log(f'Gmail: вошли как {email_addr}. Ищу письма от Google…')

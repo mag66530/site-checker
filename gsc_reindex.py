@@ -1,506 +1,292 @@
 """
 gsc_reindex.py
 ==============
-Шаг 2: Автоматически запросить повторную индексацию для страниц с ошибками.
+Автоматический запрос индексирования в Google Search Console.
+
+Поток (проверен на живом GSC):
+    обзор ресурса → строка проверки URL (омнибокс) → Enter →
+    ждём live-проверку → клик «Запросить индексирование» →
+    ждём подтверждение/квоту → лог.
+
+Подготовка:
+    1. python gsc_save_session.py     # держит авторизованный Chrome на порту 9222
+       (НЕ закрывай это окно Chrome)
+    2. (необязательно) python gsc_list_properties.py  # соберёт gsc_properties.json
+
+    Список URL: файл urls.txt, по одному URL в строке. Это битые/проблемные
+    страницы (домен и поддомены) — например из отчёта чек-листа.
 
 Запуск:
-    python gsc_reindex.py                    # все свойства
-    python gsc_reindex.py --property example.com  # только одно
-    python gsc_reindex.py --dry-run          # проверка без кликов
-    python gsc_reindex.py --limit 20         # не более 20 URL за запуск
-    python gsc_reindex.py --headless         # без видимого браузера
+    python gsc_reindex.py                       # читает urls.txt
+    python gsc_reindex.py --urls broken.txt
+    python gsc_reindex.py --dry-run             # без клика, только проверка
+    python gsc_reindex.py --limit 10            # не больше 10 URL за запуск
+    python gsc_reindex.py --delay 8             # пауза между URL, сек
 
-Требования:
-    - gsc_session.json (сгенерировать через gsc_save_session.py)
-    - pip install playwright
-    - playwright install chromium
-
-Логика:
-    1. Загружает сохранённую сессию Google
-    2. Открывает GSC, собирает список всех свойств
-    3. Для каждого свойства: переходит в Индексирование → Страницы → Ошибки
-    4. Собирает список URL с ошибками
-    5. Для каждого URL открывает инструмент проверки и нажимает
-       "Запросить повторную индексацию"
-    6. Сохраняет результат в gsc_reindex_log.json
-
-Ограничения Google:
-    - URL Inspection: ~10 запросов в день на свойство через API
-      (через UI лимит мягче, но при злоупотреблении — капча)
-    - Между запросами пауза 5 секунд (настраивается через DELAY_BETWEEN_URLS_SEC)
+Важно про квоты Google:
+    Ручной запрос индексирования лимитирован (~10-12 URL в сутки на ресурс).
+    При превышении GSC отвечает «превышена квота» — скрипт это поймает и
+    остановится по этому ресурсу.
 """
 
 import argparse
 import asyncio
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
-SESSION_FILE = Path('gsc_session.json')
+CDP_URL = 'http://127.0.0.1:9222'
 LOG_FILE = Path('gsc_reindex_log.json')
+PROPS_FILE = Path('gsc_properties.json')
 
-GSC_HOME = 'https://search.google.com/search-console/'
-GSC_COVERAGE = 'https://search.google.com/search-console/index?resource_id={resource_id}'
-GSC_INSPECT = 'https://search.google.com/search-console/inspect?resource_id={resource_id}&id={url}'
+OVERVIEW = ('https://search.google.com/search-console/performance/'
+            'search-analytics?resource_id={rid}')
 
-# Пауза между запросами (секунды)
-DELAY_BETWEEN_URLS_SEC = 6
-DELAY_BETWEEN_PROPERTIES_SEC = 3
+OMNIBOX = 'input[aria-label*="Проверка всех URL"]'
+REINDEX_TEXT = 'Запросить индексирование'
 
-# Таймаут ожидания элементов (мс)
-ELEMENT_TIMEOUT = 15_000
+# Тексты-исходы после клика
+RE_SUCCESS = re.compile(
+    r'(Индексирование запрошено|очередь на индексирован|Запрос на индексирован|'
+    r'URL добавлен|Indexing requested)', re.I)
+RE_QUOTA = re.compile(r'(превышен[ао].{0,20}квот|quota|Превышена дневная)', re.I)
+RE_ALREADY = re.compile(r'(уже отправлен|already requested)', re.I)
 
 
-# ── Утилиты ────────────────────────────────────────────────────────
+def _log(msg, level='info'):
+    ts = datetime.now().strftime('%H:%M:%S')
+    pfx = {'info': '  ', 'ok': '✓ ', 'warn': '⚠ ', 'error': '✗ '}.get(level, '  ')
+    print(f'[{ts}] {pfx}{msg}')
 
 
-def _find_chrome():
-    import os
-    candidates = [
-        Path(os.environ.get('PROGRAMFILES', 'C:/Program Files'))
-        / 'Google/Chrome/Application/chrome.exe',
-        Path(os.environ.get('PROGRAMFILES(X86)', 'C:/Program Files (x86)'))
-        / 'Google/Chrome/Application/chrome.exe',
-        Path(os.environ.get('LOCALAPPDATA', ''))
-        / 'Google/Chrome/Application/chrome.exe',
-        Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
-        Path('/usr/bin/google-chrome-stable'),
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
+def _load_urls(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding='utf-8').splitlines():
+        s = line.strip()
+        if s and (s.startswith('http://') or s.startswith('https://')):
+            out.append(s)
+    return out
+
+
+def _origin(url: str) -> str:
+    p = urlparse(url)
+    return f'{p.scheme}://{p.netloc}/'
+
+
+def _resolve_resource(url: str, valid: set) -> str | None:
+    """Подобрать resource_id для URL.
+    URL-префикс: origin (https://host/). Домен: sc-domain:host."""
+    origin = _origin(url)
+    if not valid:
+        return origin  # нет списка — доверяем origin
+    if origin in valid:
+        return origin
+    host = urlparse(url).netloc
+    # ресурс-домен на корневой домен или сам хост
+    parts = host.split('.')
+    for i in range(len(parts) - 1):
+        cand = 'sc-domain:' + '.'.join(parts[i:])
+        if cand in valid:
+            return cand
+    if origin in valid:
+        return origin
     return None
 
 
-def _log(msg: str, level: str = 'info'):
-    ts = datetime.now().strftime('%H:%M:%S')
-    prefix = {'info': '  ', 'ok': '✓ ', 'warn': '⚠ ', 'error': '✗ '}.get(level, '  ')
-    print(f'[{ts}] {prefix}{msg}')
-
-
-def _save_log(log: list):
+def _save_log(entries: list):
     LOG_FILE.write_text(
-        json.dumps({'run_at': datetime.now().isoformat(), 'entries': log},
+        json.dumps({'run_at': datetime.now().isoformat(), 'entries': entries},
                    ensure_ascii=False, indent=2),
-        encoding='utf-8',
-    )
+        encoding='utf-8')
 
 
-# ── Получение свойств GSC ──────────────────────────────────────────
+async def _open_resource(page, resource_id: str):
+    await page.goto(OVERVIEW.format(rid=quote(resource_id, safe='')),
+                    wait_until='domcontentloaded')
+    await page.wait_for_timeout(3500)
 
 
-async def get_properties(page) -> list[dict]:
-    """
-    Открывает главную GSC и собирает все свойства.
-    Возвращает [{'name': ..., 'resource_id': ...}, ...]
-    """
-    _log('Открываю GSC...')
-    await page.goto(GSC_HOME, wait_until='domcontentloaded')
-    await page.wait_for_timeout(3000)
-
-    # Проверяем редирект на логин
-    if 'accounts.google.com' in page.url:
-        _log('Сессия истекла — запусти gsc_save_session.py заново', 'error')
-        sys.exit(1)
-
-    properties = []
-
-    # GSC показывает свойства в dropdown или на главной странице
-    # Пробуем несколько способов найти список свойств
-
-    # Способ 1: кнопка выбора свойства (dropdown в шапке)
+async def reindex_url(page, url: str, dry_run: bool) -> dict:
+    res = {'url': url, 'status': 'error', 'message': ''}
     try:
-        # Открываем dropdown свойств
-        selector_btn = 'button[data-id="sc-search-console-nav-back-button"], ' \
-                       '[data-sc-data-prop-selector], ' \
-                       'div[role="button"]:has-text("Search property")'
-        # Ищем элемент с текстом о переходе к свойствам
-        prop_links = await page.query_selector_all('a[href*="resource_id="]')
-        for link in prop_links:
-            href = await link.get_attribute('href')
-            if not href:
-                continue
-            # resource_id закодирован в URL
-            if 'resource_id=' in href:
-                rid = href.split('resource_id=')[1].split('&')[0]
-                from urllib.parse import unquote
-                rid_decoded = unquote(rid)
-                name = await link.inner_text()
-                name = name.strip()
-                if rid_decoded and rid_decoded not in [p['resource_id'] for p in properties]:
-                    properties.append({'name': name or rid_decoded, 'resource_id': rid_decoded})
-    except Exception as e:
-        _log(f'Способ 1 не сработал: {e}', 'warn')
+        # Вставляем URL в омнибокс
+        omni = page.locator(OMNIBOX).first
+        await omni.wait_for(state='attached', timeout=8000)
+        await omni.click(timeout=8000)
+        await omni.fill(url, timeout=8000)
+        await page.keyboard.press('Enter')
+        _log(f'проверяю: {url}')
 
-    # Способ 2: на главной странице GSC список свойств — карточки
-    if not properties:
+        # Ждём кнопку «Запросить индексирование» (live-проверка ~30-60 сек)
         try:
-            await page.wait_for_selector('[data-property-url], .SC-property-item, '
-                                         'div[jsname] a[href*="resource_id"]',
-                                         timeout=5000)
-            cards = await page.query_selector_all('a[href*="resource_id="]')
-            seen = set()
-            for c in cards:
-                href = await c.get_attribute('href')
-                if not href or 'resource_id=' not in href:
-                    continue
-                from urllib.parse import unquote
-                rid = unquote(href.split('resource_id=')[1].split('&')[0])
-                if rid in seen:
-                    continue
-                seen.add(rid)
-                txt = (await c.inner_text()).strip()
-                properties.append({'name': txt or rid, 'resource_id': rid})
-        except Exception as e:
-            _log(f'Способ 2 не сработал: {e}', 'warn')
-
-    # Способ 3: открываем property selector через меню
-    if not properties:
-        try:
-            _log('Пробую открыть dropdown свойств...', 'warn')
-            # Ищем кнопку текущего свойства в шапке
-            await page.click('text=Search property', timeout=4000)
-            await page.wait_for_timeout(1000)
-            prop_items = await page.query_selector_all('[role="option"], [role="menuitem"]')
-            for item in prop_items:
-                txt = (await item.inner_text()).strip()
-                if txt:
-                    # Пытаемся получить resource_id из data-атрибута
-                    rid = await item.get_attribute('data-value') or ''
-                    if not rid:
-                        rid = txt  # использовать имя как id
-                    properties.append({'name': txt, 'resource_id': rid})
-        except Exception as e:
-            _log(f'Способ 3 не сработал: {e}', 'warn')
-
-    if not properties:
-        _log('Не удалось автоматически найти свойства GSC.', 'error')
-        _log('Возможно GSC обновил интерфейс. Открываю браузер — скопируй resource_id вручную.')
-
-    _log(f'Найдено свойств: {len(properties)}')
-    for p in properties:
-        _log(f'  • {p["name"]}  [{p["resource_id"]}]')
-    return properties
-
-
-# ── Получение ошибочных URL для свойства ──────────────────────────
-
-
-async def get_error_urls(page, resource_id: str) -> list[str]:
-    """
-    Переходит в отчёт Индексирование→Страницы, фильтрует ошибки.
-    Возвращает список URL для повторной индексации.
-    """
-    coverage_url = GSC_COVERAGE.format(resource_id=quote(resource_id, safe=''))
-    _log(f'Открываю отчёт по ресурсу: {resource_id}')
-    await page.goto(coverage_url, wait_until='domcontentloaded')
-    await page.wait_for_timeout(4000)
-
-    error_urls: list[str] = []
-
-    try:
-        # Ищем вкладку/фильтр "Ошибки" (Error / Ошибка)
-        # GSC показывает несколько статусов: Ошибка / Предупреждение / Исключено / Действующие
-        error_tab = None
-        for text in ['Ошибка', 'Error', 'Errors']:
-            try:
-                error_tab = await page.wait_for_selector(
-                    f'text="{text}"', timeout=3000)
-                if error_tab:
-                    break
-            except Exception:
-                pass
-
-        if error_tab:
-            await error_tab.click()
-            await page.wait_for_timeout(2000)
-
-        # Собираем URL из таблицы ошибок
-        # Таблица содержит строки с данными — ищем ссылки или текст URL
-        rows = await page.query_selector_all(
-            'table tr[data-row], '
-            '.SC-coverage-table tr, '
-            '[role="row"]:not([role="columnheader"])'
-        )
-
-        for row in rows:
-            # Пробуем найти URL в тексте ячейки
-            cells = await row.query_selector_all('td, [role="cell"]')
-            for cell in cells:
-                txt = (await cell.inner_text()).strip()
-                if txt.startswith('http://') or txt.startswith('https://'):
-                    if txt not in error_urls:
-                        error_urls.append(txt)
-                    break
-
-        # Если таблица пустая — проверяем через количество ошибок
-        if not error_urls:
-            # Попробуем найти ссылки внутри таблицы
-            links = await page.query_selector_all(
-                'a[href*="inspect"], a[href*="/search-console/"]')
-            for link in links:
-                href = await link.get_attribute('href') or ''
-                txt = (await link.inner_text()).strip()
-                if txt.startswith('http://') or txt.startswith('https://'):
-                    if txt not in error_urls:
-                        error_urls.append(txt)
-
-    except Exception as e:
-        _log(f'Ошибка при получении URL для {resource_id}: {e}', 'warn')
-
-    _log(f'Найдено URL с ошибками: {len(error_urls)}')
-    return error_urls
-
-
-# ── Запрос повторной индексации для одного URL ─────────────────────
-
-
-async def request_reindex(page, resource_id: str, url: str, dry_run: bool) -> dict:
-    """
-    Открывает URL Inspection для url, нажимает "Запросить повторную индексацию".
-    Возвращает {'url': ..., 'status': 'ok'|'error'|'skipped', 'message': ...}
-    """
-    result = {'url': url, 'resource_id': resource_id, 'status': 'error', 'message': ''}
-
-    try:
-        inspect_url = GSC_INSPECT.format(
-            resource_id=quote(resource_id, safe=''),
-            url=quote(url, safe=''),
-        )
-        _log(f'  Проверка: {url}')
-        await page.goto(inspect_url, wait_until='domcontentloaded')
-        await page.wait_for_timeout(4000)
-
-        # Ждём загрузки инструмента проверки
-        # Страница содержит статус индексации и кнопку повторного запроса
-        try:
-            await page.wait_for_selector(
-                'text="Запросить повторную индексацию", '
-                'text="Request indexing", '
-                '[data-sc-request-indexing]',
-                timeout=ELEMENT_TIMEOUT,
-            )
+            await page.wait_for_selector(f'text={REINDEX_TEXT}', timeout=70000)
         except Exception:
-            # Кнопки может не быть (URL уже проиндексирован или недоступен)
-            page_text = await page.inner_text('body')
-            if 'URL находится в Google' in page_text or 'URL is on Google' in page_text:
-                result['status'] = 'skipped'
-                result['message'] = 'Уже в индексе'
-                _log(f'    Уже в индексе — пропускаем', 'ok')
-                return result
-            result['status'] = 'skipped'
-            result['message'] = 'Кнопка повторной индексации не найдена'
-            _log(f'    Кнопка не найдена (возможно URL недоступен)', 'warn')
-            return result
-
-        # Находим и кликаем кнопку
-        btn = None
-        for btn_text in ['Запросить повторную индексацию', 'Request indexing']:
-            try:
-                btn = page.get_by_text(btn_text, exact=False).first
-                if await btn.is_visible():
-                    break
-                btn = None
-            except Exception:
-                btn = None
-
-        if btn is None:
-            result['status'] = 'skipped'
-            result['message'] = 'Кнопка не видна'
-            return result
+            body = (await page.inner_text('body'))
+            if 'есть в индексе' in body or 'проиндексирована' in body:
+                res['status'] = 'skipped'
+                res['message'] = 'нет кнопки (проверь состояние страницы)'
+            else:
+                res['status'] = 'skipped'
+                res['message'] = 'кнопка индексации не появилась'
+            _log(f'  {res["message"]}', 'warn')
+            return res
 
         if dry_run:
-            result['status'] = 'dry_run'
-            result['message'] = 'dry-run — клик пропущен'
-            _log(f'    [DRY RUN] Нашёл кнопку, кликать не стал', 'ok')
-            return result
+            res['status'] = 'dry_run'
+            res['message'] = 'кнопка найдена, клик пропущен (--dry-run)'
+            _log('  [DRY RUN] кнопка есть, не кликаю', 'ok')
+            return res
 
-        await btn.click()
-        _log(f'    Клик по кнопке...')
+        # Кликаем
+        await page.get_by_text(REINDEX_TEXT, exact=False).first.click()
+        _log('  клик «Запросить индексирование», жду результат…')
 
-        # Ждём результата — Google показывает диалог или сообщение об успехе
-        success = False
-        for wait_text in [
-            'Запрос принят',
-            'Indexing requested',
-            'done',
-            'успешно',
-        ]:
-            try:
-                await page.wait_for_selector(
-                    f'text="{wait_text}"', timeout=12_000)
-                success = True
+        # Ждём исход: успех / квота / уже отправлен (до 150 сек)
+        deadline = asyncio.get_event_loop().time() + 150
+        outcome = None
+        while asyncio.get_event_loop().time() < deadline:
+            await page.wait_for_timeout(3000)
+            txt = await page.inner_text('body')
+            if RE_QUOTA.search(txt):
+                outcome = 'quota'
                 break
-            except Exception:
-                pass
+            if RE_SUCCESS.search(txt) or RE_ALREADY.search(txt):
+                outcome = 'ok'
+                break
 
-        # Также ищем по общим признакам успешного диалога
-        if not success:
-            try:
-                # Ищем любой диалог/модал после клика
-                await page.wait_for_selector(
-                    '[role="dialog"], .VfPpkd-xl07Ob-XxIAqe',
-                    timeout=8000,
-                )
-                dialog_text = ''
-                dialog = await page.query_selector('[role="dialog"]')
-                if dialog:
-                    dialog_text = await dialog.inner_text()
-                if dialog_text and ('ошибк' not in dialog_text.lower() and
-                                    'error' not in dialog_text.lower()):
-                    success = True
-                    # Закрываем диалог если есть кнопка "OK" / "Готово"
-                    for close_text in ['OK', 'Готово', 'Done', 'Закрыть']:
-                        try:
-                            close_btn = page.get_by_role('button', name=close_text)
-                            if await close_btn.is_visible(timeout=2000):
-                                await close_btn.click()
-                                break
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-
-        if success:
-            result['status'] = 'ok'
-            result['message'] = 'Запрос отправлен'
-            _log(f'    ✓ Запрос принят', 'ok')
+        if outcome == 'ok':
+            res['status'] = 'ok'
+            res['message'] = 'запрос отправлен'
+            _log('  ✓ индексирование запрошено', 'ok')
+        elif outcome == 'quota':
+            res['status'] = 'quota'
+            res['message'] = 'превышена квота на ресурсе'
+            _log('  квота исчерпана — остановка по ресурсу', 'warn')
         else:
-            result['status'] = 'warn'
-            result['message'] = 'Клик выполнен, но подтверждение не получено'
-            _log(f'    Клик выполнен — подтверждение не найдено', 'warn')
+            res['status'] = 'warn'
+            res['message'] = 'клик сделан, подтверждение не поймано'
+            _log('  клик сделан, подтверждение не поймано', 'warn')
+
+        # Закрываем диалог
+        for close in ('ПОНЯТНО', 'OK', 'Готово', 'Закрыть'):
+            try:
+                b = page.get_by_role('button', name=close)
+                if await b.is_visible(timeout=1500):
+                    await b.click()
+                    break
+            except Exception:
+                pass
+        await page.keyboard.press('Escape')
 
     except Exception as e:
-        result['status'] = 'error'
-        result['message'] = str(e)
-        _log(f'    Ошибка: {e}', 'error')
-
-    return result
-
-
-# ── Основной цикл ──────────────────────────────────────────────────
+        res['status'] = 'error'
+        res['message'] = str(e)
+        _log(f'  ошибка: {e}', 'error')
+    return res
 
 
-async def run(
-    property_filter: Optional[str] = None,
-    dry_run: bool = False,
-    limit: int = 0,
-    headless: bool = False,
-):
-    if not SESSION_FILE.exists():
-        _log(f'{SESSION_FILE} не найден — запусти gsc_save_session.py', 'error')
-        sys.exit(1)
+async def run(urls_file: str, dry_run: bool, limit: int, delay: float):
+    urls = _load_urls(Path(urls_file))
+    if not urls:
+        _log(f'Нет URL в {urls_file}. Заполни файл (по одному URL в строке).', 'error')
+        return
+
+    valid = set()
+    if PROPS_FILE.exists():
+        try:
+            valid = set(json.loads(PROPS_FILE.read_text(encoding='utf-8')))
+        except Exception:
+            pass
+    _log(f'URL к обработке: {len(urls)}; известных ресурсов: {len(valid) or "нет (доверяю origin)"}')
 
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        print('pip install playwright && playwright install chromium')
+        print('pip install playwright')
         sys.exit(1)
 
-    _log(f'Запуск{"  [DRY RUN]" if dry_run else ""}')
-    all_results = []
-    total_requested = 0
+    # Группируем URL по ресурсу, чтобы не переоткрывать обзор зря
+    by_res: dict[str, list[str]] = {}
+    unresolved = []
+    for u in urls:
+        r = _resolve_resource(u, valid)
+        if r is None:
+            unresolved.append(u)
+        else:
+            by_res.setdefault(r, []).append(u)
+    if unresolved:
+        _log(f'Без ресурса в GSC (пропущу): {len(unresolved)}', 'warn')
+        for u in unresolved[:10]:
+            _log(f'    {u}')
+
+    entries = []
+    done = 0
+    quota_blocked: set = set()
 
     async with async_playwright() as p:
-        chrome_path = _find_chrome()
-        browser = await p.chromium.launch(
-            headless=headless,
-            executable_path=str(chrome_path) if chrome_path else None,
-            args=[
-                '--disable-blink-features=AutomationControlled',
-                '--no-first-run',
-                '--disable-infobars',
-            ],
-            ignore_default_args=['--enable-automation'],
-        )
-        context = await browser.new_context(
-            storage_state=str(SESSION_FILE),
-            locale='ru-RU',
-            timezone_id='Europe/Moscow',
-            viewport={'width': 1440, 'height': 900},
-        )
-        page = await context.new_page()
-
-        # Собираем свойства
-        properties = await get_properties(page)
-
-        if property_filter:
-            properties = [
-                p for p in properties
-                if property_filter.lower() in p['resource_id'].lower()
-                or property_filter.lower() in p['name'].lower()
-            ]
-            _log(f'После фильтра --property: {len(properties)} свойств')
-
-        if not properties:
-            _log('Нет свойств для обработки', 'warn')
-            await browser.close()
+        try:
+            browser = await p.chromium.connect_over_cdp(CDP_URL)
+        except Exception as e:
+            _log(f'Нет подключения к Chrome ({CDP_URL}): {e}', 'error')
+            _log('Сначала запусти gsc_save_session.py (держит Chrome открытым).')
             return
 
-        for prop in properties:
-            rid = prop['resource_id']
-            _log(f'\n{"─" * 50}')
-            _log(f'Свойство: {prop["name"]}')
+        ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
-            # Получаем URL с ошибками
-            error_urls = await get_error_urls(page, rid)
-            if not error_urls:
-                _log('Ошибок нет — пропускаем', 'ok')
-                await asyncio.sleep(DELAY_BETWEEN_PROPERTIES_SEC)
-                continue
+        for resource_id, res_urls in by_res.items():
+            if limit and done >= limit:
+                break
+            _log(f'\n── Ресурс: {resource_id}  ({len(res_urls)} URL) ──')
+            await _open_resource(page, resource_id)
 
-            # Обрабатываем URL
-            for url in error_urls:
-                if limit and total_requested >= limit:
-                    _log(f'Достигнут лимит {limit} URL — остановка')
+            for u in res_urls:
+                if limit and done >= limit:
+                    _log(f'Достигнут лимит {limit}', 'warn')
+                    break
+                if resource_id in quota_blocked:
                     break
 
-                result = await request_reindex(page, rid, url, dry_run)
-                all_results.append(result)
+                r = await reindex_url(page, u, dry_run)
+                r['resource_id'] = resource_id
+                entries.append(r)
+                _save_log(entries)
 
-                if result['status'] in ('ok', 'dry_run'):
-                    total_requested += 1
+                if r['status'] in ('ok', 'dry_run'):
+                    done += 1
+                if r['status'] == 'quota':
+                    quota_blocked.add(resource_id)
+                    _log(f'Ресурс {resource_id} пропущен до завтра (квота)', 'warn')
+                    break
 
-                _save_log(all_results)
-                await asyncio.sleep(DELAY_BETWEEN_URLS_SEC)
-
-            await asyncio.sleep(DELAY_BETWEEN_PROPERTIES_SEC)
+                await asyncio.sleep(delay)
 
         await browser.close()
 
-    _log(f'\n{"═" * 50}')
-    ok = sum(1 for r in all_results if r['status'] == 'ok')
-    skip = sum(1 for r in all_results if r['status'] == 'skipped')
-    err = sum(1 for r in all_results if r['status'] == 'error')
-    _log(f'Готово: запрошено {ok}, пропущено {skip}, ошибок {err}')
-    _log(f'Лог сохранён → {LOG_FILE.resolve()}')
-
-
-# ── CLI ────────────────────────────────────────────────────────────
+    ok = sum(1 for e in entries if e['status'] == 'ok')
+    dr = sum(1 for e in entries if e['status'] == 'dry_run')
+    sk = sum(1 for e in entries if e['status'] == 'skipped')
+    q = sum(1 for e in entries if e['status'] == 'quota')
+    er = sum(1 for e in entries if e['status'] == 'error')
+    _log(f'\n══ Готово: запрошено {ok}, dry-run {dr}, пропущено {sk}, '
+         f'квота {q}, ошибок {er} ══')
+    _log(f'Лог → {LOG_FILE.resolve()}')
 
 
 def parse_args():
-    p = argparse.ArgumentParser(
-        description='Автозапрос повторной индексации в Google Search Console')
-    p.add_argument('--property', metavar='DOMAIN',
-                   help='Фильтр по имени свойства (например: example.com)')
-    p.add_argument('--dry-run', action='store_true',
-                   help='Проверка без реальных кликов')
-    p.add_argument('--limit', type=int, default=0,
-                   help='Максимум URL за один запуск (0 = без лимита)')
-    p.add_argument('--headless', action='store_true',
-                   help='Без видимого окна браузера')
-    return p.parse_args()
+    ap = argparse.ArgumentParser(description='Авто-запрос индексирования в GSC')
+    ap.add_argument('--urls', default='urls.txt', help='файл со списком URL')
+    ap.add_argument('--dry-run', action='store_true', help='без клика, только проверка')
+    ap.add_argument('--limit', type=int, default=0, help='максимум URL за запуск')
+    ap.add_argument('--delay', type=float, default=6, help='пауза между URL, сек')
+    return ap.parse_args()
 
 
 if __name__ == '__main__':
-    args = parse_args()
-    asyncio.run(run(
-        property_filter=args.property,
-        dry_run=args.dry_run,
-        limit=args.limit,
-        headless=args.headless,
-    ))
+    a = parse_args()
+    asyncio.run(run(a.urls, a.dry_run, a.limit, a.delay))

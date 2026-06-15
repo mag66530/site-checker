@@ -81,21 +81,29 @@ _NOTIF_CAT_DEPT = {
 
 
 def _dept_result(r) -> str:
+    """Отдел для колонки «Отдел» листа «Все детали».
+
+    Тег ставим ТОЛЬКО при проблеме со статусом или скоростью.
+    Если статус «Работает» и скорость «ОК» — поле пустое, всё в порядке.
+    (Битые переменные и контент-баги показаны в своих колонках/листе,
+    здесь их не дублируем — иначе тег появлялся бы у рабочих страниц.)
+
+    Карта:
+      • сервер не отвечает / таймаут / нет соединения (5xx) → разработка
+      • прочие ошибки на сайте (4xx, кроме 404)              → разработка
+      • долгий ответ сервера (медленно)                      → разработка
+      • 404 / страница не найдена                            → SEO
+      • редиректы (предупреждение)                           → SEO
+    """
     tags: list[str] = []
     if r.is_error:
-        if r.status in ('server_error', 'timeout', 'network_error'):
-            tags.append('разработка')
-        elif r.status == 'not_found':
-            tags += ['SEO', 'разработка']
-        else:
+        if r.status == 'not_found':
+            tags.append('SEO')
+        else:  # server_error, timeout, network_error, client_error
             tags.append('разработка')
     elif r.is_warning:
         tags.append('SEO')
     if r.speed_rating in ('slow', 'very_slow') and 'разработка' not in tags:
-        tags.append('разработка')
-    if r.has_text_issues and 'разработка' not in tags:
-        tags.append('разработка')
-    if getattr(r, 'has_content_bugs', False) and 'разработка' not in tags:
         tags.append('разработка')
     return ', '.join(dict.fromkeys(tags))
 
@@ -412,7 +420,9 @@ _NOTIF_SECTIONS = [
 
 
 def _build_notifications_sheet(wb, notifications):
-    """Лист «Уведомления» — письма по источникам, структурированные секциями."""
+    """Лист «Уведомления» — письма по источникам, структурированные секциями.
+    Лист добавляется всегда: при пустом списке показывает заглушку."""
+    notifications = notifications or []
     ws = wb.create_sheet('Уведомления')
     ws.sheet_view.showGridLines = False
 
@@ -443,6 +453,19 @@ def _build_notifications_sheet(wb, notifications):
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 24
+
+    # Пустой список — показываем заглушку и выходим
+    if not notifications:
+        ws.merge_cells('B5:G5')
+        c = ws['B5']
+        c.value = ('За период проверки писем не найдено. '
+                   'Если ждёте уведомления — проверьте секреты почты и пароли приложений '
+                   '(Gmail требует App Password), затем запустите прогон с галкой '
+                   '«Собрать уведомления из почты».')
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True, vertical='top')
+        ws.row_dimensions[5].height = 60
+        return
 
     # Разбиваем по источникам
     from collections import defaultdict
@@ -1176,8 +1199,8 @@ def build_report(
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 5: Уведомления (Вебмастер + GSC) — если есть данные
     # ═══════════════════════════════════════════════════════════════
-    if notifications:
-        _build_notifications_sheet(wb, notifications)
+    # Лист «Уведомления» добавляем всегда (при пустом списке — заглушка).
+    _build_notifications_sheet(wb, notifications)
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)

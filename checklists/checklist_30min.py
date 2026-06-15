@@ -150,23 +150,34 @@ def _tags_html(tags: list[str]) -> str:
 
 
 def _dept_tags_result(r) -> list[str]:
+    """Кто отвечает за конкретную проблему. Пусто — если страница работает.
+
+    Карта проблема → отдел:
+      • сервер не отвечает / таймаут / нет соединения (5xx) → разработка
+      • долгий ответ сервера (медленно)                    → разработка
+      • битые переменные в шаблоне ({{city}} и т.п.)        → разработка
+      • 404 / страница не найдена                           → SEO
+      • редиректы (предупреждение)                          → SEO
+      • прочие ошибки на сайте (4xx)                         → разработка
+      • нет цены / H1 / кнопок заказа (контентные баги)     → контент
+    """
     tags: list[str] = []
     if r.is_error:
         if r.status in ('server_error', 'timeout', 'network_error'):
             tags.append('разработка')
         elif r.status == 'not_found':
-            tags += ['SEO', 'разработка']
-        else:
+            tags.append('SEO')
+        else:  # client_error и прочее
             tags.append('разработка')
     elif r.is_warning:
+        # Предупреждение = редирект → зона SEO
         tags.append('SEO')
     if r.speed_rating in ('slow', 'very_slow') and 'разработка' not in tags:
         tags.append('разработка')
-    if r.has_text_issues:
+    if r.has_text_issues and 'разработка' not in tags:
         tags.append('разработка')
-    if getattr(r, 'has_content_bugs', False):
-        if 'разработка' not in tags:
-            tags.append('разработка')
+    if getattr(r, 'has_content_bugs', False) and 'контент' not in tags:
+        tags.append('контент')
     return list(dict.fromkeys(tags))
 
 
@@ -436,9 +447,23 @@ if pid:
             log_area = log_expander.empty()
             log_messages = []
 
+        # Файл лога прогона — чтобы можно было найти строки про GSC/почту.
+        _run_log_path = Path('cache') / 'last_run.log'
+        try:
+            _run_log_path.parent.mkdir(parents=True, exist_ok=True)
+            _run_log_path.write_text('', encoding='utf-8')  # очистка перед прогоном
+        except Exception:
+            pass
+
         def append_log(msg):
             log_messages.append(msg)
             log_area.code('\n'.join(log_messages[-100:]), language='text')
+            try:
+                _run_log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(_run_log_path, 'a', encoding='utf-8') as _f:
+                    _f.write(f'{datetime.now().strftime("%H:%M:%S")}  {msg}\n')
+            except Exception:
+                pass
 
         started_ms = int(time.time() * 1000)
         st.session_state.c30_started_at = started_ms
@@ -610,27 +635,50 @@ if pid:
                         fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_cfg['folder'], 30, _proxy, _nlog_run)
                     except Exception as _e:
                         append_log(f'⚠ Вебмастер: {_e}')
+                else:
+                    append_log('⚠ Вебмастер: креды не найдены '
+                               f'(секреты metrika_{pid}_email / metrika_{pid}_password)')
 
                 _gsc_e, _gsc_p = get_gsc_credentials(pid)
                 if _gsc_e and _gsc_p:
+                    append_log(f'GSC: креды найдены ({_gsc_e}), подключаюсь к Gmail…')
                     try:
                         fetch_gsc_gmail(pid, _gsc_e, _gsc_p, 30, _nlog_run)
                     except Exception as _e:
                         append_log(f'⚠ GSC: {_e}')
+                else:
+                    # Показываем какие ключи реально есть в секретах (только имена).
+                    try:
+                        _avail = [k for k in list(st.secrets.keys())
+                                  if 'gsc' in k.lower() or pid in k.lower()]
+                    except Exception:
+                        _avail = []
+                    append_log(
+                        f'⚠ GSC: креды не найдены. Ожидаю секреты '
+                        f'gsc_{pid}_email и gsc_{pid}_password. '
+                        f'Сейчас в секретах есть похожие ключи: {_avail or "нет"}')
 
                 _yab_e, _yab_p, _yab_f = get_yabusiness_credentials(pid)
                 if _yab_e and _yab_p and _yab_f:
+                    append_log(f'Я.Бизнес: подключаюсь к {_yab_e}, папка «{_yab_f}»…')
                     try:
                         fetch_yandex_folder_simple(pid, _yab_e, _yab_p, _yab_f, 'ya_business', 30, _proxy, _nlog_run)
                     except Exception as _e:
                         append_log(f'⚠ Я.Бизнес: {_e}')
+                else:
+                    append_log('⚠ Я.Бизнес: креды/папка не найдены '
+                               f'(секреты metrika_{pid}_email / metrika_{pid}_password)')
 
                 _tg_e, _tg_p, _tg_f = get_twogis_credentials(pid)
                 if _tg_e and _tg_p and _tg_f:
+                    append_log(f'2ГИС: подключаюсь к {_tg_e}, папка «{_tg_f}»…')
                     try:
                         fetch_yandex_folder_simple(pid, _tg_e, _tg_p, _tg_f, 'twogis', 30, _proxy, _nlog_run)
                     except Exception as _e:
                         append_log(f'⚠ 2ГИС: {_e}')
+                else:
+                    append_log('⚠ 2ГИС: креды/папка не найдены '
+                               f'(секреты metrika_{pid}_email / metrika_{pid}_password)')
 
                 _ga_e, _ga_p = get_google_accounts_credentials(pid)
                 if _ga_e and _ga_p:
@@ -658,6 +706,11 @@ if pid:
                         notifications=_notifs_for_report,
                     )
                     append_log(f'✓ Отчёт обновлён с уведомлениями ({len(_notifs_for_report)} шт.)')
+                else:
+                    append_log('Уведомлений нет — лист «Уведомления» в отчёт не добавлен. '
+                               'Проверьте секреты почты выше в логе.')
+            else:
+                append_log('Чекбокс «Собрать уведомления из почты» выключен — почту не проверяю.')
 
             st.session_state.c30_results = results
             st.session_state.c30_report_path = str(report_path)
@@ -708,6 +761,24 @@ if pid:
                             use_container_width=True, type='primary',
                         )
 
+            # Лог прогона — для диагностики почты/GSC
+            _log_path = Path('cache') / 'last_run.log'
+            if _log_path.exists():
+                _log_txt = _log_path.read_text(encoding='utf-8', errors='ignore')
+                st.download_button(
+                    label='🧾 Скачать лог прогона (для диагностики GSC/почты)',
+                    data=_log_txt.encode('utf-8'),
+                    file_name='last_run.log', mime='text/plain',
+                    use_container_width=True,
+                )
+                _gsc_lines = [ln for ln in _log_txt.splitlines()
+                              if any(k in ln for k in
+                                     ('GSC', 'креды', 'секрет', 'Отправители',
+                                      'Gmail', 'папк', 'Вебмастер', 'уведомлени'))]
+                if _gsc_lines:
+                    with st.expander('🔎 Строки лога про почту/GSC', expanded=True):
+                        st.code('\n'.join(_gsc_lines), language='text')
+
             problems = [
                 r for r in results
                 if r.is_error or r.is_warning or r.has_text_issues
@@ -715,6 +786,7 @@ if pid:
                 or r.speed_rating in ('slow', 'very_slow')
             ]
             if problems:
+                import html as _html
                 kind_labels = {'listing': 'Листинг', 'section': 'Раздел каталога',
                                'empty': 'Пустой раздел'}
                 st.markdown(f'**Список проблем ({len(problems)})**')
@@ -730,10 +802,15 @@ if pid:
                         getattr(getattr(r, 'content', None), 'page_kind', ''), r.type_label)
                     city = f'[{r.city}] ' if r.city else ''
                     tags_html = _tags_html(_dept_tags_result(r))
+                    url_safe = _html.escape(r.url, quote=True)
+                    extra_html = (' — ' + _html.escape(' · '.join(extra))) if extra else ''
+                    # Вся строка — чистый HTML (без смешения с markdown-разметкой),
+                    # иначе Streamlit иногда не дорисовывает теги-span после markdown-ссылки.
                     st.markdown(
-                        f'{emoji} **{city}**{type_label}: [{r.url}]({r.url})'
-                        + (' — ' + ' · '.join(extra) if extra else '')
-                        + tags_html,
+                        f'<div style="margin:2px 0;font-size:0.9rem">'
+                        f'{emoji} <b>{_html.escape(city)}</b>{_html.escape(type_label)}: '
+                        f'<a href="{url_safe}" target="_blank">{url_safe}</a>'
+                        f'{extra_html}{tags_html}</div>',
                         unsafe_allow_html=True,
                     )
                 if len(problems) > 50:
