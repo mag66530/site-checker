@@ -149,9 +149,13 @@ def test_redirect_chain_in_path_column():
         from openpyxl import load_workbook
         wb = load_workbook(out)
         ws = wb['Все детали']
-        
-        # Колонка J — «Откуда перешли»
-        paths = [ws.cell(row=r, column=10).value for r in range(2, 4)]
+
+        # Находим колонку «Откуда перешли» по заголовку, а не по фикс. индексу —
+        # в лист «Все детали» со временем добавляли колонки (напр. «Отдел»),
+        # из-за чего хардкод column=10 ломался.
+        header_row = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+        path_col = header_row.index('Откуда перешли') + 1
+        paths = [ws.cell(row=r, column=path_col).value for r in range(2, 4)]
         # Должна быть и цепочка и «Прямая ссылка»
         assert any('301:' in p for p in paths if p)
         assert any('Прямая ссылка' in p for p in paths if p)

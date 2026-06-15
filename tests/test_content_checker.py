@@ -14,11 +14,21 @@ from content_checker import check_content, BLOCK_DESCRIPTIONS
 
 # ── Готовые куски HTML ───────────────────────────────────────────────
 
+# Шапка со всеми обязательными элементами (телефон, заказать звонок,
+# оставить заявку, город) и подвал (телефон, e-mail, написать нам, адрес).
 COMMON = (
-    '<header>шапка</header>'
+    '<header>'
+    '<a href="tel:+74951234567">+7 (495) 123-45-67</a>'
+    '<button>Заказать звонок</button><button>Оставить заявку</button>'
+    '<span>Город: Москва</span>'
+    '</header>'
     '<div class="breadcrumb">крошки</div>'
     '<h1>Категория</h1>'
-    '<footer>+7 (495) 123-45-67 info@example.ru</footer>'
+    '<footer>'
+    '<a href="tel:+74951234567">+7 (495) 123-45-67</a>'
+    '<a href="mailto:info@example.ru">info@example.ru</a>'
+    '<a>Написать нам</a><span>Адрес: ул. Ленина, 1</span>'
+    '</footer>'
 )
 
 CARD_WITH_PRICE = (
@@ -43,6 +53,63 @@ FORM_NF = '<div>Не нашли что искали?</div>'
 
 def _by_key(result):
     return {b.key: b for b in result.blocks}
+
+
+# ── Шапка и подвал (обязательные элементы) ───────────────────────────
+
+
+def test_header_footer_all_present():
+    """Полные шапка и подвал — все 8 элементов найдены, багов нет."""
+    r = check_content(COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER, 'category')
+    b = _by_key(r)
+    for key in ('hdr_phone', 'hdr_callback', 'hdr_request', 'hdr_city',
+                'ftr_phone', 'ftr_email', 'ftr_writeus', 'ftr_address'):
+        assert b[key].present and b[key].required, f'{key} должен быть найден и обязателен'
+    assert all(bug.key not in (
+        'hdr_phone', 'hdr_callback', 'hdr_request', 'hdr_city',
+        'ftr_phone', 'ftr_email', 'ftr_writeus', 'ftr_address') for bug in r.bugs)
+
+
+def test_header_missing_request_is_bug():
+    """Нет «Оставить заявку» в шапке → красный баг именно по этому столбцу."""
+    header_no_request = (
+        '<header><a href="tel:+74951234567">+7 (495) 123-45-67</a>'
+        '<button>Заказать звонок</button><span>Город: Москва</span></header>'
+    )
+    html = (header_no_request + '<div class="breadcrumb">x</div><h1>K</h1>'
+            '<footer><a href="tel:+74951234567">+7</a>'
+            '<a href="mailto:a@b.ru">a@b.ru</a>Написать нам Адрес: ул. Мира 5</footer>'
+            + CARD_WITH_PRICE + FORM_NF + SMU_MARKER)
+    r = check_content(html, 'category')
+    b = _by_key(r)
+    assert not b['hdr_request'].present
+    assert any(bug.key == 'hdr_request' for bug in r.bugs)
+    # остальные элементы шапки на месте
+    assert b['hdr_phone'].present and b['hdr_callback'].present and b['hdr_city'].present
+
+
+def test_footer_missing_email_is_bug():
+    """Нет e-mail в подвале → баг по столбцу «Подвал: e-mail»."""
+    footer_no_email = (
+        '<footer><a href="tel:+74951234567">+7 (495) 123-45-67</a>'
+        'Написать нам Адрес: ул. Мира 5</footer>'
+    )
+    header_full = (
+        '<header><a href="tel:+74951234567">+7 (495) 1-23</a>Заказать звонок '
+        'Оставить заявку Город: Москва</header>'
+    )
+    html = (header_full + '<div class="breadcrumb">x</div><h1>K</h1>' + footer_no_email
+            + CARD_WITH_PRICE + FORM_NF + SMU_MARKER)
+    r = check_content(html, 'category')
+    assert any(bug.key == 'ftr_email' for bug in r.bugs)
+
+
+def test_phone_in_region_caught_via_tel_link():
+    """Телефон ловится по tel:-ссылке, даже если видимый формат «+7 (495)…»."""
+    html = COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER
+    b = _by_key(check_content(html, 'category'))
+    assert b['hdr_phone'].present
+    assert b['ftr_phone'].present
 
 
 # ── Листинг ──────────────────────────────────────────────────────────

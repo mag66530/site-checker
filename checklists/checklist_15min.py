@@ -1416,39 +1416,30 @@ if is_project:
     with st.container(border=True):
         st.markdown('<h3><span class="step-num">3</span>Какие пункты включить</h3>', unsafe_allow_html=True)
 
+        # Чек-боксы привязаны к session_state через key= (без value= и ручной
+        # перезаписи) — иначе Streamlit реагировал на клик только со второго раза.
+        # on_change сбрасывает баннер прошлого прогона при изменении набора.
         c1, c2 = st.columns(2)
         with c1:
-            check_main = st.checkbox('🏠 Главные страницы', value=st.session_state.check_main, help='Пункт 1.1 чек-листа')
-            check_catalog = st.checkbox('📁 Страница /catalog/', value=st.session_state.check_catalog, help='Пункт 1.2')
-            check_categories = st.checkbox('📂 Категории', value=st.session_state.check_categories, help='Пункт 1.3')
+            check_main = st.checkbox('🏠 Главные страницы', key='check_main', on_change=reset_run_state, help='Пункт 1.1 чек-листа')
+            check_catalog = st.checkbox('📁 Страница /catalog/', key='check_catalog', on_change=reset_run_state, help='Пункт 1.2')
+            check_categories = st.checkbox('📂 Категории', key='check_categories', on_change=reset_run_state, help='Пункт 1.3')
         with c2:
             if stats['has_filters']:
-                check_filters = st.checkbox('🏷️ Фильтры', value=st.session_state.check_filters, help='Пункт 1.4')
+                check_filters = st.checkbox('🏷️ Фильтры', key='check_filters', on_change=reset_run_state, help='Пункт 1.4')
             else:
                 check_filters = False
                 st.markdown('<span style="color:var(--text-muted)">🏷️ Фильтры _(нет в каталоге проекта)_</span>', unsafe_allow_html=True)
-            check_products = st.checkbox('🛒 Карточки товаров', value=st.session_state.check_products, help='Пункт 1.5 — из sitemap.xml')
-            check_text = st.checkbox('🔤 Битые переменные', value=st.session_state.check_text, help='Пункт 1.6 — {{city}}, %price%, undefined и т.д.')
-
-        # сохраняем в state
-        for key, val in [
-            ('check_main', check_main), ('check_catalog', check_catalog),
-            ('check_categories', check_categories), ('check_filters', check_filters),
-            ('check_products', check_products), ('check_text', check_text),
-        ]:
-            if val != st.session_state[key]:
-                st.session_state[key] = val
-                reset_run_state()
+            check_products = st.checkbox('🛒 Карточки товаров', key='check_products', on_change=reset_run_state, help='Пункт 1.5 — из sitemap.xml')
+            check_text = st.checkbox('🔤 Битые переменные', key='check_text', on_change=reset_run_state, help='Пункт 1.6 — {{city}}, %price%, undefined и т.д.')
 
         use_custom_urls = st.checkbox(
             '📝 Свой список URL',
-            value=st.session_state.use_custom_urls,
+            key='use_custom_urls',
+            on_change=reset_run_state,
             help='Проверить дополнительно свои ссылки этого проекта. '
                  'Тип каждой ссылки определяется по адресу.',
         )
-        if use_custom_urls != st.session_state.use_custom_urls:
-            st.session_state.use_custom_urls = use_custom_urls
-            reset_run_state()
 
     # ─── Свой список URL (в контексте проекта) ─────────────────
     custom_extra_count = 0

@@ -355,10 +355,17 @@ def _build_structure_sheet(wb, results):
         row += 1  # пробел между секциями
 
     # ── Ширины колонок ──
+    # Город / Открыть / Проблем, дальше — столбцы блоков. Их стало больше
+    # (шапка и подвал разбиты на элементы), поэтому ширину задаём с запасом
+    # по самому широкому набору столбцов на листе.
     ws.column_dimensions['B'].width = 18
     ws.column_dimensions['C'].width = 10
     ws.column_dimensions['D'].width = 9
-    for col_idx in range(5, 5 + 13):
+    max_block_cols = max(
+        (len(r.content.blocks) for r in pages if getattr(r, 'content', None)),
+        default=13,
+    )
+    for col_idx in range(5, 5 + max_block_cols + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = 13
 
 

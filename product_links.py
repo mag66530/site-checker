@@ -114,6 +114,7 @@ async def collect_product_links(
     concurrency: int = 8,
     timeout_s: int = 30,
     max_attempts: int = 2,
+    retry_failed: bool = True,
     proxy_url: Optional[str] = None,
     user_agent: str = DEFAULT_USER_AGENT,
     log: Optional[Callable] = None,
@@ -122,6 +123,11 @@ async def collect_product_links(
     """
     Пройти все категории проекта (главный домен, первая страница листинга)
     и собрать ссылки на товары.
+
+    Сначала основной проход с заданной параллельностью. Часть категорий под
+    нагрузкой отдаёт таймаут/5xx — поэтому, если retry_failed=True, по упавшим
+    делается второй, мягкий проход с низкой параллельностью: так возвращается
+    почти всё, что отвалилось не из-за реального 404, а из-за нагрузки.
 
     Возвращает:
       {
@@ -137,12 +143,10 @@ async def collect_product_links(
     known_cats = {p if p.endswith('/') else p + '/' for p in category_paths}
     known_filters = {p if p.endswith('/') else p + '/' for p in known_filter_paths or []}
 
-    sem = asyncio.Semaphore(concurrency)
     seen_products: set[str] = set()
     links: list[dict] = []
-    failed: list[str] = []
-    done = 0
     total = len(category_paths)
+    done = 0
 
     headers = {
         'User-Agent': user_agent,
@@ -151,12 +155,14 @@ async def collect_product_links(
         'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
     }
-    timeout = aiohttp.ClientTimeout(total=timeout_s)
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
+
+    # Транзиентные коды — повторяем. 404/403/410 — устойчивый результат, не ретраим.
+    _RETRY_CODES = {429, 500, 502, 503, 504}
 
     async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
 
-        async def fetch_category(cat_path: str):
+        async def fetch_category(cat_path, sem, timeout, out_failed, count_progress):
             nonlocal done
             url = f'{base}{cat_path}'
             async with sem:
@@ -166,43 +172,62 @@ async def collect_product_links(
                         async with session.get(url, timeout=timeout, proxy=proxy_url) as resp:
                             if resp.status == 200:
                                 html = await resp.text(errors='replace')
-                            break
-                    except Exception:
-                        if attempt == max_attempts - 1:
-                            break
-                        await asyncio.sleep(1.5)
-
-                done += 1
-                if progress:
-                    try:
-                        progress(done, total)
+                                break
+                            if resp.status not in _RETRY_CODES:
+                                break       # 404/403 и т.п. — повторять бессмысленно
                     except Exception:
                         pass
+                    if attempt < max_attempts - 1:
+                        await asyncio.sleep(1.5)
+
+                if count_progress:
+                    done += 1
+                    if progress:
+                        try:
+                            progress(done, total)
+                        except Exception:
+                            pass
 
                 if html is None:
-                    failed.append(cat_path)
-                    if log:
-                        log('warn', f'Не удалось загрузить {url}')
+                    out_failed.append(cat_path)
                     return
-
-                paths = extract_product_paths(html, url, known_cats, known_filters)
-                for p in paths:
+                for p in extract_product_paths(html, url, known_cats, known_filters):
                     if p not in seen_products:
                         seen_products.add(p)
                         links.append({'url': p, 'category': cat_path})
 
-        await asyncio.gather(*(fetch_category(c) for c in category_paths))
+        # ── Проход 1: все категории, заданная параллельность ──
+        sem1 = asyncio.Semaphore(concurrency)
+        timeout1 = aiohttp.ClientTimeout(total=timeout_s)
+        failed_1: list[str] = []
+        await asyncio.gather(*(
+            fetch_category(c, sem1, timeout1, failed_1, True) for c in category_paths
+        ))
+
+        # ── Проход 2: добиваем упавшие — мягко, низкая параллельность ──
+        failed_final = failed_1
+        if retry_failed and failed_1:
+            if log:
+                log('info', f'Повторный проход по {len(failed_1)} упавшим категориям '
+                            f'(мягче, параллельность {max(2, concurrency // 3)})…')
+            sem2 = asyncio.Semaphore(max(2, concurrency // 3))
+            timeout2 = aiohttp.ClientTimeout(total=timeout_s + 30)
+            failed_2: list[str] = []
+            await asyncio.gather(*(
+                fetch_category(c, sem2, timeout2, failed_2, False) for c in failed_1
+            ))
+            failed_final = failed_2
 
     if log:
         log('info', f'Собрано {len(links)} товарных ссылок '
-                    f'с {total - len(failed)} из {total} категорий')
+                    f'с {total - len(failed_final)} из {total} категорий')
 
     return {
         'links': links,
         'categories_total': total,
-        'categories_ok': total - len(failed),
-        'categories_failed': len(failed),
-        'failed_categories': failed,
+        'categories_ok': total - len(failed_final),
+        'categories_failed': len(failed_final),
+        'failed_categories': failed_final,
     }
 
 
