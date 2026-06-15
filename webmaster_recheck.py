@@ -64,12 +64,14 @@ async def _collect_sites(page) -> list[str]:
         href = await a.get_attribute('href') or ''
         if '/site/' not in href:
             continue
-        # нормализуем до корня сайта /site/<id>/
-        full = href if href.startswith('http') else f'https://webmaster.yandex.ru{href}'
-        # обрезаем хвост раздела, оставляем .../site/<id>/
-        idx = full.find('/site/')
-        tail = full[idx + len('/site/'):]
+        idx = href.find('/site/')
+        tail = href[idx + len('/site/'):]
         site_id = tail.split('/')[0]
+        # Реальный id сайта — это закодированный хост (есть точка/двоеточие):
+        # https:vladimir.mepen.ru:443. Навигационные ссылки вида /site/dashboard/
+        # такого не содержат — отсеиваем.
+        if '.' not in site_id and ':' not in site_id:
+            continue
         root = f'https://webmaster.yandex.ru/site/{site_id}/'
         if root not in sites:
             sites.append(root)
@@ -109,7 +111,39 @@ async def _process_problems(page, dry_run: bool) -> dict:
 
     problems = await page.query_selector_all(SEL_PROBLEM)
     stat['problems'] = len(problems)
+    _log(f'  URL страницы: {page.url}')
     _log(f'  блоков .DiagnosticProblem: {len(problems)}')
+
+    # Если блоков нет — разведка: показываем классы с «Diagnostic»/«Problem»
+    # и ссылки/элементы со словом «ошиб», чтобы поймать реальные селекторы.
+    if not problems:
+        _log('  блоков нет — дамп кандидатов:')
+        try:
+            classes = await page.eval_on_selector_all(
+                '*',
+                """els => {
+                    const s = new Set();
+                    for (const e of els) {
+                        const c = (e.className && e.className.baseVal !== undefined)
+                            ? e.className.baseVal : e.className;
+                        if (typeof c === 'string') {
+                            for (const cl of c.split(/\\s+/)) {
+                                if (/Diagnostic|Problem|checklist|Health/i.test(cl)) s.add(cl);
+                            }
+                        }
+                    }
+                    return [...s].slice(0, 40);
+                }""")
+            _log(f'    классы с Diagnostic/Problem: {classes}')
+        except Exception as e:
+            _log(f'    дамп классов не удался: {e}')
+        for el in (await page.query_selector_all('a, button'))[:60]:
+            try:
+                t = (await el.inner_text()).strip().replace('\n', ' ')
+                if 'ошиб' in t.lower() and await el.is_visible():
+                    _log(f'    ссылка/кнопка с «ошиб»: "{t[:60]}"')
+            except Exception:
+                pass
 
     for i, prob in enumerate(problems):
         try:
