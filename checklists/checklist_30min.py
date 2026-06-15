@@ -715,6 +715,7 @@ if pid:
                 or r.speed_rating in ('slow', 'very_slow')
             ]
             if problems:
+                import html as _html
                 kind_labels = {'listing': 'Листинг', 'section': 'Раздел каталога',
                                'empty': 'Пустой раздел'}
                 st.markdown(f'**Список проблем ({len(problems)})**')
@@ -730,10 +731,15 @@ if pid:
                         getattr(getattr(r, 'content', None), 'page_kind', ''), r.type_label)
                     city = f'[{r.city}] ' if r.city else ''
                     tags_html = _tags_html(_dept_tags_result(r))
+                    url_safe = _html.escape(r.url, quote=True)
+                    extra_html = (' — ' + _html.escape(' · '.join(extra))) if extra else ''
+                    # Вся строка — чистый HTML (без смешения с markdown-разметкой),
+                    # иначе Streamlit иногда не дорисовывает теги-span после markdown-ссылки.
                     st.markdown(
-                        f'{emoji} **{city}**{type_label}: [{r.url}]({r.url})'
-                        + (' — ' + ' · '.join(extra) if extra else '')
-                        + tags_html,
+                        f'<div style="margin:2px 0;font-size:0.9rem">'
+                        f'{emoji} <b>{_html.escape(city)}</b>{_html.escape(type_label)}: '
+                        f'<a href="{url_safe}" target="_blank">{url_safe}</a>'
+                        f'{extra_html}{tags_html}</div>',
                         unsafe_allow_html=True,
                     )
                 if len(problems) > 50:

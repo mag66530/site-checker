@@ -544,10 +544,11 @@ def fetch_gsc_gmail(
 
         _log(f'Gmail: вошли как {email_addr}. Ищу письма GSC…')
 
-        # Пробуем несколько папок: INBOX → All Mail → [Gmail]/All Mail.
-        # На некоторых аккаунтах GSC идёт в INBOX, на других — в Updates (не видна в INBOX).
+        # Открываем All Mail — это надмножество ВСЕХ писем Gmail (любые ярлыки и
+        # вкладки Primary/Updates/Promotions). INBOX через IMAP может не содержать
+        # письма из вкладки «Оповещения», поэтому All Mail надёжнее.
         _folder_ok = False
-        for _folder in ('INBOX', '"[Gmail]/All Mail"', '"[Google Mail]/All Mail"'):
+        for _folder in ('"[Gmail]/All Mail"', '"[Google Mail]/All Mail"', 'INBOX'):
             _s, _ = M.select(_folder, readonly=True)
             if _s == 'OK':
                 _log(f'Открыта папка {_folder}')
@@ -557,19 +558,37 @@ def fetch_gsc_gmail(
             raise FileNotFoundError('Не удалось открыть ни одну папку Gmail')
 
         since_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%d-%b-%Y')
-        # Ищем только письма от GSC
-        status, nums_raw = M.search(
-            None, 'FROM', '"sc-noreply@google.com"', 'SINCE', since_date,
-        )
-        if status != 'OK' or not nums_raw[0]:
-            _log('Писем от GSC нет')
+        # Ищем письма от GSC по нескольким известным адресам-отправителям.
+        nums = []
+        for _from in ('sc-noreply@google.com', 'noreply-search-console@google.com'):
+            _st, _raw = M.search(None, f'(FROM "{_from}" SINCE {since_date})')
+            if _st == 'OK' and _raw and _raw[0]:
+                nums += _raw[0].split()
+
+        # Диагностика: если по FROM ничего, смотрим кто вообще писал за период,
+        # чтобы в логе увидеть реальный адрес отправителя GSC.
+        if not nums:
+            _st, _raw = M.search(None, f'(SINCE {since_date})')
+            sample = _raw[0].split()[-40:] if (_st == 'OK' and _raw and _raw[0]) else []
+            senders = set()
+            for _n in sample:
+                try:
+                    _sth, _dh = M.fetch(_n, '(BODY.PEEK[HEADER.FIELDS (FROM)])')
+                    if _sth == 'OK' and _dh and _dh[0]:
+                        senders.add(_decode_mime_header(
+                            _dh[0][1].decode('utf-8', 'ignore')).strip())
+                except Exception:
+                    pass
+            _log(f'Писем от GSC нет за {lookback_days} дн. '
+                 f'Отправители в ящике (последние): {sorted(senders)[:15]}')
             M.logout()
             return {
                 'notifications': list(existing.values()),
                 'fetched': 0, 'skipped': 0, 'error': None,
             }
 
-        nums = nums_raw[0].split()
+        # Убираем дубли (письмо могло попасть под оба адреса/поиска)
+        nums = list(dict.fromkeys(nums))
         _log(f'Найдено {len(nums)} писем от GSC')
 
         for num in nums[-100:]:
