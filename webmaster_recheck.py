@@ -34,8 +34,8 @@ SITES_URL = 'https://webmaster.yandex.ru/sites/'
 LOG_FILE = Path('webmaster_recheck_log.json')
 
 # Селекторы (реальные классы Я.Вебмастера, из DevTools)
-# Берём только ОШИБКИ (severity_ERROR), не рекомендации/Я.Бизнес.
-SEL_PROBLEM = '.DiagnosisChecklistProblem_severity_ERROR'
+# Берём ВСЕ блоки: ошибки и рекомендации — где есть кнопка «Проверить», кликаем.
+SEL_PROBLEM = '.DiagnosisChecklistProblem'
 SEL_STATUS_INPROGRESS = '.DiagnosisChecklistProblemTitle-Status_status_IN_PROGRESS'
 SEL_CHEVRON = '.DiagnosisChecklistProblem-Chevron'
 SEL_TITLE = '.DiagnosisChecklistAccordion-TitleContainer, .DiagnosisChecklistProblemTitle'
@@ -118,7 +118,7 @@ async def _process_problems(page, dry_run: bool) -> dict:
     problems = await page.query_selector_all(SEL_PROBLEM)
     stat['problems'] = len(problems)
     _log(f'  URL страницы: {page.url}')
-    _log(f'  блоков-ошибок (severity_ERROR): {len(problems)}')
+    _log(f'  блоков (ошибки + рекомендации): {len(problems)}')
 
     # Если блоков нет — разведка: показываем классы с «Diagnostic»/«Problem»
     # и ссылки/элементы со словом «ошиб», чтобы поймать реальные селекторы.
