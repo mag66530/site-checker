@@ -73,7 +73,7 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     ci_addr = _col(headers, exact='адрес') or _col(headers, 'адрес')
     ci_email = _col(headers, 'e-mail') or _col(headers, 'почта') or _col(headers, 'email')
     ci_url = (_col(headers, 'url', 'магазин') or _col(headers, 'домен')
-              or _col(headers, 'url'))
+              or _col(headers, 'ссылка') or _col(headers, 'url'))
     ci_seo = _col(headers, *layout['phone_seo'])
     ci_ad = _col(headers, *layout['phone_ad'])
     ci_common = _col(headers, *layout['phone_common'])
@@ -92,11 +92,12 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             continue
         city = cell(row, ci_city)
         url = cell(row, ci_url)
-        # домен: из url-колонки, либо ищем по строке любой *.ru
+        # домен: из url-колонки, либо ищем по строке любой домен сети
+        # (.ru/.uz/.kz/.by — у МПЭ есть Узбекистан и Казахстан)
         host = _norm_host(url)
         if not host:
             joined = ' '.join(str(c) for c in row if c)
-            m = re.search(r'([a-z0-9-]+\.)*(?:inmetprom|stalmetural|mepen)\.ru', joined)
+            m = re.search(r'([a-z0-9-]+\.)*(?:inmetprom|stalmetural|mepen)\.(?:ru|uz|kz|by)', joined)
             host = _norm_host(m.group(0)) if m else ''
         if not host or host in seen:
             continue
