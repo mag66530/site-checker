@@ -275,8 +275,39 @@ def _style_cell(cell, value, state):
         cell.font = _font(size=10, color=C.text_muted)
 
 
+def _plural_pages(n):
+    n10, n100 = n % 10, n % 100
+    if n10 == 1 and n100 != 11:
+        return 'страница'
+    if 2 <= n10 <= 4 and not 12 <= n100 <= 14:
+        return 'страницы'
+    return 'страниц'
+
+
+def _health_color(p):
+    return C.ok if p >= 90 else (C.warn if p >= 70 else C.err)
+
+
+def _health_bg(p):
+    return C.ok_soft if p >= 90 else (C.warn_soft if p >= 70 else C.err_soft)
+
+
+_KIND_LABEL = {'listing': 'Листинг', 'section': 'Раздел каталога',
+               'empty': 'Пустой раздел'}
+
+
+def _problem_text(r):
+    """Понятная формулировка проблемы страницы для списка «Что чинить»."""
+    pk = getattr(r.content, 'page_kind', '')
+    if getattr(r.content, 'is_soft_404', False):
+        return 'страница отдаёт 404 (не найдена) — проверить ссылку или убрать из каталога'
+    if pk == 'empty':
+        return 'раздел пуст — нет ни товаров, ни подразделов'
+    return 'нет: ' + ', '.join(b.label for b in r.content.bugs)
+
+
 def _build_structure_sheet(wb, results):
-    """Лист структурной проверки – рассчитан на читателя без подготовки."""
+    """Лист структурной проверки — дашборд, что чинить, сводка и детали."""
     pages = [r for r in results if getattr(r, 'content', None) is not None]
     if not pages:
         return
@@ -286,153 +317,174 @@ def _build_structure_sheet(wb, results):
 
     total_pages = len(pages)
     pages_with_bugs = sum(1 for r in pages if r.content_bugs > 0)
+    ok_pages = total_pages - pages_with_bugs
     total_bugs = sum(r.content_bugs for r in pages)
-    ws.sheet_properties.tabColor = C.err if total_bugs else C.accent
+    health = round(ok_pages / total_pages * 100) if total_pages else 100
+    ws.sheet_properties.tabColor = C.err if total_bugs else C.ok
 
-    # ── Заголовок + пояснение простым языком ──
-    ws.column_dimensions['A'].width = 3
-    ws.merge_cells('B2:H2')
+    # ── Ширины ──
+    ws.column_dimensions['A'].width = 2.5
+    ws.column_dimensions['B'].width = 24
+    ws.column_dimensions['C'].width = 17
+    ws.column_dimensions['D'].width = 11
+    max_block_cols = max((len(_grid_columns(r.content.blocks)) for r in pages), default=12)
+    for col_idx in range(5, 5 + max(max_block_cols, 9) + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 13
+    last_col = 13                       # карточки дашборда занимают B..M
+    LASTL = get_column_letter(last_col)
+
+    def fill_block(r1, c1, r2, c2, bg, bc=C.border_light):
+        for rr in range(r1, r2 + 1):
+            for cc in range(c1, c2 + 1):
+                cell = ws.cell(row=rr, column=cc)
+                if bg:
+                    cell.fill = _fill(bg)
+                cell.border = _border(color=bc)
+
+    # ── Заголовок ──
+    ws.merge_cells(f'B2:{LASTL}2')
     c = ws['B2']
     c.value = 'Структура страниц'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 24
+    c.font = _font(size=20, bold=True, color=C.text)
+    ws.row_dimensions[2].height = 30
 
-    ws.merge_cells('B3:N3')
+    ws.merge_cells(f'B3:{LASTL}3')
     c = ws['B3']
-    c.value = ('Проверяем, что на каждой странице есть всё нужное для продаж: заголовок, хлебные '
-               'крошки, цена, кнопки заказа, формы. Красным помечено то, что НУЖНО ЧИНИТЬ. '
-               'Серым прочерком – то, чего просто нет (это не ошибка). '
-               'Наведите курсор на заголовок столбца – всплывёт пояснение, что именно проверяется.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 30
+    c.value = ('Что должно быть на каждой странице для продаж — и чего не хватает. '
+               'Красное нужно чинить, серый прочерк — этого просто нет (норма).')
+    c.font = _font(size=11, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='center')
+    ws.row_dimensions[3].height = 18
 
-    # ── Сводка: три плитки ──
-    tiles = [
-        ('Проверено страниц', total_pages, C.accent,
-         C.accent_soft),
-        ('Страниц с проблемами', pages_with_bugs,
+    # ── Дашборд: 4 карточки (B-D, E-G, H-J, K-M) ──
+    cards = [
+        (total_pages, 'ПРОВЕРЕНО СТРАНИЦ', C.accent, C.accent_soft),
+        (ok_pages, 'БЕЗ ПРОБЛЕМ', C.ok, C.ok_soft),
+        (pages_with_bugs, 'НУЖНО ПОЧИНИТЬ',
          C.err if pages_with_bugs else C.ok, C.err_soft if pages_with_bugs else C.ok_soft),
-        ('Всего проблем', total_bugs,
-         C.err if total_bugs else C.ok, C.err_soft if total_bugs else C.ok_soft),
+        (f'{health}%', 'ЗДОРОВЬЕ СТРАНИЦ', _health_color(health), _health_bg(health)),
     ]
-    srow = 5
-    col = 2
-    for label, value, color, bg in tiles:
-        ws.merge_cells(start_row=srow, start_column=col, end_row=srow, end_column=col + 1)
-        ws.merge_cells(start_row=srow + 1, start_column=col, end_row=srow + 1, end_column=col + 1)
-        vc = ws.cell(row=srow, column=col)
-        vc.value = value
-        vc.font = _font(size=22, bold=True, color=color)
-        vc.fill = _fill(bg)
-        vc.alignment = _align(horizontal='center')
-        vc.border = _border(color=C.border_light)
-        ws.cell(row=srow, column=col + 1).fill = _fill(bg)
-        ws.cell(row=srow, column=col + 1).border = _border(color=C.border_light)
-        lc = ws.cell(row=srow + 1, column=col)
-        lc.value = label
-        lc.font = _font(size=9, color=C.text_muted)
-        lc.fill = _fill(bg)
-        lc.alignment = _align(horizontal='center')
-        lc.border = _border(color=C.border_light)
-        ws.cell(row=srow + 1, column=col + 1).fill = _fill(bg)
-        ws.cell(row=srow + 1, column=col + 1).border = _border(color=C.border_light)
-        col += 3
-    ws.row_dimensions[srow].height = 32
+    ws.row_dimensions[5].height = 30
+    ws.row_dimensions[6].height = 16
+    for i, (value, label, color, bg) in enumerate(cards):
+        c1 = 2 + i * 3
+        c2 = c1 + 2
+        fill_block(5, c1, 6, c2, bg)
+        ws.merge_cells(start_row=5, start_column=c1, end_row=5, end_column=c2)
+        v = ws.cell(row=5, column=c1, value=value)
+        v.font = _font(size=26, bold=True, color=color)
+        v.alignment = _align(horizontal='center', vertical='center')
+        ws.merge_cells(start_row=6, start_column=c1, end_row=6, end_column=c2)
+        l = ws.cell(row=6, column=c1, value=label)
+        l.font = _font(size=9, bold=True, color=C.text_muted)
+        l.alignment = _align(horizontal='center')
 
-    # ── Легенда ──
-    lrow = srow + 3
-    lh = ws.cell(row=lrow, column=2)
-    lh.value = 'Обозначения:'
-    lh.font = _font(size=10, bold=True, color=C.text_soft)
-    legend = [
-        ('✓',     'блок есть',                                C.ok,        C.ok_soft),
-        ('БАГ',   'обязательного блока нет – нужно починить', C.err,       C.err_soft),
-        ('–',     'необязательного блока нет – это норма',    C.text_muted, C.surface),
-        ('число', 'сколько найдено (карточек товаров, форм)', C.text_soft, C.bg_elev),
-    ]
-    lr = lrow + 1
-    for sym, desc, color, bg in legend:
-        sc = ws.cell(row=lr, column=2)
-        sc.value = sym
-        sc.font = _font(size=10, bold=True, color=color)
-        sc.fill = _fill(bg)
-        sc.alignment = _align(horizontal='center')
-        sc.border = _border(color=C.border_light)
-        ws.merge_cells(start_row=lr, start_column=3, end_row=lr, end_column=6)
-        dc = ws.cell(row=lr, column=3)
-        dc.value = desc
-        dc.font = _font(size=10, color=C.text_soft)
-        dc.alignment = _align(horizontal='left')
-        lr += 1
-
-    # ── «Что чинить» – понятный список проблем сразу под сводкой ──
-    # Главное для читателя: не грид целиком, а короткий список «где и что
-    # сломано». Грид ниже – для деталей.
-    _kind_label = {'listing': 'Листинг', 'section': 'Раздел каталога',
-                   'empty': 'Пустой раздел'}
-    bug_pages = [r for r in pages if r.content_bugs > 0]
-    row = lr + 2
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+    # ── «Что чинить» — главный блок ──
+    bug_pages = sorted([r for r in pages if r.content_bugs > 0],
+                       key=lambda r: -r.content_bugs)
+    row = 8
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=last_col)
     hc = ws.cell(row=row, column=2)
     if bug_pages:
-        hc.value = f'Что чинить – {total_bugs} на {len(bug_pages)} стр.'
-        hc.font = _font(size=13, bold=True, color=C.err)
+        hc.value = f'  Что чинить — {len(bug_pages)} {_plural_pages(len(bug_pages))}'
+        hc.font = _font(size=14, bold=True, color=C.err)
+        hc.fill = _fill(C.err_soft)
     else:
-        hc.value = '✓ Структурных проблем не найдено – чинить нечего'
-        hc.font = _font(size=13, bold=True, color=C.ok)
-    hc.fill = _fill(C.err_soft if bug_pages else C.ok_soft)
-    hc.alignment = _align(indent=1)
-    ws.row_dimensions[row].height = 24
+        hc.value = '  ✓ Всё в порядке — структурных проблем не найдено'
+        hc.font = _font(size=14, bold=True, color=C.ok)
+        hc.fill = _fill(C.ok_soft)
+    hc.alignment = _align(indent=1, vertical='center')
+    for cc in range(2, last_col + 1):
+        ws.cell(row=row, column=cc).fill = _fill(C.err_soft if bug_pages else C.ok_soft)
+    ws.row_dimensions[row].height = 26
     row += 1
 
     if bug_pages:
-        # сортируем: больше всего проблем – выше
-        bug_pages.sort(key=lambda r: -r.content_bugs)
-        ws.column_dimensions['B'].width = 18
-        for r in bug_pages[:40]:
-            pk = getattr(r.content, 'page_kind', '')
-            kind = _kind_label.get(pk, r.type_label)
-            if getattr(r.content, 'is_soft_404', False):
-                # Страница отдала 200, но это «не найдена» — суть проблемы 404,
-                # а не «нет цены». Так и пишем.
-                problem_text = ('страница отдаёт 404 (не найдена) — проверить '
-                                'ссылку/убрать из каталога')
-            elif pk == 'empty':
-                # «Раздел пуст.» — нет ни товаров, ни подразделов.
-                problem_text = 'раздел пуст — нет ни товаров, ни подразделов'
-            else:
-                problem_text = 'нет: ' + ', '.join(b.label for b in r.content.bugs)
-
-            cc = ws.cell(row=row, column=2, value=f'[{r.city}] {kind}')
-            cc.font = _font(size=10, bold=True)
-            cc.alignment = _align(indent=1)
-            cc.border = _border(color=C.border_light)
-
-            uc = ws.cell(row=row, column=3, value='открыть')
+        # Шапка списка
+        for ci, h in [(2, 'Город'), (3, 'Тип страницы'), (4, 'Открыть'),
+                      (5, 'Что не так')]:
+            cell = ws.cell(row=row, column=ci, value=h)
+            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.fill = _fill(C.surface)
+            cell.alignment = _align(indent=1)
+            cell.border = _border()
+        ws.merge_cells(start_row=row, start_column=5, end_row=row, end_column=last_col)
+        for cc in range(5, last_col + 1):
+            ws.cell(row=row, column=cc).fill = _fill(C.surface)
+            ws.cell(row=row, column=cc).border = _border()
+        row += 1
+        for idx, r in enumerate(bug_pages[:50]):
+            band = C.surface if idx % 2 else C.bg_elev
+            kind = _KIND_LABEL.get(getattr(r.content, 'page_kind', ''), r.type_label)
+            cc = ws.cell(row=row, column=2, value=r.city)
+            cc.font = _font(size=10, bold=True); cc.fill = _fill(band)
+            cc.alignment = _align(indent=1); cc.border = _border(color=C.border_light)
+            kc = ws.cell(row=row, column=3, value=kind)
+            kc.font = _font(size=10, color=C.text_soft); kc.fill = _fill(band)
+            kc.alignment = _align(indent=1); kc.border = _border(color=C.border_light)
+            uc = ws.cell(row=row, column=4, value='открыть')
             uc.hyperlink = r.url
             uc.font = _font(size=10, color=C.accent, underline='single')
-            uc.alignment = _align(horizontal='center', indent=0)
-            uc.border = _border(color=C.border_light)
-
-            ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=8)
-            mc = ws.cell(row=row, column=4, value=problem_text)
+            uc.fill = _fill(band)
+            uc.alignment = _align(horizontal='center'); uc.border = _border(color=C.border_light)
+            ws.merge_cells(start_row=row, start_column=5, end_row=row, end_column=last_col)
+            mc = ws.cell(row=row, column=5, value=_problem_text(r))
             mc.font = _font(size=10, color=C.err)
             mc.alignment = _align(indent=1, wrap=True)
-            mc.border = _border(color=C.border_light)
+            for cc2 in range(5, last_col + 1):
+                ws.cell(row=row, column=cc2).fill = _fill(band)
+                ws.cell(row=row, column=cc2).border = _border(color=C.border_light)
             row += 1
-        if len(bug_pages) > 40:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+        if len(bug_pages) > 50:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=last_col)
             ws.cell(row=row, column=2,
-                    value=f'… и ещё {len(bug_pages) - 40} страниц – см. таблицы ниже').font = \
+                    value=f'… и ещё {len(bug_pages) - 50} — см. таблицы ниже').font = \
                 _font(size=10, italic=True, color=C.text_muted)
             row += 1
 
-    # ── Подробные таблицы по группам страниц ──
+    # ── Сводка по типам страниц ──
     row += 2
-    sect_title = ws.cell(row=row, column=2, value='Подробно по типам страниц')
-    sect_title.font = _font(size=12, bold=True, color=C.text_soft)
+    ws.cell(row=row, column=2, value='Сводка по типам страниц').font = \
+        _font(size=13, bold=True, color=C.text)
+    row += 1
+    for ci, h in [(2, 'Тип страницы'), (3, 'Проверено'), (4, 'Без проблем'),
+                  (5, 'Проблем'), (6, 'Здоровье')]:
+        cell = ws.cell(row=row, column=ci, value=h)
+        cell.font = _font(size=9, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align(horizontal='center' if ci > 2 else 'left', indent=1)
+        cell.border = _border()
+    row += 1
+    for group_label, predicate in _STRUCT_GROUPS:
+        gp = [r for r in pages if predicate(r)]
+        if not gp:
+            continue
+        gbug = sum(1 for r in gp if r.content_bugs > 0)
+        gok = len(gp) - gbug
+        gh = round(gok / len(gp) * 100) if gp else 100
+        vals = [(2, group_label, 'left', C.text), (3, len(gp), 'center', C.text_soft),
+                (4, gok, 'center', C.ok), (5, gbug, 'center', C.err if gbug else C.text_muted),
+                (6, f'{gh}%', 'center', _health_color(gh))]
+        for ci, val, al, color in vals:
+            cell = ws.cell(row=row, column=ci, value=val)
+            cell.font = _font(size=10, bold=(ci in (2, 6)), color=color)
+            cell.alignment = _align(horizontal=al, indent=1)
+            cell.border = _border(color=C.border_light)
+            if ci == 6:
+                cell.fill = _fill(_health_bg(gh))
+        row += 1
+
+    # ── Подробные таблицы по типам ──
     row += 2
+    ws.cell(row=row, column=2, value='Подробно по типам страниц').font = \
+        _font(size=13, bold=True, color=C.text)
+    ws.cell(row=row + 1, column=2,
+            value='✓ есть · БАГ обязательного нет · «–» необязательного нет (норма) · '
+                  'число = сколько найдено. Наведите курсор на заголовок столбца — пояснение.').font = \
+        _font(size=9, italic=True, color=C.text_muted)
+    ws.merge_cells(start_row=row + 1, start_column=2, end_row=row + 1, end_column=last_col)
+    row += 3
+
     for group_label, predicate in _STRUCT_GROUPS:
         group_pages = [r for r in pages if predicate(r)]
         if not group_pages:
@@ -444,19 +496,19 @@ def _build_structure_sheet(wb, results):
         # Заголовок секции
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4 + n_cols)
         gc = ws.cell(row=row, column=2)
-        gc.value = (f'{group_label} – {len(group_pages)} стр.'
-                    + (f' · проблем: {g_bugs}' if g_bugs else ''))
-        gc.font = _font(size=12, bold=True, color=C.err if g_bugs else C.text)
+        gc.value = (f'  {group_label} — {len(group_pages)} стр.'
+                    + (f'  ·  проблем: {g_bugs}' if g_bugs else '  ·  все в порядке'))
+        gc.font = _font(size=11, bold=True, color=C.err if g_bugs else C.ok)
         gc.fill = _fill(C.accent_soft)
-        gc.alignment = _align(indent=1)
+        gc.alignment = _align(indent=1, vertical='center')
+        for cc in range(2, 5 + n_cols):
+            ws.cell(row=row, column=cc).fill = _fill(C.accent_soft)
         ws.row_dimensions[row].height = 22
         row += 1
 
-        # Шапка таблицы. К каждому столбцу – комментарий-пояснение (по наведению).
-        headers = (
-            [('Город', ''), ('Открыть', ''), ('Проблем', '')]
-            + [(c['label'], c['desc']) for c in columns]
-        )
+        # Шапка таблицы
+        headers = ([('Город', ''), ('Открыть', ''), ('Проблем', '')]
+                   + [(c['label'], c['desc']) for c in columns])
         hdr_row = row
         for ci, (h, desc) in enumerate(headers, start=2):
             cell = ws.cell(row=hdr_row, column=ci)
@@ -467,23 +519,21 @@ def _build_structure_sheet(wb, results):
             cell.border = _border()
             if desc:
                 cell.comment = Comment(desc, 'Site Checker', height=120, width=260)
-        ws.row_dimensions[hdr_row].height = 56
+        ws.row_dimensions[hdr_row].height = 54
         row += 1
 
-        # Строки
-        for r in group_pages:
+        for idx, r in enumerate(group_pages):
             by_key = {b.key: b for b in r.content.blocks}
+            band = C.surface if idx % 2 else C.bg_elev
 
-            cc = ws.cell(row=row, column=2)
-            cc.value = r.city
-            cc.font = _font(size=10)
-            cc.alignment = _align(indent=1)
-            cc.border = _border(color=C.border_light)
+            cc = ws.cell(row=row, column=2, value=r.city)
+            cc.font = _font(size=10); cc.fill = _fill(band)
+            cc.alignment = _align(indent=1); cc.border = _border(color=C.border_light)
 
-            uc = ws.cell(row=row, column=3)
-            uc.value = 'открыть'
+            uc = ws.cell(row=row, column=3, value='открыть')
             uc.hyperlink = r.url
             uc.font = _font(size=10, color=C.accent, underline='single')
+            uc.fill = _fill(band)
             uc.alignment = _align(horizontal='center', indent=0)
             uc.border = _border(color=C.border_light)
 
@@ -491,21 +541,17 @@ def _build_structure_sheet(wb, results):
             pc.value = r.content_bugs if r.content_bugs else ''
             pc.font = _font(size=11, bold=True, color=C.err)
             pc.alignment = _align(horizontal='center', indent=0)
-            pc.fill = _fill(C.err_soft) if r.content_bugs else _fill(C.bg_elev)
+            pc.fill = _fill(C.err_soft) if r.content_bugs else _fill(band)
             pc.border = _border(color=C.border_light)
 
-            # Soft-404: не сыплем БАГ по каждому столбцу — одна заметка на строку.
             if getattr(r.content, 'is_soft_404', False) and n_cols:
-                ws.merge_cells(start_row=row, start_column=5,
-                               end_row=row, end_column=4 + n_cols)
-                cell = ws.cell(row=row, column=5,
-                               value='Страница отдаёт 404 (не найдена)')
+                ws.merge_cells(start_row=row, start_column=5, end_row=row, end_column=4 + n_cols)
+                cell = ws.cell(row=row, column=5, value='Страница отдаёт 404 (не найдена)')
                 cell.font = _font(size=10, bold=True, color=C.err)
-                cell.fill = _fill(C.err_soft)
                 cell.alignment = _align(indent=1)
-                cell.border = _border(color=C.border_light)
-                for k in range(1, n_cols):
-                    ws.cell(row=row, column=5 + k).border = _border(color=C.border_light)
+                for k in range(n_cols):
+                    cm = ws.cell(row=row, column=5 + k)
+                    cm.fill = _fill(C.err_soft); cm.border = _border(color=C.border_light)
                 row += 1
                 continue
 
@@ -515,22 +561,10 @@ def _build_structure_sheet(wb, results):
                 cell.border = _border(color=C.border_light)
                 value, state = _cell_state(col, by_key)
                 _style_cell(cell, value, state)
+                if state in ('absent', 'count', 'okinfo'):
+                    cell.fill = _fill(band)
             row += 1
-        row += 1  # пробел между секциями
-
-    # ── Ширины колонок ──
-    # Город / Открыть / Проблем, дальше – столбцы блоков. Их стало больше
-    # (шапка и подвал разбиты на элементы), поэтому ширину задаём с запасом
-    # по самому широкому набору столбцов на листе.
-    ws.column_dimensions['B'].width = 18
-    ws.column_dimensions['C'].width = 10
-    ws.column_dimensions['D'].width = 9
-    max_block_cols = max(
-        (len(r.content.blocks) for r in pages if getattr(r, 'content', None)),
-        default=13,
-    )
-    for col_idx in range(5, 5 + max_block_cols + 1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = 13
+        row += 2  # пробел между секциями
 
 
 # ── Лист уведомлений ──────────────────────────────────────────────
