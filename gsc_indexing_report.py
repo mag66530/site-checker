@@ -96,32 +96,44 @@ async def main(resource_id: str, open_first: bool):
         await dump_buttons(page)
         await dump_links(page)
 
-        # Пробуем кликнуть первую строку причины и показать детальную страницу
+        # Пробуем кликнуть первую причину и показать детальную страницу
         if open_first:
             print('\n=== ПРОБУЮ ОТКРЫТЬ ПЕРВУЮ ПРИЧИНУ ===')
-            # Причины — строки таблицы ниже графика. Берём кликабельные строки,
-            # пропуская заголовки.
-            candidates = await page.query_selector_all('[role="row"]')
             opened = False
-            for r in candidates:
+            for r in await page.query_selector_all('[role="row"]'):
                 try:
                     txt = (await r.inner_text()).strip()
-                    # пропускаем шапку и пустые
                     if not txt or 'Причина' in txt or 'Источник' in txt:
                         continue
-                    if await r.is_visible():
-                        await r.click()
-                        opened = True
-                        print(f'  Кликнул строку: {txt[:80]}')
-                        break
-                except Exception:
+                    if not await r.is_visible():
+                        continue
+                    # Кликаем по ПЕРВОЙ ячейке строки (там название причины-ссылка),
+                    # а не по самой строке — клик по row часто перехватывается.
+                    cell = await r.query_selector(
+                        '[role="gridcell"], [role="cell"], td, a, span')
+                    target = cell or r
+                    await target.click()
+                    opened = True
+                    print(f'  Кликнул причину: {txt[:70]}')
+                    break
+                except Exception as e:
+                    print(f'  попытка клика не удалась: {type(e).__name__}')
                     continue
             if opened:
-                await page.wait_for_timeout(5000)
+                await page.wait_for_timeout(6000)
                 print(f'  URL после клика: {page.url}')
                 await dump_buttons(page)
+                # Подсветим кандидата на кнопку проверки
+                print('\n  Поиск кнопки проверки исправления:')
+                for needle in ('Проверить исправление', 'ПРОВЕРИТЬ ИСПРАВЛЕНИЕ',
+                               'Подтвердить исправление', 'Validate', 'Начать проверку'):
+                    try:
+                        cnt = await page.get_by_text(needle, exact=False).count()
+                    except Exception:
+                        cnt = 0
+                    print(f'    "{needle}": {cnt}')
             else:
-                print('  Не нашёл кликабельную строку причины.')
+                print('  Не нашёл кликабельную причину.')
 
         print('\nГотово. Браузер оставляю открытым.')
         await browser.close()
