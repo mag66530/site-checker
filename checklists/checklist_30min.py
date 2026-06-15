@@ -17,6 +17,11 @@
 Ручная часть (пункты 3–6 чек-листом с галочками) временно убрана.
 """
 import asyncio
+import json
+import os
+import pickle
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -202,7 +207,87 @@ def _dept_tags_notif(n) -> list[str]:
 # сервера, не в session_state), поэтому переход на другую вкладку и обратно
 # не перезапускает прогон — поток продолжает работать сам.
 
-_RUNS: dict = {}  # project_id -> состояние прогона
+_RUNS: dict = {}  # project_id -> состояние прогона (устаревший потоковый путь)
+
+_CACHE = Path('cache')
+_PROJECT_ROOT = Path(__file__).parent.parent
+
+
+def _c30_paths(pid):
+    return {
+        'params': _CACHE / f'c30_{pid}.params.json',
+        'log': _CACHE / f'c30_{pid}.log',
+        'status': _CACHE / f'c30_{pid}.status.json',
+        'result': _CACHE / f'c30_{pid}.result.pkl',
+        'pid': _CACHE / f'c30_{pid}.pid',
+    }
+
+
+def _read_pidfile(p: Path):
+    try:
+        return int(p.read_text().strip())
+    except Exception:
+        return None
+
+
+def _pid_alive(pid) -> bool:
+    if not pid:
+        return False
+    if os.name == 'nt':
+        try:
+            out = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'],
+                                 capture_output=True, text=True).stdout
+            return str(pid) in out
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _kill_tree(pid):
+    if not pid:
+        return
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)],
+                       capture_output=True)
+    else:
+        import signal
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+
+
+def _launch_checklist_bg(pid, params, creds):
+    """Запустить прогон ОТДЕЛЬНЫМ процессом (надёжнее потока для async-работы)."""
+    paths = _c30_paths(pid)
+    _CACHE.mkdir(parents=True, exist_ok=True)
+    paths['params'].write_text(
+        json.dumps({'pid': pid, 'params': params, 'creds': creds},
+                   ensure_ascii=False), encoding='utf-8')
+    for k in ('log', 'status', 'result'):
+        try:
+            paths[k].unlink(missing_ok=True)
+        except Exception:
+            pass
+    env = dict(os.environ)
+    env['PYTHONIOENCODING'] = 'utf-8'
+    env['PYTHONUNBUFFERED'] = '1'
+    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0
+    logf = open(paths['log'], 'a', encoding='utf-8')
+    proc = subprocess.Popen(
+        [sys.executable, 'checklist_run.py',
+         '--params', str(paths['params']),
+         '--out', str(paths['result']),
+         '--status', str(paths['status'])],
+        cwd=str(_PROJECT_ROOT), stdout=logf, stderr=subprocess.STDOUT,
+        env=env, creationflags=creationflags,
+    )
+    paths['pid'].write_text(str(proc.pid), encoding='utf-8')
+    return proc.pid
 
 
 class _RunCancelled(Exception):
@@ -708,10 +793,23 @@ if pid:
         ]:
             st.session_state[_k] = _v
 
-        _is_running = bool(_RUNS.get(pid, {}).get('running'))
-        if st.button('▶ Запустить еженедельную проверку', type='primary',
-                     use_container_width=True, key='c30_run',
-                     disabled=_is_running):
+        _paths = _c30_paths(pid)
+        _alive = _pid_alive(_read_pidfile(_paths['pid']))
+        _bcol, _ccol = st.columns([3, 1])
+        with _bcol:
+            _go = st.button('▶ Запустить еженедельную проверку', type='primary',
+                            use_container_width=True, key='c30_run', disabled=_alive)
+        with _ccol:
+            if st.button('⛔ Отменить', use_container_width=True,
+                         key='c30_cancel', disabled=not _alive):
+                _kill_tree(_read_pidfile(_paths['pid']))
+                try:
+                    _paths['pid'].unlink(missing_ok=True)
+                except Exception:
+                    pass
+                st.session_state.c30_last_error = 'Проверка отменена'
+                st.rerun()
+        if _go:
             flags = {
                 'check_main': st.session_state.c30_check_main,
                 'check_catalog': st.session_state.c30_check_catalog,
@@ -720,7 +818,6 @@ if pid:
                 'check_products': st.session_state.c30_check_products,
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
             }
-            # Собираем все секреты в основном потоке (в фоне st.secrets недоступен)
             try:
                 _sk_hint = [k for k in list(st.secrets.keys())
                             if 'gsc' in k.lower() or pid in k.lower()]
@@ -737,44 +834,55 @@ if pid:
                 'google': get_google_accounts_credentials(pid),
                 'secret_keys_hint': _sk_hint,
             }
-            _RUNS[pid] = _run_state_new()
+            params = {'budget': budget, 'random_cities': int(random_cities), **flags}
             st.session_state.c30_results = None
             st.session_state.c30_report_path = None
             st.session_state.c30_last_error = None
-            threading.Thread(
-                target=_run_worker,
-                args=(pid, cfg, src, stats, budget, random_cities, flags, creds),
-                daemon=True,
-            ).start()
+            _launch_checklist_bg(pid, params, creds)
             st.rerun()
 
-    # ── Прогон: показываем прогресс ФОНОВОГО потока ──────────────────
-    _state = _RUNS.get(pid)
-    if _state and _state['running']:
+    # ── Прогон: прогресс фонового ПРОЦЕССА ──────────────────────────
+    _paths = _c30_paths(pid)
+    _alive = _pid_alive(_read_pidfile(_paths['pid']))
+    if _alive:
         with st.container(border=True):
             st.markdown('### ⏳ Идёт проверка')
             st.caption('Можно переключаться на другие вкладки — прогон идёт в фоне '
                        'и не прервётся.')
-            st.progress(_state['progress'], text=_state['progress_text'])
-            if st.button('⛔ Отменить проверку', key='c30_cancel'):
-                _state['cancel'] = True
-                _state['running'] = False
-                _RUNS.pop(pid, None)
-                st.session_state.c30_last_error = 'Проверка отменена'
-                st.rerun()
+            _prog, _ptext = 0.0, 'Подготовка…'
+            try:
+                _s = json.loads(_paths['status'].read_text(encoding='utf-8'))
+                _prog, _ptext = float(_s.get('progress', 0.0)), _s.get('text', '')
+            except Exception:
+                pass
+            st.progress(_prog, text=_ptext)
             with st.expander('Подробный лог', expanded=False):
-                st.code('\n'.join(_state['log'][-120:]) or '…', language='text')
+                _logtxt = ''
+                try:
+                    _logtxt = _paths['log'].read_text(encoding='utf-8', errors='ignore')
+                except Exception:
+                    pass
+                st.code('\n'.join(_logtxt.splitlines()[-120:]) or '…', language='text')
         time.sleep(1.5)
         st.rerun()
-    elif _state and not _state['running']:
-        # Прогон завершился в фоне — переносим результат и убираем состояние
-        if _state['results'] is not None:
-            st.session_state.c30_results = _state['results']
-            st.session_state.c30_report_path = _state['report_path']
-            st.session_state.c30_started_at = _state['started_at']
-            st.session_state.c30_finished_at = _state['finished_at']
-        st.session_state.c30_last_error = _state.get('error')
-        del _RUNS[pid]
+    elif _paths['result'].exists():
+        # Процесс завершился — загружаем результат из pickle (один раз)
+        try:
+            with open(_paths['result'], 'rb') as _rf:
+                _res = pickle.load(_rf)
+            if _res.get('results') is not None:
+                st.session_state.c30_results = _res['results']
+                st.session_state.c30_report_path = _res['report_path']
+                st.session_state.c30_started_at = _res['started_at']
+                st.session_state.c30_finished_at = _res['finished_at']
+            st.session_state.c30_last_error = _res.get('error')
+        except Exception as _e:
+            st.session_state.c30_last_error = f'Не удалось прочитать результат: {_e}'
+        try:
+            _paths['result'].unlink(missing_ok=True)
+            _paths['pid'].unlink(missing_ok=True)
+        except Exception:
+            pass
         st.rerun()
 
     if False:  # старый синхронный блок отключён — прогон перенесён в _run_worker
