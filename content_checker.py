@@ -77,7 +77,10 @@ class ContentResult:
 # Цена: число + ₽ (с учётом пробелов/неразрывных пробелов), либо «руб»
 _PRICE_RE = re.compile(r'\d[\d\s\u00a0]{0,12}(?:₽|руб)', re.IGNORECASE)
 _PHONE_RE = re.compile(
-    r'(?:\+7|\b8|\b7)[\s\-(]*\d{3}[\s\-)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'
+    # Беларусь: +375 (44) 588-81-48
+    r'\+375[\s\-(]*\d{2}[\s\-)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'
+    # Россия: +7/8/7 (495) 123-45-67, либо tel:74951234567 без «+»
+    r'|(?:\+7|\b8|\b7)[\s\-(]*\d{3}[\s\-)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'
 )
 _EMAIL_RE = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 # Адрес: уличные маркеры со всеми ходовыми сокращениями.
@@ -208,9 +211,17 @@ def _d_hdr_request(c: _Ctx):
 
 
 def _d_hdr_city(c: _Ctx):
+    # СМУ/ИМП.ru: текст «Город…», «Ваш город», «Выбрать город».
+    # ИМП.by: переключатель городов без слова «город» — гео-иконка
+    # (icon-geo-mark) + список городов; ловим по вёрстке.
     t = c.header_text_lower
-    # «Город: Москва изменить», «Ваш город», «выбрать город»
-    present = 'город' in t or 'выбрать город' in t
+    h = c.header_html.lower()
+    present = (
+        'город' in t or 'выбрать город' in t or 'ваш город' in t
+        or 'geo-mark' in h or 'icon-geo' in h
+        or 'select-city' in h or 'city-select' in h or 'cityselect' in h
+        or 'js-city' in h or 'choose-city' in h
+    )
     return present, None
 
 

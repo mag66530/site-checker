@@ -255,6 +255,27 @@ def test_project_absent_elements_not_shown():
     assert 'ftr_writeus' not in mpe_keys  # у МПЭ его нет
 
 
+def test_belarus_header_variant():
+    """ИМП.by: телефон +375 и переключатель городов по гео-иконке (без слова
+    «город») должны распознаваться."""
+    html = (
+        '<a href="https://inmetprom.by/">inmetprom.by</a>'
+        '<header>'
+        '<svg class="svg-icon icon-geo-mark"></svg><span>Гомель</span>'
+        '<a href="tel:+375445888148">+375 (44) 588-81-48</a>'
+        'Оставить заявку</header>'
+        '<h1>Гл</h1>'
+        '<footer><a href="tel:+375445888148">+375 (44) 588-81-48</a>'
+        '<a href="mailto:gomel@inmetprom.by">gomel@inmetprom.by</a>'
+        'ул. Советская, 1</footer>'
+    )
+    b = _by_key(check_content(html, 'main'))
+    assert b['hdr_phone'].present, 'телефон +375 должен ловиться'
+    assert b['hdr_city'].present, 'город по гео-иконке должен ловиться'
+    assert b['ftr_phone'].present
+    assert 'hdr_callback' not in b, 'у ИМП нет «Заказать звонок»'
+
+
 def test_soft_404_detected():
     """Страница отдала 200, но контент — «страница не найдена» → soft-404,
     одна проблема (404), а не «нет цены»."""
