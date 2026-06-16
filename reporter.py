@@ -10,6 +10,7 @@ reporter.py – формирование xlsx-отчёта.
   Город | Поддомен | Тип | URL | Код | Статус |
   Скорость, с | Оценка скорости | Битые переменные | Откуда перешли
 """
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -556,6 +557,77 @@ _NOTIF_CATEGORY_LABEL = {
     'other':      'Прочее',
 }
 
+# Группировка уведомлений по теме (один и тот же текст письма приходит по
+# каждому домену отдельно — схлопываем в одну строку, домены в список).
+_DOMAIN_TLDS = (
+    'ru|рф|by|com|net|org|su|info|biz|online|store|site|shop|pro'
+)
+# URL c путём целиком (group1 = host+path) — для извлечения режем по '/'.
+_URL_RE = re.compile(r'https?://([^\s,;()<>"\']+)', re.IGNORECASE)
+_HOST_RE = re.compile(
+    r'\b((?:[a-zа-я0-9](?:[a-zа-я0-9-]*[a-zа-я0-9])?\.)+(?:' + _DOMAIN_TLDS + r'))\b',
+    re.IGNORECASE,
+)
+
+
+def _extract_domains(text: str) -> list:
+    """Вытащить хосты/домены из текста темы письма (URL и «голые» хосты)."""
+    if not text:
+        return []
+    raw = [m.group(1).split('/')[0] for m in _URL_RE.finditer(text)]
+    raw += [m.group(1) for m in _HOST_RE.finditer(text)]
+    seen, out = set(), []
+    for d in raw:
+        d = d.strip('.').lower()
+        if d.startswith('www.'):
+            d = d[4:]
+        if d and d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out
+
+
+def _canon_theme(subject: str) -> str:
+    """Тема без конкретного домена/URL — ключ группировки и текст для отчёта."""
+    s = subject or ''
+    s = _URL_RE.sub('', s)
+    s = _HOST_RE.sub('', s)
+    s = re.sub(r'\s+', ' ', s).strip(' .,:;/–—-«»"\'')
+    return s or (subject or '').strip()
+
+
+def _group_notifs_by_theme(items: list) -> list:
+    """Схлопнуть письма с одинаковой темой в группы.
+
+    Возвращает список dict: theme, date (минимальная), domains (список),
+    first (репрезентативное письмо), count. Порядок — первое появление темы.
+    """
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for n in items:
+        key = _canon_theme(n.subject)
+        g = groups.get(key)
+        if g is None:
+            g = {'theme': key, 'date': n.date, 'first': n,
+                 'domains': [], 'count': 0}
+            groups[key] = g
+        g['count'] += 1
+        if n.date and (not g['date'] or n.date < g['date']):
+            g['date'] = n.date
+        for d in _extract_domains(n.subject):
+            if d not in g['domains']:
+                g['domains'].append(d)
+    return list(groups.values())
+
+
+def _notif_row_height(domains_str: str, preview: str) -> float:
+    """Высота строки под перенос длинного списка доменов / превью."""
+    import math
+    dom_lines = max(1, math.ceil(len(domains_str or '') / 50))
+    prev_lines = max(1, math.ceil(len((preview or '')[:400]) / 70))
+    lines = max(dom_lines, prev_lines)
+    return min(300, max(44, lines * 14))
+
 # Секции в порядке убывания релевантности:
 # (source_key, title, has_priority)
 _NOTIF_SECTIONS = [
@@ -579,20 +651,21 @@ def _build_notifications_sheet(wb, notifications):
 
     ws.column_dimensions['A'].width = 3
     ws.column_dimensions['B'].width = 14   # Дата
-    ws.column_dimensions['C'].width = 20   # Приоритет / пусто
-    ws.column_dimensions['D'].width = 20   # Категория / пусто
-    ws.column_dimensions['E'].width = 58   # Тема
-    ws.column_dimensions['F'].width = 70   # Превью
-    ws.column_dimensions['G'].width = 22   # Отдел
+    ws.column_dimensions['C'].width = 18   # Приоритет / пусто
+    ws.column_dimensions['D'].width = 18   # Категория / пусто
+    ws.column_dimensions['E'].width = 50   # Тема
+    ws.column_dimensions['F'].width = 42   # Домены
+    ws.column_dimensions['G'].width = 60   # Превью
+    ws.column_dimensions['H'].width = 22   # Отдел
 
     # ── Заголовок листа ──
-    ws.merge_cells('B2:G2')
+    ws.merge_cells('B2:H2')
     c = ws['B2']
     c.value = 'Уведомления из почты'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
-    ws.merge_cells('B3:G3')
+    ws.merge_cells('B3:H3')
     c = ws['B3']
     c.value = (
         'Письма от Яндекс.Вебмастера, GSC, Я.Бизнеса, 2ГИС и Google '
@@ -604,7 +677,7 @@ def _build_notifications_sheet(wb, notifications):
 
     # Пустой список – показываем заглушку и выходим
     if not notifications:
-        ws.merge_cells('B5:G5')
+        ws.merge_cells('B5:H5')
         c = ws['B5']
         c.value = ('За период проверки писем не найдено. '
                    'Если ждёте уведомления – проверьте секреты почты и пароли приложений '
@@ -629,7 +702,7 @@ def _build_notifications_sheet(wb, notifications):
             continue
 
         # ── Заголовок секции ──
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
         sc = ws.cell(row=row, column=2)
         sc.value = f'{section_title}  ({len(items)})'
         sc.font = _font(size=13, bold=True, color=C.accent)
@@ -654,7 +727,7 @@ def _build_notifications_sheet(wb, notifications):
                 p_label = _NOTIF_PRIORITY_LABEL[priority]
 
                 # Подзаголовок приоритета
-                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
                 pc = ws.cell(row=row, column=2)
                 pc.value = f'  {p_label}  ({len(p_items)})'
                 pc.font = _font(size=10, bold=True, color=p_color)
@@ -664,7 +737,7 @@ def _build_notifications_sheet(wb, notifications):
                 row += 1
 
                 # Шапка
-                for ci, h in enumerate(['Дата', 'Приоритет', 'Категория', 'Тема', 'Превью', 'Отдел'], 2):
+                for ci, h in enumerate(['Дата', 'Приоритет', 'Категория', 'Тема', 'Домены', 'Превью', 'Отдел'], 2):
                     cell = ws.cell(row=row, column=ci)
                     cell.value = h
                     cell.font = _font(size=9, bold=True, color=C.text_muted)
@@ -674,24 +747,32 @@ def _build_notifications_sheet(wb, notifications):
                 ws.row_dimensions[row].height = 20
                 row += 1
 
-                # Строки
-                for n in sorted(p_items, key=lambda x: x.date, reverse=True):
-                    ws.row_dimensions[row].height = 44
+                # Строки — одна на уникальную тему, домены отдельной колонкой
+                groups = _group_notifs_by_theme(p_items)
+                for g in sorted(groups, key=lambda x: x['date'] or '', reverse=True):
+                    n0 = g['first']
+                    domains_str = ', '.join(g['domains'])
+                    theme = g['theme']
+                    if g['count'] > 1:
+                        theme = f'{theme}  ×{g["count"]}'
+                    ws.row_dimensions[row].height = _notif_row_height(
+                        domains_str, n0.body_preview)
 
                     for ci, (val, kw) in enumerate([
-                        (n.date, {'color': C.text_soft}),
-                        (_NOTIF_PRIORITY_LABEL[n.priority], {'bold': priority == 'critical', 'color': p_color}),
-                        (_NOTIF_CATEGORY_LABEL.get(n.category, n.category), {'color': C.text_soft}),
-                        (n.subject, {'bold': priority == 'critical', 'color': p_color}),
-                        ((n.body_preview or '')[:400], {'size': 9, 'color': C.text_soft}),
-                        (_dept_notif(n), {'size': 9, 'color': C.text_soft}),
+                        (g['date'], {'color': C.text_soft}),
+                        (_NOTIF_PRIORITY_LABEL[priority], {'bold': priority == 'critical', 'color': p_color}),
+                        (_NOTIF_CATEGORY_LABEL.get(n0.category, n0.category), {'color': C.text_soft}),
+                        (theme, {'bold': priority == 'critical', 'color': p_color}),
+                        (domains_str, {'size': 9, 'color': C.text_soft}),
+                        ((n0.body_preview or '')[:400], {'size': 9, 'color': C.text_soft}),
+                        (_dept_notif(n0), {'size': 9, 'color': C.text_soft}),
                     ], 2):
                         cell = ws.cell(row=row, column=ci)
                         cell.value = val
                         cell.font = _font(**kw)
-                        cell.alignment = _align(wrap=True)
+                        cell.alignment = _align(wrap=True, vertical='top')
                         cell.border = _border(color=C.border_light)
-                        if priority == 'critical' and ci in (5, 6):
+                        if priority == 'critical' and ci in (5, 6, 7):
                             cell.fill = _fill(p_bg)
 
                     row += 1
@@ -701,7 +782,7 @@ def _build_notifications_sheet(wb, notifications):
         else:
             # ── Источник без классификации: плоский список ──
             # Шапка
-            for ci, h in enumerate(['Дата', '', '', 'Тема', 'Превью', 'Отдел'], 2):
+            for ci, h in enumerate(['Дата', '', '', 'Тема', 'Домены', 'Превью', 'Отдел'], 2):
                 cell = ws.cell(row=row, column=ci)
                 cell.value = h
                 cell.font = _font(size=9, bold=True, color=C.text_muted)
@@ -711,21 +792,29 @@ def _build_notifications_sheet(wb, notifications):
             ws.row_dimensions[row].height = 20
             row += 1
 
-            for n in sorted(items, key=lambda x: x.date, reverse=True):
-                ws.row_dimensions[row].height = 44
+            groups = _group_notifs_by_theme(items)
+            for g in sorted(groups, key=lambda x: x['date'] or '', reverse=True):
+                n0 = g['first']
+                domains_str = ', '.join(g['domains'])
+                theme = g['theme']
+                if g['count'] > 1:
+                    theme = f'{theme}  ×{g["count"]}'
+                ws.row_dimensions[row].height = _notif_row_height(
+                    domains_str, n0.body_preview)
 
                 for ci, (val, kw) in enumerate([
-                    (n.date, {'color': C.text_soft}),
+                    (g['date'], {'color': C.text_soft}),
                     ('', {}),
                     ('', {}),
-                    (n.subject, {'bold': False, 'color': C.text}),
-                    ((n.body_preview or '')[:400], {'size': 9, 'color': C.text_soft}),
-                    (_dept_notif(n), {'size': 9, 'color': C.text_soft}),
+                    (theme, {'bold': False, 'color': C.text}),
+                    (domains_str, {'size': 9, 'color': C.text_soft}),
+                    ((n0.body_preview or '')[:400], {'size': 9, 'color': C.text_soft}),
+                    (_dept_notif(n0), {'size': 9, 'color': C.text_soft}),
                 ], 2):
                     cell = ws.cell(row=row, column=ci)
                     cell.value = val
                     cell.font = _font(**kw)
-                    cell.alignment = _align(wrap=True)
+                    cell.alignment = _align(wrap=True, vertical='top')
                     cell.border = _border(color=C.border_light)
 
                 row += 1

@@ -23,6 +23,10 @@ from webmaster_notify import (
     fetch_yandex_folder_simple, fetch_google_accounts,
     load_notifications,
 )
+from metrika_404 import (
+    MAILBOX_CONFIG, fetch_incremental,
+    load_reports_for_period, get_latest_available_date,
+)
 
 REPORTS_DIR = Path(__file__).parent / 'reports'
 REPORTS_DIR.mkdir(exist_ok=True)
@@ -38,6 +42,7 @@ def run_check(pid, params, creds, log, progress):
         cfg = load_project_config(pid)
         src = load_sources(cfg)
         started_ms = out['started_at']
+        _nd = int(params.get('notify_days', 30))   # период сбора почты/404
 
         proxy_url = creds.get('proxy_url') if cfg.get('use_proxy') else None
         if cfg.get('use_proxy') and not proxy_url:
@@ -117,17 +122,20 @@ def run_check(pid, params, creds, log, progress):
         report_filename = make_report_filename(pid, started_ms, REPORTS_DIR)
         report_path = REPORTS_DIR / report_filename
         _notifs = (
-            load_notifications(pid, 'yandex_webmaster', 30)
-            + load_notifications(pid, 'gsc', 30)
-            + load_notifications(pid, 'ya_business', 30)
-            + load_notifications(pid, 'twogis', 30)
-            + load_notifications(pid, 'google_accounts', 3)
+            load_notifications(pid, 'yandex_webmaster', _nd)
+            + load_notifications(pid, 'gsc', _nd)
+            + load_notifications(pid, 'ya_business', _nd)
+            + load_notifications(pid, 'twogis', _nd)
+            + load_notifications(pid, 'google_accounts', _nd)
         )
+        _metrika_reports = load_reports_for_period(pid, _nd) or None
         build_report(
             project_name=cfg['name'], started_at_ms=started_ms,
             finished_at_ms=finished_ms,
             selected_subdomains=plan.selected_subdomains, results=results,
-            output_path=report_path, notifications=_notifs or None)
+            output_path=report_path, notifications=_notifs or None,
+            metrika_reports=_metrika_reports,
+            metrika_data_date=get_latest_available_date(pid))
 
         # Telegram
         tg_token = creds.get('tg_token')
@@ -181,7 +189,7 @@ def run_check(pid, params, creds, log, progress):
             _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
             if _yw_e and _yw_p and _yw_cfg:
                 try:
-                    fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_cfg['folder'], 30, _proxy, _nlog)
+                    fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_cfg['folder'], _nd, _proxy, _nlog)
                 except Exception as _e:
                     log(f'⚠ Вебмастер: {_e}')
             else:
@@ -191,7 +199,7 @@ def run_check(pid, params, creds, log, progress):
             if _gsc_e and _gsc_p:
                 log(f'GSC: креды найдены ({_gsc_e})…')
                 try:
-                    fetch_gsc_gmail(pid, _gsc_e, _gsc_p, 30, _nlog)
+                    fetch_gsc_gmail(pid, _gsc_e, _gsc_p, _nd, _nlog)
                 except Exception as _e:
                     log(f'⚠ GSC: {_e}')
             else:
@@ -200,40 +208,60 @@ def run_check(pid, params, creds, log, progress):
             _yab_e, _yab_p, _yab_f = creds.get('yab') or (None, None, None)
             if _yab_e and _yab_p and _yab_f:
                 try:
-                    fetch_yandex_folder_simple(pid, _yab_e, _yab_p, _yab_f, 'ya_business', 30, _proxy, _nlog)
+                    fetch_yandex_folder_simple(pid, _yab_e, _yab_p, _yab_f, 'ya_business', _nd, _proxy, _nlog)
                 except Exception as _e:
                     log(f'⚠ Я.Бизнес: {_e}')
 
             _tg_e, _tg_p, _tg_f = creds.get('twogis') or (None, None, None)
             if _tg_e and _tg_p and _tg_f:
                 try:
-                    fetch_yandex_folder_simple(pid, _tg_e, _tg_p, _tg_f, 'twogis', 30, _proxy, _nlog)
+                    fetch_yandex_folder_simple(pid, _tg_e, _tg_p, _tg_f, 'twogis', _nd, _proxy, _nlog)
                 except Exception as _e:
                     log(f'⚠ 2ГИС: {_e}')
 
             _ga_e, _ga_p = creds.get('google') or (None, None)
             if _ga_e and _ga_p:
                 try:
-                    fetch_google_accounts(pid, _ga_e, _ga_p, 3, _nlog)
+                    fetch_google_accounts(pid, _ga_e, _ga_p, _nd, _nlog)
                 except Exception as _e:
                     log(f'⚠ Google: {_e}')
 
+            # 404-отчёты из почты Метрики (та же учётка metrika_{pid}, своя папка)
+            _mb_cfg = MAILBOX_CONFIG.get(pid)
+            if _yw_e and _yw_p and _mb_cfg:
+                log(f'Метрика-404: собираю отчёты за {_nd} дн…')
+                try:
+                    _msum = fetch_incremental(
+                        project_id=pid, email_addr=_yw_e, password=_yw_p,
+                        folder=_mb_cfg['folder'], proxy_url=_proxy,
+                        lookback_days=_nd, log=_nlog)
+                    log(f'✓ Метрика-404: новых отчётов {_msum.get("fetched", 0)}')
+                except Exception as _e:
+                    log(f'⚠ Метрика-404: {_e}')
+            else:
+                log(f'⚠ Метрика-404: креды/почта не найдены (metrika_{pid}_*)')
+
             _notifs2 = (
-                load_notifications(pid, 'yandex_webmaster', 30)
-                + load_notifications(pid, 'gsc', 30)
-                + load_notifications(pid, 'ya_business', 30)
-                + load_notifications(pid, 'twogis', 30)
-                + load_notifications(pid, 'google_accounts', 3)
+                load_notifications(pid, 'yandex_webmaster', _nd)
+                + load_notifications(pid, 'gsc', _nd)
+                + load_notifications(pid, 'ya_business', _nd)
+                + load_notifications(pid, 'twogis', _nd)
+                + load_notifications(pid, 'google_accounts', _nd)
             )
-            if _notifs2:
+            _metrika_reports = load_reports_for_period(pid, _nd) or None
+            if _notifs2 or _metrika_reports:
                 build_report(
                     project_name=cfg['name'], started_at_ms=started_ms,
                     finished_at_ms=finished_ms,
                     selected_subdomains=plan.selected_subdomains, results=results,
-                    output_path=report_path, notifications=_notifs2)
-                log(f'✓ Отчёт обновлён с уведомлениями ({len(_notifs2)} шт.)')
+                    output_path=report_path, notifications=_notifs2 or None,
+                    metrika_reports=_metrika_reports,
+                    metrika_data_date=get_latest_available_date(pid))
+                _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
+                log(f'✓ Отчёт обновлён: уведомлений {len(_notifs2)}, '
+                    f'404-страниц из Метрики {_m_pages}')
             else:
-                log('Уведомлений нет — лист «Уведомления» в отчёт не добавлен.')
+                log('Уведомлений и 404-данных нет — листы в отчёт не добавлены.')
         else:
             log('Сбор уведомлений выключен.')
 
