@@ -735,12 +735,16 @@ st.markdown(
     [data-testid="stMetricLabel"] p { font-size: .8rem !important; color: #8A867F !important; }
 
     /* Пресеты как карточки (radio с подписями): клик = выбор, выбранная —
-       рамка подсвечивается; одинаковая ширина и высота, без кнопки «Выбрать». */
+       рамка подсвечивается; равные, по центру, без кружка и кнопки «Выбрать». */
     .st-key-c30_preset div[role="radiogroup"] { gap: 12px !important; align-items: stretch !important; }
+    /* прячем кружок радио — карточка кликается целиком, заголовок по центру */
+    .st-key-c30_preset div[role="radiogroup"] > label > div:first-child { display: none !important; }
     .st-key-c30_preset div[role="radiogroup"] > label {
-        flex: 1 1 0 !important; min-height: 92px; align-items: flex-start !important;
+        flex: 1 1 0 !important; min-height: 90px;
+        flex-direction: column !important; align-items: center !important;
+        justify-content: center !important; text-align: center !important; gap: 4px !important;
         background: #FFFFFF !important; border: 1px solid #DEDBD4 !important;
-        border-radius: 10px !important; padding: 14px 16px !important; margin: 0 !important;
+        border-radius: 10px !important; padding: 16px 14px !important; margin: 0 !important;
         cursor: pointer; transition: border-color .15s, background .15s;
     }
     .st-key-c30_preset div[role="radiogroup"] > label:hover {
@@ -750,14 +754,18 @@ st.markdown(
         border-color: #1A1A1A !important; background: #ECEAE4 !important;
         box-shadow: inset 0 0 0 1px #1A1A1A;
     }
-    /* Название пресета (крупнее, жирное) и подпись-расшифровка (мельче, серая) */
-    .st-key-c30_preset div[role="radiogroup"] > label p {
-        font-size: 1rem !important; font-weight: 700 !important; color: #1A1A1A !important;
+    /* Заголовок карточки — крупнее, по центру, наш шрифт */
+    .st-key-c30_preset div[role="radiogroup"] > label [data-testid="stMarkdownContainer"] p {
+        font-family: 'Hanken Grotesk', sans-serif !important;
+        font-size: 1.15rem !important; font-weight: 600 !important;
+        color: #1A1A1A !important; text-align: center !important; margin: 0 !important;
     }
+    /* Подпись снизу — мельче, БЕЗ жирности, по центру */
     .st-key-c30_preset [data-testid="stCaptionContainer"],
     .st-key-c30_preset [data-testid="stCaptionContainer"] p {
+        font-family: 'Hanken Grotesk', sans-serif !important;
         font-size: .78rem !important; font-weight: 400 !important;
-        color: #8A867F !important; line-height: 1.3 !important;
+        color: #8A867F !important; line-height: 1.35 !important; text-align: center !important;
     }
     </style>
     """,
@@ -836,7 +844,6 @@ if pid:
             c30_load_sources.clear()
             st.session_state['c30_cache_reset_done'] = True
             st.rerun()
-        st.caption('Автосброс: sitemap – раз в сутки, база с листингов – через 30 дней.')
         if st.session_state.pop('c30_cache_reset_done', False):
             st.success('Кэш очищен. При следующем прогоне товары перечитаются заново.')
 
@@ -845,6 +852,8 @@ if pid:
     _mcity = cfg.get('mandatory_city', 'Москва')
 
     def _c30_apply_preset(profile_id):
+        if profile_id not in PROFILES:
+            return
         kw = get_profile_kwargs(profile_id)
         st.session_state.c30_in_cities = kw['random_subdomains_count']
         st.session_state.c30_in_cats = kw['categories_per_subdomain']
@@ -876,14 +885,19 @@ if pid:
         st.markdown('### 1. Доступность и визуальные ошибки')
         _c30_sub('Объём проверки')
 
-        def _c30_on_preset():
-            _c30_apply_preset(st.session_state.c30_preset)
-        st.radio('Объём', ['quick', 'standard', 'full'],
-                 format_func=lambda p: PROFILES[p]['label'],
-                 captions=[_c30_breakdown('quick'), _c30_breakdown('standard'),
-                           _c30_breakdown('full')],
-                 horizontal=True, key='c30_preset', label_visibility='collapsed',
-                 on_change=_c30_on_preset)
+        # Радио-карточки пресетов. Применяем выбор в основном потоке (по
+        # возвращённому значению — оно всегда валидно), без on_change: callback
+        # иногда срабатывал со старым/чужим значением и падал.
+        _choice = st.radio('Объём', ['quick', 'standard', 'full'],
+                           format_func=lambda p: PROFILES[p]['label'],
+                           captions=[_c30_breakdown('quick'), _c30_breakdown('standard'),
+                                     _c30_breakdown('full')],
+                           horizontal=True, key='c30_preset', label_visibility='collapsed')
+        if st.session_state.get('_c30_applied') != _choice:
+            _c30_apply_preset(_choice)
+            st.session_state['_c30_applied'] = _choice
+            if st.session_state.c30_in_cities > _maxsubs:
+                st.session_state.c30_in_cities = _maxsubs
 
         with st.expander('Настроить вручную', expanded=False):
             st.caption(f'Главный город {_mcity} всегда в выборке.')
@@ -949,16 +963,16 @@ if pid:
     # БЛОК 3 — Дополнительно (видимый, без раскрывашки)
     with st.container(border=True):
         st.markdown('### Дополнительно')
-        _nf_col1, _nf_col2 = st.columns([3, 1])
+        _nf_col1, _nf_col2 = st.columns([3, 1], vertical_alignment='center')
         with _nf_col1:
             _ck_notif = st.checkbox(
                 'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 Метрики',
                 key='c30_fetch_notifications')
         with _nf_col2:
             _nd_opts = [3, 7, 14, 30]
-            st.selectbox('За сколько дней', _nd_opts,
+            st.selectbox('За период', _nd_opts,
                          format_func=lambda x: f'{x} дней', key='c30_notify_days',
-                         disabled=not _ck_notif)
+                         disabled=not _ck_notif, label_visibility='collapsed')
         st.checkbox('Добавить свой список URL', key='c30_use_custom_urls')
         if st.session_state.c30_use_custom_urls:
             st.caption('Ссылки – по одной на строку. Тип по адресу: /catalog/x/ – '
