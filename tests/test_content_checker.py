@@ -321,6 +321,25 @@ def test_hidden_price_button_is_bug():
     assert not b['btn_order'].present and 'не видит' in b['btn_order'].note
 
 
+def test_breadcrumbs_not_faked_by_css_link():
+    """Крошки не должны «находиться» по ссылке на стиль
+    (/bitrix/.../breadcrumb/.../style.css). Если самих крошек нет — это баг."""
+    css_link = ('<link href="/bitrix/components/bitrix/breadcrumb/templates/'
+                '.default/style.min.css" rel="stylesheet">')
+    # крошек на странице нет, остался только CSS-линк → баг
+    no_crumbs = (css_link + SMU_MARKER + '<h1>Категория</h1>'
+                 + CARD_WITH_PRICE * 3 + FORM_NF)
+    b = _by_key(check_content(no_crumbs, 'category'))
+    assert not b['breadcrumbs'].present, 'крошки по CSS-ссылке — ложный ✓'
+    # реальные крошки (class или schema) → present
+    with_crumbs = (css_link + SMU_MARKER
+                   + '<div class="bx-breadcrumb" itemtype="http://schema.org/BreadcrumbList">'
+                   + '<span>Главная</span></div><h1>Категория</h1>'
+                   + CARD_WITH_PRICE * 3 + FORM_NF)
+    b2 = _by_key(check_content(with_crumbs, 'category'))
+    assert b2['breadcrumbs'].present
+
+
 def test_mpe_listing_is_recognized():
     """Листинг МПЭ — другой шаблон (card-item + schema Product, цена в
     .price-row, кнопка «в корзину» в .add). Должен распознаваться как листинг

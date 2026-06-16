@@ -300,18 +300,25 @@ def _extract_stylesheet_links(html: str, base_url: str) -> list[str]:
 
 
 async def _fetch_css_text(session, url, timeout_ms, proxy_url) -> str:
-    try:
-        to = aiohttp.ClientTimeout(total=min(timeout_ms, 30000) / 1000)
-        async with session.get(url, timeout=to, allow_redirects=True,
-                               proxy=proxy_url) as r:
-            if r.status != 200:
-                return ''
-            data = await r.read()
-            if len(data) > _MAX_CSS_BYTES:
-                data = data[:_MAX_CSS_BYTES]
-            return data.decode('utf-8', errors='replace')
-    except Exception:
-        return ''
+    # Пара попыток: один сбой/таймаут на стиль не должен «ослеплять» проверку
+    # видимости для всего домена (цена/кнопка тогда ложно считаются видимыми).
+    to = aiohttp.ClientTimeout(total=min(timeout_ms, 30000) / 1000)
+    for attempt in range(2):
+        try:
+            async with session.get(url, timeout=to, allow_redirects=True,
+                                   proxy=proxy_url) as r:
+                if r.status != 200:
+                    return ''          # 401/403/404 — повтор не поможет
+                data = await r.read()
+                if len(data) > _MAX_CSS_BYTES:
+                    data = data[:_MAX_CSS_BYTES]
+                return data.decode('utf-8', errors='replace')
+        except Exception:
+            if attempt == 0:
+                await asyncio.sleep(0.5)
+                continue
+            return ''
+    return ''
 
 
 async def _css_sel_for_url(session, url, timeout_ms, proxy_url, cache, locks, guard):

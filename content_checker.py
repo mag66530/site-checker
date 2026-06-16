@@ -466,14 +466,17 @@ def _d_h2(c: _Ctx):
     return n > 0, n
 
 
+# Крошки ищем ТОЛЬКО в реальной разметке элемента (class/id/aria/itemtype), а
+# не где попало: иначе слово breadcrumb из href подключённого стиля
+# (/bitrix/.../breadcrumb/.../style.css) даёт ложный «✓», даже когда самих
+# крошек на странице нет (их «вшили» в H1). Так было — коллега это поймала.
+_RE_BREADCRUMB = re.compile(r'(?:class|id|aria-label|itemtype)="[^"]*breadcrumb', re.I)
+
+
 def _d_breadcrumbs(c: _Ctx):
-    # Микроразметка BreadcrumbList или класс/атрибут breadcrumb —
-    # практически универсальный признак хлебных крошек.
-    present = (
-        'breadcrumb' in c.html_lower
-        or 'breadcrumblist' in c.html_lower
-    )
-    return present, None
+    # Микроразметка BreadcrumbList или класс/атрибут breadcrumb на реальном
+    # элементе — практически универсальный признак хлебных крошек.
+    return bool(_RE_BREADCRUMB.search(c.html_lower)), None
 
 
 # ── Шапка: обязательные элементы (проверяются ВНУТРИ региона шапки) ──
