@@ -647,10 +647,24 @@ def _review_rating_cell(rating):
         return f'{stars} Средний', C.warn
     return f'{stars} Плохой', C.err
 
+
+# Отдел для ошибки сервиса (Вебмастер-API): серверное → разработка, иначе SEO.
+def _dept_service_issue(i) -> str:
+    code = (getattr(i, 'code', '') or '').upper()
+    if any(k in code for k in ('SERVER', 'DNS', 'SLOW', 'RESPONSE', 'THREAT',
+                               'SITE_NOT_LOADED', 'SITE_ERROR', '5XX')):
+        return 'разработка'
+    return 'SEO'
+
+
+_SEV2PRIO = {'fatal': 'critical', 'critical': 'critical', 'possible': 'important',
+             'recommendation': 'recommendation', 'info': 'info'}
+
+
 # Секции в порядке убывания релевантности:
 # (source_key, title, has_priority)
 _NOTIF_SECTIONS = [
-    ('yandex_webmaster', 'Яндекс.Вебмастер',       True),
+    ('yandex_webmaster', 'Вебмастер. Почта',        True),
     ('gsc',              'Google Search Console',   True),
     ('ya_business',      'Я.Бизнес',                False),
     ('twogis',           '2ГИС',                    False),
@@ -658,14 +672,18 @@ _NOTIF_SECTIONS = [
 ]
 
 
-def _build_notifications_sheet(wb, notifications):
-    """Лист «Уведомления» – письма по источникам, структурированные секциями.
-    Лист добавляется всегда: при пустом списке показывает заглушку."""
+def _build_notifications_sheet(wb, notifications, service_issues=None):
+    """Лист «Уведомления» – письма по источникам + ошибки прямо из сервисов
+    (Вебмастер по API). Структурирован секциями. Добавляется всегда: при
+    пустых данных показывает заглушку."""
     notifications = notifications or []
+    service_issues = service_issues or []
     ws = wb.create_sheet('Уведомления')
     ws.sheet_view.showGridLines = False
 
-    has_critical = any(n.priority == 'critical' for n in notifications)
+    has_critical = (any(n.priority == 'critical' for n in notifications)
+                    or any(getattr(i, 'severity', '') in ('fatal', 'critical')
+                           for i in service_issues))
     ws.sheet_properties.tabColor = C.err if has_critical else C.accent
 
     ws.column_dimensions['A'].width = 3
@@ -680,7 +698,7 @@ def _build_notifications_sheet(wb, notifications):
     # ── Заголовок листа ──
     ws.merge_cells('B2:H2')
     c = ws['B2']
-    c.value = 'Уведомления из почты'
+    c.value = 'Уведомления'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
@@ -694,8 +712,8 @@ def _build_notifications_sheet(wb, notifications):
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 24
 
-    # Пустой список – показываем заглушку и выходим
-    if not notifications:
+    # Нет ни писем, ни ошибок сервисов – показываем заглушку и выходим
+    if not notifications and not service_issues:
         ws.merge_cells('B5:H5')
         c = ws['B5']
         c.value = ('За период проверки писем не найдено. '
@@ -886,6 +904,84 @@ def _build_notifications_sheet(wb, notifications):
                 row += 1
 
         row += 2  # пробел между секциями
+
+    # ── Секция «Вебмастер» — ошибки прямо из сервиса (API), не из почты ──
+    if service_issues:
+        from collections import defaultdict as _dd
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+        sc = ws.cell(row=row, column=2)
+        sc.value = f'Вебмастер  ({len(service_issues)})'
+        sc.font = _font(size=13, bold=True, color=C.accent)
+        sc.fill = _fill(C.accent_soft)
+        sc.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+
+        prio_groups = _dd(list)
+        for i in service_issues:
+            prio_groups[_SEV2PRIO.get(getattr(i, 'severity', 'info'), 'info')].append(i)
+
+        for priority in _NOTIF_PRIORITY_ORDER:
+            p_items = prio_groups.get(priority, [])
+            if not p_items:
+                continue
+            p_color = _NOTIF_PRIORITY_COLOR[priority]
+            p_bg = _NOTIF_PRIORITY_BG[priority]
+            p_label = _NOTIF_PRIORITY_LABEL[priority]
+
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+            pc = ws.cell(row=row, column=2)
+            pc.value = f'  {p_label}  ({len(p_items)})'
+            pc.font = _font(size=10, bold=True, color=p_color)
+            pc.fill = _fill(p_bg)
+            pc.alignment = _align(indent=2)
+            ws.row_dimensions[row].height = 20
+            row += 1
+
+            for ci, h in enumerate(['Дата', 'Серьёзность', 'Категория', 'Проблема',
+                                    'Сайт', 'Открыть', 'Отдел'], 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = h
+                cell.font = _font(size=9, bold=True, color=C.text_muted)
+                cell.fill = _fill(C.surface)
+                cell.alignment = _align()
+                cell.border = _border()
+            ws.row_dimensions[row].height = 20
+            row += 1
+
+            for i in sorted(p_items, key=lambda x: getattr(x, 'host', '')):
+                ws.row_dimensions[row].height = 30
+                for ci, (val, kw) in enumerate([
+                    (getattr(i, 'date', ''), {'color': C.text_soft}),
+                    (p_label, {'bold': priority == 'critical', 'color': p_color}),
+                    ('Диагностика', {'color': C.text_soft}),
+                    (getattr(i, 'title', '') or getattr(i, 'code', ''),
+                     {'bold': priority == 'critical', 'color': p_color}),
+                    (getattr(i, 'host', ''), {'size': 9, 'color': C.text_soft}),
+                    ('', {}),   # ссылка проставляется ниже
+                    (_dept_service_issue(i), {'size': 9, 'color': C.text_soft}),
+                ], 2):
+                    cell = ws.cell(row=row, column=ci)
+                    cell.value = val
+                    cell.font = _font(**kw)
+                    cell.alignment = _align(wrap=True, vertical='top')
+                    cell.border = _border(color=C.border_light)
+
+                lc = ws.cell(row=row, column=7)   # «Открыть» (Превью-колонка)
+                _u = getattr(i, 'url', '')
+                if _u:
+                    lc.value = 'открыть'
+                    lc.hyperlink = _u
+                    lc.font = _font(size=9, color=C.accent, underline='single')
+                else:
+                    lc.value = '–'
+                    lc.font = _font(size=9, color=C.text_muted)
+                lc.alignment = _align(vertical='top')
+                lc.border = _border(color=C.border_light)
+                row += 1
+
+            row += 1
+        row += 2
 
 
 # ── Лист «Ошибки сервисов» (Вебмастер/GSC/Метрика — из API) ─────────
@@ -1764,11 +1860,9 @@ def build_report(
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 5: Уведомления (Вебмастер + GSC) – если есть данные
     # ═══════════════════════════════════════════════════════════════
-    # Лист «Уведомления» добавляем всегда (при пустом списке – заглушка).
-    _build_notifications_sheet(wb, notifications)
-
-    # ЛИСТ 6: «Ошибки сервисов» (Вебмастер/GSC/Метрика из API) — если есть.
-    _build_service_issues_sheet(wb, service_issues)
+    # Лист «Уведомления» добавляем всегда (при пустых данных – заглушка).
+    # Сюда же идут ошибки из Вебмастера по API (секция «Вебмастер»).
+    _build_notifications_sheet(wb, notifications, service_issues)
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)
