@@ -308,6 +308,29 @@ def test_product_without_price_is_bug():
     assert any(bug.key == 'price' for bug in r.bugs)
 
 
+def test_hidden_disabled_price_button_is_bug():
+    """Цена и кнопка СПРЯТАНЫ (disabled) → покупатель их не видит → баг
+    с пояснением «в коде есть, но покупатель не видит»."""
+    html = (COMMON + SMU_MARKER
+            + '<div class="cost-block disabled"><div class="cost-val">3 627 руб.</div></div>'
+            + '<div class="card-item-add-no-cart-block disabled">'
+            + '<div class="one-click-to-buy">Купить в один клик</div></div>'
+            + '<div>Характеристики</div>')
+    b = _by_key(check_content(html, 'product'))
+    assert not b['price'].present and 'не видит' in b['price'].note
+    assert not b['btn_order'].present and 'не видит' in b['btn_order'].note
+
+
+def test_visible_price_button_ok():
+    """Видимые цена и кнопка → без багов."""
+    html = (COMMON + SMU_MARKER
+            + '<div class="cost-val">3 627 руб.</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>'
+            + '<div>Характеристики</div>')
+    b = _by_key(check_content(html, 'product'))
+    assert b['price'].present and b['btn_order'].present
+
+
 def test_product_price_ignores_recommendations_block():
     """На карточке товара «Цена по запросу» из блока «с этим товаром покупают»
     не должна примешиваться к цене самого товара (там одна цена)."""

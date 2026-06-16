@@ -25,9 +25,86 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from typing import Optional, Callable
 
 from text_checker import html_to_visible_text
+
+
+# ── Вырезание скрытого/отключённого (то, чего покупатель НЕ видит) ───
+# Цена/кнопка, спрятанные через disabled / display:none / hidden и т.п.,
+# для покупателя всё равно что отсутствуют — поэтому такие поддеревья
+# выкидываем и считаем контент только по видимой части.
+
+_HIDDEN_CLASSES = {
+    'disabled', 'd-none', 'hidden', 'is-hidden', 'hide', 'invisible',
+    'sr-only', 'visually-hidden', 'visuallyhidden',
+}
+_VOID_TAGS = {
+    'img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'area',
+    'base', 'col', 'embed', 'param', 'track', 'wbr',
+}
+
+
+class _VisibleHTML(HTMLParser):
+    """Собирает HTML только из ВИДИМЫХ элементов (скрытые поддеревья — мимо)."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.skip = 0
+
+    @staticmethod
+    def _hidden(attrs) -> bool:
+        d = {k: (v or '') for k, v in attrs}
+        if 'hidden' in d:
+            return True
+        style = d.get('style', '').lower().replace(' ', '')
+        if any(x in style for x in ('display:none', 'visibility:hidden', 'opacity:0')):
+            return True
+        cls = set(d.get('class', '').lower().split())
+        return bool(cls & _HIDDEN_CLASSES)
+
+    def handle_starttag(self, tag, attrs):
+        if self.skip:
+            if tag not in _VOID_TAGS:
+                self.skip += 1
+            return
+        if tag in ('script', 'style', 'noscript', 'template'):
+            self.skip = 1
+            return
+        if self._hidden(attrs):
+            if tag not in _VOID_TAGS:
+                self.skip = 1
+            return
+        cls = dict(attrs).get('class', '') or ''
+        self.parts.append(f'<{tag} class="{cls}">')
+
+    def handle_startendtag(self, tag, attrs):
+        if self.skip or self._hidden(attrs):
+            return
+        self.parts.append(f'<{tag}>')
+
+    def handle_endtag(self, tag):
+        if self.skip:
+            if tag not in _VOID_TAGS:
+                self.skip -= 1
+            return
+        self.parts.append(f'</{tag}>')
+
+    def handle_data(self, data):
+        if not self.skip:
+            self.parts.append(data)
+
+
+def _strip_hidden(html: str) -> str:
+    """HTML → только видимая часть (без disabled/display:none/hidden поддеревьев)."""
+    try:
+        p = _VisibleHTML()
+        p.feed(html)
+        return ''.join(p.parts)
+    except Exception:
+        return html
 
 
 # ── Результаты ──────────────────────────────────────────────────────
@@ -157,6 +234,10 @@ class _Ctx:
     # прочих типах = весь текст страницы.
     price_text: str = ''
     price_text_lower: str = ''
+    # «Видимая» часть страницы (без disabled/скрытых блоков) — для цены и
+    # кнопок: то, что покупатель реально видит. Скрытая цена/кнопка = её нет.
+    vis_html_lower: str = ''
+    vis_text_lower: str = ''
 
 
 # ── Детекторы. Возвращают (present: bool, count: Optional[int]) ──────
@@ -300,23 +381,23 @@ def _d_btn_cart(c: _Ctx):
     # ИМП — кнопка add-to-cart-btn; МПЭ — popup_form («Заявка», «Расчитать
     # заказ» открывают форму). Ловим по вёрстке и по тексту.
     present = (
-        'card-item-add-to-cart-block' in c.html_lower
-        or 'an-ico-basket' in c.html_lower
-        or 'add-to-cart-btn' in c.html_lower
-        or 'popup_form' in c.html_lower
-        or 'в корзину' in c.text_lower
+        'card-item-add-to-cart-block' in c.vis_html_lower
+        or 'an-ico-basket' in c.vis_html_lower
+        or 'add-to-cart-btn' in c.vis_html_lower
+        or 'popup_form' in c.vis_html_lower
+        or 'в корзину' in c.vis_text_lower
     )
     return present, None
 
 
 def _d_btn_add_cart(c: _Ctx):
     present = (
-        'добавить в корзину' in c.text_lower
-        or 'в корзину' in c.text_lower
-        or 'card-item-add-to-cart-block' in c.html_lower
-        or 'an-ico-basket' in c.html_lower
-        or 'add-to-cart-btn' in c.html_lower
-        or 'popup_form' in c.html_lower
+        'добавить в корзину' in c.vis_text_lower
+        or 'в корзину' in c.vis_text_lower
+        or 'card-item-add-to-cart-block' in c.vis_html_lower
+        or 'an-ico-basket' in c.vis_html_lower
+        or 'add-to-cart-btn' in c.vis_html_lower
+        or 'popup_form' in c.vis_html_lower
     )
     return present, None
 
@@ -324,9 +405,9 @@ def _d_btn_add_cart(c: _Ctx):
 def _d_btn_oneclick(c: _Ctx):
     # «Купить в один клик»: текст в карточке + класс кнопки one-click.
     present = (
-        'в один клик' in c.text_lower
-        or 'one-click-to-buy' in c.html_lower
-        or 'an-ico-one-click' in c.html_lower
+        'в один клик' in c.vis_text_lower
+        or 'one-click-to-buy' in c.vis_html_lower
+        or 'an-ico-one-click' in c.vis_html_lower
     )
     return present, None
 
@@ -649,13 +730,20 @@ def check_content(html: str, type_code: str) -> ContentResult:
     ctx.footer_text = html_to_visible_text(ctx.footer_html)
     ctx.footer_text_lower = ctx.footer_text.lower()
 
-    # «Ценовая» область. На карточке товара цена одна — но внизу есть блок
-    # «с этим товаром покупают / похожие», где у чужих карточек бывает
-    # «Цена по запросу». Чтобы это не примешивалось к цене самого товара,
-    # на product берём текст ДО первого блока рекомендаций. На остальных
-    # типах (листинг и т.д.) ценовая область = весь текст.
-    ctx.price_text = ctx.text
-    ctx.price_text_lower = ctx.text_lower
+    # Видимая часть страницы (без disabled/скрытых блоков) — то, что реально
+    # видит покупатель. Цена/кнопка считаются ТОЛЬКО по ней: скрытая или
+    # отключённая цена/кнопка для покупателя всё равно что отсутствует.
+    visible_html = _strip_hidden(html)
+    visible_text = html_to_visible_text(visible_html)
+    ctx.vis_html_lower = visible_html.lower()
+    ctx.vis_text_lower = visible_text.lower()
+
+    # «Ценовая» область (по видимому тексту). На карточке товара цена одна —
+    # но внизу есть блок «с этим товаром покупают / похожие», где у чужих
+    # карточек бывает «Цена по запросу». Чтобы это не примешивалось к цене
+    # самого товара, на product берём текст ДО первого блока рекомендаций.
+    ctx.price_text = visible_text
+    ctx.price_text_lower = ctx.vis_text_lower
     if type_code == 'product':
         _related = (
             'с этим товаром', 'с этими товарами', 'с этим покупают',
@@ -664,13 +752,13 @@ def check_content(html: str, type_code: str) -> ContentResult:
             'вместе с этим', 'аналогичные товар', 'вам может понадоб',
             'с этим часто',
         )
-        cut = len(ctx.text_lower)
+        cut = len(ctx.vis_text_lower)
         for _m in _related:
-            i = ctx.text_lower.find(_m)
+            i = ctx.vis_text_lower.find(_m)
             if 0 <= i < cut:
                 cut = i
-        ctx.price_text = ctx.text[:cut]
-        ctx.price_text_lower = ctx.text_lower[:cut]
+        ctx.price_text = visible_text[:cut]
+        ctx.price_text_lower = ctx.vis_text_lower[:cut]
 
     # Подтип страницы-списка (категория / тег) — определяем по вёрстке:
     #   listing — есть карточки товаров (catalog-product-card-item) → строгая
@@ -736,6 +824,20 @@ def check_content(html: str, type_code: str) -> ContentResult:
     else:
         absent = {'form_nf'}
 
+    # Для пояснения «почему нет»: было ли это в коде (включая скрытое), но
+    # покупатель не видит. ctx.text/html_lower — весь код; видимость уже учтена
+    # в детекторах (они смотрят vis_*). Если в коде есть, а present=False —
+    # значит скрыто/отключено.
+    raw_has_price = bool(_PRICE_RE.search(ctx.text)) or 'по запросу' in ctx.text_lower
+    raw_has_btn = (
+        'card-item-add-to-cart-block' in ctx.html_lower
+        or 'card-item-add-no-cart-block' in ctx.html_lower
+        or 'an-ico-basket' in ctx.html_lower or 'add-to-cart-btn' in ctx.html_lower
+        or 'one-click-to-buy' in ctx.html_lower or 'an-ico-one-click' in ctx.html_lower
+        or 'popup_form' in ctx.html_lower
+        or 'в корзину' in ctx.text_lower or 'в один клик' in ctx.text_lower
+    )
+
     for blk in _profile_for(type_code, page_kind):
         if blk.key in absent:
             continue        # этого элемента у проекта нет по дизайну — не показываем
@@ -748,6 +850,14 @@ def check_content(html: str, type_code: str) -> ContentResult:
         # может не быть (например, главная каталога ИМП) — это не баг.
         if type_code == 'catalog' and blk.key == 'breadcrumbs':
             required = False
+        # Пояснение к багу цены/кнопки: «есть в коде, но покупатель не видит»
+        # (скрыто/disabled) vs просто «нет».
+        note = ''
+        if required and not present:
+            if blk.key == 'price' and raw_has_price:
+                note = 'в коде есть, но покупатель не видит (скрыто/disabled)'
+            elif blk.key == 'btn_order' and raw_has_btn:
+                note = 'в коде есть, но покупатель не видит (скрыто/disabled)'
         result.blocks.append(BlockResult(
             key=blk.key,
             label=blk.label,
@@ -755,6 +865,7 @@ def check_content(html: str, type_code: str) -> ContentResult:
             present=bool(present),
             count=count,
             description=BLOCK_DESCRIPTIONS.get(blk.key, ''),
+            note=note,
         ))
 
     return result
