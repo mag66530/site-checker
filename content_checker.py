@@ -151,6 +151,12 @@ class _Ctx:
     footer_html: str = ''
     footer_text: str = ''
     footer_text_lower: str = ''
+    # «Ценовая» область: на карточке товара — текст ДО блока рекомендаций
+    # («с этим товаром покупают», «похожие»), чтобы цена/«по запросу» из
+    # чужих карточек снизу не считались ценой самого товара. На листинге и
+    # прочих типах = весь текст страницы.
+    price_text: str = ''
+    price_text_lower: str = ''
 
 
 # ── Детекторы. Возвращают (present: bool, count: Optional[int]) ──────
@@ -259,23 +265,22 @@ def _d_ftr_address(c: _Ctx):
 
 def _d_price(c: _Ctx):
     # Число с ₽/руб (товар с ценой) ИЛИ «по запросу» (товар без цены).
-    # На сайте «Цена по запросу» свёрстана с неразрывным пробелом, поэтому
-    # ищем устойчивое «по запросу», а не всю фразу целиком.
+    # Ищем в «ценовой» области (на карточке — без блока рекомендаций снизу).
     present = (
-        bool(_PRICE_RE.search(c.text))
-        or 'по запросу' in c.text_lower
+        bool(_PRICE_RE.search(c.price_text))
+        or 'по запросу' in c.price_text_lower
     )
     return present, None
 
 
 def _d_price_real(c: _Ctx):
-    # Настоящая цена — число с ₽/руб.
-    return bool(_PRICE_RE.search(c.text)), None
+    # Настоящая цена — число с ₽/руб (в ценовой области).
+    return bool(_PRICE_RE.search(c.price_text)), None
 
 
 def _d_price_request(c: _Ctx):
-    # «Цена по запросу» — товар без цены (свёрстано с неразрывным пробелом).
-    return 'по запросу' in c.text_lower, None
+    # «Цена по запросу» — товар без цены (в ценовой области).
+    return 'по запросу' in c.price_text_lower, None
 
 
 def _d_tag_tiles(c: _Ctx):
@@ -643,6 +648,29 @@ def check_content(html: str, type_code: str) -> ContentResult:
     ctx.footer_html = _extract_region(html, 'footer', 'bottom')
     ctx.footer_text = html_to_visible_text(ctx.footer_html)
     ctx.footer_text_lower = ctx.footer_text.lower()
+
+    # «Ценовая» область. На карточке товара цена одна — но внизу есть блок
+    # «с этим товаром покупают / похожие», где у чужих карточек бывает
+    # «Цена по запросу». Чтобы это не примешивалось к цене самого товара,
+    # на product берём текст ДО первого блока рекомендаций. На остальных
+    # типах (листинг и т.д.) ценовая область = весь текст.
+    ctx.price_text = ctx.text
+    ctx.price_text_lower = ctx.text_lower
+    if type_code == 'product':
+        _related = (
+            'с этим товаром', 'с этими товарами', 'с этим покупают',
+            'похожие товар', 'похожие предложения', 'сопутствующ',
+            'рекомендуем', 'рекомендованные', 'смотрите также',
+            'вместе с этим', 'аналогичные товар', 'вам может понадоб',
+            'с этим часто',
+        )
+        cut = len(ctx.text_lower)
+        for _m in _related:
+            i = ctx.text_lower.find(_m)
+            if 0 <= i < cut:
+                cut = i
+        ctx.price_text = ctx.text[:cut]
+        ctx.price_text_lower = ctx.text_lower[:cut]
 
     # Подтип страницы-списка (категория / тег) — определяем по вёрстке:
     #   listing — есть карточки товаров (catalog-product-card-item) → строгая

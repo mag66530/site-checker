@@ -308,6 +308,17 @@ def test_product_without_price_is_bug():
     assert any(bug.key == 'price' for bug in r.bugs)
 
 
+def test_product_price_ignores_recommendations_block():
+    """На карточке товара «Цена по запросу» из блока «с этим товаром покупают»
+    не должна примешиваться к цене самого товара (там одна цена)."""
+    html = (COMMON + SMU_MARKER
+            + '<div>Цена за 1 кг 3 627.00 руб. <button>В корзину</button> Характеристики</div>'
+            + '<div>С этим товаром покупают: Свинец Цена по запросу. Цинк Цена по запросу.</div>')
+    b = _by_key(check_content(html, 'product'))
+    assert b['price_real'].present
+    assert not b['price_request'].present
+
+
 # ── Описания столбцов ────────────────────────────────────────────────
 
 
