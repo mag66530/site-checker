@@ -11,7 +11,8 @@ from sources import (
 def test_list_projects():
     projects = list_projects()
     ids = {p['id'] for p in projects}
-    assert ids == {'smu', 'imp', 'mpe'}, f"Ожидалось smu/imp/mpe, получили {ids}"
+    # Базовые проекты должны быть; могут быть и доп. (напр. smu-test — тестовый стенд)
+    assert {'smu', 'imp', 'mpe'} <= ids, f"Нет базовых проектов, получили {ids}"
     print(f'✓ list_projects: {len(projects)} проектов ({", ".join(sorted(ids))})')
 
 
