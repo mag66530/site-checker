@@ -661,6 +661,31 @@ _SEV2PRIO = {'fatal': 'critical', 'critical': 'critical', 'possible': 'important
              'recommendation': 'recommendation', 'info': 'info'}
 
 
+def _group_service_issues(items: list) -> list:
+    """Схлопнуть ошибки сервиса по одной проблеме: один и тот же тип проблемы
+    приходит по каждому сайту отдельно — собираем сайты в список.
+    Возвращает dict: title, code, hosts (список), date (мин), count, first."""
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for i in items:
+        title = getattr(i, 'title', '') or getattr(i, 'code', '')
+        key = (title, getattr(i, 'code', ''))
+        g = groups.get(key)
+        if g is None:
+            g = {'title': title, 'code': getattr(i, 'code', ''),
+                 'hosts': [], 'date': getattr(i, 'date', ''),
+                 'count': 0, 'first': i}
+            groups[key] = g
+        g['count'] += 1
+        host = getattr(i, 'host', '')
+        if host and host not in g['hosts']:
+            g['hosts'].append(host)
+        d = getattr(i, 'date', '')
+        if d and (not g['date'] or d < g['date']):
+            g['date'] = d
+    return list(groups.values())
+
+
 # Секции в порядке убывания релевантности:
 # (source_key, title, has_priority)
 _NOTIF_SECTIONS = [
@@ -908,9 +933,12 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
     # ── Секция «Вебмастер» — ошибки прямо из сервиса (API), не из почты ──
     if service_issues:
         from collections import defaultdict as _dd
+        _n_problems = len(_group_service_issues(service_issues))
+        _n_hosts = len({getattr(i, 'host', '') for i in service_issues})
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
         sc = ws.cell(row=row, column=2)
-        sc.value = f'Вебмастер  ({len(service_issues)})'
+        sc.value = (f'Вебмастер  ({_n_problems} проблем на {_n_hosts} сайтах, '
+                    f'{len(service_issues)} всего)')
         sc.font = _font(size=13, bold=True, color=C.accent)
         sc.fill = _fill(C.accent_soft)
         sc.alignment = _align(indent=1)
@@ -938,8 +966,9 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
             ws.row_dimensions[row].height = 20
             row += 1
 
+            # Шапка: одна строка на проблему, сайты — списком в одной колонке
             for ci, h in enumerate(['Дата', 'Серьёзность', 'Категория', 'Проблема',
-                                    'Сайт', 'Открыть', 'Отдел'], 2):
+                                    'Сайты', 'Кол-во', 'Отдел'], 2):
                 cell = ws.cell(row=row, column=ci)
                 cell.value = h
                 cell.font = _font(size=9, bold=True, color=C.text_muted)
@@ -949,35 +978,26 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
             ws.row_dimensions[row].height = 20
             row += 1
 
-            for i in sorted(p_items, key=lambda x: getattr(x, 'host', '')):
-                ws.row_dimensions[row].height = 30
+            groups = _group_service_issues(p_items)
+            for g in sorted(groups, key=lambda x: x['count'], reverse=True):
+                hosts_str = ', '.join(g['hosts'])
+                ws.row_dimensions[row].height = _notif_row_height(hosts_str, '')
                 for ci, (val, kw) in enumerate([
-                    (getattr(i, 'date', ''), {'color': C.text_soft}),
+                    (g['date'], {'color': C.text_soft}),
                     (p_label, {'bold': priority == 'critical', 'color': p_color}),
                     ('Диагностика', {'color': C.text_soft}),
-                    (getattr(i, 'title', '') or getattr(i, 'code', ''),
-                     {'bold': priority == 'critical', 'color': p_color}),
-                    (getattr(i, 'host', ''), {'size': 9, 'color': C.text_soft}),
-                    ('', {}),   # ссылка проставляется ниже
-                    (_dept_service_issue(i), {'size': 9, 'color': C.text_soft}),
+                    (g['title'], {'bold': priority == 'critical', 'color': p_color}),
+                    (hosts_str, {'size': 9, 'color': C.text_soft}),
+                    (len(g['hosts']), {'size': 10, 'bold': True, 'color': C.text_soft}),
+                    (_dept_service_issue(g['first']), {'size': 9, 'color': C.text_soft}),
                 ], 2):
                     cell = ws.cell(row=row, column=ci)
                     cell.value = val
                     cell.font = _font(**kw)
-                    cell.alignment = _align(wrap=True, vertical='top')
+                    cell.alignment = _align(
+                        wrap=True, vertical='top',
+                        horizontal='center' if ci == 7 else 'general')
                     cell.border = _border(color=C.border_light)
-
-                lc = ws.cell(row=row, column=7)   # «Открыть» (Превью-колонка)
-                _u = getattr(i, 'url', '')
-                if _u:
-                    lc.value = 'открыть'
-                    lc.hyperlink = _u
-                    lc.font = _font(size=9, color=C.accent, underline='single')
-                else:
-                    lc.value = '–'
-                    lc.font = _font(size=9, color=C.text_muted)
-                lc.alignment = _align(vertical='top')
-                lc.border = _border(color=C.border_light)
                 row += 1
 
             row += 1
