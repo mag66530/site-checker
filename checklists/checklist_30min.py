@@ -733,6 +733,26 @@ st.markdown(
     /* Метрики каталога — числа крупные, подписи спокойные (ровный ряд) */
     [data-testid="stMetricValue"] { font-size: 1.7rem !important; }
     [data-testid="stMetricLabel"] p { font-size: .8rem !important; color: #8A867F !important; }
+
+    /* Пресеты как карточки (radio): клик по карточке = выбор, выбранная —
+       рамка подсвечивается; отдельной кнопки «Выбрать» нет. */
+    .st-key-c30_preset div[role="radiogroup"] { gap: 12px !important; }
+    .st-key-c30_preset div[role="radiogroup"] > label {
+        flex: 1 1 0 !important; justify-content: center !important; text-align: center;
+        background: #FFFFFF !important; border: 1px solid #DEDBD4 !important;
+        border-radius: 10px !important; padding: 16px 12px !important; margin: 0 !important;
+        cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .st-key-c30_preset div[role="radiogroup"] > label:hover {
+        border-color: #B9B2A6 !important; background: #FBFAF8 !important;
+    }
+    .st-key-c30_preset div[role="radiogroup"] > label:has(input:checked) {
+        border-color: #1A1A1A !important; background: #ECEAE4 !important;
+        box-shadow: inset 0 0 0 1px #1A1A1A;
+    }
+    .st-key-c30_preset div[role="radiogroup"] > label p {
+        font-size: .92rem !important; color: #1A1A1A !important; font-weight: 600 !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -802,19 +822,15 @@ if pid:
             _m4.metric('Товаров',
                        f'{_pinfo["count"]:,}'.replace(',', ' ') if _pinfo and _pinfo.get('count') else '–',
                        help='Из sitemap.xml (или соберите базу collect_products.py).')
-        st.caption(f'Главный город (всегда в выборке): **{cfg.get("mandatory_city", "Москва")}**.')
-        _rc1, _rc2 = st.columns([1, 2])
-        with _rc1:
-            if st.button('♻ Сбросить кэш товаров', key='c30_reset_cache',
-                         help='Очищает локальный кэш приложения (sitemap + каталог). '
-                              'При следующем прогоне всё перечитается заново. База в '
-                              'репозитории не трогается.'):
-                invalidate_sitemap_cache(pid)
-                c30_load_sources.clear()
-                st.session_state['c30_cache_reset_done'] = True
-                st.rerun()
-        with _rc2:
-            st.caption('Автосброс: sitemap – раз в сутки, база с листингов – через 30 дней.')
+        st.caption(f'Главный город (всегда в выборке): {cfg.get("mandatory_city", "Москва")}.')
+        if st.button('Сбросить кэш товаров', key='c30_reset_cache',
+                     help='Очищает локальный кэш (sitemap + каталог); при следующем '
+                          'прогоне всё перечитается. База в репозитории не трогается.'):
+            invalidate_sitemap_cache(pid)
+            c30_load_sources.clear()
+            st.session_state['c30_cache_reset_done'] = True
+            st.rerun()
+        st.caption('Автосброс: sitemap – раз в сутки, база с листингов – через 30 дней.')
         if st.session_state.pop('c30_cache_reset_done', False):
             st.success('Кэш очищен. При следующем прогоне товары перечитаются заново.')
 
@@ -849,31 +865,30 @@ if pid:
                    + kw['products_per_subdomain'])
             return cities * per
 
-        # Три карточки-пресета: рамка, по центру название + объём·время, кнопка.
-        _proxy_mult = 1.3 if cfg.get('use_proxy') else 1.0
-        _names = {'quick': 'Быстрая', 'standard': 'Стандартная', 'full': 'Полная'}
-        for _col, (_pid, _icon) in zip(
-                st.columns(3), [('quick', '⚡'), ('standard', '◐'), ('full', '✦')]):
-            with _col:
-                with st.container(border=True):
-                    _n = _c30_preset_total(_pid)
-                    _t = format_duration(max(20, int((_n / 6) * 5 * _proxy_mult * 1.2)))
-                    st.markdown(
-                        f'<div style="text-align:center;line-height:1.3;padding:2px 0 8px">'
-                        f'<div style="font-size:1.1rem;font-weight:700;color:#1A1A1A">{_icon} {_names[_pid]}</div>'
-                        f'<div style="font-size:.82rem;color:#8A867F;margin-top:3px">'
-                        f'~{_n} проверок · {_t}</div></div>',
-                        unsafe_allow_html=True)
-                    st.button('Выбрать', use_container_width=True,
-                              key=f'c30_pre_{_pid}', on_click=_c30_apply_preset, args=(_pid,))
-
-        # Дефолты и клампы под текущий проект (у каждого свой лимит городов).
-        st.session_state.setdefault('c30_in_cities', min(9, _maxsubs))
-        st.session_state.setdefault('c30_in_cats', 10)
-        st.session_state.setdefault('c30_in_filters', 5)
-        st.session_state.setdefault('c30_in_products', 5)
+        # Дефолты выборки = пресет «Стандартная» (карточка и поля совпадают).
+        _std = get_profile_kwargs('standard')
+        st.session_state.setdefault('c30_in_cities', min(_std['random_subdomains_count'], _maxsubs))
+        st.session_state.setdefault('c30_in_cats', _std['categories_per_subdomain'])
+        st.session_state.setdefault('c30_in_filters', _std['filters_per_subdomain'])
+        st.session_state.setdefault('c30_in_products', _std['products_per_subdomain'])
         if st.session_state.c30_in_cities > _maxsubs:
             st.session_state.c30_in_cities = _maxsubs
+        st.session_state.setdefault('c30_preset', 'standard')
+
+        # Карточки-пресеты (radio): клик по карточке = выбор и заполнение полей.
+        _proxy_mult = 1.3 if cfg.get('use_proxy') else 1.0
+
+        def _c30_fmt_preset(_pid):
+            _n = _c30_preset_total(_pid)
+            _t = format_duration(max(20, int((_n / 6) * 5 * _proxy_mult * 1.2)))
+            return f'{PROFILES[_pid]["label"]} · ~{_n} проверок · {_t}'
+
+        def _c30_on_preset():
+            _c30_apply_preset(st.session_state.c30_preset)
+
+        st.radio('Объём', ['quick', 'standard', 'full'], format_func=_c30_fmt_preset,
+                 horizontal=True, key='c30_preset', label_visibility='collapsed',
+                 on_change=_c30_on_preset)
 
         with st.expander(f'Настроить вручную (города, категории, фильтры, товары). '
                          f'Главный город {_mcity} всегда в выборке', expanded=False):
@@ -907,57 +922,45 @@ if pid:
         budget['per_city'] = 2 + budget['cats'] + budget['filters'] + budget['products']
         plan_total = cities_total * budget['per_city']
 
-        products_base = load_product_links(pid)
-        if products_base and products_base['pathnames']:
-            d = datetime.fromtimestamp(products_base['collected_at_ms'] / 1000)
-            products_note = (
-                f'Товары – из базы листингов ({len(products_base["pathnames"])} шт., '
-                f'собрана {d.strftime("%d.%m.%Y")}'
-                + (', ⚠ старше 30 дней' if products_base['is_stale'] else '')
-                + ').'
-            )
-        else:
-            products_note = 'Базы листингов нет – товары возьмём из sitemap.xml.'
-
-        st.markdown(
-            f'<div class="c30-summary">На каждый из <b>{cities_total} городов</b>: '
-            f'главная + каталог + {budget["cats"]} категорий'
-            + (f' + {budget["filters"]} фильтров' if budget['filters'] else '')
-            + f' + {budget["products"]} товаров = <b>{plan_total} проверок</b>. '
-            f'{products_note}</div>',
-            unsafe_allow_html=True,
-        )
         est_sec = max(20, int((plan_total / 6) * 5 * (1.3 if cfg.get('use_proxy') else 1.0) * 1.2))
-        st.caption(f'Примерное время: {format_duration(est_sec)}. '
-                   f'Прогон идёт в фоне – можно переключаться на другие вкладки приложения.')
+        st.markdown(
+            f'<div class="c30-summary"><b>Итого: {plan_total} проверок</b> · '
+            f'примерно {format_duration(est_sec)}</div>',
+            unsafe_allow_html=True)
+        st.caption(
+            f'{cities_total} городов × (главная + каталог + {budget["cats"]} кат.'
+            + (f' + {budget["filters"]} фильтр.' if budget['filters'] else '')
+            + f' + {budget["products"]} тов.)')
 
-        # ── Что проверять (по умолчанию всё) – свёрнуто, чтобы не загромождать ──
-        with st.expander('Что проверять на страницах (1.1–1.6) · по умолчанию всё', expanded=False):
-            def _c30_select_all():
-                for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
-                           'c30_check_filters', 'c30_check_products', 'c30_check_text'):
-                    st.session_state[_k] = True
-            st.button('✓ Выбрать все', key='c30_select_all', on_click=_c30_select_all)
-            _cb_col1, _cb_col2 = st.columns(2)
-            with _cb_col1:
-                st.checkbox('🏠 Главные страницы', key='c30_check_main')
-                st.checkbox('📁 Страница /catalog/', key='c30_check_catalog')
-                st.checkbox('📂 Категории', key='c30_check_categories')
-            with _cb_col2:
-                if stats['has_filters']:
-                    st.checkbox('🏷️ Фильтры', key='c30_check_filters')
-                else:
-                    st.markdown('<span style="color:#9A958C">🏷️ Фильтры (нет в каталоге)</span>',
-                                unsafe_allow_html=True)
-                st.checkbox('🛒 Карточки товаров', key='c30_check_products')
-                st.checkbox('🔤 Битые переменные', key='c30_check_text')
+        # ── Что проверять (1.1–1.6) – отдельный видимый блок, без раскрывашки ──
+        _c30_sub('Что проверять на страницах')
+
+        def _c30_select_all():
+            for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
+                       'c30_check_filters', 'c30_check_products', 'c30_check_text'):
+                st.session_state[_k] = True
+        st.button('Выбрать все', key='c30_select_all', on_click=_c30_select_all)
+        _cb_col1, _cb_col2 = st.columns(2)
+        with _cb_col1:
+            st.checkbox('1.1  Главная', key='c30_check_main')
+            st.checkbox('1.2  Каталог', key='c30_check_catalog')
+            st.checkbox('1.3  Категории всех уровней вложенности', key='c30_check_categories')
+        with _cb_col2:
+            if stats['has_filters']:
+                st.checkbox('1.4  Фильтры', key='c30_check_filters')
+            else:
+                st.markdown('<span style="color:#9A958C">1.4  Фильтры (нет в каталоге)</span>',
+                            unsafe_allow_html=True)
+            st.checkbox('1.5  Товары', key='c30_check_products')
+            st.checkbox('1.6  Текстовые блоки категорий/фильтров/товаров и переменные',
+                        key='c30_check_text')
 
         # ── Дополнительно: уведомления из почты + свой список URL – тоже свёрнуто ──
         with st.expander('Дополнительно · уведомления из почты, свой список URL', expanded=False):
             _nf_col1, _nf_col2 = st.columns([3, 1])
             with _nf_col1:
                 _ck_notif = st.checkbox(
-                    '📬 Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 Метрики',
+                    'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 Метрики',
                     key='c30_fetch_notifications')
             with _nf_col2:
                 _nd_opts = [3, 7, 14, 30]
@@ -965,7 +968,7 @@ if pid:
                              format_func=lambda x: f'{x} дней', key='c30_notify_days',
                              disabled=not _ck_notif)
             st.divider()
-            st.checkbox('📝 Добавить свой список URL', key='c30_use_custom_urls')
+            st.checkbox('Добавить свой список URL', key='c30_use_custom_urls')
             if st.session_state.c30_use_custom_urls:
                 st.caption('Ссылки – по одной на строку. Тип по адресу: /catalog/x/ – '
                            'категория, /catalog/x/y/ – товар, …/filter/… – фильтр, / – главная.')
