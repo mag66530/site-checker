@@ -1047,8 +1047,12 @@ if pid:
                             if 'webmaster' in k.lower() or 'oauth' in k.lower()]
             except Exception:
                 _sk_hint, _wm_hint = [], []
-            # Токен Вебмастер-API: сперва на проект, затем общий
-            _wm_token = _secret(f'webmaster_oauth_{pid}') or _secret('webmaster_oauth')
+            # Токен Яндекс OAuth (Вебмастер-API; тот же подойдёт для Метрики).
+            # Имя секрета: yandex_oauth_<pid> (с запасными вариантами).
+            _wm_token = (_secret(f'yandex_oauth_{pid}')
+                         or _secret(f'webmaster_oauth_{pid}')
+                         or _secret('yandex_oauth')
+                         or _secret('webmaster_oauth'))
             creds = {
                 'proxy_url': get_proxy_url(),
                 'tg_token': _secret('telegram_bot_token'),

@@ -207,7 +207,7 @@ def run_check(pid, params, creds, log, progress):
             else:
                 _wm_keys = creds.get('webmaster_keys_hint') or []
                 log(f'⚠ Вебмастер-API: токен не задан (ожидаю секрет '
-                    f'webmaster_oauth_{pid} или webmaster_oauth). '
+                    f'yandex_oauth_{pid}). '
                     f'Найденные похожие ключи в секретах: {_wm_keys or "нет"}')
         else:
             log('Сбор уведомлений выключен.')
