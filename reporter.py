@@ -296,7 +296,13 @@ def _problem_text(r):
         return 'страница отдаёт 404 (не найдена) — проверить ссылку или убрать из каталога'
     if pk == 'empty':
         return 'раздел пуст — нет ни товаров, ни подразделов'
-    return 'нет: ' + ', '.join(b.label for b in r.content.bugs)
+    # У бага может быть пояснение (напр. «в коде есть, но покупатель не видит
+    # (скрыто/disabled)») — показываем его рядом с названием блока.
+    parts = []
+    for b in r.content.bugs:
+        note = getattr(b, 'note', '')
+        parts.append(f'{b.label} — {note}' if note else b.label)
+    return 'нет: ' + ', '.join(parts)
 
 
 def _build_structure_sheet(wb, results):
