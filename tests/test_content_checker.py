@@ -321,6 +321,28 @@ def test_hidden_price_button_is_bug():
     assert not b['btn_order'].present and 'не видит' in b['btn_order'].note
 
 
+def test_mpe_listing_is_recognized():
+    """Листинг МПЭ — другой шаблон (card-item + schema Product, цена в
+    .price-row, кнопка «в корзину» в .add). Должен распознаваться как листинг
+    и проверяться: карточки/цена/кнопка. Форма «Не нашли» на МПЭ не требуется."""
+    cards = ''.join(
+        '<div itemscope itemtype="http://schema.org/Product" class="card-item ">'
+        f'<a class="name h4"><span itemprop="name">Инконель {i}</span></a>'
+        '<div class="price price-row h4" itemprop="offers">'
+        f'<span itemprop="price">15557.00</span><span> ₽ </span></div>'
+        '<div class="settings"><div class="add"><p>в корзину</p></div></div>'
+        '</div>' for i in range(6))
+    html = ('<a href="https://mepen.ru/">mepen</a>'
+            '<div class="breadcrumb">крошки</div><h1>Инконель</h1>' + cards)
+    r = check_content(html, 'category')
+    assert r.page_kind == 'listing', f'ожидали listing, получили {r.page_kind!r}'
+    b = _by_key(r)
+    assert b['product_cards'].present and b['product_cards'].count == 6
+    assert b['price'].present and b['btn_order'].present
+    # форму «Не нашли что искали» на МПЭ не требуем — её не должно быть в багах
+    assert not any(bug.key == 'form_nf' for bug in r.bugs)
+
+
 def test_disabled_class_alone_does_not_hide():
     """Класс «disabled» сам по себе НЕ прячет: на сайте это часто смысловой
     маркер (card-item-add-no-cart-block disabled), а кнопка «Купить в один

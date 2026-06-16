@@ -645,9 +645,17 @@ def _d_availability(c: _Ctx):
     return 'в наличии' in c.vis_text_lower, None
 
 
+# Карточка товара МПЭ — отдельный шаблон: <div itemtype="schema.org/Product"
+# class="card-item ">. Маркер «class="card-item"» точный: на СМУ карточки
+# зовутся catalog-product-card-item (класс начинается с catalog-), под-классы
+# card-item-name/-img идут через дефис — под этот маркер не попадают; на
+# разделах-витринах и карточке товара МПЭ его нет.
+_RE_MPE_CARD = re.compile(r'class="card-item[ "]')
+
+
 def _d_product_cards(c: _Ctx):
-    # СМУ — catalog-product-card-item; ИМП — listing__cards / card-product.
-    # Запасные маркеры — listing-card / «расчёт стоимости».
+    # СМУ — catalog-product-card-item; ИМП — listing__cards / card-product;
+    # МПЭ — card-item. Запасные маркеры — listing-card / «расчёт стоимости».
     n = c.html_lower.count('catalog-product-card-item')
     if n == 0:
         n = c.html_lower.count('listing-card')
@@ -655,6 +663,8 @@ def _d_product_cards(c: _Ctx):
         n = c.html_lower.count('listing__cards')   # контейнер выдачи ИМП
     if n == 0:
         n = c.html_lower.count('card-product')      # карточка товара ИМП
+    if n == 0:
+        n = len(_RE_MPE_CARD.findall(c.html_lower))  # карточка товара МПЭ
     if n == 0:
         n = _count_text(c.text_lower, 'расчёт стоимости')
     return n > 0, n
@@ -991,6 +1001,7 @@ def check_content(html: str, type_code: str, css_hidden: tuple = ()) -> ContentR
             'catalog-product-card-item' in ctx.html_lower
             or 'listing-card' in ctx.html_lower
             or 'listing__cards' in ctx.html_lower      # листинг ИМП
+            or bool(_RE_MPE_CARD.search(ctx.html_lower))   # листинг МПЭ
         )
         has_subcats = (
             'catalog-cat-tabs' in ctx.html_lower
