@@ -308,17 +308,35 @@ def test_product_without_price_is_bug():
     assert any(bug.key == 'price' for bug in r.bugs)
 
 
-def test_hidden_disabled_price_button_is_bug():
-    """Цена и кнопка СПРЯТАНЫ (disabled) → покупатель их не видит → баг
-    с пояснением «в коде есть, но покупатель не видит»."""
+def test_hidden_price_button_is_bug():
+    """Цена и кнопка СПРЯТАНЫ стилем display:none → покупатель их не видит →
+    баг с пояснением «в коде есть, но покупатель не видит»."""
     html = (COMMON + SMU_MARKER
-            + '<div class="cost-block disabled"><div class="cost-val">3 627 руб.</div></div>'
-            + '<div class="card-item-add-no-cart-block disabled">'
+            + '<div class="cost-val" style="display:none">3 627 руб.</div>'
+            + '<div class="card-item-add-no-cart-block" style="display:none">'
             + '<div class="one-click-to-buy">Купить в один клик</div></div>'
             + '<div>Характеристики</div>')
     b = _by_key(check_content(html, 'product'))
     assert not b['price'].present and 'не видит' in b['price'].note
     assert not b['btn_order'].present and 'не видит' in b['btn_order'].note
+
+
+def test_disabled_class_alone_does_not_hide():
+    """Класс «disabled» сам по себе НЕ прячет: на сайте это часто смысловой
+    маркер (card-item-add-no-cart-block disabled), а кнопка «Купить в один
+    клик» при этом видна (реальный прод stalmetural.ru, товары «по запросу»).
+    Видимая кнопка-один-клик → заказ ЕСТЬ, это не баг."""
+    html = (COMMON + SMU_MARKER
+            + '<div class="catalog-product-card-item">'
+            + '<a href="/catalog/c/t/">Круг ванадиевый 103 мм</a>'
+            + '<div class="cost-val">Цена по запросу</div>'
+            + '<div class="card-item-add-no-cart-block disabled">'
+            + '<div class="btn btn-transparent-blue one-click-to-buy-catalog">'
+            + '<i class="an-ico an-ico-one-click"></i><span>Купить в один клик</span></div>'
+            + '</div></div>' + FORM_NF)
+    b = _by_key(check_content(html, 'category'))
+    assert b['btn_order'].present, 'видимая кнопка «в один клик» — заказ есть, не баг'
+    assert b['price'].present       # «по запросу» — цена есть
 
 
 def test_visible_price_button_ok():

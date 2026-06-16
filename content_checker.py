@@ -41,8 +41,13 @@ from text_checker import html_to_visible_text
 # стилей — их подгружает раннер и передаёт сюда уже разобранными
 # (parse_hidden_selectors). Так мы ловим «цена есть в коде, но скрыта стилями».
 
+# Классы, которые ПО КОНВЕНЦИИ всегда означают «визуально скрыто» (фреймворки).
+# Сюда НЕ кладём «disabled»: класс с таким именем сплошь и рядом всего лишь
+# смысловой маркер (напр. «card-item-add-no-cart-block disabled» — вариант
+# блока БЕЗ корзины), а сама кнопка «Купить в один клик» при этом видна. Что
+# реально скрыто — решаем по CSS (display:none и т.п.), который мы читаем.
 _HIDDEN_CLASSES = {
-    'disabled', 'd-none', 'hidden', 'is-hidden', 'hide', 'invisible',
+    'd-none', 'hidden', 'is-hidden', 'invisible',
     'sr-only', 'visually-hidden', 'visuallyhidden',
 }
 _VOID_TAGS = {
@@ -231,7 +236,8 @@ class _VisibleHTML(HTMLParser):
         if 'hidden' in d:
             return True
         style = d.get('style', '').lower().replace(' ', '')
-        if any(x in style for x in ('display:none', 'visibility:hidden', 'opacity:0')):
+        if ('display:none' in style or 'visibility:hidden' in style
+                or _RE_OPACITY0.search(style)):
             return True
         cls = set(d.get('class', '').lower().split())
         return bool(cls & _HIDDEN_CLASSES)
