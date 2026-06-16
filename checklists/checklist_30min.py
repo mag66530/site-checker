@@ -706,6 +706,33 @@ st.markdown(
     [data-testid="stNumberInput"] input { font-size: 1.05rem !important; font-weight: 600 !important; }
     /* Итог/оценка — спокойный вторичный текст */
     .c30-summary { font-size: .95rem; color: #1A1A1A; margin-top: .3rem; }
+
+    /* ── Раскладка: воздух в карточках, отступы между блоками, выравнивание ── */
+    /* Карточки-секции: внутренний воздух + ровный отступ между блоками */
+    .block-container [data-testid="stVerticalBlockBorderWrapper"] {
+        padding: 20px 24px !important; margin-bottom: 16px !important;
+    }
+    /* Раскрывашки делаем ЛЁГКИМИ (не вторая жирная рамка), чтобы «скрытое»
+       читалось как второстепенное, а карточки-секции — как главное. */
+    [data-testid="stExpander"] {
+        border: 1px solid #ECEAE4 !important; background: #FBFAF8 !important;
+        box-shadow: none !important; border-radius: 10px !important;
+        margin-bottom: 8px !important;
+    }
+    [data-testid="stExpander"] summary {
+        font-size: .9rem !important; font-weight: 600 !important; color: #5B5853 !important;
+    }
+    /* Карточки-пресеты (контейнер с рамкой в колонке) — кликабельный вид */
+    [data-testid="column"] [data-testid="stVerticalBlockBorderWrapper"] {
+        padding: 14px 12px !important; margin-bottom: 0 !important;
+        transition: border-color .15s;
+    }
+    [data-testid="column"] [data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: #B9B2A6 !important;
+    }
+    /* Метрики каталога — числа крупные, подписи спокойные (ровный ряд) */
+    [data-testid="stMetricValue"] { font-size: 1.7rem !important; }
+    [data-testid="stMetricLabel"] p { font-size: .8rem !important; color: #8A867F !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -822,19 +849,23 @@ if pid:
                    + kw['products_per_subdomain'])
             return cities * per
 
-        # Три карточки-пресета: иконка+название (кнопка) и под ней объём·время.
+        # Три карточки-пресета: рамка, по центру название + объём·время, кнопка.
         _proxy_mult = 1.3 if cfg.get('use_proxy') else 1.0
+        _names = {'quick': 'Быстрая', 'standard': 'Стандартная', 'full': 'Полная'}
         for _col, (_pid, _icon) in zip(
                 st.columns(3), [('quick', '⚡'), ('standard', '◐'), ('full', '✦')]):
             with _col:
-                _n = _c30_preset_total(_pid)
-                _t = format_duration(max(20, int((_n / 6) * 5 * _proxy_mult * 1.2)))
-                st.button(f'{_icon} {PROFILES[_pid]["label"]}', use_container_width=True,
-                          key=f'c30_pre_{_pid}', on_click=_c30_apply_preset, args=(_pid,))
-                st.markdown(
-                    f'<div style="text-align:center;font-size:.8rem;color:#8A867F;'
-                    f'margin-top:-.45rem">~{_n} проверок · {_t}</div>',
-                    unsafe_allow_html=True)
+                with st.container(border=True):
+                    _n = _c30_preset_total(_pid)
+                    _t = format_duration(max(20, int((_n / 6) * 5 * _proxy_mult * 1.2)))
+                    st.markdown(
+                        f'<div style="text-align:center;line-height:1.3;padding:2px 0 8px">'
+                        f'<div style="font-size:1.1rem;font-weight:700;color:#1A1A1A">{_icon} {_names[_pid]}</div>'
+                        f'<div style="font-size:.82rem;color:#8A867F;margin-top:3px">'
+                        f'~{_n} проверок · {_t}</div></div>',
+                        unsafe_allow_html=True)
+                    st.button('Выбрать', use_container_width=True,
+                              key=f'c30_pre_{_pid}', on_click=_c30_apply_preset, args=(_pid,))
 
         # Дефолты и клампы под текущий проект (у каждого свой лимит городов).
         st.session_state.setdefault('c30_in_cities', min(9, _maxsubs))
@@ -900,88 +931,70 @@ if pid:
         st.caption(f'Примерное время: {format_duration(est_sec)}. '
                    f'Прогон идёт в фоне – можно переключаться на другие вкладки приложения.')
 
-        _c30_sub('Что проверяем на страницах (пункты 1.1–1.6)')
+        # ── Что проверять (по умолчанию всё) – свёрнуто, чтобы не загромождать ──
+        with st.expander('Что проверять на страницах (1.1–1.6) · по умолчанию всё', expanded=False):
+            def _c30_select_all():
+                for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
+                           'c30_check_filters', 'c30_check_products', 'c30_check_text'):
+                    st.session_state[_k] = True
+            st.button('✓ Выбрать все', key='c30_select_all', on_click=_c30_select_all)
+            _cb_col1, _cb_col2 = st.columns(2)
+            with _cb_col1:
+                st.checkbox('🏠 Главные страницы', key='c30_check_main')
+                st.checkbox('📁 Страница /catalog/', key='c30_check_catalog')
+                st.checkbox('📂 Категории', key='c30_check_categories')
+            with _cb_col2:
+                if stats['has_filters']:
+                    st.checkbox('🏷️ Фильтры', key='c30_check_filters')
+                else:
+                    st.markdown('<span style="color:#9A958C">🏷️ Фильтры (нет в каталоге)</span>',
+                                unsafe_allow_html=True)
+                st.checkbox('🛒 Карточки товаров', key='c30_check_products')
+                st.checkbox('🔤 Битые переменные', key='c30_check_text')
 
-        # «Выбрать все» – включает пункты 1.1–1.6. on_click выставляет значения
-        # ДО отрисовки чек-боксов, поэтому срабатывает с первого клика.
-        def _c30_select_all():
-            for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
-                       'c30_check_filters', 'c30_check_products', 'c30_check_text'):
-                st.session_state[_k] = True
-        st.button('✓ Выбрать все', key='c30_select_all', on_click=_c30_select_all,
-                  help='Включить все пункты 1.1–1.6')
+        # ── Дополнительно: уведомления из почты + свой список URL – тоже свёрнуто ──
+        with st.expander('Дополнительно · уведомления из почты, свой список URL', expanded=False):
+            _nf_col1, _nf_col2 = st.columns([3, 1])
+            with _nf_col1:
+                _ck_notif = st.checkbox(
+                    '📬 Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 Метрики',
+                    key='c30_fetch_notifications')
+            with _nf_col2:
+                _nd_opts = [3, 7, 14, 30]
+                st.selectbox('За сколько дней', _nd_opts,
+                             format_func=lambda x: f'{x} дней', key='c30_notify_days',
+                             disabled=not _ck_notif)
+            st.divider()
+            st.checkbox('📝 Добавить свой список URL', key='c30_use_custom_urls')
+            if st.session_state.c30_use_custom_urls:
+                st.caption('Ссылки – по одной на строку. Тип по адресу: /catalog/x/ – '
+                           'категория, /catalog/x/y/ – товар, …/filter/… – фильтр, / – главная.')
+                _up = st.file_uploader('Загрузить .txt / .csv', type=['txt', 'csv'],
+                                       label_visibility='collapsed', key='c30_custom_file')
+                if _up is not None:
+                    try:
+                        _txt = _up.read().decode('utf-8', errors='replace')
+                        if _up.name.lower().endswith('.csv'):
+                            _txt = '\n'.join(
+                                (ln.split(',') if ',' in ln else ln.split(';'))[0].strip().strip('"\'')
+                                for ln in _txt.splitlines())
+                        _ex = st.session_state.c30_custom_urls_text.strip()
+                        st.session_state.c30_custom_urls_text = (_ex + '\n' + _txt) if _ex else _txt
+                    except Exception as _e:
+                        st.error(f'Не удалось прочитать файл: {_e}')
+                st.text_area('URLs', height=160, key='c30_custom_urls_text',
+                             label_visibility='collapsed',
+                             placeholder='https://stalmetural.ru/catalog/armatura/\n'
+                                         'https://orenburg.stalmetural.ru/catalog/truby/truba-20x20/')
+                _typed = build_custom_tasks_typed(
+                    st.session_state.c30_custom_urls_text.split('\n'), src)
+                if _typed:
+                    from collections import Counter as _Counter
+                    _bt = ', '.join(f'{lbl}: {n}' for lbl, n
+                                    in _Counter(t.type_label for t in _typed).items())
+                    st.success(f'Будет добавлено {len(_typed)} URL – {_bt}')
 
-        _cb_col1, _cb_col2 = st.columns(2)
-        with _cb_col1:
-            st.checkbox('🏠 Главные страницы', key='c30_check_main', help='Пункт 1.1')
-            st.checkbox('📁 Страница /catalog/', key='c30_check_catalog', help='Пункт 1.2')
-            st.checkbox('📂 Категории', key='c30_check_categories', help='Пункт 1.3')
-        with _cb_col2:
-            if stats['has_filters']:
-                st.checkbox('🏷️ Фильтры', key='c30_check_filters', help='Пункт 1.4')
-            else:
-                st.markdown('<span style="color:#71717A">🏷️ Фильтры _(нет в каталоге)_</span>', unsafe_allow_html=True)
-            st.checkbox('🛒 Карточки товаров', key='c30_check_products', help='Пункт 1.5')
-            st.checkbox('🔤 Битые переменные', key='c30_check_text',
-                        help='Пункт 1.6 – {{city}}, %price%, undefined и т.п.')
-
-        _c30_sub('Сервисные проверки – уведомления из почты')
-        _nf_col1, _nf_col2 = st.columns([3, 1])
-        with _nf_col1:
-            _ck_notif = st.checkbox(
-                '📬 Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 из Метрики',
-                key='c30_fetch_notifications',
-                help='Подключится к почте проекта и заберёт новые письма во время '
-                     'прогона. Всё попадёт в xlsx-отчёт (лист «Уведомления»).',
-            )
-        with _nf_col2:
-            _nd_opts = [3, 7, 14, 30]
-            st.selectbox(
-                'За сколько дней', _nd_opts,
-                format_func=lambda x: f'{x} дней', key='c30_notify_days',
-                disabled=not _ck_notif,
-                help='За какой период собирать почту и 404-отчёты Метрики',
-            )
-
-        # ── Свой список URL (необязательно) ──────────────────────────
-        st.checkbox(
-            '📝 Добавить свой список URL',
-            key='c30_use_custom_urls',
-            help='Проверить дополнительно свои ссылки этого проекта вместе с '
-                 'обычной выборкой. Тип каждой ссылки определяется по адресу.',
-        )
-        if st.session_state.c30_use_custom_urls:
-            st.caption(
-                'Ссылки – по одной на строку. Тип по адресу: /catalog/x/ – '
-                'категория, /catalog/x/y/ – товар, …/filter/… – фильтр, / – главная.'
-            )
-            _up = st.file_uploader('Загрузить .txt / .csv', type=['txt', 'csv'],
-                                   label_visibility='collapsed', key='c30_custom_file')
-            if _up is not None:
-                try:
-                    _txt = _up.read().decode('utf-8', errors='replace')
-                    if _up.name.lower().endswith('.csv'):
-                        _txt = '\n'.join(
-                            (ln.split(',') if ',' in ln else ln.split(';'))[0].strip().strip('"\'')
-                            for ln in _txt.splitlines())
-                    _ex = st.session_state.c30_custom_urls_text.strip()
-                    st.session_state.c30_custom_urls_text = (_ex + '\n' + _txt) if _ex else _txt
-                except Exception as _e:
-                    st.error(f'Не удалось прочитать файл: {_e}')
-            st.text_area(
-                'URLs', height=160, key='c30_custom_urls_text',
-                label_visibility='collapsed',
-                placeholder='https://stalmetural.ru/catalog/armatura/\n'
-                            'https://orenburg.stalmetural.ru/catalog/truby/truba-20x20/',
-            )
-            _typed = build_custom_tasks_typed(
-                st.session_state.c30_custom_urls_text.split('\n'), src)
-            if _typed:
-                from collections import Counter as _Counter
-                _bt = ', '.join(f'{lbl}: {n}' for lbl, n
-                                in _Counter(t.type_label for t in _typed).items())
-                st.success(f'Будет добавлено {len(_typed)} URL – {_bt}')
-
+        st.markdown('<div style="height:6px"></div>', unsafe_allow_html=True)
         _paths = _c30_paths(pid)
         _alive = _pid_alive(_read_pidfile(_paths['pid']))
         _bcol, _ccol = st.columns([3, 1])
