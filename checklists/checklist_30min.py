@@ -889,9 +889,12 @@ if pid:
                 _res = pickle.load(_rf)
             if _res.get('results') is not None:
                 st.session_state.c30_results = _res['results']
-                st.session_state.c30_report_path = _res['report_path']
                 st.session_state.c30_started_at = _res['started_at']
                 st.session_state.c30_finished_at = _res['finished_at']
+            # Путь к отчёту сохраняем ВСЕГДА — кнопка скачивания должна быть
+            # доступна даже если результаты не распарсились (xlsx уже на диске).
+            if _res.get('report_path'):
+                st.session_state.c30_report_path = _res['report_path']
             st.session_state.c30_last_error = _res.get('error')
         except Exception as _e:
             st.session_state.c30_last_error = f'Не удалось прочитать результат: {_e}'
@@ -1201,6 +1204,20 @@ if pid:
     # ── Ошибка прогона (если была) ──────────────────────────────────
     if st.session_state.get('c30_last_error'):
         st.error(f'Прогон завершился с ошибкой: {st.session_state.c30_last_error}')
+
+    # ── Запасная кнопка скачивания ──────────────────────────────────
+    # Если отчёт на диске есть, но блок результатов ниже не отрисовался
+    # (нет распарсенных результатов) — всё равно даём скачать xlsx.
+    if (st.session_state.get('c30_report_path')
+            and not st.session_state.get('c30_results')):
+        _rp = Path(st.session_state.c30_report_path)
+        if _rp.exists():
+            with open(_rp, 'rb') as _f:
+                st.download_button(
+                    label=f'📥 Скачать отчёт ({_rp.name})',
+                    data=_f.read(), file_name=_rp.name,
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    use_container_width=True, type='primary', key='c30_dl_fallback')
 
     # ── Результаты прогона ──────────────────────────────────────────
     if st.session_state.c30_results and not st.session_state.c30_is_running:

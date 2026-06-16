@@ -628,6 +628,19 @@ def _notif_row_height(domains_str: str, preview: str) -> float:
     lines = max(dom_lines, prev_lines)
     return min(300, max(44, lines * 14))
 
+
+# Оценка отзыва 2ГИС → текст звёзд + ярлык качества + цвет.
+def _review_rating_cell(rating):
+    """(текст, цвет) для колонки «Оценка». rating: 1..5 или None."""
+    if not rating:
+        return '—', C.text_muted
+    stars = '★' * int(rating)
+    if rating >= 4:
+        return f'{stars} Хороший', C.ok
+    if rating == 3:
+        return f'{stars} Средний', C.warn
+    return f'{stars} Плохой', C.err
+
 # Секции в порядке убывания релевантности:
 # (source_key, title, has_priority)
 _NOTIF_SECTIONS = [
@@ -778,6 +791,53 @@ def _build_notifications_sheet(wb, notifications):
                     row += 1
 
                 row += 1  # пробел между приоритетами
+
+        elif source_key == 'twogis':
+            # ── 2ГИС: одна строка на отзыв (без группировки), колонка
+            # «Оценка» (★ + качество), превью = только ссылка «Читать». ──
+            for ci, h in enumerate(['Дата', 'Оценка', '', 'Тема', '', 'Ссылка', 'Отдел'], 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = h
+                cell.font = _font(size=9, bold=True, color=C.text_muted)
+                cell.fill = _fill(C.surface)
+                cell.alignment = _align()
+                cell.border = _border()
+            ws.row_dimensions[row].height = 20
+            row += 1
+
+            for n in sorted(items, key=lambda x: x.date or '', reverse=True):
+                ws.row_dimensions[row].height = 30
+                rating_txt, rating_color = _review_rating_cell(getattr(n, 'rating', None))
+                review_url = getattr(n, 'review_url', None)
+
+                for ci, (val, kw) in enumerate([
+                    (n.date, {'color': C.text_soft}),
+                    (rating_txt, {'bold': True, 'color': rating_color}),
+                    ('', {}),
+                    (n.subject, {'color': C.text}),
+                    ('', {}),
+                    ('', {}),   # ссылка проставляется ниже
+                    (_dept_notif(n), {'size': 9, 'color': C.text_soft}),
+                ], 2):
+                    cell = ws.cell(row=row, column=ci)
+                    cell.value = val
+                    cell.font = _font(**kw)
+                    cell.alignment = _align(wrap=True, vertical='top')
+                    cell.border = _border(color=C.border_light)
+
+                # Колонка «Ссылка» (G = 7): кликабельная «Читать полностью»
+                link_cell = ws.cell(row=row, column=7)
+                if review_url:
+                    link_cell.value = 'Читать полностью'
+                    link_cell.hyperlink = review_url
+                    link_cell.font = _font(size=9, color=C.accent, underline='single')
+                else:
+                    link_cell.value = '—'
+                    link_cell.font = _font(size=9, color=C.text_muted)
+                link_cell.alignment = _align(vertical='top')
+                link_cell.border = _border(color=C.border_light)
+
+                row += 1
 
         else:
             # ── Источник без классификации: плоский список ──
