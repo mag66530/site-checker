@@ -139,13 +139,17 @@ class WebmasterNotification:
     body_preview: str    # первые ~400 символов тела
     priority: str        # critical | important | recommendation | info
     category: str        # server | indexing | speed | security | structure | coverage | other
+    # Доп. поля для отзывов 2ГИС (None для остальных источников):
+    rating: Optional[int] = None        # оценка 1..5 (число звёзд)
+    review_url: Optional[str] = None    # ссылка «Читать полностью» из письма
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> 'WebmasterNotification':
-        return cls(**{k: d[k] for k in cls.__dataclass_fields__})
+        # if k in d — старые кеш-файлы без новых полей не падают (берут default)
+        return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
 
 # ── Классификация приоритетов и категорий ───────────────────────────
@@ -250,6 +254,70 @@ def _extract_text_body(msg) -> str:
             cs = msg.get_content_charset() or 'utf-8'
             return payload.decode(cs, errors='replace')
     return ''
+
+
+def _extract_html_body(msg) -> str:
+    """Извлечь HTML-тело из email.message (для ссылок/звёзд 2ГИС)."""
+    if msg.is_multipart():
+        for part in msg.walk():
+            if (part.get_content_type() == 'text/html'
+                    and 'attachment' not in part.get('Content-Disposition', '')):
+                payload = part.get_payload(decode=True)
+                if payload:
+                    cs = part.get_content_charset() or 'utf-8'
+                    return payload.decode(cs, errors='replace')
+    elif msg.get_content_type() == 'text/html':
+        payload = msg.get_payload(decode=True)
+        if payload:
+            cs = msg.get_content_charset() or 'utf-8'
+            return payload.decode(cs, errors='replace')
+    return ''
+
+
+# Парсинг отзыва 2ГИС: оценка (число звёзд) + ссылка «Читать полностью».
+# Письма 2ГИС: анкор с текстом «читать»/«полностью», оценка — звёзды/число.
+_2GIS_READMORE_RE = re.compile(
+    r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(?:(?!</a>).)*?'
+    r'(?:читать|полностью|подробн|смотреть\s+отзыв)',
+    re.IGNORECASE | re.DOTALL,
+)
+_2GIS_RATING_PATTERNS = [
+    re.compile(r'(\d)\s*из\s*5', re.IGNORECASE),
+    re.compile(r'оцен\w*\D{0,15}?([1-5])\b', re.IGNORECASE),
+    re.compile(r'\b([1-5])\s*звёзд', re.IGNORECASE),
+    re.compile(r'\b([1-5])\s*звезд', re.IGNORECASE),
+    re.compile(r'rating["\'>\s:]+([1-5])', re.IGNORECASE),
+]
+
+
+def _parse_2gis_review(html: str, text: str):
+    """Вернуть (rating:int|None, review_url:str|None) из письма 2ГИС.
+
+    ВНИМАНИЕ: эвристики проверены на типовом письме 2ГИС, но формат может
+    меняться — при сбое возвращаем None (в отчёте будет «—»).
+    """
+    rating = None
+    review_url = None
+    h = html or ''
+    t = text or ''
+
+    # Ссылка «Читать полностью»
+    m = _2GIS_READMORE_RE.search(h)
+    if m:
+        review_url = m.group(1).strip()
+
+    # Оценка: сперва считаем закрашенные звёзды-глифы, затем числовые шаблоны
+    blob = h + '\n' + t
+    filled = blob.count('★') + blob.count('⭐')
+    if 1 <= filled <= 5:
+        rating = filled
+    else:
+        for pat in _2GIS_RATING_PATTERNS:
+            mm = pat.search(blob)
+            if mm:
+                rating = int(mm.group(1))
+                break
+    return rating, review_url
 
 
 def _msg_uid_hash(subject: str, date_str: str, frm: str) -> str:
@@ -770,6 +838,12 @@ def fetch_yandex_folder_simple(
 
                 body = _extract_text_body(msg)
 
+                _rating = None
+                _review_url = None
+                if source_key == 'twogis':
+                    _html = _extract_html_body(msg)
+                    _rating, _review_url = _parse_2gis_review(_html, body)
+
                 n = WebmasterNotification(
                     msg_id=msg_id,
                     project_id=project_id,
@@ -779,6 +853,8 @@ def fetch_yandex_folder_simple(
                     body_preview=body[:400].strip(),
                     priority='info',
                     category='other',
+                    rating=_rating,
+                    review_url=_review_url,
                 )
                 _save_notification(n)
                 existing[msg_id] = n
