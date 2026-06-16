@@ -1143,6 +1143,23 @@ if pid:
                     mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     use_container_width=True, type='primary', key='c30_dl_fallback')
 
+    # ── Лог прогона: отдельной строкой внизу, виден всегда после
+    #    завершения (как в автокликере) — даже если результатов нет. ──
+    if not _alive:
+        _lp = _c30_paths(pid)['log']
+        if _lp.exists():
+            _log_txt = _lp.read_text(encoding='utf-8', errors='ignore')
+            if _log_txt.strip():
+                with st.expander('🧾 Лог прогона (почта / Вебмастер / GSC)',
+                                 expanded=True):
+                    st.code('\n'.join(_log_txt.splitlines()[-250:]) or '…',
+                            language='text')
+                st.download_button(
+                    label='Скачать полный лог прогона',
+                    data=_log_txt.encode('utf-8'),
+                    file_name=f'{pid}-run.log', mime='text/plain',
+                    use_container_width=True, key='c30_dl_log')
+
     # ── Результаты прогона ──────────────────────────────────────────
     if st.session_state.c30_results and not st.session_state.c30_is_running:
         results = st.session_state.c30_results
@@ -1180,24 +1197,6 @@ if pid:
                             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                             use_container_width=True, type='primary',
                         )
-
-            # Лог прогона – для диагностики почты/GSC
-            _log_path = Path('cache') / 'last_run.log'
-            if _log_path.exists():
-                _log_txt = _log_path.read_text(encoding='utf-8', errors='ignore')
-                st.download_button(
-                    label='🧾 Скачать лог прогона (для диагностики GSC/почты)',
-                    data=_log_txt.encode('utf-8'),
-                    file_name='last_run.log', mime='text/plain',
-                    use_container_width=True,
-                )
-                _gsc_lines = [ln for ln in _log_txt.splitlines()
-                              if any(k in ln for k in
-                                     ('GSC', 'креды', 'секрет', 'Отправители',
-                                      'Gmail', 'папк', 'Вебмастер', 'уведомлени'))]
-                if _gsc_lines:
-                    with st.expander('🔎 Строки лога про почту/GSC', expanded=True):
-                        st.code('\n'.join(_gsc_lines), language='text')
 
             problems = [
                 r for r in results
