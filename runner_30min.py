@@ -118,68 +118,9 @@ def run_check(pid, params, creds, log, progress):
         out['finished_at'] = finished_ms
         save_history(pid, list({urlparse(r.url).path for r in results}))
 
-        log('Формирую xlsx-отчёт…')
         report_filename = make_report_filename(pid, started_ms, REPORTS_DIR)
         report_path = REPORTS_DIR / report_filename
-        _notifs = (
-            load_notifications(pid, 'yandex_webmaster', _nd)
-            + load_notifications(pid, 'gsc', _nd)
-            + load_notifications(pid, 'ya_business', _nd)
-            + load_notifications(pid, 'twogis', _nd)
-            + load_notifications(pid, 'google_accounts', _nd)
-        )
-        _metrika_reports = load_reports_for_period(pid, _nd) or None
-        build_report(
-            project_name=cfg['name'], started_at_ms=started_ms,
-            finished_at_ms=finished_ms,
-            selected_subdomains=plan.selected_subdomains, results=results,
-            output_path=report_path, notifications=_notifs or None,
-            metrika_reports=_metrika_reports,
-            metrika_data_date=get_latest_available_date(pid))
-
-        # Telegram
-        tg_token = creds.get('tg_token')
-        tg_recipients = creds.get('tg_recipients') or []
-        if tg_token and tg_recipients:
-            log(f'Отправляю отчёт в Telegram ({len(tg_recipients)})…')
-            try:
-                problems_for_tg = [
-                    {'city': r.city or '—', 'url': r.url,
-                     'status': {'not_found': '404 Не найдена',
-                                'client_error': 'Ошибка на сайте',
-                                'server_error': 'Сервер не отвечает',
-                                'timeout': 'Нет ответа',
-                                'network_error': 'Нет соединения'}.get(r.status, r.status)}
-                    for r in results if r.is_error][:5]
-                empty_sections = [
-                    {'city': r.city or '—', 'url': r.url} for r in results
-                    if getattr(r, 'content', None) is not None
-                    and getattr(r.content, 'page_kind', '') == 'empty']
-                summary_text = format_summary_message(
-                    project_name=f'{cfg["name"]} · еженедельная проверка',
-                    started_at=datetime.fromtimestamp(started_ms / 1000).strftime('%d.%m.%Y %H:%M'),
-                    duration_sec=(finished_ms - started_ms) // 1000,
-                    total_checks=len(results),
-                    ok_count=sum(1 for r in results if r.is_ok),
-                    warn_count=sum(1 for r in results if r.is_warning),
-                    err_count=sum(1 for r in results if r.is_error),
-                    text_issues_count=sum(len(r.text_issues) for r in results if r.has_text_issues),
-                    top_problems=problems_for_tg,
-                    content_bugs_count=sum(getattr(r, 'content_bugs', 0) or 0 for r in results),
-                    content_bug_pages=sum(1 for r in results if getattr(r, 'has_content_bugs', False)),
-                    empty_sections=empty_sections)
-                tg_result = send_run_notification(
-                    bot_token=tg_token, recipients=tg_recipients,
-                    project_name=cfg['name'], summary_text=summary_text,
-                    report_file=report_path, proxy_url=proxy_url,
-                    log=lambda lvl, msg: log(msg))
-                log(f'✓ Telegram: отправлено {tg_result["sent"]}, не доставлено {tg_result["failed"]}')
-            except Exception as e:
-                log(f'⚠ Telegram-отправка упала: {e}')
-        else:
-            log('Telegram не настроен.')
-
-        # Почта
+        # ── Сбор почты/Метрики ДО сборки отчёта — чтобы отчёт сразу полный ──
         if params['fetch_notifications']:
             log('Собираю уведомления из почты…')
             _nlog = lambda lvl, msg: log(msg)
@@ -240,30 +181,70 @@ def run_check(pid, params, creds, log, progress):
                     log(f'⚠ Метрика-404: {_e}')
             else:
                 log(f'⚠ Метрика-404: креды/почта не найдены (metrika_{pid}_*)')
-
-            _notifs2 = (
-                load_notifications(pid, 'yandex_webmaster', _nd)
-                + load_notifications(pid, 'gsc', _nd)
-                + load_notifications(pid, 'ya_business', _nd)
-                + load_notifications(pid, 'twogis', _nd)
-                + load_notifications(pid, 'google_accounts', _nd)
-            )
-            _metrika_reports = load_reports_for_period(pid, _nd) or None
-            if _notifs2 or _metrika_reports:
-                build_report(
-                    project_name=cfg['name'], started_at_ms=started_ms,
-                    finished_at_ms=finished_ms,
-                    selected_subdomains=plan.selected_subdomains, results=results,
-                    output_path=report_path, notifications=_notifs2 or None,
-                    metrika_reports=_metrika_reports,
-                    metrika_data_date=get_latest_available_date(pid))
-                _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
-                log(f'✓ Отчёт обновлён: уведомлений {len(_notifs2)}, '
-                    f'404-страниц из Метрики {_m_pages}')
-            else:
-                log('Уведомлений и 404-данных нет — листы в отчёт не добавлены.')
         else:
             log('Сбор уведомлений выключен.')
+
+        # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
+        _notifs = (
+            load_notifications(pid, 'yandex_webmaster', _nd)
+            + load_notifications(pid, 'gsc', _nd)
+            + load_notifications(pid, 'ya_business', _nd)
+            + load_notifications(pid, 'twogis', _nd)
+            + load_notifications(pid, 'google_accounts', _nd)
+        )
+        _metrika_reports = load_reports_for_period(pid, _nd) or None
+        build_report(
+            project_name=cfg['name'], started_at_ms=started_ms,
+            finished_at_ms=finished_ms,
+            selected_subdomains=plan.selected_subdomains, results=results,
+            output_path=report_path, notifications=_notifs or None,
+            metrika_reports=_metrika_reports,
+            metrika_data_date=get_latest_available_date(pid))
+        _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
+        log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
+            f'404-страниц из Метрики {_m_pages}')
+
+        # Telegram (полный отчёт — почта/метрика уже собраны выше)
+        tg_token = creds.get('tg_token')
+        tg_recipients = creds.get('tg_recipients') or []
+        if tg_token and tg_recipients:
+            log(f'Отправляю отчёт в Telegram ({len(tg_recipients)})…')
+            try:
+                problems_for_tg = [
+                    {'city': r.city or '—', 'url': r.url,
+                     'status': {'not_found': '404 Не найдена',
+                                'client_error': 'Ошибка на сайте',
+                                'server_error': 'Сервер не отвечает',
+                                'timeout': 'Нет ответа',
+                                'network_error': 'Нет соединения'}.get(r.status, r.status)}
+                    for r in results if r.is_error][:5]
+                empty_sections = [
+                    {'city': r.city or '—', 'url': r.url} for r in results
+                    if getattr(r, 'content', None) is not None
+                    and getattr(r.content, 'page_kind', '') == 'empty']
+                summary_text = format_summary_message(
+                    project_name=f'{cfg["name"]} · еженедельная проверка',
+                    started_at=datetime.fromtimestamp(started_ms / 1000).strftime('%d.%m.%Y %H:%M'),
+                    duration_sec=(finished_ms - started_ms) // 1000,
+                    total_checks=len(results),
+                    ok_count=sum(1 for r in results if r.is_ok),
+                    warn_count=sum(1 for r in results if r.is_warning),
+                    err_count=sum(1 for r in results if r.is_error),
+                    text_issues_count=sum(len(r.text_issues) for r in results if r.has_text_issues),
+                    top_problems=problems_for_tg,
+                    content_bugs_count=sum(getattr(r, 'content_bugs', 0) or 0 for r in results),
+                    content_bug_pages=sum(1 for r in results if getattr(r, 'has_content_bugs', False)),
+                    empty_sections=empty_sections)
+                tg_result = send_run_notification(
+                    bot_token=tg_token, recipients=tg_recipients,
+                    project_name=cfg['name'], summary_text=summary_text,
+                    report_file=report_path, proxy_url=proxy_url,
+                    log=lambda lvl, msg: log(msg))
+                log(f'✓ Telegram: отправлено {tg_result["sent"]}, не доставлено {tg_result["failed"]}')
+            except Exception as e:
+                log(f'⚠ Telegram-отправка упала: {e}')
+        else:
+            log('Telegram не настроен.')
 
         out['results'] = results
         out['report_path'] = str(report_path)
