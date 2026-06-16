@@ -1042,8 +1042,13 @@ if pid:
             try:
                 _sk_hint = [k for k in list(st.secrets.keys())
                             if 'gsc' in k.lower() or pid in k.lower()]
+                # Какие «webmaster/oauth»-ключи реально есть — для диагностики
+                _wm_hint = [k for k in list(st.secrets.keys())
+                            if 'webmaster' in k.lower() or 'oauth' in k.lower()]
             except Exception:
-                _sk_hint = []
+                _sk_hint, _wm_hint = [], []
+            # Токен Вебмастер-API: сперва на проект, затем общий
+            _wm_token = _secret(f'webmaster_oauth_{pid}') or _secret('webmaster_oauth')
             creds = {
                 'proxy_url': get_proxy_url(),
                 'tg_token': _secret('telegram_bot_token'),
@@ -1053,7 +1058,8 @@ if pid:
                 'yab': get_yabusiness_credentials(pid),
                 'twogis': get_twogis_credentials(pid),
                 'google': get_google_accounts_credentials(pid),
-                'webmaster_oauth': _secret(f'webmaster_oauth_{pid}'),
+                'webmaster_oauth': _wm_token,
+                'webmaster_keys_hint': _wm_hint,
                 'secret_keys_hint': _sk_hint,
             }
             params = {'budget': budget, 'random_cities': int(random_cities),
@@ -1143,23 +1149,6 @@ if pid:
                     mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     use_container_width=True, type='primary', key='c30_dl_fallback')
 
-    # ── Лог прогона: отдельной строкой внизу, виден всегда после
-    #    завершения (как в автокликере) — даже если результатов нет. ──
-    if not _alive:
-        _lp = _c30_paths(pid)['log']
-        if _lp.exists():
-            _log_txt = _lp.read_text(encoding='utf-8', errors='ignore')
-            if _log_txt.strip():
-                with st.expander('🧾 Лог прогона (почта / Вебмастер / GSC)',
-                                 expanded=True):
-                    st.code('\n'.join(_log_txt.splitlines()[-250:]) or '…',
-                            language='text')
-                st.download_button(
-                    label='Скачать полный лог прогона',
-                    data=_log_txt.encode('utf-8'),
-                    file_name=f'{pid}-run.log', mime='text/plain',
-                    use_container_width=True, key='c30_dl_log')
-
     # ── Результаты прогона ──────────────────────────────────────────
     if st.session_state.c30_results and not st.session_state.c30_is_running:
         results = st.session_state.c30_results
@@ -1238,6 +1227,23 @@ if pid:
     # Уведомления из почты и 404 из Метрики – в xlsx-отчёте (лист
     # «Уведомления»), собираются по галке «Собрать уведомления» за
     # выбранный период. Отдельный блок в UI убран.
+
+    # ── Лог прогона: самый нижний блок (под результатами), виден всегда
+    #    после завершения (как в автокликере) — даже если результатов нет. ──
+    if not _alive:
+        _lp = _c30_paths(pid)['log']
+        if _lp.exists():
+            _log_txt = _lp.read_text(encoding='utf-8', errors='ignore')
+            if _log_txt.strip():
+                with st.expander('🧾 Лог прогона (почта / Вебмастер / GSC)',
+                                 expanded=True):
+                    st.code('\n'.join(_log_txt.splitlines()[-250:]) or '…',
+                            language='text')
+                st.download_button(
+                    label='Скачать полный лог прогона',
+                    data=_log_txt.encode('utf-8'),
+                    file_name=f'{pid}-run.log', mime='text/plain',
+                    use_container_width=True, key='c30_dl_log')
 
 else:
     st.info('Выберите проект, чтобы начать еженедельную проверку.')
