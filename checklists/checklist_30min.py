@@ -582,6 +582,7 @@ def init_session():
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
         'c30_fetch_notifications': True,
+        'c30_notify_days': 7,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -776,12 +777,26 @@ if pid:
             _ck_products = st.checkbox('🛒 Карточки товаров', value=st.session_state.c30_check_products, key='c30_ck_products', help='Пункт 1.5')
             _ck_gsc = st.checkbox('🌐 Ошибки GSC', value=st.session_state.c30_check_gsc, key='c30_ck_gsc', help='Критические и важные уведомления GSC — из кеша почты')
 
-        _ck_notif = st.checkbox(
-            '📬 Собрать уведомления из почты (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google)',
-            value=st.session_state.c30_fetch_notifications,
-            key='c30_ck_notif',
-            help='Подключится к почте и заберёт новые письма во время прогона',
-        )
+        _nf_col1, _nf_col2 = st.columns([3, 1])
+        with _nf_col1:
+            _ck_notif = st.checkbox(
+                '📬 Собрать уведомления из почты (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 из Метрики',
+                value=st.session_state.c30_fetch_notifications,
+                key='c30_ck_notif',
+                help='Подключится к почте и заберёт новые письма во время прогона',
+            )
+        with _nf_col2:
+            _nd_opts = [3, 7, 14, 30]
+            _nd = st.selectbox(
+                'За сколько дней',
+                _nd_opts,
+                index=_nd_opts.index(st.session_state.get('c30_notify_days', 7))
+                if st.session_state.get('c30_notify_days', 7) in _nd_opts else 1,
+                format_func=lambda x: f'{x} дней',
+                key='c30_nd_sel',
+                disabled=not _ck_notif,
+                help='За какой период собирать почту и 404-отчёты Метрики',
+            )
 
         # Сохраняем в session_state
         for _k, _v in [
@@ -790,6 +805,7 @@ if pid:
             ('c30_check_products', _ck_products),
             ('c30_check_webmaster', _ck_wm), ('c30_check_gsc', _ck_gsc),
             ('c30_fetch_notifications', _ck_notif),
+            ('c30_notify_days', _nd),
         ]:
             st.session_state[_k] = _v
 
@@ -817,6 +833,7 @@ if pid:
                 'check_filters': st.session_state.c30_check_filters and stats['has_filters'],
                 'check_products': st.session_state.c30_check_products,
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
+                'notify_days': int(st.session_state.get('c30_notify_days', 7)),
             }
             try:
                 _sk_hint = [k for k in list(st.secrets.keys())
@@ -1278,121 +1295,9 @@ if pid:
                 if len(problems) > 50:
                     st.caption(f'... и ещё {len(problems) - 50}. Все детали — в xlsx-отчёте.')
 
-    # ── Блок 2: уведомления из почты ───────────────────────────────
-    _yw_e2, _yw_p2 = get_metrika_credentials(pid)
-    _gsc_e2, _gsc_p2 = get_gsc_credentials(pid)
-    _has_any_notif = bool(_yw_e2 or _gsc_e2)
-
-    if _has_any_notif:
-        with st.container(border=True):
-            st.markdown('### 2. Уведомления из почты')
-            st.caption('Данные из кеша — обновляются при запуске прогона (чекбокс «Собрать уведомления»).')
-
-            _nb_days = st.selectbox(
-                'Период',
-                [7, 14, 30],
-                index=1,
-                format_func=lambda x: f'{x} дней',
-                key='c30_notify_period',
-                label_visibility='collapsed',
-            )
-
-            # ── Ошибки Вебмастера / GSC (всегда раскрыты, если есть) ─
-            _P_ERR = {'critical': ('#DC2626', 'rgba(220,38,38,0.07)'),
-                      'important': ('#D97706', 'rgba(217,119,6,0.07)')}
-
-            _PRIO_C = {'critical': '#DC2626', 'important': '#D97706',
-                       'recommendation': '#CA8A04', 'info': '#6B7280'}
-            _PRIO_BG = {'critical': 'rgba(220,38,38,0.06)', 'important': 'rgba(217,119,6,0.06)',
-                        'recommendation': 'rgba(202,138,4,0.06)', 'info': 'rgba(107,114,128,0.04)'}
-
-            def _group_by_subject(items):
-                """Группировка по теме: одинаковые subject → одна запись с датами."""
-                from collections import OrderedDict
-                groups: dict = OrderedDict()
-                for n in items:
-                    key = n.subject.strip()
-                    if key not in groups:
-                        groups[key] = {'rep': n, 'dates': [], 'count': 0}
-                    groups[key]['dates'].append(n.date)
-                    groups[key]['count'] += 1
-                return list(groups.values())
-
-            def _notif_card_grouped(rep_n, dates, count, color, bg):
-                cat = CATEGORY_LABELS.get(rep_n.category, rep_n.category)
-                tags_h = _tags_html(_dept_tags_notif(rep_n))
-                date_str = dates[0] if count == 1 else f'{min(dates)} – {max(dates)} · ×{count}'
-                st.markdown(
-                    f'<div style="padding:7px 12px;margin-bottom:5px;border-left:3px solid {color};'
-                    f'border-radius:0 5px 5px 0;background:{bg}">'
-                    f'<span style="font-size:0.78rem;color:#6B7280">{date_str} · {cat}</span>'
-                    f'{tags_h}'
-                    f'<p style="margin:3px 0 0;font-size:0.9rem;font-weight:600;color:{color}">'
-                    f'{rep_n.subject}</p>'
-                    + (f'<p style="margin:2px 0 0;font-size:0.82rem;color:#5B5853">'
-                       f'{rep_n.body_preview[:220]}</p>' if rep_n.body_preview and count == 1 else '')
-                    + '</div>', unsafe_allow_html=True,
-                )
-
-            def _render_service_block(source_key, title, icon, days=None, with_priority=False):
-                """Один сворачиваемый блок на сервис. Критические — раскрыт по умолчанию."""
-                items = load_notifications(pid, source_key, days or _nb_days)
-                if not items:
-                    st.caption(f'{icon} {title} — нет уведомлений за период')
-                    return
-                crit_n = sum(1 for n in items if n.priority == 'critical')
-                imp_n = sum(1 for n in items if n.priority == 'important')
-                badge_parts = []
-                if crit_n:
-                    badge_parts.append(f'🔴 {crit_n} крит.')
-                if imp_n:
-                    badge_parts.append(f'🟠 {imp_n} важных')
-                badge = '  ' + '  '.join(badge_parts) if badge_parts else ''
-                expand_default = bool(crit_n)
-                with st.expander(f'{icon} **{title}** — {len(items)} уведомлений{badge}',
-                                 expanded=expand_default):
-                    if with_priority:
-                        groups = group_by_priority(items)
-                        _prio_labels = {
-                            'critical': '🔴 Критические',
-                            'important': '🟠 Важные',
-                            'recommendation': '🟡 Рекомендации',
-                            'info': '⚪ Инфо',
-                        }
-                        for priority in PRIORITY_ORDER:
-                            prio_items = groups.get(priority, [])
-                            if not prio_items:
-                                continue
-                            st.markdown(f'**{_prio_labels[priority]}**')
-                            c, bg = _PRIO_C[priority], _PRIO_BG[priority]
-                            for g in _group_by_subject(prio_items):
-                                _notif_card_grouped(g['rep'], g['dates'], g['count'], c, bg)
-                    else:
-                        for g in _group_by_subject(items):
-                            _notif_card_grouped(g['rep'], g['dates'], g['count'],
-                                                '#6B7280', 'rgba(107,114,128,0.04)')
-
-            if _yw_e2:
-                _render_service_block('yandex_webmaster', 'Яндекс.Вебмастер', '🔍',
-                                      with_priority=True)
-                _render_service_block('ya_business', 'Я.Бизнес', '🏢')
-                _render_service_block('twogis', '2ГИС', '🗺')
-            if _gsc_e2:
-                _render_service_block('gsc', 'Google Search Console', '🌐',
-                                      with_priority=True)
-                _render_service_block('google_accounts', 'Google', '📧', days=3)
-
-            # Метрика 404
-            if _yw_e2:
-                _m_reports = load_reports_for_period(pid, days=_nb_days)
-                if _m_reports:
-                    _m_total = sum(r.total_pages for r in _m_reports)
-                    with st.expander(f'📊 Метрика 404 — {_m_total} страниц', expanded=False):
-                        for rep in sorted(_m_reports, key=lambda r: r.report_date, reverse=True):
-                            st.markdown(
-                                f'**{rep.report_date}** · {rep.country_name} — '
-                                f'{rep.total_pages} стр., {rep.total_views} просмотров'
-                            )
+    # Уведомления из почты и 404 из Метрики — в xlsx-отчёте (лист
+    # «Уведомления»), собираются по галке «Собрать уведомления» за
+    # выбранный период. Отдельный блок в UI убран.
 
 else:
     st.info('Выберите проект, чтобы начать еженедельную проверку.')
