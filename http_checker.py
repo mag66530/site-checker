@@ -20,14 +20,16 @@ http_checker.py — асинхронная проверка URL'ов.
 """
 import asyncio
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Callable
+from urllib.parse import urljoin, urlsplit
 
 import aiohttp
 
 from text_checker import find_text_issues, TextIssue
-from content_checker import check_content, ContentResult
+from content_checker import check_content, ContentResult, parse_hidden_selectors
 
 
 # ── Константы ────────────────────────────────────────────────────────
@@ -265,6 +267,71 @@ async def _attempt_once(
     }
 
 
+# ── Подгрузка CSS (чтобы видеть, что спрятано стилями) ───────────────
+# Цена/кнопка могут быть в HTML, но скрыты правилом display:none из CSS-файла.
+# Чтобы это поймать, тянем подключённые на странице стили (свой хост),
+# разбираем «скрывающие» селекторы и передаём их в check_content. Стили
+# шаблона одинаковы на всех страницах домена — кэшируем по URL стиля.
+
+_MAX_CSS_BYTES = 3_000_000
+
+
+def _extract_stylesheet_links(html: str, base_url: str) -> list[str]:
+    """Абсолютные URL подключённых стилей того же хоста (без дублей)."""
+    host = urlsplit(base_url).netloc
+    out, seen = [], set()
+    for tag in re.findall(r'<link\b[^>]*>', html, re.I):
+        if 'stylesheet' not in tag.lower():
+            continue
+        m = re.search(r'href\s*=\s*["\']([^"\']+)', tag, re.I)
+        if not m:
+            continue
+        href = m.group(1).strip()
+        if not href or href.startswith('data:'):
+            continue
+        absu = urljoin(base_url, href).split('#')[0]
+        sp = urlsplit(absu)
+        if sp.scheme not in ('http', 'https') or sp.netloc != host:
+            continue
+        if absu not in seen:
+            seen.add(absu)
+            out.append(absu)
+    return out[:12]
+
+
+async def _fetch_css_text(session, url, timeout_ms, proxy_url) -> str:
+    try:
+        to = aiohttp.ClientTimeout(total=min(timeout_ms, 30000) / 1000)
+        async with session.get(url, timeout=to, allow_redirects=True,
+                               proxy=proxy_url) as r:
+            if r.status != 200:
+                return ''
+            data = await r.read()
+            if len(data) > _MAX_CSS_BYTES:
+                data = data[:_MAX_CSS_BYTES]
+            return data.decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+async def _css_sel_for_url(session, url, timeout_ms, proxy_url, cache, locks, guard):
+    """Разобранные скрывающие селекторы для одного CSS-URL (с кэшем)."""
+    if url in cache:
+        return cache[url]
+    async with guard:
+        lock = locks.get(url)
+        if lock is None:
+            lock = asyncio.Lock()
+            locks[url] = lock
+    async with lock:
+        if url in cache:
+            return cache[url]
+        text = await _fetch_css_text(session, url, timeout_ms, proxy_url)
+        sels = parse_hidden_selectors(text) if text else ()
+        cache[url] = sels
+        return sels
+
+
 # ── Проверка с ретраями ─────────────────────────────────────────────
 
 
@@ -280,6 +347,7 @@ async def check_one(
     check_structure: bool = True,
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
+    get_css_hidden: Optional[Callable] = None,
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
@@ -307,11 +375,19 @@ async def check_one(
         except Exception:
             text_issues = []
 
-    # Структурная проверка контента — только для OK с body
+    # Структурная проверка контента — только для OK с body. Подтягиваем CSS,
+    # чтобы цена/кнопка, скрытые стилями (display:none), считались невидимыми.
     content = None
     if is_ok and check_structure and a['body_text']:
+        css_hidden = ()
+        if get_css_hidden is not None:
+            try:
+                css_hidden = await get_css_hidden(
+                    a['body_text'], a['final_url'] or task.url)
+            except Exception:
+                css_hidden = ()
         try:
-            content = check_content(a['body_text'], task.type_code)
+            content = check_content(a['body_text'], task.type_code, css_hidden=css_hidden)
         except Exception:
             content = None
 
@@ -401,7 +477,20 @@ async def run_batch(
     headers = make_browser_headers(user_agent)
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
 
+    # Кэш разобранных стилей (общий на весь батч — шаблонный CSS повторяется
+    # на всех страницах домена, тянем каждый файл один раз).
+    css_cache: dict = {}
+    css_locks: dict = {}
+    css_guard = asyncio.Lock()
+
     async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
+
+        async def get_css_hidden(html, base_url):
+            sels = []
+            for u in _extract_stylesheet_links(html, base_url):
+                sels.extend(await _css_sel_for_url(
+                    session, u, timeout_ms, proxy_url, css_cache, css_locks, css_guard))
+            return tuple(sels)
 
         async def worker(task):
             nonlocal done_count
@@ -422,6 +511,7 @@ async def run_batch(
                     check_structure=check_structure,
                     proxy_url=proxy_url,
                     kp_map=kp_map,
+                    get_css_hidden=get_css_hidden,
                 )
                 done_count += 1
                 if on_progress:

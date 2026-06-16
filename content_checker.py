@@ -32,9 +32,14 @@ from text_checker import html_to_visible_text
 
 
 # ── Вырезание скрытого/отключённого (то, чего покупатель НЕ видит) ───
-# Цена/кнопка, спрятанные через disabled / display:none / hidden и т.п.,
-# для покупателя всё равно что отсутствуют — поэтому такие поддеревья
+# Цена/кнопка/наличие, спрятанные через disabled / display:none / hidden /
+# visibility:hidden — хоть в атрибуте style, хоть правилом из CSS-файла —
+# для покупателя всё равно что отсутствуют. Поэтому такие поддеревья
 # выкидываем и считаем контент только по видимой части.
+#
+# CSS-правила (display:none и т.п.) приходят из подключённых на странице
+# стилей — их подгружает раннер и передаёт сюда уже разобранными
+# (parse_hidden_selectors). Так мы ловим «цена есть в коде, но скрыта стилями».
 
 _HIDDEN_CLASSES = {
     'disabled', 'd-none', 'hidden', 'is-hidden', 'hide', 'invisible',
@@ -45,17 +50,183 @@ _VOID_TAGS = {
     'base', 'col', 'embed', 'param', 'track', 'wbr',
 }
 
+# Сигналы «элемент невидим» в теле CSS-правила.
+_RE_OPACITY0 = re.compile(r'opacity:0(?![.\d])')
+
+
+def _decl_hides(decl: str) -> bool:
+    """Делает ли блок объявлений элемент невидимым (display:none и т.п.)."""
+    d = decl.lower().replace(' ', '').replace('\n', '').replace('\t', '')
+    return ('display:none' in d or 'visibility:hidden' in d
+            or bool(_RE_OPACITY0.search(d)))
+
+
+def _compile_compound(c: str):
+    """Простой селектор → (tag, frozenset(classes), id, attr-tests) | None.
+
+    Поддерживаем только то, что встречается в правилах скрытия: тег, .класс,
+    #id и [class*=/^=/$=/=...]. Всё прочее (псевдо, хитрые атрибуты) → None,
+    т.е. правило пропускаем (консервативно, чтобы не спрятать лишнее)."""
+    c = c.strip()
+    if not c:
+        return None
+    tag = ''
+    classes = set()
+    cid = ''
+    attrs = []
+    i, n = 0, len(c)
+    m = re.match(r'[a-zA-Z][\w-]*|\*', c)
+    if m:
+        t = m.group(0)
+        tag = '' if t == '*' else t.lower()
+        i = m.end()
+    while i < n:
+        ch = c[i]
+        if ch == '.':
+            m = re.match(r'\.([\w-]+)', c[i:])
+            if not m:
+                return None
+            classes.add(m.group(1).lower())
+            i += m.end()
+        elif ch == '#':
+            m = re.match(r'#([\w-]+)', c[i:])
+            if not m:
+                return None
+            cid = m.group(1).lower()
+            i += m.end()
+        elif ch == '[':
+            m = re.match(r'\[\s*class\s*([*^$|~]?)=\s*["\']?([^"\'\]]+)["\']?\s*\]',
+                         c[i:], re.I)
+            if not m:
+                return None
+            attrs.append((m.group(1) or '=', m.group(2).lower()))
+            i += m.end()
+        else:
+            return None
+    return (tag, frozenset(classes), cid, tuple(attrs))
+
+
+def _compile_selector(sel: str):
+    """Полный селектор → кортеж простых (от внешнего к ключевому) | None."""
+    sel = sel.strip()
+    if not sel or ':' in sel or '+' in sel or '~' in sel:
+        return None              # псевдо/соседние — пропускаем (консервативно)
+    comps = []
+    for part in sel.replace('>', ' ').split():
+        cc = _compile_compound(part)
+        if cc is None:
+            return None
+        comps.append(cc)
+    return tuple(comps) if comps else None
+
+
+def parse_hidden_selectors(css_text: str) -> tuple:
+    """CSS-текст → кортеж разобранных селекторов, которые ПРЯЧУТ элемент.
+
+    Берём только правила верхнего уровня (внутрь @media/@keyframes не лезем —
+    мобильные/анимационные скрытия для десктоп-проверки не применяем)."""
+    if not css_text:
+        return ()
+    css = re.sub(r'/\*.*?\*/', '', css_text, flags=re.S)
+    sels = []
+    idx, n, buf = 0, len(css), []
+    while idx < n:
+        ch = css[idx]
+        if ch == '{':
+            prelude = ''.join(buf).strip()
+            buf = []
+            depth, idx = 1, idx + 1
+            dstart = idx
+            while idx < n and depth > 0:
+                if css[idx] == '{':
+                    depth += 1
+                elif css[idx] == '}':
+                    depth -= 1
+                if depth > 0:
+                    idx += 1
+            block = css[dstart:idx]
+            idx += 1
+            if prelude.startswith('@'):
+                continue              # @media/@keyframes/@font-face — мимо
+            if _decl_hides(block):
+                for s in prelude.split(','):
+                    cs = _compile_selector(s)
+                    if cs:
+                        sels.append(cs)
+        else:
+            buf.append(ch)
+            idx += 1
+    return tuple(sels)
+
+
+def _compound_matches(comp, el) -> bool:
+    tag, classes, cid, attrs = comp
+    etag, eclasses, eid, eraw = el
+    if tag and tag != etag:
+        return False
+    if cid and cid != eid:
+        return False
+    if classes and not classes <= eclasses:
+        return False
+    for op, val in attrs:
+        if op == '*' or op == '~' or op == '|':
+            if val not in eraw:
+                return False
+        elif op == '^':
+            if not eraw.startswith(val):
+                return False
+        elif op == '$':
+            if not eraw.endswith(val):
+                return False
+        else:                          # '='
+            if eraw != val:
+                return False
+    return True
+
+
+def _selector_matches(sel, el, stack) -> bool:
+    if not _compound_matches(sel[-1], el):
+        return False
+    ai = len(stack) - 1
+    for comp in reversed(sel[:-1]):
+        ok = False
+        while ai >= 0:
+            hit = _compound_matches(comp, stack[ai])
+            ai -= 1
+            if hit:
+                ok = True
+                break
+        if not ok:
+            return False
+    return True
+
+
+def _build_hidden_index(selectors):
+    """Индекс селекторов по ключевому классу/id для быстрого матчинга."""
+    by_class, by_id, fallback = {}, {}, []
+    for sel in selectors:
+        _, kclasses, kid, _ = sel[-1]
+        if kclasses:
+            by_class.setdefault(next(iter(kclasses)), []).append(sel)
+        elif kid:
+            by_id.setdefault(kid, []).append(sel)
+        else:
+            fallback.append(sel)
+    return by_class, by_id, fallback
+
 
 class _VisibleHTML(HTMLParser):
     """Собирает HTML только из ВИДИМЫХ элементов (скрытые поддеревья — мимо)."""
 
-    def __init__(self):
+    def __init__(self, hidden_index=None):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.skip = 0
+        self.index = hidden_index           # (by_class, by_id, fallback) | None
+        self.stack: list = []               # видимые предки (для CSS-матчинга)
 
     @staticmethod
-    def _hidden(attrs) -> bool:
+    def _inline_hidden(attrs) -> bool:
         d = {k: (v or '') for k, v in attrs}
         if 'hidden' in d:
             return True
@@ -65,6 +236,22 @@ class _VisibleHTML(HTMLParser):
         cls = set(d.get('class', '').lower().split())
         return bool(cls & _HIDDEN_CLASSES)
 
+    def _css_hidden(self, el) -> bool:
+        if not self.index:
+            return False
+        by_class, by_id, fallback = self.index
+        cands = fallback
+        if el[2] and el[2] in by_id:
+            cands = cands + by_id[el[2]]
+        for c in el[1]:
+            lst = by_class.get(c)
+            if lst:
+                cands = cands + lst
+        for sel in cands:
+            if _selector_matches(sel, el, self.stack):
+                return True
+        return False
+
     def handle_starttag(self, tag, attrs):
         if self.skip:
             if tag not in _VOID_TAGS:
@@ -73,15 +260,24 @@ class _VisibleHTML(HTMLParser):
         if tag in ('script', 'style', 'noscript', 'template'):
             self.skip = 1
             return
-        if self._hidden(attrs):
+        d = dict(attrs)
+        raw_class = (d.get('class') or '').lower()
+        el = (tag, frozenset(raw_class.split()), (d.get('id') or '').lower(), raw_class)
+        if self._inline_hidden(attrs) or self._css_hidden(el):
             if tag not in _VOID_TAGS:
                 self.skip = 1
             return
-        cls = dict(attrs).get('class', '') or ''
-        self.parts.append(f'<{tag} class="{cls}">')
+        self.parts.append(f'<{tag} class="{d.get("class", "") or ""}">')
+        if tag not in _VOID_TAGS:
+            self.stack.append(el)
 
     def handle_startendtag(self, tag, attrs):
-        if self.skip or self._hidden(attrs):
+        if self.skip:
+            return
+        d = dict(attrs)
+        raw_class = (d.get('class') or '').lower()
+        el = (tag, frozenset(raw_class.split()), (d.get('id') or '').lower(), raw_class)
+        if self._inline_hidden(attrs) or self._css_hidden(el):
             return
         self.parts.append(f'<{tag}>')
 
@@ -91,16 +287,27 @@ class _VisibleHTML(HTMLParser):
                 self.skip -= 1
             return
         self.parts.append(f'</{tag}>')
+        if tag not in _VOID_TAGS and self.stack:
+            self.stack.pop()
 
     def handle_data(self, data):
         if not self.skip:
             self.parts.append(data)
 
 
-def _strip_hidden(html: str) -> str:
-    """HTML → только видимая часть (без disabled/display:none/hidden поддеревьев)."""
+def _strip_hidden(html: str, css_hidden: tuple = ()) -> str:
+    """HTML → только видимая часть.
+
+    Убираем поддеревья, скрытые: атрибутом (hidden / style=display:none),
+    классом из списка скрывающих, ИЛИ правилом CSS (css_hidden — селекторы
+    из подключённых стилей + из <style> самой страницы)."""
     try:
-        p = _VisibleHTML()
+        inline = ''
+        for m in re.findall(r'<style[^>]*>(.*?)</style>', html, re.S | re.I):
+            inline += '\n' + m
+        all_sels = tuple(css_hidden) + parse_hidden_selectors(inline)
+        index = _build_hidden_index(all_sels) if all_sels else None
+        p = _VisibleHTML(index)
         p.feed(html)
         return ''.join(p.parts)
     except Exception:
@@ -428,7 +635,8 @@ def _d_btn_order_product(c: _Ctx):
 
 
 def _d_availability(c: _Ctx):
-    return 'в наличии' in c.text_lower, None
+    # По видимому тексту: скрытый стилями статус наличия покупатель не видит.
+    return 'в наличии' in c.vis_text_lower, None
 
 
 def _d_product_cards(c: _Ctx):
@@ -701,12 +909,15 @@ def _profile_for(type_code: str, page_kind: str = '') -> list[_Block]:
 # ── Точка входа ─────────────────────────────────────────────────────
 
 
-def check_content(html: str, type_code: str) -> ContentResult:
+def check_content(html: str, type_code: str, css_hidden: tuple = ()) -> ContentResult:
     """
     Проверить наличие ожидаемых блоков на странице данного типа.
 
     html       — сырой HTML страницы (как в http_checker body_text)
     type_code  — 'main' | 'catalog' | 'category' | 'filter' | 'product' | 'custom'
+    css_hidden — разобранные селекторы скрытия из подключённых стилей
+                 (parse_hidden_selectors). Нужны, чтобы цена/кнопка, спрятанные
+                 правилом display:none из CSS-файла, считались невидимыми.
     """
     result = ContentResult(type_code=type_code)
     if not html or not isinstance(html, str):
@@ -733,7 +944,7 @@ def check_content(html: str, type_code: str) -> ContentResult:
     # Видимая часть страницы (без disabled/скрытых блоков) — то, что реально
     # видит покупатель. Цена/кнопка считаются ТОЛЬКО по ней: скрытая или
     # отключённая цена/кнопка для покупателя всё равно что отсутствует.
-    visible_html = _strip_hidden(html)
+    visible_html = _strip_hidden(html, css_hidden)
     visible_text = html_to_visible_text(visible_html)
     ctx.vis_html_lower = visible_html.lower()
     ctx.vis_text_lower = visible_text.lower()
@@ -851,13 +1062,13 @@ def check_content(html: str, type_code: str) -> ContentResult:
         if type_code == 'catalog' and blk.key == 'breadcrumbs':
             required = False
         # Пояснение к багу цены/кнопки: «есть в коде, но покупатель не видит»
-        # (скрыто/disabled) vs просто «нет».
+        # (скрыто стилями display:none / disabled) vs просто «нет в коде».
         note = ''
         if required and not present:
             if blk.key == 'price' and raw_has_price:
-                note = 'в коде есть, но покупатель не видит (скрыто/disabled)'
+                note = 'в коде есть, но покупатель не видит (скрыто стилями/disabled)'
             elif blk.key == 'btn_order' and raw_has_btn:
-                note = 'в коде есть, но покупатель не видит (скрыто/disabled)'
+                note = 'в коде есть, но покупатель не видит (скрыто стилями/disabled)'
         result.blocks.append(BlockResult(
             key=blk.key,
             label=blk.label,
