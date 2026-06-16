@@ -805,8 +805,8 @@ if pid:
         _maxsubs = max(0, stats['subdomains_count'] - 1)
         _mcity = cfg.get('mandatory_city', 'Москва')
 
-        # Пресеты заполняют поля ниже (значения из profiles.py); потом можно
-        # подправить вручную. on_click срабатывает до отрисовки полей.
+        # Пресет заполняет поля ниже (значения из profiles.py). on_click
+        # срабатывает до отрисовки полей, поэтому применяется с первого клика.
         def _c30_apply_preset(profile_id):
             kw = get_profile_kwargs(profile_id)
             st.session_state.c30_in_cities = kw['random_subdomains_count']
@@ -814,21 +814,27 @@ if pid:
             st.session_state.c30_in_filters = kw['filters_per_subdomain']
             st.session_state.c30_in_products = kw['products_per_subdomain']
 
-        _p1, _p2, _p3 = st.columns(3)
-        with _p1:
-            st.button('⚡ Быстрая', use_container_width=True, key='c30_pre_quick',
-                      on_click=_c30_apply_preset, args=('quick',),
-                      help=PROFILES['quick']['description'])
-        with _p2:
-            st.button('◐ Стандартная', use_container_width=True, key='c30_pre_std',
-                      on_click=_c30_apply_preset, args=('standard',),
-                      help=PROFILES['standard']['description'])
-        with _p3:
-            st.button('✦ Полная', use_container_width=True, key='c30_pre_full',
-                      on_click=_c30_apply_preset, args=('full',),
-                      help=PROFILES['full']['description'])
-        st.caption(f'Пресет заполняет поля ниже – дальше можно подправить вручную. '
-                   f'Для теста ставьте минимум. Главный город {_mcity} всегда в выборке.')
+        def _c30_preset_total(profile_id):
+            kw = get_profile_kwargs(profile_id)
+            cities = 1 + min(kw['random_subdomains_count'], _maxsubs)
+            per = (2 + kw['categories_per_subdomain']
+                   + (kw['filters_per_subdomain'] if stats['has_filters'] else 0)
+                   + kw['products_per_subdomain'])
+            return cities * per
+
+        # Три карточки-пресета: иконка+название (кнопка) и под ней объём·время.
+        _proxy_mult = 1.3 if cfg.get('use_proxy') else 1.0
+        for _col, (_pid, _icon) in zip(
+                st.columns(3), [('quick', '⚡'), ('standard', '◐'), ('full', '✦')]):
+            with _col:
+                _n = _c30_preset_total(_pid)
+                _t = format_duration(max(20, int((_n / 6) * 5 * _proxy_mult * 1.2)))
+                st.button(f'{_icon} {PROFILES[_pid]["label"]}', use_container_width=True,
+                          key=f'c30_pre_{_pid}', on_click=_c30_apply_preset, args=(_pid,))
+                st.markdown(
+                    f'<div style="text-align:center;font-size:.8rem;color:#8A867F;'
+                    f'margin-top:-.45rem">~{_n} проверок · {_t}</div>',
+                    unsafe_allow_html=True)
 
         # Дефолты и клампы под текущий проект (у каждого свой лимит городов).
         st.session_state.setdefault('c30_in_cities', min(9, _maxsubs))
@@ -838,30 +844,28 @@ if pid:
         if st.session_state.c30_in_cities > _maxsubs:
             st.session_state.c30_in_cities = _maxsubs
 
-        col1, col2 = st.columns(2)
-        with col1:
-            random_cities = st.number_input(
-                f'Случайных городов (+ {_mcity})',
-                min_value=0, max_value=_maxsubs, step=1, key='c30_in_cities',
-                help='Сколько случайных городов-поддоменов взять помимо главного.',
-            )
-            cats_per_city = st.number_input(
-                'Категорий на город', min_value=0, max_value=50, step=1,
-                key='c30_in_cats', help='Категории всех уровней вложенности (пункт 1.3).',
-            )
-        with col2:
-            if stats['has_filters']:
-                filters_per_city = st.number_input(
-                    'Фильтров на город', min_value=0, max_value=50, step=1,
-                    key='c30_in_filters', help='Страницы фильтров (пункт 1.4).',
-                )
-            else:
-                filters_per_city = 0
-                st.markdown('_У проекта нет фильтров_')
-            products_per_city = st.number_input(
-                'Товаров на город', min_value=0, max_value=50, step=1,
-                key='c30_in_products', help='Карточки товаров (пункт 1.5).',
-            )
+        with st.expander(f'Настроить вручную (города, категории, фильтры, товары). '
+                         f'Главный город {_mcity} всегда в выборке', expanded=False):
+            _ec1, _ec2 = st.columns(2)
+            with _ec1:
+                st.number_input(f'Случайных городов (+ {_mcity})',
+                                min_value=0, max_value=_maxsubs, step=1, key='c30_in_cities')
+                st.number_input('Категорий на город',
+                                min_value=0, max_value=50, step=1, key='c30_in_cats')
+            with _ec2:
+                if stats['has_filters']:
+                    st.number_input('Фильтров на город',
+                                    min_value=0, max_value=50, step=1, key='c30_in_filters')
+                else:
+                    st.markdown('_У проекта нет фильтров_')
+                st.number_input('Товаров на город',
+                                min_value=0, max_value=50, step=1, key='c30_in_products')
+
+        # Итоговые значения (из полей; поля живут в expander, но всегда созданы).
+        random_cities = st.session_state.c30_in_cities
+        cats_per_city = st.session_state.c30_in_cats
+        products_per_city = st.session_state.c30_in_products
+        filters_per_city = st.session_state.c30_in_filters if stats['has_filters'] else 0
 
         cities_total = 1 + int(random_cities)
         budget = {
