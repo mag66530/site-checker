@@ -306,17 +306,25 @@ def _parse_2gis_review(html: str, text: str):
     if m:
         review_url = m.group(1).strip()
 
-    # Оценка: сперва считаем закрашенные звёзды-глифы, затем числовые шаблоны
+    # Оценка. Приоритет:
+    # 1) divʼы 2ГИС с классом «Stars__star-<хэш>» — каждый = 1 закрашенная
+    #    звезда (хэш-суффикс плавающий, матчим по базе);
+    # 2) глифы ★ / ⭐;
+    # 3) числовые шаблоны («N из 5», «N звёзд», «оценка N»).
+    star_divs = len(re.findall(r'Stars__star-[A-Za-z0-9]+', h))
     blob = h + '\n' + t
-    filled = blob.count('★') + blob.count('⭐')
-    if 1 <= filled <= 5:
-        rating = filled
+    if 1 <= star_divs <= 5:
+        rating = star_divs
     else:
-        for pat in _2GIS_RATING_PATTERNS:
-            mm = pat.search(blob)
-            if mm:
-                rating = int(mm.group(1))
-                break
+        filled = blob.count('★') + blob.count('⭐')
+        if 1 <= filled <= 5:
+            rating = filled
+        else:
+            for pat in _2GIS_RATING_PATTERNS:
+                mm = pat.search(blob)
+                if mm:
+                    rating = int(mm.group(1))
+                    break
     return rating, review_url
 
 
