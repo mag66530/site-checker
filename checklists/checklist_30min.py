@@ -219,6 +219,7 @@ def _c30_paths(pid):
         'log': _CACHE / f'c30_{pid}.log',
         'status': _CACHE / f'c30_{pid}.status.json',
         'result': _CACHE / f'c30_{pid}.result.pkl',
+        'report': _CACHE / f'c30_{pid}.report.txt',  # лёгкий сайдкар: путь к xlsx
         'pid': _CACHE / f'c30_{pid}.pid',
     }
 
@@ -268,7 +269,7 @@ def _launch_checklist_bg(pid, params, creds):
     paths['params'].write_text(
         json.dumps({'pid': pid, 'params': params, 'creds': creds},
                    ensure_ascii=False), encoding='utf-8')
-    for k in ('log', 'status', 'result'):
+    for k in ('log', 'status', 'result', 'report'):
         try:
             paths[k].unlink(missing_ok=True)
         except Exception:
@@ -282,7 +283,8 @@ def _launch_checklist_bg(pid, params, creds):
         [sys.executable, 'checklist_run.py',
          '--params', str(paths['params']),
          '--out', str(paths['result']),
-         '--status', str(paths['status'])],
+         '--status', str(paths['status']),
+         '--report', str(paths['report'])],
         cwd=str(_PROJECT_ROOT), stdout=logf, stderr=subprocess.STDOUT,
         env=env, creationflags=creationflags,
     )
@@ -861,7 +863,11 @@ if pid:
     # ── Прогон: прогресс фонового ПРОЦЕССА ──────────────────────────
     _paths = _c30_paths(pid)
     _alive = _pid_alive(_read_pidfile(_paths['pid']))
-    if _alive:
+    _done = _paths['result'].exists() or _paths['report'].exists()
+    # Завершение определяем по появлению артефакта (отчёт/результат), а не только
+    # по живости pid: на Linux дочерний процесс может стать zombie и «жить» в
+    # таблице процессов, из-за чего _alive остаётся True и UI зависает на прогрессе.
+    if _alive and not _done:
         with st.container(border=True):
             st.markdown('### ⏳ Идёт проверка')
             st.caption('Можно переключаться на другие вкладки — прогон идёт в фоне '
@@ -882,24 +888,34 @@ if pid:
                 st.code('\n'.join(_logtxt.splitlines()[-120:]) or '…', language='text')
         time.sleep(1.5)
         st.rerun()
-    elif _paths['result'].exists():
-        # Процесс завершился — загружаем результат из pickle (один раз)
+    elif _paths['result'].exists() or _paths['report'].exists():
+        # Процесс завершился.
+        # 1) Путь к отчёту — из лёгкого сайдкара (надёжно, не зависит от pickle).
         try:
-            with open(_paths['result'], 'rb') as _rf:
-                _res = pickle.load(_rf)
-            if _res.get('results') is not None:
-                st.session_state.c30_results = _res['results']
-                st.session_state.c30_started_at = _res['started_at']
-                st.session_state.c30_finished_at = _res['finished_at']
-            # Путь к отчёту сохраняем ВСЕГДА — кнопка скачивания должна быть
-            # доступна даже если результаты не распарсились (xlsx уже на диске).
-            if _res.get('report_path'):
-                st.session_state.c30_report_path = _res['report_path']
-            st.session_state.c30_last_error = _res.get('error')
-        except Exception as _e:
-            st.session_state.c30_last_error = f'Не удалось прочитать результат: {_e}'
+            if _paths['report'].exists():
+                _rp_txt = _paths['report'].read_text(encoding='utf-8').strip()
+                if _rp_txt:
+                    st.session_state.c30_report_path = _rp_txt
+        except Exception:
+            pass
+        # 2) Результаты — из pickle (для метрик и блока результатов); если
+        #    pickle упал, кнопка скачивания всё равно работает (см. п.1).
+        if _paths['result'].exists():
+            try:
+                with open(_paths['result'], 'rb') as _rf:
+                    _res = pickle.load(_rf)
+                if _res.get('results') is not None:
+                    st.session_state.c30_results = _res['results']
+                    st.session_state.c30_started_at = _res['started_at']
+                    st.session_state.c30_finished_at = _res['finished_at']
+                if _res.get('report_path'):
+                    st.session_state.c30_report_path = _res['report_path']
+                st.session_state.c30_last_error = _res.get('error')
+            except Exception as _e:
+                st.session_state.c30_last_error = f'Не удалось прочитать результат: {_e}'
         try:
             _paths['result'].unlink(missing_ok=True)
+            _paths['report'].unlink(missing_ok=True)
             _paths['pid'].unlink(missing_ok=True)
         except Exception:
             pass
