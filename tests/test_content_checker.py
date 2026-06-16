@@ -331,6 +331,58 @@ def test_visible_price_button_ok():
     assert b['price'].present and b['btn_order'].present
 
 
+def test_css_display_none_hides_price_button_listing():
+    """Цена/кнопка ЕСТЬ в HTML, но скрыты правилом display:none из CSS-файла
+    (как на тест-стенде test2.stalmetural.ru) → покупатель не видит → баг."""
+    from content_checker import parse_hidden_selectors
+    cards = ''.join(
+        f'<div class="catalog-product-card-item"><a href="/catalog/c/t{i}/">Товар {i}</a>'
+        f'<div class="cost-val">156 000 ₽</div>'
+        f'<div class="card-item-add-to-cart-block"><span class="an-ico-basket"></span>'
+        f'<span>В корзину</span></div></div>'
+        for i in range(5))
+    html = COMMON + SMU_MARKER + cards + FORM_NF
+    css = parse_hidden_selectors(
+        '.cost-val,[class*="cost-"]{display:none!important}'
+        '.card-item-add-to-cart-block{display:none!important}')
+    # без CSS — всё «видно», багов по цене/кнопке нет
+    b0 = _by_key(check_content(html, 'category'))
+    assert b0['price'].present and b0['btn_order'].present
+    # с CSS-скрытием — цена и кнопка считаются невидимыми → баг с пояснением
+    b = _by_key(check_content(html, 'category', css_hidden=css))
+    assert not b['price'].present and 'не видит' in b['price'].note
+    assert not b['btn_order'].present and 'не видит' in b['btn_order'].note
+    # карточки при этом всё равно посчитаны (контейнеры не скрыты)
+    assert b['product_cards'].present and b['product_cards'].count == 5
+
+
+def test_css_hidden_ancestor_qualified_not_overhide():
+    """Правило `.catalog-list .cost-val{display:none}` НЕ должно прятать цену,
+    если предка `.catalog-list` на странице нет (сетка, а не список)."""
+    from content_checker import parse_hidden_selectors
+    html = (COMMON + SMU_MARKER
+            + '<div class="catalog-product-card-item"><a href="/catalog/c/t/">Товар</a>'
+            + '<div class="cost-val">156 000 ₽</div>'
+            + '<div class="card-item-add-to-cart-block"><span>В корзину</span></div></div>'
+            + FORM_NF)
+    css = parse_hidden_selectors('.catalog-list .cost-val{display:none}')
+    b = _by_key(check_content(html, 'category', css_hidden=css))
+    assert b['price'].present, 'цена не под .catalog-list — прятать нельзя'
+
+
+def test_parse_hidden_selectors_basics():
+    """display:none/visibility:hidden ловим; видимые правила и @media — нет."""
+    from content_checker import parse_hidden_selectors
+    assert len(parse_hidden_selectors('.a{display:none}')) == 1
+    assert len(parse_hidden_selectors('.a{visibility:hidden}')) == 1
+    assert len(parse_hidden_selectors('.a{color:red}')) == 0
+    assert len(parse_hidden_selectors('.a{opacity:0.5}')) == 0   # не полностью прозрачно
+    # внутрь @media не лезем (мобильные скрытия для десктоп-проверки не берём)
+    assert len(parse_hidden_selectors('@media(max-width:600px){.a{display:none}}')) == 0
+    # список селекторов раскрывается
+    assert len(parse_hidden_selectors('.a,.b{display:none}')) == 2
+
+
 def test_product_price_ignores_recommendations_block():
     """На карточке товара «Цена по запросу» из блока «с этим товаром покупают»
     не должна примешиваться к цене самого товара (там одна цена)."""
