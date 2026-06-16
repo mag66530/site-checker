@@ -93,10 +93,10 @@ st.markdown(
         fill: #1A1A1A !important; stroke: none !important;
     }
 
-    /* Значок подсказки «?» — оставляем родной значок Streamlit (он аккуратный),
-       только задаём спокойный серый тон. НЕ трогаем fill/stroke: попытки
-       fill:none+stroke давали «кружок в кружке» и размазанность. */
-    [data-testid="stTooltipIcon"] { color: #A8A39B !important; opacity: 1 !important; }
+    /* Значок подсказки «?» убираем совсем — он выглядел «кружком в кружке» и
+       размазанно, а подписи полей и так понятны. Если где-то нужна подсказка —
+       вынесем текстом, а не иконкой. */
+    [data-testid="stTooltipIcon"] { display: none !important; }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
     /* Карточки-контейнеры (с рамкой) — белые, чтобы блоки не сливались с фоном */
