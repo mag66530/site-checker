@@ -308,17 +308,76 @@ def test_product_without_price_is_bug():
     assert any(bug.key == 'price' for bug in r.bugs)
 
 
-def test_hidden_disabled_price_button_is_bug():
-    """Цена и кнопка СПРЯТАНЫ (disabled) → покупатель их не видит → баг
-    с пояснением «в коде есть, но покупатель не видит»."""
+def test_hidden_price_button_is_bug():
+    """Цена и кнопка СПРЯТАНЫ стилем display:none → покупатель их не видит →
+    баг с пояснением «в коде есть, но покупатель не видит»."""
     html = (COMMON + SMU_MARKER
-            + '<div class="cost-block disabled"><div class="cost-val">3 627 руб.</div></div>'
-            + '<div class="card-item-add-no-cart-block disabled">'
+            + '<div class="cost-val" style="display:none">3 627 руб.</div>'
+            + '<div class="card-item-add-no-cart-block" style="display:none">'
             + '<div class="one-click-to-buy">Купить в один клик</div></div>'
             + '<div>Характеристики</div>')
     b = _by_key(check_content(html, 'product'))
     assert not b['price'].present and 'не видит' in b['price'].note
     assert not b['btn_order'].present and 'не видит' in b['btn_order'].note
+
+
+def test_breadcrumbs_not_faked_by_css_link():
+    """Крошки не должны «находиться» по ссылке на стиль
+    (/bitrix/.../breadcrumb/.../style.css). Если самих крошек нет — это баг."""
+    css_link = ('<link href="/bitrix/components/bitrix/breadcrumb/templates/'
+                '.default/style.min.css" rel="stylesheet">')
+    # крошек на странице нет, остался только CSS-линк → баг
+    no_crumbs = (css_link + SMU_MARKER + '<h1>Категория</h1>'
+                 + CARD_WITH_PRICE * 3 + FORM_NF)
+    b = _by_key(check_content(no_crumbs, 'category'))
+    assert not b['breadcrumbs'].present, 'крошки по CSS-ссылке — ложный ✓'
+    # реальные крошки (class или schema) → present
+    with_crumbs = (css_link + SMU_MARKER
+                   + '<div class="bx-breadcrumb" itemtype="http://schema.org/BreadcrumbList">'
+                   + '<span>Главная</span></div><h1>Категория</h1>'
+                   + CARD_WITH_PRICE * 3 + FORM_NF)
+    b2 = _by_key(check_content(with_crumbs, 'category'))
+    assert b2['breadcrumbs'].present
+
+
+def test_mpe_listing_is_recognized():
+    """Листинг МПЭ — другой шаблон (card-item + schema Product, цена в
+    .price-row, кнопка «в корзину» в .add). Должен распознаваться как листинг
+    и проверяться: карточки/цена/кнопка. Форма «Не нашли» на МПЭ не требуется."""
+    cards = ''.join(
+        '<div itemscope itemtype="http://schema.org/Product" class="card-item ">'
+        f'<a class="name h4"><span itemprop="name">Инконель {i}</span></a>'
+        '<div class="price price-row h4" itemprop="offers">'
+        f'<span itemprop="price">15557.00</span><span> ₽ </span></div>'
+        '<div class="settings"><div class="add"><p>в корзину</p></div></div>'
+        '</div>' for i in range(6))
+    html = ('<a href="https://mepen.ru/">mepen</a>'
+            '<div class="breadcrumb">крошки</div><h1>Инконель</h1>' + cards)
+    r = check_content(html, 'category')
+    assert r.page_kind == 'listing', f'ожидали listing, получили {r.page_kind!r}'
+    b = _by_key(r)
+    assert b['product_cards'].present and b['product_cards'].count == 6
+    assert b['price'].present and b['btn_order'].present
+    # форму «Не нашли что искали» на МПЭ не требуем — её не должно быть в багах
+    assert not any(bug.key == 'form_nf' for bug in r.bugs)
+
+
+def test_disabled_class_alone_does_not_hide():
+    """Класс «disabled» сам по себе НЕ прячет: на сайте это часто смысловой
+    маркер (card-item-add-no-cart-block disabled), а кнопка «Купить в один
+    клик» при этом видна (реальный прод stalmetural.ru, товары «по запросу»).
+    Видимая кнопка-один-клик → заказ ЕСТЬ, это не баг."""
+    html = (COMMON + SMU_MARKER
+            + '<div class="catalog-product-card-item">'
+            + '<a href="/catalog/c/t/">Круг ванадиевый 103 мм</a>'
+            + '<div class="cost-val">Цена по запросу</div>'
+            + '<div class="card-item-add-no-cart-block disabled">'
+            + '<div class="btn btn-transparent-blue one-click-to-buy-catalog">'
+            + '<i class="an-ico an-ico-one-click"></i><span>Купить в один клик</span></div>'
+            + '</div></div>' + FORM_NF)
+    b = _by_key(check_content(html, 'category'))
+    assert b['btn_order'].present, 'видимая кнопка «в один клик» — заказ есть, не баг'
+    assert b['price'].present       # «по запросу» — цена есть
 
 
 def test_visible_price_button_ok():

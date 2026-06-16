@@ -80,13 +80,26 @@ st.markdown(
         background: #ECEAE4 !important;
         border: 1px solid rgba(26,26,26,.12) !important;
         color: #1A1A1A !important;
+        width: 42px !important;
+        border-radius: 8px !important;
     }
     [data-testid="stNumberInput"] button:hover {
         background: #DEDBD4 !important;
     }
+    /* Иконки +/− рисуются заливкой (solid). Обводку НЕ добавляем — иначе глиф
+       выглядит размазанным/жирным. Только чёткая заливка. */
     [data-testid="stNumberInput"] button svg,
     [data-testid="stNumberInput"] button svg path {
-        fill: #1A1A1A !important; stroke: #1A1A1A !important;
+        fill: #1A1A1A !important; stroke: none !important;
+    }
+
+    /* Значок подсказки «?» — КОНТУРНЫЙ кружок (Streamlit рисует его обводкой).
+       Без этого правила глобальные заливки превращают его в чёрную точку.
+       Делаем fill:none и красим обводку — получается аккуратный «?». */
+    [data-testid="stTooltipHoverTarget"] { color: #8A867F !important; opacity: 1 !important; }
+    [data-testid="stTooltipHoverTarget"] svg,
+    [data-testid="stTooltipHoverTarget"] svg * {
+        fill: none !important; stroke: #8A867F !important; opacity: 1 !important;
     }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
@@ -115,9 +128,35 @@ st.markdown(
     div[data-baseweb="select"] > div > div {
         font-size: 16px !important; color: #1A1A1A !important; font-weight: 500 !important;
     }
-    ul[role="listbox"] li, li[role="option"], div[role="option"] {
+    /* Выпадающий список селекта: тёмный читаемый текст опций (и вложенных
+       span'ов!). Без правила на «li *» текст опций оставался бледным. */
+    ul[role="listbox"] li, li[role="option"], div[role="option"],
+    div[data-baseweb="popover"] li, div[data-baseweb="popover"] [role="option"],
+    div[data-baseweb="popover"] ul > li {
         font-size: 15.5px !important; color: #1A1A1A !important;
+        background: #FFFFFF !important;
         padding-top: 9px !important; padding-bottom: 9px !important;
+    }
+    ul[role="listbox"] li *, li[role="option"] *,
+    div[data-baseweb="popover"] li *,
+    div[data-baseweb="popover"] [role="option"] * {
+        color: #1A1A1A !important; background: transparent !important;
+    }
+    /* Список — одна белая рамка, без «матрёшки» вложенных рамок popover */
+    div[data-baseweb="popover"] ul, div[data-baseweb="popover"] [role="listbox"] {
+        background: #FFFFFF !important; border: 1px solid #DEDBD4 !important;
+        border-radius: 8px !important; box-shadow: 0 8px 24px rgba(26,26,26,.12) !important;
+    }
+    /* Наведение / выбранная опция — мягкая подсветка, текст остаётся тёмным */
+    div[data-baseweb="popover"] li:hover, div[data-baseweb="popover"] [role="option"]:hover,
+    div[data-baseweb="popover"] li[aria-selected="true"],
+    div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
+        background: #ECEAE4 !important;
+    }
+    div[data-baseweb="popover"] li:hover *, div[data-baseweb="popover"] [role="option"]:hover *,
+    div[data-baseweb="popover"] li[aria-selected="true"] *,
+    div[data-baseweb="popover"] [role="option"][aria-selected="true"] * {
+        color: #1A1A1A !important;
     }
     .stSelectbox label, .stCheckbox label, [data-testid="stWidgetLabel"] p {
         font-size: 14px !important; color: #5B5853 !important;
@@ -159,8 +198,7 @@ st.markdown(
 )
 
 pages = [
-    st.Page('checklists/checklist_15min.py', title='Чек-лист 15 мин', icon='🔎', default=True),
-    st.Page('checklists/checklist_30min.py', title='Чек-лист 30 мин', icon='📋'),
+    st.Page('checklists/checklist_30min.py', title='Чек-лист', icon='🔎', default=True),
     st.Page('checklists/autoclickers.py', title='Автокликеры', icon='🖱'),
 ]
 

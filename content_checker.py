@@ -41,8 +41,13 @@ from text_checker import html_to_visible_text
 # стилей — их подгружает раннер и передаёт сюда уже разобранными
 # (parse_hidden_selectors). Так мы ловим «цена есть в коде, но скрыта стилями».
 
+# Классы, которые ПО КОНВЕНЦИИ всегда означают «визуально скрыто» (фреймворки).
+# Сюда НЕ кладём «disabled»: класс с таким именем сплошь и рядом всего лишь
+# смысловой маркер (напр. «card-item-add-no-cart-block disabled» — вариант
+# блока БЕЗ корзины), а сама кнопка «Купить в один клик» при этом видна. Что
+# реально скрыто — решаем по CSS (display:none и т.п.), который мы читаем.
 _HIDDEN_CLASSES = {
-    'disabled', 'd-none', 'hidden', 'is-hidden', 'hide', 'invisible',
+    'd-none', 'hidden', 'is-hidden', 'invisible',
     'sr-only', 'visually-hidden', 'visuallyhidden',
 }
 _VOID_TAGS = {
@@ -231,7 +236,8 @@ class _VisibleHTML(HTMLParser):
         if 'hidden' in d:
             return True
         style = d.get('style', '').lower().replace(' ', '')
-        if any(x in style for x in ('display:none', 'visibility:hidden', 'opacity:0')):
+        if ('display:none' in style or 'visibility:hidden' in style
+                or _RE_OPACITY0.search(style)):
             return True
         cls = set(d.get('class', '').lower().split())
         return bool(cls & _HIDDEN_CLASSES)
@@ -460,14 +466,17 @@ def _d_h2(c: _Ctx):
     return n > 0, n
 
 
+# Крошки ищем ТОЛЬКО в реальной разметке элемента (class/id/aria/itemtype), а
+# не где попало: иначе слово breadcrumb из href подключённого стиля
+# (/bitrix/.../breadcrumb/.../style.css) даёт ложный «✓», даже когда самих
+# крошек на странице нет (их «вшили» в H1). Так было — коллега это поймала.
+_RE_BREADCRUMB = re.compile(r'(?:class|id|aria-label|itemtype)="[^"]*breadcrumb', re.I)
+
+
 def _d_breadcrumbs(c: _Ctx):
-    # Микроразметка BreadcrumbList или класс/атрибут breadcrumb —
-    # практически универсальный признак хлебных крошек.
-    present = (
-        'breadcrumb' in c.html_lower
-        or 'breadcrumblist' in c.html_lower
-    )
-    return present, None
+    # Микроразметка BreadcrumbList или класс/атрибут breadcrumb на реальном
+    # элементе — практически универсальный признак хлебных крошек.
+    return bool(_RE_BREADCRUMB.search(c.html_lower)), None
 
 
 # ── Шапка: обязательные элементы (проверяются ВНУТРИ региона шапки) ──
@@ -639,9 +648,17 @@ def _d_availability(c: _Ctx):
     return 'в наличии' in c.vis_text_lower, None
 
 
+# Карточка товара МПЭ — отдельный шаблон: <div itemtype="schema.org/Product"
+# class="card-item ">. Маркер «class="card-item"» точный: на СМУ карточки
+# зовутся catalog-product-card-item (класс начинается с catalog-), под-классы
+# card-item-name/-img идут через дефис — под этот маркер не попадают; на
+# разделах-витринах и карточке товара МПЭ его нет.
+_RE_MPE_CARD = re.compile(r'class="card-item[ "]')
+
+
 def _d_product_cards(c: _Ctx):
-    # СМУ — catalog-product-card-item; ИМП — listing__cards / card-product.
-    # Запасные маркеры — listing-card / «расчёт стоимости».
+    # СМУ — catalog-product-card-item; ИМП — listing__cards / card-product;
+    # МПЭ — card-item. Запасные маркеры — listing-card / «расчёт стоимости».
     n = c.html_lower.count('catalog-product-card-item')
     if n == 0:
         n = c.html_lower.count('listing-card')
@@ -649,6 +666,8 @@ def _d_product_cards(c: _Ctx):
         n = c.html_lower.count('listing__cards')   # контейнер выдачи ИМП
     if n == 0:
         n = c.html_lower.count('card-product')      # карточка товара ИМП
+    if n == 0:
+        n = len(_RE_MPE_CARD.findall(c.html_lower))  # карточка товара МПЭ
     if n == 0:
         n = _count_text(c.text_lower, 'расчёт стоимости')
     return n > 0, n
@@ -985,6 +1004,7 @@ def check_content(html: str, type_code: str, css_hidden: tuple = ()) -> ContentR
             'catalog-product-card-item' in ctx.html_lower
             or 'listing-card' in ctx.html_lower
             or 'listing__cards' in ctx.html_lower      # листинг ИМП
+            or bool(_RE_MPE_CARD.search(ctx.html_lower))   # листинг МПЭ
         )
         has_subcats = (
             'catalog-cat-tabs' in ctx.html_lower
