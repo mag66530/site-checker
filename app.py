@@ -86,26 +86,17 @@ st.markdown(
     [data-testid="stNumberInput"] button:hover {
         background: #DEDBD4 !important;
     }
-    /* Иконки +/− рисуются заливкой (solid). Обводку НЕ добавляем — иначе глиф
-       выглядит размазанным/жирным. Только чёткая заливка. */
-    [data-testid="stNumberInput"] button svg,
-    [data-testid="stNumberInput"] button svg path {
+    /* Иконки +/− — ТОЛЬКО сами степперы (по их testid), чтобы заливка не
+       попадала на значок подсказки «?», который тоже лежит в <button>. */
+    [data-testid="stNumberInputStepUp"] svg, [data-testid="stNumberInputStepUp"] svg path,
+    [data-testid="stNumberInputStepDown"] svg, [data-testid="stNumberInputStepDown"] svg path {
         fill: #1A1A1A !important; stroke: none !important;
     }
 
-    /* Значок подсказки «?» — КОНТУРНЫЙ кружок (Streamlit рисует его обводкой).
-       Без этого правила глобальные заливки превращают его в чёрную точку.
-       Делаем fill:none и красим обводку — получается аккуратный «?».
-       Внутри числового поля «?» тоже лежит в <button>, поэтому правило ниже
-       (со scoped-селектором stNumberInput) перебивает заливку кнопок +/−,
-       иначе у числовых полей «?» снова чернеет. */
-    [data-testid="stTooltipHoverTarget"] { color: #8A867F !important; opacity: 1 !important; }
-    [data-testid="stTooltipHoverTarget"] svg,
-    [data-testid="stTooltipHoverTarget"] svg *,
-    [data-testid="stNumberInput"] [data-testid="stTooltipHoverTarget"] svg,
-    [data-testid="stNumberInput"] [data-testid="stTooltipHoverTarget"] svg * {
-        fill: none !important; stroke: #8A867F !important; opacity: 1 !important;
-    }
+    /* Значок подсказки «?» — оставляем родной значок Streamlit (он аккуратный),
+       только задаём спокойный серый тон. НЕ трогаем fill/stroke: попытки
+       fill:none+stroke давали «кружок в кружке» и размазанность. */
+    [data-testid="stTooltipIcon"] { color: #A8A39B !important; opacity: 1 !important; }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
     /* Карточки-контейнеры (с рамкой) — белые, чтобы блоки не сливались с фоном */
