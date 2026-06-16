@@ -1028,6 +1028,7 @@ if pid:
                 'yab': get_yabusiness_credentials(pid),
                 'twogis': get_twogis_credentials(pid),
                 'google': get_google_accounts_credentials(pid),
+                'webmaster_oauth': _secret(f'webmaster_oauth_{pid}'),
                 'secret_keys_hint': _sk_hint,
             }
             params = {'budget': budget, 'random_cities': int(random_cities),

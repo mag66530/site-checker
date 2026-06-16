@@ -888,6 +888,128 @@ def _build_notifications_sheet(wb, notifications):
         row += 2  # пробел между секциями
 
 
+# ── Лист «Ошибки сервисов» (Вебмастер/GSC/Метрика — из API) ─────────
+
+_SVC_SECTION = [
+    ('webmaster', 'Яндекс.Вебмастер'),
+    ('gsc',       'Google Search Console'),
+    ('metrika',   'Яндекс.Метрика'),
+]
+_SVC_SEV_LABEL = {
+    'fatal': '🔴 Фатальная', 'critical': '🔴 Критическая',
+    'possible': '🟠 Возможная', 'recommendation': '🟡 Рекомендация',
+    'info': '⚪ Инфо',
+}
+_SVC_SEV_COLOR = {
+    'fatal': C.err, 'critical': C.err, 'possible': C.warn,
+    'recommendation': 'CA8A04', 'info': C.text_muted,
+}
+_SVC_SEV_ORDER = {'fatal': 0, 'critical': 1, 'possible': 2,
+                  'recommendation': 3, 'info': 4}
+
+
+def _build_service_issues_sheet(wb, service_issues):
+    """Лист «Ошибки сервисов» — проблемы сайтов прямо из сервисов (не из почты).
+    Добавляется только если есть данные."""
+    issues = service_issues or []
+    if not issues:
+        return
+
+    ws = wb.create_sheet('Ошибки сервисов')
+    ws.sheet_view.showGridLines = False
+    has_crit = any(getattr(i, 'severity', '') in ('fatal', 'critical') for i in issues)
+    ws.sheet_properties.tabColor = C.err if has_crit else C.accent
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 28   # Сайт
+    ws.column_dimensions['C'].width = 18   # Серьёзность
+    ws.column_dimensions['D'].width = 50   # Проблема
+    ws.column_dimensions['E'].width = 13   # Дата
+    ws.column_dimensions['F'].width = 10   # Открыть
+
+    ws.merge_cells('B2:F2')
+    c = ws['B2']
+    c.value = 'Ошибки сайтов из сервисов'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:F3')
+    c = ws['B3']
+    c.value = ('Проблемы напрямую из Яндекс.Вебмастера / GSC / Метрики (диагностика: '
+               'сайтмапы, дубли, мусорные ссылки, ошибки сервера и индексации). '
+               'Не из почты — из самих сервисов по API.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 30
+
+    from collections import defaultdict
+    by_service = defaultdict(list)
+    for i in issues:
+        by_service[getattr(i, 'service', 'webmaster')].append(i)
+
+    row = 5
+    for svc_key, svc_title in _SVC_SECTION:
+        svc_items = by_service.get(svc_key, [])
+        if not svc_items:
+            continue
+
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        sc = ws.cell(row=row, column=2)
+        sc.value = f'{svc_title}  ({len(svc_items)})'
+        sc.font = _font(size=13, bold=True, color=C.accent)
+        sc.fill = _fill(C.accent_soft)
+        sc.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+
+        for ci, h in enumerate(['Сайт', 'Серьёзность', 'Проблема', 'Дата', 'Открыть'], 2):
+            cell = ws.cell(row=row, column=ci)
+            cell.value = h
+            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.fill = _fill(C.surface)
+            cell.alignment = _align()
+            cell.border = _border()
+        ws.row_dimensions[row].height = 20
+        row += 1
+
+        for i in sorted(svc_items, key=lambda x: (_SVC_SEV_ORDER.get(
+                getattr(x, 'severity', 'info'), 9), getattr(x, 'host', ''))):
+            sev = getattr(i, 'severity', 'info')
+            sev_color = _SVC_SEV_COLOR.get(sev, C.text_muted)
+            ws.row_dimensions[row].height = 30
+
+            for ci, (val, kw) in enumerate([
+                (getattr(i, 'host', ''), {'size': 10, 'color': C.text}),
+                (_SVC_SEV_LABEL.get(sev, sev),
+                 {'size': 9, 'bold': sev in ('fatal', 'critical'), 'color': sev_color}),
+                (getattr(i, 'title', '') or getattr(i, 'code', ''),
+                 {'size': 10, 'color': C.text_soft}),
+                (getattr(i, 'date', ''), {'size': 9, 'color': C.text_muted}),
+            ], 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = val
+                cell.font = _font(**kw)
+                cell.alignment = _align(wrap=True, vertical='top')
+                cell.border = _border(color=C.border_light)
+
+            # «Открыть» — ссылка в панель сервиса
+            link_cell = ws.cell(row=row, column=6)
+            _u = getattr(i, 'url', '')
+            if _u:
+                link_cell.value = 'открыть'
+                link_cell.hyperlink = _u
+                link_cell.font = _font(size=9, color=C.accent, underline='single')
+            else:
+                link_cell.value = '–'
+                link_cell.font = _font(size=9, color=C.text_muted)
+            link_cell.alignment = _align(horizontal='center')
+            link_cell.border = _border(color=C.border_light)
+
+            row += 1
+
+        row += 2
+
+
 # ── Лист «Контакты по городам» (сверка с КП) ───────────────────────
 
 
@@ -1039,6 +1161,7 @@ def build_report(
     metrika_data_date: str = None, # дата отчёта Метрики (YYYY-MM-DD)
     metrika_is_stale: bool = False,# True если данные не за вчера, а за более ранний день
     notifications: list = None,    # список WebmasterNotification – добавит лист «Уведомления»
+    service_issues: list = None,   # список ServiceIssue – добавит лист «Ошибки сервисов»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -1643,6 +1766,9 @@ def build_report(
     # ═══════════════════════════════════════════════════════════════
     # Лист «Уведомления» добавляем всегда (при пустом списке – заглушка).
     _build_notifications_sheet(wb, notifications)
+
+    # ЛИСТ 6: «Ошибки сервисов» (Вебмастер/GSC/Метрика из API) — если есть.
+    _build_service_issues_sheet(wb, service_issues)
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)

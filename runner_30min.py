@@ -29,6 +29,7 @@ from metrika_404 import (
     MAILBOX_CONFIG, fetch_incremental,
     load_reports_for_period, get_latest_available_date,
 )
+from webmaster_api import fetch_webmaster_issues, load_issues
 
 REPORTS_DIR = Path(__file__).parent / 'reports'
 REPORTS_DIR.mkdir(exist_ok=True)
@@ -194,6 +195,17 @@ def run_check(pid, params, creds, log, progress):
                     log(f'⚠ Метрика-404: {_e}')
             else:
                 log(f'⚠ Метрика-404: креды/почта не найдены (metrika_{pid}_*)')
+
+            # Ошибки сайтов из Яндекс.Вебмастера (официальный API v4)
+            _wm_token = creds.get('webmaster_oauth')
+            if _wm_token:
+                log('Вебмастер-API: тяну диагностику сайтов…')
+                try:
+                    fetch_webmaster_issues(pid, _wm_token, _proxy, _nlog)
+                except Exception as _e:
+                    log(f'⚠ Вебмастер-API: {_e}')
+            else:
+                log(f'⚠ Вебмастер-API: токен не задан (webmaster_oauth_{pid})')
         else:
             log('Сбор уведомлений выключен.')
 
@@ -206,16 +218,18 @@ def run_check(pid, params, creds, log, progress):
             + load_notifications(pid, 'google_accounts', _nd)
         )
         _metrika_reports = load_reports_for_period(pid, _nd) or None
+        _service_issues = load_issues(pid) or None
         build_report(
             project_name=cfg['name'], started_at_ms=started_ms,
             finished_at_ms=finished_ms,
             selected_subdomains=plan.selected_subdomains, results=results,
             output_path=report_path, notifications=_notifs or None,
             metrika_reports=_metrika_reports,
-            metrika_data_date=get_latest_available_date(pid))
+            metrika_data_date=get_latest_available_date(pid),
+            service_issues=_service_issues)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
-            f'404-страниц из Метрики {_m_pages}')
+            f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
 
         # Telegram (полный отчёт – почта/метрика уже собраны выше)
         tg_token = creds.get('tg_token')
