@@ -21,6 +21,21 @@ def test_split_phones_multiple():
     assert set(split_phones(txt)) == {'4991306028', '9031303669'}
 
 
+def test_normalize_phone_countries_and_float():
+    # Узбекистан (+998 → 9 цифр), в т.ч. число из Excel с «.0»
+    assert normalize_phone('998 (90) 006-84-48') == '900068448'
+    assert normalize_phone('998900068448.0') == '900068448'
+    # Беларусь (+375 → 9 цифр)
+    assert normalize_phone('+375 (44) 588-81-48') == '445888148'
+    # Казахстан (+7 → 10 цифр)
+    assert normalize_phone('7 (727) 354-08-98') == '7273540898'
+    assert normalize_phone('8-708-987-98-15') == '7089879815'
+
+
+def test_split_phones_uzbek_tel_link():
+    assert split_phones('tel:998900068448') == ['900068448']
+
+
 # ── Мягкое сравнение адреса ──────────────────────────────────────────
 
 
@@ -126,6 +141,30 @@ def test_address_mismatch_is_bug():
              address='проспект Мира, 100')
     res = check_against_kp(_page(), 'x.ru', kp)
     assert any(i['field'] == 'Адрес' and i['status'] == 'bug' for i in res.issues)
+
+
+def test_phone_branch_match_other_city_ok():
+    """Филиальная модель: город показывает номер другого города из КП → ок."""
+    kp = {
+        'aktau.x.ru': KPRow(domain='aktau.x.ru', city='Актау',
+                            phone_seo='8-708-987-98-15', all_phones='7089879815'),
+        'almaty.x.ru': KPRow(domain='almaty.x.ru', city='Алматы',
+                             phone_seo='7 (727) 354-08-98', all_phones='7273540898'),
+    }
+    # На сайте Актау — номер Алматы (обслуживающий филиал)
+    page = HEAD_FOOT.format(ph='+77273540898', ph_disp='7 (727) 354-08-98',
+                            em='aktau@x.ru', addr='Микрорайон 19А, 32/1')
+    res = check_against_kp(page, 'aktau.x.ru', kp)
+    phone = next(i for i in res.issues if i['field'] == 'Телефон')
+    assert phone['status'] == 'ok'
+
+
+def test_non_email_kp_value_skipped():
+    """Если в КП в поле почты не e-mail («надо заказывать») — почту не сверяем."""
+    kp = _kp(phone_seo='+7 (499) 130-60-28', all_phones='4991306028',
+             email='надо заказывать', address='улица Ленина, 5')
+    res = check_against_kp(_page(), 'x.ru', kp)
+    assert all(i['field'] != 'Почта' for i in res.issues)
 
 
 def test_unknown_domain_no_match():
