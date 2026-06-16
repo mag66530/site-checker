@@ -1,8 +1,8 @@
 """
-runner_30min.py — логика прогона 30-мин чек-листа БЕЗ Streamlit.
+runner_30min.py – логика прогона 30-мин чек-листа БЕЗ Streamlit.
 
 Используется фоновым подпроцессом checklist_run.py, чтобы тяжёлая async-работа
-(run_batch на aiohttp) шла в отдельном ПРОЦЕССЕ — надёжно, в отличие от потока
+(run_batch на aiohttp) шла в отдельном ПРОЦЕССЕ – надёжно, в отличие от потока
 внутри Streamlit. Возвращает результаты, путь отчёта и т.п.
 """
 import asyncio
@@ -10,7 +10,9 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from sources import load_project_config, load_sources, build_plan
+from sources import (
+    load_project_config, load_sources, build_plan, build_custom_tasks_typed,
+)
 from history import load_history, save_history, WEEKLY_TTL_MS
 from sitemap import load_product_pathnames
 from product_links import load_product_links
@@ -33,7 +35,7 @@ REPORTS_DIR.mkdir(exist_ok=True)
 
 
 def run_check(pid, params, creds, log, progress):
-    """Выполнить прогон. log(msg), progress(frac, text) — колбэки.
+    """Выполнить прогон. log(msg), progress(frac, text) – колбэки.
     Возвращает dict с results / report_path / started_at / finished_at / error."""
     out = {'results': None, 'report_path': None,
            'started_at': int(datetime.now().timestamp() * 1000),
@@ -84,6 +86,17 @@ def run_check(pid, params, creds, log, progress):
             mandatory_city=cfg.get('mandatory_city', 'Москва'),
             rotation_history=recent,
         )
+        # Свой список URL – добавляем к выборке проекта (тип по адресу).
+        _custom = params.get('custom_urls') or []
+        if _custom:
+            try:
+                extra = build_custom_tasks_typed(_custom, src)
+                if extra:
+                    plan.tasks.extend(extra)
+                    log(f'Свой список URL: добавлено {len(extra)}')
+            except Exception as e:
+                log(f'⚠ Свой список URL не разобран: {e}')
+
         log(f'Города: {", ".join(s.city for s in plan.selected_subdomains)}')
         log(f'Всего проверок: {len(plan.tasks)}')
 
@@ -97,7 +110,7 @@ def run_check(pid, params, creds, log, progress):
             else:
                 counters['err'] += 1
             progress(done / max(total_n, 1),
-                     f'Проверено {done} из {total_n} — '
+                     f'Проверено {done} из {total_n} – '
                      f'✅ {counters["ok"]} · ⚠ {counters["warn"]} · ❌ {counters["err"]}')
 
         try:
@@ -111,8 +124,8 @@ def run_check(pid, params, creds, log, progress):
 
         results = asyncio.run(run_batch(
             plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
-            retry_delay_ms=2500, check_text=True, on_progress=on_progress,
-            proxy_url=proxy_url, kp_map=kp_map))
+            retry_delay_ms=2500, check_text=bool(params.get('check_text', True)),
+            on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
 
         finished_ms = int(datetime.now().timestamp() * 1000)
         out['finished_at'] = finished_ms
@@ -120,7 +133,7 @@ def run_check(pid, params, creds, log, progress):
 
         report_filename = make_report_filename(pid, started_ms, REPORTS_DIR)
         report_path = REPORTS_DIR / report_filename
-        # ── Сбор почты/Метрики ДО сборки отчёта — чтобы отчёт сразу полный ──
+        # ── Сбор почты/Метрики ДО сборки отчёта – чтобы отчёт сразу полный ──
         if params['fetch_notifications']:
             log('Собираю уведомления из почты…')
             _nlog = lambda lvl, msg: log(msg)
@@ -204,14 +217,14 @@ def run_check(pid, params, creds, log, progress):
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц из Метрики {_m_pages}')
 
-        # Telegram (полный отчёт — почта/метрика уже собраны выше)
+        # Telegram (полный отчёт – почта/метрика уже собраны выше)
         tg_token = creds.get('tg_token')
         tg_recipients = creds.get('tg_recipients') or []
         if tg_token and tg_recipients:
             log(f'Отправляю отчёт в Telegram ({len(tg_recipients)})…')
             try:
                 problems_for_tg = [
-                    {'city': r.city or '—', 'url': r.url,
+                    {'city': r.city or '–', 'url': r.url,
                      'status': {'not_found': '404 Не найдена',
                                 'client_error': 'Ошибка на сайте',
                                 'server_error': 'Сервер не отвечает',
@@ -219,7 +232,7 @@ def run_check(pid, params, creds, log, progress):
                                 'network_error': 'Нет соединения'}.get(r.status, r.status)}
                     for r in results if r.is_error][:5]
                 empty_sections = [
-                    {'city': r.city or '—', 'url': r.url} for r in results
+                    {'city': r.city or '–', 'url': r.url} for r in results
                     if getattr(r, 'content', None) is not None
                     and getattr(r.content, 'page_kind', '') == 'empty']
                 summary_text = format_summary_message(

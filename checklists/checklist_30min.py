@@ -1,20 +1,20 @@
 """
-Чек-лист 30 мин — еженедельная проверка сайта-проекта помощником/джуном.
+Чек-лист – проверка сайта-проекта (объединённый 15- и 30-минутный).
 
-Пункты чек-листа:
-  1. Доступность сайта/поддоменов и визуальные ошибки — парсинг по случайной
-     выборке 300–500 URL (главная, каталог, категории всех уровней, фильтры,
-     товары) + проверка текстовых блоков и переменных. Выборка не повторяется
-     от недели к неделе: ротация с окном 30 дней.
-  2. Сбор найденных ошибок и отправка seo-специалисту и руководителю проекта —
-     автоматически: Telegram-уведомление с xlsx-отчётом после прогона.
-  3. Проверка почты проекта и уведомлений вебмастера, метрики, GSC — руками.
-  4. Проверка вебмастера и GSC на ошибки — руками.
-  5. Проверка метрики (или GA) — сравнение трафика — руками.
-  6. Проверка замены рекламного номера — руками.
+Объём задаётся вручную полями ввода (города / категории / фильтры / товары на
+город): минимум – быстрый тест, больше – полная еженедельная проверка.
 
-Сейчас вкладка автоматизирует пункты 1–2 (прогон + отправка отчёта).
-Ручная часть (пункты 3–6 чек-листом с галочками) временно убрана.
+Что делает:
+  1. Доступность и визуальные ошибки – выборка URL (главная 1.1, каталог 1.2,
+     категории 1.3, фильтры 1.4, товары 1.5, битые переменные 1.6) + структура
+     (цена, кнопки заказа, H1, шапка/подвал). Ротация с окном 30 дней.
+     Можно добавить свой список URL.
+  2. Сбор уведомлений из почты (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) +
+     404 из Метрики – в xlsx-отчёт.
+  3. Telegram-уведомление с отчётом после прогона.
+
+Прогон идёт ОТДЕЛЬНЫМ процессом (checklist_run.py → runner_30min), поэтому
+переживает переключение вкладок и не сбрасывается.
 """
 import asyncio
 import json
@@ -30,9 +30,14 @@ from urllib.parse import urlparse
 
 import streamlit as st
 
-from sources import list_projects, load_project_config, load_sources, build_plan
+from sources import (
+    list_projects, load_project_config, load_sources, build_plan,
+    build_custom_tasks_typed,
+)
 from history import load_history, save_history, WEEKLY_TTL_MS
-from sitemap import load_product_pathnames
+from sitemap import (
+    load_product_pathnames, get_cached_products_info, invalidate_sitemap_cache,
+)
 from product_links import load_product_links
 from http_checker import run_batch
 from reporter import build_report, make_report_filename
@@ -156,7 +161,7 @@ def _tags_html(tags: list[str]) -> str:
 
 
 def _dept_tags_result(r) -> list[str]:
-    """Кто отвечает за конкретную проблему. Пусто — если страница работает.
+    """Кто отвечает за конкретную проблему. Пусто – если страница работает.
 
     Карта проблема → отдел:
       • сервер не отвечает / таймаут / нет соединения (5xx) → разработка
@@ -205,7 +210,7 @@ def _dept_tags_notif(n) -> list[str]:
 # ── Фоновый прогон (переживает переключение вкладок) ─────────────────
 # Состояние прогона хранится в модульной переменной (живёт в процессе
 # сервера, не в session_state), поэтому переход на другую вкладку и обратно
-# не перезапускает прогон — поток продолжает работать сам.
+# не перезапускает прогон – поток продолжает работать сам.
 
 _RUNS: dict = {}  # project_id -> состояние прогона (устаревший потоковый путь)
 
@@ -304,7 +309,7 @@ def _run_state_new() -> dict:
 
 
 def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
-    """Выполняет прогон в фоне. НЕ обращается к st.* — все секреты переданы
+    """Выполняет прогон в фоне. НЕ обращается к st.* – все секреты переданы
     в creds из основного потока. Пишет прогресс/лог/результат в _RUNS[pid]."""
     state = _RUNS[pid]
     _run_log_path = Path('cache') / 'last_run.log'
@@ -388,7 +393,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
                 counters['err'] += 1
             set_progress(
                 done / max(total_n, 1),
-                f'Проверено {done} из {total_n} — '
+                f'Проверено {done} из {total_n} – '
                 f'✅ {counters["ok"]} · ⚠ {counters["warn"]} · ❌ {counters["err"]}',
             )
 
@@ -434,7 +439,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             append_log(f'Отправляю отчёт в Telegram ({len(tg_recipients)} получателей)…')
             try:
                 problems_for_tg = [
-                    {'city': r.city or '—', 'url': r.url,
+                    {'city': r.city or '–', 'url': r.url,
                      'status': {'not_found': '404 Не найдена',
                                 'client_error': 'Ошибка на сайте',
                                 'server_error': 'Сервер не отвечает',
@@ -442,7 +447,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
                                 'network_error': 'Нет соединения'}.get(r.status, r.status)}
                     for r in results if r.is_error][:5]
                 empty_sections = [
-                    {'city': r.city or '—', 'url': r.url} for r in results
+                    {'city': r.city or '–', 'url': r.url} for r in results
                     if getattr(r, 'content', None) is not None
                     and getattr(r.content, 'page_kind', '') == 'empty']
                 summary_text = format_summary_message(
@@ -470,7 +475,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             except Exception as e:
                 append_log(f'⚠ Telegram-отправка упала: {e}')
         else:
-            append_log('Telegram не настроен — отправьте отчёт ответственным вручную (пункт 2).')
+            append_log('Telegram не настроен – отправьте отчёт ответственным вручную (пункт 2).')
 
         # Сбор уведомлений из почты
         if flags['fetch_notifications']:
@@ -542,9 +547,9 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
                 )
                 append_log(f'✓ Отчёт обновлён с уведомлениями ({len(_notifs2)} шт.)')
             else:
-                append_log('Уведомлений нет — лист «Уведомления» в отчёт не добавлен.')
+                append_log('Уведомлений нет – лист «Уведомления» в отчёт не добавлен.')
         else:
-            append_log('Чекбокс «Собрать уведомления из почты» выключен — почту не проверяю.')
+            append_log('Чекбокс «Собрать уведомления из почты» выключен – почту не проверяю.')
 
         state['results'] = results
         state['report_path'] = str(report_path)
@@ -580,11 +585,15 @@ def init_session():
         'c30_check_categories': True,
         'c30_check_filters': True,
         'c30_check_products': True,
+        'c30_check_text': True,        # пункт 1.6 – битые переменные
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
         'c30_fetch_notifications': True,
         'c30_notify_days': 7,
+        # Свой список URL
+        'c30_use_custom_urls': False,
+        'c30_custom_urls_text': '',
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -609,8 +618,8 @@ def split_budget(target_urls: int, cities: int, has_filters: bool) -> dict:
     Разложить общий размер выборки (300–500 URL) на параметры build_plan.
 
     На каждый город: главная + каталог (фикс) + категории/фильтры/товары.
-    Категории — самая большая доля (все уровни вложенности), затем фильтры
-    и товары. Если фильтров у проекта нет — их долю делят категории и товары.
+    Категории – самая большая доля (все уровни вложенности), затем фильтры
+    и товары. Если фильтров у проекта нет – их долю делят категории и товары.
     """
     per_city = max(target_urls // max(cities, 1), 4)
     rest = per_city - 2          # минус главная и каталог
@@ -633,15 +642,17 @@ def split_budget(target_urls: int, cities: int, has_filters: bool) -> dict:
 # ── Шапка ───────────────────────────────────────────────────────────
 
 
-st.title('Чек-лист 30 мин')
+st.title('Чек-лист')
 st.caption(
-    'Еженедельная 30-минутная проверка сайта-проекта помощником/джуном. '
-    'Доступность, визуальные ошибки и структура — по случайной выборке URL.'
+    'Проверка сайта-проекта: доступность, визуальные ошибки и структура по '
+    'случайной выборке URL. Объём задаёте сами – минимум для быстрого теста, '
+    'больше для еженедельной проверки. Прогон идёт в фоне и переживает '
+    'переключение вкладок.'
 )
 
 # Локальный CSS только для этой страницы: primary-кнопка («Запустить
 # еженедельную проверку»). app.py красит белым саму кнопку, но текст лежит
-# во вложенном <p>, который глобальное правило перекрашивает в тёмный —
+# во вложенном <p>, который глобальное правило перекрашивает в тёмный –
 # получалась чёрная кнопка без видимого текста. Здесь явно белим и текст.
 st.markdown(
     """
@@ -662,7 +673,7 @@ st.markdown(
         background: #000000 !important;
         border-color: #000000 !important;
     }
-    /* Зелёная кнопка скачивания отчёта — чтобы не путалась с primary */
+    /* Зелёная кнопка скачивания отчёта – чтобы не путалась с primary */
     div[data-testid="stDownloadButton"] > button,
     div[data-testid="stDownloadButton"] > button * {
         color: #FFFFFF !important;
@@ -683,10 +694,10 @@ st.markdown(
 with st.container(border=True):
     st.markdown('### Какой сайт проверяем')
     projects = list_projects()
-    options = ['— выберите —'] + [p['name'] for p in projects]
+    options = ['– выберите –'] + [p['name'] for p in projects]
     name_to_id = {p['name']: p['id'] for p in projects}
 
-    current = '— выберите —'
+    current = '– выберите –'
     for p in projects:
         if p['id'] == st.session_state.c30_project_id:
             current = p['name']
@@ -709,113 +720,208 @@ if pid:
         st.stop()
     stats = src.stats
 
+    # ── Каталог проекта: метрики + сброс кэша ──────────────────────
+    with st.container(border=True):
+        st.markdown('#### Каталог проекта')
+        _m1, _m2, _m3, _m4 = st.columns(4)
+        _m1.metric('Городов', stats['subdomains_count'])
+        _m2.metric('Категорий', f'{stats["categories_count"]:,}'.replace(',', ' '))
+        _m3.metric('Фильтров',
+                   f'{stats["filters_count"]:,}'.replace(',', ' ')
+                   if stats['has_filters'] else 'нет')
+        _pbase = load_product_links(pid)
+        if _pbase and _pbase['pathnames']:
+            _d = datetime.fromtimestamp(_pbase['collected_at_ms'] / 1000)
+            _m4.metric('Товаров',
+                       f'{len(_pbase["pathnames"]):,}'.replace(',', ' ')
+                       + (' ⚠' if _pbase['is_stale'] else ''),
+                       help=f'База ссылок с листингов, собрана {_d.strftime("%d.%m.%Y")}. '
+                            f'Обновляется скриптом collect_products.py. Через 30 дней '
+                            f'помечается устаревшей (⚠).')
+        else:
+            _pinfo = get_cached_products_info(pid)
+            _m4.metric('Товаров',
+                       f'{_pinfo["count"]:,}'.replace(',', ' ') if _pinfo and _pinfo.get('count') else '–',
+                       help='Из sitemap.xml (или соберите базу collect_products.py).')
+        st.caption(f'Главный город (всегда в выборке): **{cfg.get("mandatory_city", "Москва")}**.')
+        _rc1, _rc2 = st.columns([1, 2])
+        with _rc1:
+            if st.button('♻ Сбросить кэш товаров', key='c30_reset_cache',
+                         help='Очищает локальный кэш приложения (sitemap + каталог). '
+                              'При следующем прогоне всё перечитается заново. База в '
+                              'репозитории не трогается.'):
+                invalidate_sitemap_cache(pid)
+                c30_load_sources.clear()
+                st.session_state['c30_cache_reset_done'] = True
+                st.rerun()
+        with _rc2:
+            st.caption('Автосброс: sitemap – раз в сутки, база с листингов – через 30 дней.')
+        if st.session_state.pop('c30_cache_reset_done', False):
+            st.success('Кэш очищен. При следующем прогоне товары перечитаются заново.')
+
     # ── Пункт 1: доступность и визуальные ошибки ───────────────────
     with st.container(border=True):
         st.markdown('### 1. Доступность и визуальные ошибки')
         st.caption(
-            'Случайная выборка 300–500 URL: главная (1.1), каталог (1.2), '
-            'категории всех уровней (1.3), фильтры (1.4), товары (1.5) '
-            'и текстовые блоки с переменными (1.6). На каждой странице — '
-            'код ответа, скорость и структура: цена, кнопки заказа, H1, '
-            'шапка/подвал. Выборка не повторяется: URL, проверенные за '
+            'Главная (1.1), каталог (1.2), категории всех уровней (1.3), '
+            'фильтры (1.4), товары (1.5) и текстовые блоки с переменными (1.6). '
+            'На каждой странице – код ответа, скорость и структура: цена, кнопки '
+            'заказа, H1, шапка/подвал. Выборка не повторяется: URL, проверенные за '
             'последние 30 дней, попадают в неё в 3 раза реже.'
         )
 
+        st.markdown('**Сколько проверять.** Поставьте минимум для быстрого '
+                    'теста, больше – для полной проверки. Все параметры – вручную:')
+        _maxsubs = max(0, stats['subdomains_count'] - 1)
+        _mcity = cfg.get('mandatory_city', 'Москва')
         col1, col2 = st.columns(2)
         with col1:
-            target_urls = st.slider(
-                'Размер выборки, URL', min_value=300, max_value=500,
-                value=400, step=50, key='c30_target',
+            random_cities = st.number_input(
+                f'Случайных городов ({_mcity} добавится сама)',
+                min_value=0, max_value=_maxsubs,
+                value=min(9, _maxsubs), step=1,
+                help='Сколько случайных городов-поддоменов взять помимо главного.',
+            )
+            cats_per_city = st.number_input(
+                'Категорий на город',
+                min_value=0, max_value=50, value=10, step=1,
+                help='Категории всех уровней вложенности (пункт 1.3).',
             )
         with col2:
-            random_cities = st.number_input(
-                'Случайных городов (Москва добавится сама)',
-                min_value=4, max_value=min(30, stats['subdomains_count'] - 1),
-                value=min(9, stats['subdomains_count'] - 1), step=1,
-                key='c30_cities',
+            if stats['has_filters']:
+                filters_per_city = st.number_input(
+                    'Фильтров на город',
+                    min_value=0, max_value=50, value=5, step=1,
+                    help='Страницы фильтров (пункт 1.4).',
+                )
+            else:
+                filters_per_city = 0
+                st.markdown('_У проекта нет фильтров_')
+            products_per_city = st.number_input(
+                'Товаров на город',
+                min_value=0, max_value=50, value=5, step=1,
+                help='Карточки товаров (пункт 1.5).',
             )
 
         cities_total = 1 + int(random_cities)
-        budget = split_budget(target_urls, cities_total, stats['has_filters'])
+        budget = {
+            'cats': int(cats_per_city),
+            'filters': int(filters_per_city) if stats['has_filters'] else 0,
+            'products': int(products_per_city),
+        }
+        budget['per_city'] = 2 + budget['cats'] + budget['filters'] + budget['products']
         plan_total = cities_total * budget['per_city']
 
         products_base = load_product_links(pid)
-        products_note = ''
         if products_base and products_base['pathnames']:
             d = datetime.fromtimestamp(products_base['collected_at_ms'] / 1000)
             products_note = (
-                f'Товары — из базы листингов ({len(products_base["pathnames"])} шт., '
+                f'Товары – из базы листингов ({len(products_base["pathnames"])} шт., '
                 f'собрана {d.strftime("%d.%m.%Y")}'
                 + (', ⚠ старше 30 дней' if products_base['is_stale'] else '')
                 + ').'
             )
         else:
-            products_note = 'Базы листингов нет — товары возьмём из sitemap.xml.'
+            products_note = 'Базы листингов нет – товары возьмём из sitemap.xml.'
 
         st.markdown(
             f'На каждый из **{cities_total} городов**: главная + каталог + '
             f'{budget["cats"]} категорий'
             + (f' + {budget["filters"]} фильтров' if budget['filters'] else '')
-            + f' + {budget["products"]} товаров — итого **{plan_total} проверок**. '
+            + f' + {budget["products"]} товаров – итого **{plan_total} проверок**. '
             f'{products_note}'
         )
-        est_sec = max(60, int((plan_total / 6) * 5 * (1.3 if cfg.get('use_proxy') else 1.0) * 1.2))
+        est_sec = max(20, int((plan_total / 6) * 5 * (1.3 if cfg.get('use_proxy') else 1.0) * 1.2))
         st.caption(f'Примерное время: {format_duration(est_sec)}. '
-                   f'Прогон идёт в фоне — можно переключаться на другие вкладки приложения.')
+                   f'Прогон идёт в фоне – можно переключаться на другие вкладки приложения.')
 
-        st.markdown('**Что проверяем:**')
+        st.markdown('**Что проверяем на страницах (пункты 1.1–1.6):**')
+
+        # «Выбрать все» – включает пункты 1.1–1.6. on_click выставляет значения
+        # ДО отрисовки чек-боксов, поэтому срабатывает с первого клика.
+        def _c30_select_all():
+            for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
+                       'c30_check_filters', 'c30_check_products', 'c30_check_text'):
+                st.session_state[_k] = True
+        st.button('✓ Выбрать все', key='c30_select_all', on_click=_c30_select_all,
+                  help='Включить все пункты 1.1–1.6')
+
         _cb_col1, _cb_col2 = st.columns(2)
         with _cb_col1:
-            _ck_main = st.checkbox('🏠 Главные страницы', value=st.session_state.c30_check_main, key='c30_ck_main', help='Пункт 1.1')
-            _ck_catalog = st.checkbox('📁 Страница /catalog/', value=st.session_state.c30_check_catalog, key='c30_ck_catalog', help='Пункт 1.2')
-            _ck_cats = st.checkbox('📂 Категории', value=st.session_state.c30_check_categories, key='c30_ck_cats', help='Пункт 1.3')
-            _ck_wm = st.checkbox('🔍 Ошибки Вебмастера', value=st.session_state.c30_check_webmaster, key='c30_ck_wm', help='Сайтмапы, дубли, покрытие — из кеша почты')
+            st.checkbox('🏠 Главные страницы', key='c30_check_main', help='Пункт 1.1')
+            st.checkbox('📁 Страница /catalog/', key='c30_check_catalog', help='Пункт 1.2')
+            st.checkbox('📂 Категории', key='c30_check_categories', help='Пункт 1.3')
         with _cb_col2:
             if stats['has_filters']:
-                _ck_filters = st.checkbox('🏷️ Фильтры', value=st.session_state.c30_check_filters, key='c30_ck_filters', help='Пункт 1.4')
+                st.checkbox('🏷️ Фильтры', key='c30_check_filters', help='Пункт 1.4')
             else:
-                _ck_filters = False
                 st.markdown('<span style="color:#71717A">🏷️ Фильтры _(нет в каталоге)_</span>', unsafe_allow_html=True)
-            _ck_products = st.checkbox('🛒 Карточки товаров', value=st.session_state.c30_check_products, key='c30_ck_products', help='Пункт 1.5')
-            _ck_gsc = st.checkbox('🌐 Ошибки GSC', value=st.session_state.c30_check_gsc, key='c30_ck_gsc', help='Критические и важные уведомления GSC — из кеша почты')
+            st.checkbox('🛒 Карточки товаров', key='c30_check_products', help='Пункт 1.5')
+            st.checkbox('🔤 Битые переменные', key='c30_check_text',
+                        help='Пункт 1.6 – {{city}}, %price%, undefined и т.п.')
 
+        st.markdown('**Сервисные проверки – уведомления из почты:**')
         _nf_col1, _nf_col2 = st.columns([3, 1])
         with _nf_col1:
             _ck_notif = st.checkbox(
-                '📬 Собрать уведомления из почты (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 из Метрики',
-                value=st.session_state.c30_fetch_notifications,
-                key='c30_ck_notif',
-                help='Подключится к почте и заберёт новые письма во время прогона',
+                '📬 Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 из Метрики',
+                key='c30_fetch_notifications',
+                help='Подключится к почте проекта и заберёт новые письма во время '
+                     'прогона. Всё попадёт в xlsx-отчёт (лист «Уведомления»).',
             )
         with _nf_col2:
             _nd_opts = [3, 7, 14, 30]
-            _nd = st.selectbox(
-                'За сколько дней',
-                _nd_opts,
-                index=_nd_opts.index(st.session_state.get('c30_notify_days', 7))
-                if st.session_state.get('c30_notify_days', 7) in _nd_opts else 1,
-                format_func=lambda x: f'{x} дней',
-                key='c30_nd_sel',
+            st.selectbox(
+                'За сколько дней', _nd_opts,
+                format_func=lambda x: f'{x} дней', key='c30_notify_days',
                 disabled=not _ck_notif,
                 help='За какой период собирать почту и 404-отчёты Метрики',
             )
 
-        # Сохраняем в session_state
-        for _k, _v in [
-            ('c30_check_main', _ck_main), ('c30_check_catalog', _ck_catalog),
-            ('c30_check_categories', _ck_cats), ('c30_check_filters', _ck_filters),
-            ('c30_check_products', _ck_products),
-            ('c30_check_webmaster', _ck_wm), ('c30_check_gsc', _ck_gsc),
-            ('c30_fetch_notifications', _ck_notif),
-            ('c30_notify_days', _nd),
-        ]:
-            st.session_state[_k] = _v
+        # ── Свой список URL (необязательно) ──────────────────────────
+        st.checkbox(
+            '📝 Добавить свой список URL',
+            key='c30_use_custom_urls',
+            help='Проверить дополнительно свои ссылки этого проекта вместе с '
+                 'обычной выборкой. Тип каждой ссылки определяется по адресу.',
+        )
+        if st.session_state.c30_use_custom_urls:
+            st.caption(
+                'Ссылки – по одной на строку. Тип по адресу: /catalog/x/ – '
+                'категория, /catalog/x/y/ – товар, …/filter/… – фильтр, / – главная.'
+            )
+            _up = st.file_uploader('Загрузить .txt / .csv', type=['txt', 'csv'],
+                                   label_visibility='collapsed', key='c30_custom_file')
+            if _up is not None:
+                try:
+                    _txt = _up.read().decode('utf-8', errors='replace')
+                    if _up.name.lower().endswith('.csv'):
+                        _txt = '\n'.join(
+                            (ln.split(',') if ',' in ln else ln.split(';'))[0].strip().strip('"\'')
+                            for ln in _txt.splitlines())
+                    _ex = st.session_state.c30_custom_urls_text.strip()
+                    st.session_state.c30_custom_urls_text = (_ex + '\n' + _txt) if _ex else _txt
+                except Exception as _e:
+                    st.error(f'Не удалось прочитать файл: {_e}')
+            st.text_area(
+                'URLs', height=160, key='c30_custom_urls_text',
+                label_visibility='collapsed',
+                placeholder='https://stalmetural.ru/catalog/armatura/\n'
+                            'https://orenburg.stalmetural.ru/catalog/truby/truba-20x20/',
+            )
+            _typed = build_custom_tasks_typed(
+                st.session_state.c30_custom_urls_text.split('\n'), src)
+            if _typed:
+                from collections import Counter as _Counter
+                _bt = ', '.join(f'{lbl}: {n}' for lbl, n
+                                in _Counter(t.type_label for t in _typed).items())
+                st.success(f'Будет добавлено {len(_typed)} URL – {_bt}')
 
         _paths = _c30_paths(pid)
         _alive = _pid_alive(_read_pidfile(_paths['pid']))
         _bcol, _ccol = st.columns([3, 1])
         with _bcol:
-            _go = st.button('▶ Запустить еженедельную проверку', type='primary',
+            _go = st.button('▶ Запустить проверку', type='primary',
                             use_container_width=True, key='c30_run', disabled=_alive)
         with _ccol:
             if st.button('⛔ Отменить', use_container_width=True,
@@ -834,9 +940,18 @@ if pid:
                 'check_categories': st.session_state.c30_check_categories,
                 'check_filters': st.session_state.c30_check_filters and stats['has_filters'],
                 'check_products': st.session_state.c30_check_products,
+                'check_text': st.session_state.c30_check_text,
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
             }
+            # Свой список URL (если включён) – добавится к обычной выборке проекта.
+            _custom_urls = []
+            if (st.session_state.get('c30_use_custom_urls')
+                    and st.session_state.get('c30_custom_urls_text', '').strip()):
+                _custom_urls = [
+                    ln.strip() for ln in st.session_state.c30_custom_urls_text.split('\n')
+                    if ln.strip() and not ln.strip().startswith('#')
+                ]
             try:
                 _sk_hint = [k for k in list(st.secrets.keys())
                             if 'gsc' in k.lower() or pid in k.lower()]
@@ -853,7 +968,8 @@ if pid:
                 'google': get_google_accounts_credentials(pid),
                 'secret_keys_hint': _sk_hint,
             }
-            params = {'budget': budget, 'random_cities': int(random_cities), **flags}
+            params = {'budget': budget, 'random_cities': int(random_cities),
+                      'custom_urls': _custom_urls, **flags}
             st.session_state.c30_results = None
             st.session_state.c30_report_path = None
             st.session_state.c30_last_error = None
@@ -870,7 +986,7 @@ if pid:
     if _alive and not _done:
         with st.container(border=True):
             st.markdown('### ⏳ Идёт проверка')
-            st.caption('Можно переключаться на другие вкладки — прогон идёт в фоне '
+            st.caption('Можно переключаться на другие вкладки – прогон идёт в фоне '
                        'и не прервётся.')
             _prog, _ptext = 0.0, 'Подготовка…'
             try:
@@ -890,7 +1006,7 @@ if pid:
         st.rerun()
     elif _paths['result'].exists() or _paths['report'].exists():
         # Процесс завершился.
-        # 1) Путь к отчёту — из лёгкого сайдкара (надёжно, не зависит от pickle).
+        # 1) Путь к отчёту – из лёгкого сайдкара (надёжно, не зависит от pickle).
         try:
             if _paths['report'].exists():
                 _rp_txt = _paths['report'].read_text(encoding='utf-8').strip()
@@ -898,7 +1014,7 @@ if pid:
                     st.session_state.c30_report_path = _rp_txt
         except Exception:
             pass
-        # 2) Результаты — из pickle (для метрик и блока результатов); если
+        # 2) Результаты – из pickle (для метрик и блока результатов); если
         #    pickle упал, кнопка скачивания всё равно работает (см. п.1).
         if _paths['result'].exists():
             try:
@@ -921,309 +1037,13 @@ if pid:
             pass
         st.rerun()
 
-    if False:  # старый синхронный блок отключён — прогон перенесён в _run_worker
-        with st.container(border=True):
-            st.markdown('### ⏳ Идёт проверка')
-            st.warning('⚠ устаревший блок')
-            progress_bar = st.progress(0, text='Подготовка…')
-            log_expander = st.expander('Подробный лог', expanded=False)
-            log_area = log_expander.empty()
-            log_messages = []
-
-        # Файл лога прогона — чтобы можно было найти строки про GSC/почту.
-        _run_log_path = Path('cache') / 'last_run.log'
-        try:
-            _run_log_path.parent.mkdir(parents=True, exist_ok=True)
-            _run_log_path.write_text('', encoding='utf-8')  # очистка перед прогоном
-        except Exception:
-            pass
-
-        def append_log(msg):
-            log_messages.append(msg)
-            log_area.code('\n'.join(log_messages[-100:]), language='text')
-            try:
-                _run_log_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(_run_log_path, 'a', encoding='utf-8') as _f:
-                    _f.write(f'{datetime.now().strftime("%H:%M:%S")}  {msg}\n')
-            except Exception:
-                pass
-
-        started_ms = int(time.time() * 1000)
-        st.session_state.c30_started_at = started_ms
-
-        try:
-            proxy_url = get_proxy_url() if cfg.get('use_proxy') else None
-            if cfg.get('use_proxy') and not proxy_url:
-                append_log(f'⚠ Прокси нужен для {cfg["name"]}, но не настроен в Secrets')
-            elif proxy_url:
-                append_log(f'Прокси: включён для проекта {cfg["name"]}')
-
-            # Товары: база листингов → fallback sitemap
-            if not src.products:
-                base_links = load_product_links(pid)
-                if base_links and base_links['pathnames']:
-                    src.products = base_links['pathnames']
-                    append_log(f'Товары из базы листингов: {len(src.products)}')
-                else:
-                    append_log('Загружаю sitemap для товаров…')
-                    try:
-                        sm = asyncio.run(load_product_pathnames(
-                            cfg, src.categories, src.filters,
-                            log=lambda lvl, msg: append_log(msg),
-                            proxy_url=proxy_url,
-                        ))
-                        src.products = sm.get('pathnames', [])
-                        append_log(f'Из sitemap: {len(src.products)} товаров')
-                    except Exception as e:
-                        append_log(f'⚠ Sitemap не загрузился: {e}. Прогон без товаров.')
-
-            # Ротация: окно 30 дней, чтобы недельные выборки не повторялись
-            recent = set(load_history(pid, ttl_ms=WEEKLY_TTL_MS).keys())
-            append_log(f'История ротации (30 дней): {len(recent)} URL')
-
-            plan = build_plan(
-                src,
-                random_subdomains_count=int(random_cities),
-                categories_per_subdomain=budget['cats'],
-                filters_per_subdomain=budget['filters'],
-                products_per_subdomain=budget['products'],
-                check_main=st.session_state.c30_check_main,
-                check_catalog=st.session_state.c30_check_catalog,
-                check_categories=st.session_state.c30_check_categories,
-                check_filters=st.session_state.c30_check_filters and stats['has_filters'],
-                check_products=st.session_state.c30_check_products,
-                mandatory_city=cfg.get('mandatory_city', 'Москва'),
-                rotation_history=recent,
-            )
-            append_log(f'Города: {", ".join(s.city for s in plan.selected_subdomains)}')
-            append_log(f'Всего проверок: {len(plan.tasks)}')
-
-            counters = {'ok': 0, 'warn': 0, 'err': 0}
-
-            def on_progress(result, done, total_n):
-                if result.is_ok:
-                    counters['ok'] += 1
-                elif result.is_warning:
-                    counters['warn'] += 1
-                else:
-                    counters['err'] += 1
-                try:
-                    progress_bar.progress(
-                        min(1.0, done / max(total_n, 1)),
-                        text=f'Проверено {done} из {total_n} — '
-                             f'✅ {counters["ok"]} · ⚠ {counters["warn"]} · ❌ {counters["err"]}',
-                    )
-                except Exception:
-                    pass
-
-            # КП для сверки контактов на главных страницах поддоменов
-            try:
-                from kp import load_kp
-                kp_map = load_kp(pid) or None
-                if kp_map:
-                    append_log(f'КП для сверки контактов: {len(kp_map)} городов')
-            except Exception as e:
-                kp_map = None
-                append_log(f'⚠ Не удалось загрузить КП: {e}')
-
-            results = asyncio.run(run_batch(
-                plan.tasks,
-                concurrency=6,
-                timeout_ms=120000,
-                max_attempts=3,
-                retry_delay_ms=2500,
-                check_text=True,
-                on_progress=on_progress,
-                proxy_url=proxy_url,
-                kp_map=kp_map,
-            ))
-
-            finished_ms = int(time.time() * 1000)
-            st.session_state.c30_finished_at = finished_ms
-
-            # История ротации
-            save_history(pid, list({urlparse(r.url).path for r in results}))
-
-            # xlsx-отчёт
-            append_log('Формирую xlsx-отчёт…')
-            report_filename = make_report_filename(pid, started_ms, REPORTS_DIR)
-            report_path = REPORTS_DIR / report_filename
-            _notifs_for_report = (
-                load_notifications(pid, 'yandex_webmaster', 30)
-                + load_notifications(pid, 'gsc', 30)
-                + load_notifications(pid, 'ya_business', 30)
-                + load_notifications(pid, 'twogis', 30)
-                + load_notifications(pid, 'google_accounts', 3)
-            )
-            build_report(
-                project_name=cfg['name'],
-                started_at_ms=started_ms,
-                finished_at_ms=finished_ms,
-                selected_subdomains=plan.selected_subdomains,
-                results=results,
-                output_path=report_path,
-                notifications=_notifs_for_report or None,
-            )
-
-            # Пункт 2 чек-листа: отправка ошибок ответственным
-            tg_token = _secret('telegram_bot_token')
-            tg_recipients = get_telegram_recipients(pid)
-            if tg_token and tg_recipients:
-                append_log(f'Отправляю отчёт в Telegram ({len(tg_recipients)} получателей)…')
-                try:
-                    problems_for_tg = [
-                        {'city': r.city or '—', 'url': r.url,
-                         'status': {'not_found': '404 Не найдена',
-                                    'client_error': 'Ошибка на сайте',
-                                    'server_error': 'Сервер не отвечает',
-                                    'timeout': 'Нет ответа',
-                                    'network_error': 'Нет соединения'}.get(r.status, r.status)}
-                        for r in results if r.is_error
-                    ][:5]
-                    empty_sections = [
-                        {'city': r.city or '—', 'url': r.url}
-                        for r in results
-                        if getattr(r, 'content', None) is not None
-                        and getattr(r.content, 'page_kind', '') == 'empty'
-                    ]
-                    summary_text = format_summary_message(
-                        project_name=f'{cfg["name"]} · еженедельная проверка',
-                        started_at=datetime.fromtimestamp(started_ms / 1000).strftime('%d.%m.%Y %H:%M'),
-                        duration_sec=(finished_ms - started_ms) // 1000,
-                        total_checks=len(results),
-                        ok_count=sum(1 for r in results if r.is_ok),
-                        warn_count=sum(1 for r in results if r.is_warning),
-                        err_count=sum(1 for r in results if r.is_error),
-                        text_issues_count=sum(len(r.text_issues) for r in results if r.has_text_issues),
-                        top_problems=problems_for_tg,
-                        content_bugs_count=sum(getattr(r, 'content_bugs', 0) or 0 for r in results),
-                        content_bug_pages=sum(1 for r in results if getattr(r, 'has_content_bugs', False)),
-                        empty_sections=empty_sections,
-                    )
-                    tg_result = send_run_notification(
-                        bot_token=tg_token,
-                        recipients=tg_recipients,
-                        project_name=cfg['name'],
-                        summary_text=summary_text,
-                        report_file=report_path,
-                        proxy_url=get_proxy_url(),
-                        log=lambda lvl, msg: append_log(msg),
-                    )
-                    append_log(f'✓ Telegram: отправлено {tg_result["sent"]}, '
-                               f'не доставлено {tg_result["failed"]}')
-                except Exception as e:
-                    append_log(f'⚠ Telegram-отправка упала: {e}')
-            else:
-                append_log('Telegram не настроен — отправьте отчёт ответственным вручную (пункт 2).')
-
-            # ── Сбор уведомлений из почты (если чекбокс включён) ────
-            if st.session_state.get('c30_fetch_notifications', True):
-                append_log('Собираю уведомления из почты…')
-                _nlog_run = lambda lvl, msg: append_log(msg)
-                _proxy = get_proxy_url()
-
-                _yw_e, _yw_p = get_metrika_credentials(pid)
-                _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
-                if _yw_e and _yw_p and _yw_cfg:
-                    try:
-                        fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_cfg['folder'], 30, _proxy, _nlog_run)
-                    except Exception as _e:
-                        append_log(f'⚠ Вебмастер: {_e}')
-                else:
-                    append_log('⚠ Вебмастер: креды не найдены '
-                               f'(секреты metrika_{pid}_email / metrika_{pid}_password)')
-
-                _gsc_e, _gsc_p = get_gsc_credentials(pid)
-                if _gsc_e and _gsc_p:
-                    append_log(f'GSC: креды найдены ({_gsc_e}), подключаюсь к Gmail…')
-                    try:
-                        fetch_gsc_gmail(pid, _gsc_e, _gsc_p, 30, _nlog_run)
-                    except Exception as _e:
-                        append_log(f'⚠ GSC: {_e}')
-                else:
-                    # Показываем какие ключи реально есть в секретах (только имена).
-                    try:
-                        _avail = [k for k in list(st.secrets.keys())
-                                  if 'gsc' in k.lower() or pid in k.lower()]
-                    except Exception:
-                        _avail = []
-                    append_log(
-                        f'⚠ GSC: креды не найдены. Ожидаю секреты '
-                        f'gsc_{pid}_email и gsc_{pid}_password. '
-                        f'Сейчас в секретах есть похожие ключи: {_avail or "нет"}')
-
-                _yab_e, _yab_p, _yab_f = get_yabusiness_credentials(pid)
-                if _yab_e and _yab_p and _yab_f:
-                    append_log(f'Я.Бизнес: подключаюсь к {_yab_e}, папка «{_yab_f}»…')
-                    try:
-                        fetch_yandex_folder_simple(pid, _yab_e, _yab_p, _yab_f, 'ya_business', 30, _proxy, _nlog_run)
-                    except Exception as _e:
-                        append_log(f'⚠ Я.Бизнес: {_e}')
-                else:
-                    append_log('⚠ Я.Бизнес: креды/папка не найдены '
-                               f'(секреты metrika_{pid}_email / metrika_{pid}_password)')
-
-                _tg_e, _tg_p, _tg_f = get_twogis_credentials(pid)
-                if _tg_e and _tg_p and _tg_f:
-                    append_log(f'2ГИС: подключаюсь к {_tg_e}, папка «{_tg_f}»…')
-                    try:
-                        fetch_yandex_folder_simple(pid, _tg_e, _tg_p, _tg_f, 'twogis', 30, _proxy, _nlog_run)
-                    except Exception as _e:
-                        append_log(f'⚠ 2ГИС: {_e}')
-                else:
-                    append_log('⚠ 2ГИС: креды/папка не найдены '
-                               f'(секреты metrika_{pid}_email / metrika_{pid}_password)')
-
-                _ga_e, _ga_p = get_google_accounts_credentials(pid)
-                if _ga_e and _ga_p:
-                    try:
-                        fetch_google_accounts(pid, _ga_e, _ga_p, 3, _nlog_run)
-                    except Exception as _e:
-                        append_log(f'⚠ Google: {_e}')
-
-                # Обновляем уведомления в отчёте с актуальным кешем
-                _notifs_for_report = (
-                    load_notifications(pid, 'yandex_webmaster', 30)
-                    + load_notifications(pid, 'gsc', 30)
-                    + load_notifications(pid, 'ya_business', 30)
-                    + load_notifications(pid, 'twogis', 30)
-                    + load_notifications(pid, 'google_accounts', 3)
-                )
-                if _notifs_for_report:
-                    build_report(
-                        project_name=cfg['name'],
-                        started_at_ms=started_ms,
-                        finished_at_ms=finished_ms,
-                        selected_subdomains=plan.selected_subdomains,
-                        results=results,
-                        output_path=report_path,
-                        notifications=_notifs_for_report,
-                    )
-                    append_log(f'✓ Отчёт обновлён с уведомлениями ({len(_notifs_for_report)} шт.)')
-                else:
-                    append_log('Уведомлений нет — лист «Уведомления» в отчёт не добавлен. '
-                               'Проверьте секреты почты выше в логе.')
-            else:
-                append_log('Чекбокс «Собрать уведомления из почты» выключен — почту не проверяю.')
-
-            st.session_state.c30_results = results
-            st.session_state.c30_report_path = str(report_path)
-            st.session_state.c30_is_running = False
-            progress_bar.progress(1.0, text='Готово')
-            st.rerun()
-
-        except Exception as e:
-            st.session_state.c30_is_running = False
-            st.error(f'Ошибка: {e}')
-            append_log(f'❌ Ошибка: {e}')
-
     # ── Ошибка прогона (если была) ──────────────────────────────────
     if st.session_state.get('c30_last_error'):
         st.error(f'Прогон завершился с ошибкой: {st.session_state.c30_last_error}')
 
     # ── Запасная кнопка скачивания ──────────────────────────────────
     # Если отчёт на диске есть, но блок результатов ниже не отрисовался
-    # (нет распарсенных результатов) — всё равно даём скачать xlsx.
+    # (нет распарсенных результатов) – всё равно даём скачать xlsx.
     if (st.session_state.get('c30_report_path')
             and not st.session_state.get('c30_results')):
         _rp = Path(st.session_state.c30_report_path)
@@ -1247,7 +1067,7 @@ if pid:
         duration = (st.session_state.c30_finished_at - st.session_state.c30_started_at) // 1000
 
         with st.container(border=True):
-            st.markdown('### Результаты еженедельной проверки')
+            st.markdown('### Результаты проверки')
             any_problems = (err_count or warn_count or text_issues_count or content_bugs_count)
             if any_problems:
                 st.warning(f'Найдены проблемы. Проверено {total} страниц за {format_duration(duration)}.')
@@ -1273,7 +1093,7 @@ if pid:
                             use_container_width=True, type='primary',
                         )
 
-            # Лог прогона — для диагностики почты/GSC
+            # Лог прогона – для диагностики почты/GSC
             _log_path = Path('cache') / 'last_run.log'
             if _log_path.exists():
                 _log_txt = _log_path.read_text(encoding='utf-8', errors='ignore')
@@ -1315,8 +1135,8 @@ if pid:
                     city = f'[{r.city}] ' if r.city else ''
                     tags_html = _tags_html(_dept_tags_result(r))
                     url_safe = _html.escape(r.url, quote=True)
-                    extra_html = (' — ' + _html.escape(' · '.join(extra))) if extra else ''
-                    # Вся строка — чистый HTML (без смешения с markdown-разметкой),
+                    extra_html = (' – ' + _html.escape(' · '.join(extra))) if extra else ''
+                    # Вся строка – чистый HTML (без смешения с markdown-разметкой),
                     # иначе Streamlit иногда не дорисовывает теги-span после markdown-ссылки.
                     st.markdown(
                         f'<div style="margin:2px 0;font-size:0.9rem">'
@@ -1326,9 +1146,9 @@ if pid:
                         unsafe_allow_html=True,
                     )
                 if len(problems) > 50:
-                    st.caption(f'... и ещё {len(problems) - 50}. Все детали — в xlsx-отчёте.')
+                    st.caption(f'... и ещё {len(problems) - 50}. Все детали – в xlsx-отчёте.')
 
-    # Уведомления из почты и 404 из Метрики — в xlsx-отчёте (лист
+    # Уведомления из почты и 404 из Метрики – в xlsx-отчёте (лист
     # «Уведомления»), собираются по галке «Собрать уведомления» за
     # выбранный период. Отдельный блок в UI убран.
 
