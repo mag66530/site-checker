@@ -34,6 +34,7 @@ from sources import (
     list_projects, load_project_config, load_sources, build_plan,
     build_custom_tasks_typed,
 )
+from profiles import PROFILES, get_profile_kwargs
 from history import load_history, save_history, WEEKLY_TTL_MS
 from sitemap import (
     load_product_pathnames, get_cached_products_info, invalidate_sitemap_cache,
@@ -682,10 +683,38 @@ st.markdown(
         background: #16A34A !important;
         border: 1px solid #16A34A !important;
     }
+
+    /* ── Типографика: чёткая иерархия, чтобы не сливалось ── */
+    /* Заголовок секции-карточки (### …) */
+    .block-container h3 { font-size: 1.3rem !important; margin: 0 0 .15rem !important; }
+    .block-container h4 { font-size: 1.05rem !important; margin: 0 0 .5rem !important;
+        color: #5B5853 !important; }
+    /* Единый подзаголовок группы внутри карточки */
+    .c30-sub {
+        font-size: .76rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: .06em; color: #8A867F;
+        margin: 1.1rem 0 .4rem; padding-bottom: .25rem;
+        border-bottom: 1px solid #ECEAE4;
+    }
+    .c30-sub:first-of-type { margin-top: .3rem; }
+    /* Подписи полей чуть крупнее и темнее — читаемо */
+    [data-testid="stNumberInput"] label p,
+    .stCheckbox label p, .stSelectbox label p {
+        font-size: .9rem !important; color: #3A3A3A !important; font-weight: 500 !important;
+    }
+    /* Значение в числовом поле — крупное, в фокусе внимания */
+    [data-testid="stNumberInput"] input { font-size: 1.05rem !important; font-weight: 600 !important; }
+    /* Итог/оценка — спокойный вторичный текст */
+    .c30-summary { font-size: .95rem; color: #1A1A1A; margin-top: .3rem; }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+def _c30_sub(text: str):
+    """Единый подзаголовок группы внутри карточки (для ровной иерархии)."""
+    st.markdown(f'<div class="c30-sub">{text}</div>', unsafe_allow_html=True)
 
 
 # ── Выбор проекта ───────────────────────────────────────────────────
@@ -709,6 +738,9 @@ with st.container(border=True):
         st.session_state.c30_project_id = new_pid
         st.session_state.c30_results = None
         st.session_state.c30_report_path = None
+        # Поля выборки перечитаются под новый проект (свои лимиты городов).
+        for _k in ('c30_in_cities', 'c30_in_cats', 'c30_in_filters', 'c30_in_products'):
+            st.session_state.pop(_k, None)
 
 pid = st.session_state.c30_project_id
 
@@ -770,37 +802,66 @@ if pid:
             'последние 30 дней, попадают в неё в 3 раза реже.'
         )
 
-        st.markdown('**Сколько проверять.** Поставьте минимум для быстрого '
-                    'теста, больше – для полной проверки. Все параметры – вручную:')
+        _c30_sub('Объём проверки')
         _maxsubs = max(0, stats['subdomains_count'] - 1)
         _mcity = cfg.get('mandatory_city', 'Москва')
+
+        # Пресеты заполняют поля ниже (значения из profiles.py); потом можно
+        # подправить вручную. on_click срабатывает до отрисовки полей.
+        def _c30_apply_preset(profile_id):
+            kw = get_profile_kwargs(profile_id)
+            st.session_state.c30_in_cities = kw['random_subdomains_count']
+            st.session_state.c30_in_cats = kw['categories_per_subdomain']
+            st.session_state.c30_in_filters = kw['filters_per_subdomain']
+            st.session_state.c30_in_products = kw['products_per_subdomain']
+
+        _p1, _p2, _p3 = st.columns(3)
+        with _p1:
+            st.button('⚡ Быстрая', use_container_width=True, key='c30_pre_quick',
+                      on_click=_c30_apply_preset, args=('quick',),
+                      help=PROFILES['quick']['description'])
+        with _p2:
+            st.button('◐ Стандартная', use_container_width=True, key='c30_pre_std',
+                      on_click=_c30_apply_preset, args=('standard',),
+                      help=PROFILES['standard']['description'])
+        with _p3:
+            st.button('✦ Полная', use_container_width=True, key='c30_pre_full',
+                      on_click=_c30_apply_preset, args=('full',),
+                      help=PROFILES['full']['description'])
+        st.caption(f'Пресет заполняет поля ниже – дальше можно подправить вручную. '
+                   f'Для теста ставьте минимум. Главный город {_mcity} всегда в выборке.')
+
+        # Дефолты и клампы под текущий проект (у каждого свой лимит городов).
+        st.session_state.setdefault('c30_in_cities', min(9, _maxsubs))
+        st.session_state.setdefault('c30_in_cats', 10)
+        st.session_state.setdefault('c30_in_filters', 5)
+        st.session_state.setdefault('c30_in_products', 5)
+        if st.session_state.c30_in_cities > _maxsubs:
+            st.session_state.c30_in_cities = _maxsubs
+
         col1, col2 = st.columns(2)
         with col1:
             random_cities = st.number_input(
-                f'Случайных городов ({_mcity} добавится сама)',
-                min_value=0, max_value=_maxsubs,
-                value=min(9, _maxsubs), step=1,
+                f'Случайных городов (+ {_mcity})',
+                min_value=0, max_value=_maxsubs, step=1, key='c30_in_cities',
                 help='Сколько случайных городов-поддоменов взять помимо главного.',
             )
             cats_per_city = st.number_input(
-                'Категорий на город',
-                min_value=0, max_value=50, value=10, step=1,
-                help='Категории всех уровней вложенности (пункт 1.3).',
+                'Категорий на город', min_value=0, max_value=50, step=1,
+                key='c30_in_cats', help='Категории всех уровней вложенности (пункт 1.3).',
             )
         with col2:
             if stats['has_filters']:
                 filters_per_city = st.number_input(
-                    'Фильтров на город',
-                    min_value=0, max_value=50, value=5, step=1,
-                    help='Страницы фильтров (пункт 1.4).',
+                    'Фильтров на город', min_value=0, max_value=50, step=1,
+                    key='c30_in_filters', help='Страницы фильтров (пункт 1.4).',
                 )
             else:
                 filters_per_city = 0
                 st.markdown('_У проекта нет фильтров_')
             products_per_city = st.number_input(
-                'Товаров на город',
-                min_value=0, max_value=50, value=5, step=1,
-                help='Карточки товаров (пункт 1.5).',
+                'Товаров на город', min_value=0, max_value=50, step=1,
+                key='c30_in_products', help='Карточки товаров (пункт 1.5).',
             )
 
         cities_total = 1 + int(random_cities)
@@ -825,17 +886,18 @@ if pid:
             products_note = 'Базы листингов нет – товары возьмём из sitemap.xml.'
 
         st.markdown(
-            f'На каждый из **{cities_total} городов**: главная + каталог + '
-            f'{budget["cats"]} категорий'
+            f'<div class="c30-summary">На каждый из <b>{cities_total} городов</b>: '
+            f'главная + каталог + {budget["cats"]} категорий'
             + (f' + {budget["filters"]} фильтров' if budget['filters'] else '')
-            + f' + {budget["products"]} товаров – итого **{plan_total} проверок**. '
-            f'{products_note}'
+            + f' + {budget["products"]} товаров = <b>{plan_total} проверок</b>. '
+            f'{products_note}</div>',
+            unsafe_allow_html=True,
         )
         est_sec = max(20, int((plan_total / 6) * 5 * (1.3 if cfg.get('use_proxy') else 1.0) * 1.2))
         st.caption(f'Примерное время: {format_duration(est_sec)}. '
                    f'Прогон идёт в фоне – можно переключаться на другие вкладки приложения.')
 
-        st.markdown('**Что проверяем на страницах (пункты 1.1–1.6):**')
+        _c30_sub('Что проверяем на страницах (пункты 1.1–1.6)')
 
         # «Выбрать все» – включает пункты 1.1–1.6. on_click выставляет значения
         # ДО отрисовки чек-боксов, поэтому срабатывает с первого клика.
@@ -860,7 +922,7 @@ if pid:
             st.checkbox('🔤 Битые переменные', key='c30_check_text',
                         help='Пункт 1.6 – {{city}}, %price%, undefined и т.п.')
 
-        st.markdown('**Сервисные проверки – уведомления из почты:**')
+        _c30_sub('Сервисные проверки – уведомления из почты')
         _nf_col1, _nf_col2 = st.columns([3, 1])
         with _nf_col1:
             _ck_notif = st.checkbox(

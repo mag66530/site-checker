@@ -80,13 +80,26 @@ st.markdown(
         background: #ECEAE4 !important;
         border: 1px solid rgba(26,26,26,.12) !important;
         color: #1A1A1A !important;
+        width: 42px !important;
+        border-radius: 8px !important;
     }
     [data-testid="stNumberInput"] button:hover {
         background: #DEDBD4 !important;
     }
+    /* Иконки +/− рисуются заливкой (solid). Обводку НЕ добавляем — иначе глиф
+       выглядит размазанным/жирным. Только чёткая заливка. */
     [data-testid="stNumberInput"] button svg,
     [data-testid="stNumberInput"] button svg path {
-        fill: #1A1A1A !important; stroke: #1A1A1A !important;
+        fill: #1A1A1A !important; stroke: none !important;
+    }
+
+    /* Значок подсказки «?» — КОНТУРНЫЙ кружок (Streamlit рисует его обводкой).
+       Без этого правила глобальные заливки превращают его в чёрную точку.
+       Делаем fill:none и красим обводку — получается аккуратный «?». */
+    [data-testid="stTooltipHoverTarget"] { color: #8A867F !important; opacity: 1 !important; }
+    [data-testid="stTooltipHoverTarget"] svg,
+    [data-testid="stTooltipHoverTarget"] svg * {
+        fill: none !important; stroke: #8A867F !important; opacity: 1 !important;
     }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
