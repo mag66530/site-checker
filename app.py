@@ -95,10 +95,15 @@ st.markdown(
 
     /* Значок подсказки «?» — КОНТУРНЫЙ кружок (Streamlit рисует его обводкой).
        Без этого правила глобальные заливки превращают его в чёрную точку.
-       Делаем fill:none и красим обводку — получается аккуратный «?». */
+       Делаем fill:none и красим обводку — получается аккуратный «?».
+       Внутри числового поля «?» тоже лежит в <button>, поэтому правило ниже
+       (со scoped-селектором stNumberInput) перебивает заливку кнопок +/−,
+       иначе у числовых полей «?» снова чернеет. */
     [data-testid="stTooltipHoverTarget"] { color: #8A867F !important; opacity: 1 !important; }
     [data-testid="stTooltipHoverTarget"] svg,
-    [data-testid="stTooltipHoverTarget"] svg * {
+    [data-testid="stTooltipHoverTarget"] svg *,
+    [data-testid="stNumberInput"] [data-testid="stTooltipHoverTarget"] svg,
+    [data-testid="stNumberInput"] [data-testid="stTooltipHoverTarget"] svg * {
         fill: none !important; stroke: #8A867F !important; opacity: 1 !important;
     }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
