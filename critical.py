@@ -38,8 +38,8 @@ _OTHER_CATEGORIES = ('kp', 'cannot_buy', 'not_found', 'text')
 class CriticalItem:
     category: str          # availability | kp | cannot_buy | not_found | text
     city: str
-    path: str
-    detail: str
+    page: str              # человекочитаемое имя страницы (Главная / тех. имя / путь)
+    detail: str            # суть ошибки (без имени страницы, без тире)
     url: str = ''
 
 
@@ -68,6 +68,20 @@ def _path(url: str) -> str:
         return url
 
 
+def _page_name(r, path: str) -> str:
+    """Человекочитаемое имя страницы: Главная / имя тех. страницы / путь."""
+    tc = getattr(r, 'type_code', '')
+    if tc == 'main':
+        return 'Главная'
+    if tc == 'tech':
+        try:
+            from sources import tech_page_label
+            return tech_page_label(path)
+        except Exception:
+            return path
+    return path or '/'
+
+
 def is_availability_down(r) -> bool:
     """Падение доступности: сервер не отвечает на любой странице ИЛИ упала главная."""
     if getattr(r, 'status', '') in _SERVER_DOWN:
@@ -86,20 +100,20 @@ def analyze(results) -> CriticalSummary:
         city = getattr(r, 'city', '') or '–'
         url = getattr(r, 'url', '') or ''
         path = _path(url)
+        page = _page_name(r, path)
 
         # 1) Падение доступности (сервер / главная) – дальше контента нет.
         if is_availability_down(r):
             label = _STATUS_LABEL.get(getattr(r, 'status', ''), 'не открылась')
-            where = 'главная' if getattr(r, 'type_code', '') == 'main' else path
             s.availability.append(
-                CriticalItem('availability', city, path, f'{where}: {label}', url))
+                CriticalItem('availability', city, page, label, url))
             continue
 
         # Прочие недоступности (напр. 404 не на главной) – в not_found.
         if not getattr(r, 'is_ok', False):
             if getattr(r, 'status', '') == 'not_found':
                 s.others['not_found'].append(
-                    CriticalItem('not_found', city, path, '404', url))
+                    CriticalItem('not_found', city, page, '404 не найдена', url))
             continue
 
         content = getattr(r, 'content', None)
@@ -107,7 +121,7 @@ def analyze(results) -> CriticalSummary:
         # 2) soft-404 («заглушка»: 200, но контент «страница не найдена»).
         if content is not None and getattr(content, 'is_soft_404', False):
             s.others['not_found'].append(
-                CriticalItem('not_found', city, path, '404-заглушка', url))
+                CriticalItem('not_found', city, page, '404-заглушка (отдаёт 200)', url))
             continue
 
         # 3) Контакты ≠ КП.
@@ -117,7 +131,7 @@ def analyze(results) -> CriticalSummary:
                    if i.get('status') in ('bug', 'critical')]
             if bad:
                 s.others['kp'].append(
-                    CriticalItem('kp', city, path, ', '.join(bad), url))
+                    CriticalItem('kp', city, page, f'{", ".join(bad)} не совпадает с КП', url))
 
         # 4) Нельзя купить: пустой раздел ИЛИ нет цены/кнопки заказа.
         if content is not None:
@@ -125,7 +139,7 @@ def analyze(results) -> CriticalSummary:
             bug_keys = {getattr(b, 'key', '') for b in getattr(content, 'bugs', [])}
             if pk == 'empty':
                 s.others['cannot_buy'].append(
-                    CriticalItem('cannot_buy', city, path, 'пустой раздел', url))
+                    CriticalItem('cannot_buy', city, page, 'пустой раздел (нет товаров)', url))
             elif bug_keys & {'price', 'btn_order'}:
                 what = []
                 if 'price' in bug_keys:
@@ -133,12 +147,12 @@ def analyze(results) -> CriticalSummary:
                 if 'btn_order' in bug_keys:
                     what.append('нет кнопки заказа')
                 s.others['cannot_buy'].append(
-                    CriticalItem('cannot_buy', city, path, ', '.join(what), url))
+                    CriticalItem('cannot_buy', city, page, ', '.join(what), url))
 
         # 5) Битые переменные в текстах.
         if getattr(r, 'has_text_issues', False):
             n = len(getattr(r, 'text_issues', []) or [])
             s.others['text'].append(
-                CriticalItem('text', city, path, f'{n} битых', url))
+                CriticalItem('text', city, page, f'{n} битых переменных', url))
 
     return s

@@ -28,14 +28,16 @@ def test_availability_server_down():
 def test_availability_main_any_error():
     r = _r(status='not_found', is_ok=False, is_error=True, type_code='main')
     s = analyze([r])
-    assert len(s.availability) == 1 and 'главная' in s.availability[0].detail
+    assert len(s.availability) == 1
+    assert s.availability[0].page == 'Главная'
+    assert s.availability[0].detail == '404 не найдена'
 
 
 def test_404_not_main_goes_to_not_found_not_availability():
     r = _r(status='not_found', is_ok=False, is_error=True, type_code='product')
     s = analyze([r])
     assert not s.availability
-    assert len(s.others['not_found']) == 1 and s.others['not_found'][0].detail == '404'
+    assert len(s.others['not_found']) == 1 and s.others['not_found'][0].detail == '404 не найдена'
 
 
 def test_soft_404():
@@ -77,15 +79,21 @@ def test_cancelled_skipped():
 def test_total_and_formatters():
     rs = [
         _r(status='server_error', is_ok=False, is_error=True, type_code='main', city='Москва'),
+        _r(status='timeout', is_ok=False, is_error=True, type_code='product', city='Москва',
+           url='https://msk.x.ru/catalog/a/t/'),
         _r(status='not_found', is_ok=False, is_error=True, type_code='product', city='Уфа'),
         _r(has_text_issues=True, text_issues=[1], city='Омск'),
     ]
     s = analyze(rs)
-    assert s.total == 3 and s.has_availability
+    assert s.total == 4 and s.has_availability
     alert = format_critical_alert('СМУ – Сталметурал', s.availability)
-    assert 'КРИТИЧНО' in alert and 'СМУ' in alert and 'Москва' in alert
+    # без эмодзи и длинных тире, группировка по городу, конкретная ошибка
+    assert '🔴' not in alert and '—' not in alert
+    assert 'Упала доступность' in alert and 'СМУ' in alert
+    assert '<b>Москва</b>' in alert and 'Главная: сервер не отвечает (5xx)' in alert
     block = format_critical_block(s)
-    assert 'Критические (3)' in block and 'Недоступность' in block and 'Битые переменные' in block
+    assert '🔴' not in block and '—' not in block
+    assert 'Критические (4)' in block and 'Недоступность' in block and 'Битые переменные' in block
 
 
 def test_no_critical_empty_block():

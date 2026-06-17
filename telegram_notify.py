@@ -165,18 +165,27 @@ _CRIT_CAT_LABEL = {
 
 
 def format_critical_alert(project_name: str, availability: list,
-                          max_items: int = 12) -> str:
-    """Срочное ОТДЕЛЬНОЕ сообщение о падении доступности (сервер / главная)."""
+                          max_cities: int = 15, max_per_city: int = 10) -> str:
+    """Срочное ОТДЕЛЬНОЕ сообщение о падении доступности (сервер / главная).
+    Группировка по городу: под городом – страницы с конкретной ошибкой."""
     short = escape_html(_short_project_name(project_name))
-    n = len(availability)
-    lines = [f'🔴 <b>КРИТИЧНО — {short}</b>',
-             f'Недоступность ({n}):', '']
-    for it in availability[:max_items]:
-        lines.append(f'• {escape_html(it.city)} — {escape_html(it.detail)}')
-    if n > max_items:
-        lines.append(f'… и ещё {n - max_items}')
-    lines.append('')
-    lines.append('Полный отчёт — следующим сообщением.')
+    # Группируем по городу, сохраняя порядок появления.
+    by_city = {}
+    for it in availability:
+        by_city.setdefault(it.city, []).append(it)
+
+    lines = [f'<b>Упала доступность: {short}</b>', '']
+    for ci, (city, items) in enumerate(by_city.items()):
+        if ci >= max_cities:
+            lines.append(f'… и ещё городов: {len(by_city) - max_cities}')
+            break
+        lines.append(f'<b>{escape_html(city)}</b>')
+        for it in items[:max_per_city]:
+            lines.append(f'• {escape_html(it.page)}: {escape_html(it.detail)}')
+        if len(items) > max_per_city:
+            lines.append(f'• … ещё {len(items) - max_per_city}')
+        lines.append('')
+    lines.append('Подробности в отчёте (следующее сообщение).')
     return '\n'.join(lines)
 
 
@@ -191,9 +200,9 @@ def format_critical_block(summary, max_examples: int = 2) -> str:
             groups.append((cat, lst))
     if not groups:
         return ''
-    lines = [f'🔴 <b>Критические ({summary.total})</b>']
+    lines = [f'<b>Критические ({summary.total})</b>']
     for cat, lst in groups:
-        ex = '; '.join(f'{escape_html(it.city)} {escape_html(it.detail)}'
+        ex = '; '.join(f'{escape_html(it.city)} {escape_html(it.page)}: {escape_html(it.detail)}'
                        for it in lst[:max_examples])
         more = f' …+{len(lst) - max_examples}' if len(lst) > max_examples else ''
         lines.append(f'• {_CRIT_CAT_LABEL[cat]}: <b>{len(lst)}</b> ({ex}{more})')
