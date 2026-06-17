@@ -211,8 +211,9 @@ def _parse_diagnostics(project_id: str, host: str, host_id: str,
         if not isinstance(info, dict):
             continue
         state = (info.get('state') or '').upper()
-        # Берём только реально присутствующие проблемы
-        if state and state not in ('PRESENT', 'NEW', 'ACTUAL'):
+        # Исключаем только ЯВНО решённые/отсутствующие — всё прочее берём
+        # (значения state у Яндекса плавают; лучше показать лишнее, чем скрыть).
+        if state in ('ABSENT', 'OK', 'NONE', 'RESOLVED', 'GONE', 'FIXED'):
             continue
         sev_raw = (info.get('severity') or '').upper()
         severity = _SEV_FROM_YANDEX.get(sev_raw, 'info')
@@ -272,8 +273,14 @@ def fetch_webmaster_issues(project_id: str, token: str,
             try:
                 diag = _get(token, f'/user/{user_id}/hosts/{host_id}/diagnostics/',
                             proxy_url)
+                _raw = (diag or {}).get('problems')
+                _raw_n = len(_raw) if isinstance(_raw, (dict, list)) else 0
                 hi = _parse_diagnostics(project_id, host_norm, host_id, diag)
                 all_issues.extend(hi)
+                # Диагностика: если сырых проблем много, а активных 0 — видно в логе
+                _log(f'  {host_norm}: в ответе {_raw_n}, активных {len(hi)}')
+                if _raw_n and not hi and isinstance(_raw, dict):
+                    _log(f'    ключи/шаблон: {list(_raw)[:6]}')
             except Exception as e:
                 _log(f'⚠ Вебмастер-API ({host_norm}): {e}')
 

@@ -1098,8 +1098,17 @@ if pid:
             try:
                 _sk_hint = [k for k in list(st.secrets.keys())
                             if 'gsc' in k.lower() or pid in k.lower()]
+                # Какие «webmaster/oauth»-ключи реально есть — для диагностики
+                _wm_hint = [k for k in list(st.secrets.keys())
+                            if 'webmaster' in k.lower() or 'oauth' in k.lower()]
             except Exception:
-                _sk_hint = []
+                _sk_hint, _wm_hint = [], []
+            # Токен Яндекс OAuth (Вебмастер-API; тот же подойдёт для Метрики).
+            # Имя секрета: yandex_oauth_<pid> (с запасными вариантами).
+            _wm_token = (_secret(f'yandex_oauth_{pid}')
+                         or _secret(f'webmaster_oauth_{pid}')
+                         or _secret('yandex_oauth')
+                         or _secret('webmaster_oauth'))
             creds = {
                 'proxy_url': get_proxy_url(),
                 'tg_token': _secret('telegram_bot_token'),
@@ -1109,7 +1118,8 @@ if pid:
                 'yab': get_yabusiness_credentials(pid),
                 'twogis': get_twogis_credentials(pid),
                 'google': get_google_accounts_credentials(pid),
-                'webmaster_oauth': _secret(f'webmaster_oauth_{pid}'),
+                'webmaster_oauth': _wm_token,
+                'webmaster_keys_hint': _wm_hint,
                 'secret_keys_hint': _sk_hint,
             }
             params = {'budget': budget, 'random_cities': int(random_cities),
@@ -1237,24 +1247,6 @@ if pid:
                             use_container_width=True, type='primary',
                         )
 
-            # Лог прогона – для диагностики почты/GSC
-            _log_path = Path('cache') / 'last_run.log'
-            if _log_path.exists():
-                _log_txt = _log_path.read_text(encoding='utf-8', errors='ignore')
-                st.download_button(
-                    label='🧾 Скачать лог прогона (для диагностики GSC/почты)',
-                    data=_log_txt.encode('utf-8'),
-                    file_name='last_run.log', mime='text/plain',
-                    use_container_width=True,
-                )
-                _gsc_lines = [ln for ln in _log_txt.splitlines()
-                              if any(k in ln for k in
-                                     ('GSC', 'креды', 'секрет', 'Отправители',
-                                      'Gmail', 'папк', 'Вебмастер', 'уведомлени'))]
-                if _gsc_lines:
-                    with st.expander('🔎 Строки лога про почту/GSC', expanded=True):
-                        st.code('\n'.join(_gsc_lines), language='text')
-
             problems = [
                 r for r in results
                 if r.is_error or r.is_warning or r.has_text_issues
@@ -1295,6 +1287,23 @@ if pid:
     # Уведомления из почты и 404 из Метрики – в xlsx-отчёте (лист
     # «Уведомления»), собираются по галке «Собрать уведомления» за
     # выбранный период. Отдельный блок в UI убран.
+
+    # ── Лог прогона: самый нижний блок (под результатами), виден всегда
+    #    после завершения (как в автокликере) — даже если результатов нет. ──
+    if not _alive:
+        _lp = _c30_paths(pid)['log']
+        if _lp.exists():
+            _log_txt = _lp.read_text(encoding='utf-8', errors='ignore')
+            if _log_txt.strip():
+                with st.expander('🧾 Лог прогона (почта / Вебмастер / GSC)',
+                                 expanded=True):
+                    st.code('\n'.join(_log_txt.splitlines()[-250:]) or '…',
+                            language='text')
+                st.download_button(
+                    label='Скачать полный лог прогона',
+                    data=_log_txt.encode('utf-8'),
+                    file_name=f'{pid}-run.log', mime='text/plain',
+                    use_container_width=True, key='c30_dl_log')
 
 else:
     st.info('Выберите проект, чтобы начать еженедельную проверку.')
