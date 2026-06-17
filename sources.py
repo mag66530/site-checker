@@ -195,7 +195,25 @@ TYPE_LABELS = {
     'filter': 'Фильтр',
     'product': 'Товар',
     'custom': 'URL',
+    'tech': 'Тех. страница',
 }
+
+
+# Технические/служебные страницы (на главном домене проекта). Шаблон Bitrix общий
+# для СМУ/ИМП/МПЭ, поэтому пути одни и те же; если у проекта slug отличается —
+# поправим точечно. Проверяем в первую очередь доступность (открывается / 404).
+TECH_PAGE_PATHS = [
+    '/about/',
+    '/payment/',
+    '/delivery/',
+    '/contacts/',
+    '/vacancy/',
+    '/sitemap/',
+    '/soglasie-na-obrabotku-personalnyh-dannyh/',
+    '/soglasie-na-poluchenie-reklamnoy-informacii/',
+    '/polzovatelskoe-soglashenie/',
+    '/polzovatelskoe-soglashenie-ob-ispolzovanii-cookie-faylov/',
+]
 
 
 def _pick_random(items: list, n: int, rng: random.Random) -> list:

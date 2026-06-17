@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from sources import (
     load_project_config, load_sources, build_plan, build_custom_tasks_typed,
+    TECH_PAGE_PATHS,
 )
 from history import load_history, save_history, WEEKLY_TTL_MS
 from sitemap import load_product_pathnames
@@ -97,6 +98,22 @@ def run_check(pid, params, creds, log, progress):
                     log(f'Свой список URL: добавлено {len(extra)}')
             except Exception as e:
                 log(f'⚠ Свой список URL не разобран: {e}')
+
+        # Технические страницы (на главном домене) – проверяем доступность.
+        if params.get('check_tech'):
+            _mcity = cfg.get('mandatory_city', 'Москва')
+            _main = next((s for s in src.subdomains if s.city == _mcity), None)
+            if _main:
+                _tech_urls = [f'https://{_main.host}{p}' for p in TECH_PAGE_PATHS]
+                try:
+                    _tt = build_custom_tasks_typed(_tech_urls, src)
+                    for _t in _tt:
+                        _t.type_code = 'tech'
+                        _t.type_label = 'Тех. страница'
+                    plan.tasks.extend(_tt)
+                    log(f'Технические страницы: добавлено {len(_tt)}')
+                except Exception as e:
+                    log(f'⚠ Тех. страницы: {e}')
 
         log(f'Города: {", ".join(s.city for s in plan.selected_subdomains)}')
         log(f'Всего проверок: {len(plan.tasks)}')

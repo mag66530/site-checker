@@ -587,6 +587,7 @@ def init_session():
         'c30_check_filters': True,
         'c30_check_products': True,
         'c30_check_text': True,        # пункт 1.6 – битые переменные
+        'c30_check_tech': True,        # технические страницы (оплата/доставка/…)
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -959,6 +960,8 @@ if pid:
             st.checkbox('1.5  Товары', key='c30_check_products')
             st.checkbox('1.6  Текстовые блоки категорий/фильтров/товаров и переменные',
                         key='c30_check_text')
+        st.checkbox('Технические страницы (оплата, доставка, контакты, политики и т.п.) '
+                    '— доступность', key='c30_check_tech')
 
     # БЛОК 3 — Дополнительно (видимый, без раскрывашки)
     with st.container(border=True):
@@ -1084,6 +1087,7 @@ if pid:
                 'check_filters': st.session_state.c30_check_filters and stats['has_filters'],
                 'check_products': st.session_state.c30_check_products,
                 'check_text': st.session_state.c30_check_text,
+                'check_tech': st.session_state.c30_check_tech,
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
             }

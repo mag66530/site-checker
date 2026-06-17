@@ -308,6 +308,32 @@ def test_product_without_price_is_bug():
     assert any(bug.key == 'price' for bug in r.bugs)
 
 
+def test_bottom_block_cards_without_price_is_bug():
+    """Нижний блок карточки («С этим товаром покупают») с карточками, у которых
+    не видно цены, → баг rec_price. С ценой → ок. Без блока → не баг."""
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    card = '<div class="catalog-product-card-item"><a href="/c/t/">Товар 2</a>{}</div>'
+    # карточки снизу без цены → баг
+    b = _by_key(check_content(main + '<div>С этим товаром покупают</div>'
+                              + card.format(''), 'product'))
+    assert b['rec_block'].present and not b['rec_price'].present
+    # карточки снизу с ценой → ок
+    b2 = _by_key(check_content(main + '<div>Похожие товары</div>'
+                               + card.format('<span>99 000 ₽</span>'), 'product'))
+    assert b2['rec_block'].present and b2['rec_price'].present
+    # нижнего блока нет → не баг
+    b3 = _by_key(check_content(main + '<div>Характеристики</div>', 'product'))
+    assert not b3['rec_block'].present and b3['rec_price'].present
+
+
+def test_tech_pages_no_structure_bugs():
+    """Технические страницы (type 'tech') проверяются на доступность, без
+    структурных требований — даже пустая страница не даёт контент-багов."""
+    r = check_content('<html><body>Политика конфиденциальности</body></html>', 'tech')
+    assert r.bug_count == 0 and not r.bugs
+
+
 def test_hidden_price_button_is_bug():
     """Цена и кнопка СПРЯТАНЫ стилем display:none → покупатель их не видит →
     баг с пояснением «в коде есть, но покупатель не видит»."""

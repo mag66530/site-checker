@@ -451,6 +451,10 @@ class _Ctx:
     # кнопок: то, что покупатель реально видит. Скрытая цена/кнопка = её нет.
     vis_html_lower: str = ''
     vis_text_lower: str = ''
+    # Нижние блоки карточки товара («С этим товаром покупают», «Похожие»,
+    # «Вас также может заинтересовать») — видимая часть от первого такого блока.
+    rec_html_lower: str = ''
+    rec_text_lower: str = ''
 
 
 # ── Детекторы. Возвращают (present: bool, count: Optional[int]) ──────
@@ -731,6 +735,26 @@ def _d_found_cheaper(c: _Ctx):
     return present, None
 
 
+def _d_rec_block(c: _Ctx):
+    # Нижние блоки карточки: «С этим товаром покупают», «Похожие»,
+    # «Вас также может заинтересовать» и т.п. Справочно — есть/нет.
+    return bool(c.rec_html_lower), None
+
+
+def _d_rec_price(c: _Ctx):
+    # У товаров в нижних блоках должна быть видимая цена (₽ или «по запросу»).
+    # Если карточки снизу есть, а цены не видно — тот самый баг с пустыми ценами.
+    rh = c.rec_html_lower
+    if not rh:
+        return True, None                 # нижнего блока нет — не баг
+    has_cards = ('catalog-product-card-item' in rh or 'card-product' in rh
+                 or 'listing-card' in rh or bool(_RE_MPE_CARD.search(rh)))
+    if not has_cards:
+        return True, None                 # не товарный блок — не баг
+    has_price = bool(_PRICE_RE.search(c.rec_text_lower)) or 'по запросу' in c.rec_text_lower
+    return has_price, None
+
+
 def _d_specs(c: _Ctx):
     present = 'характеристик' in c.text_lower or 'артикул' in c.text_lower
     return present, None
@@ -796,6 +820,8 @@ BLOCK_DESCRIPTIONS = {
     'consultation':  'Блок консультации специалиста.',
     'found_cheaper': 'Кнопка «Нашли дешевле» / «Отправить ссылку».',
     'specs':         'Характеристики товара или артикул.',
+    'rec_block':     'Нижние блоки карточки: «С этим товаром покупают», «Похожие», «Вас также может заинтересовать». Справочно — есть/нет.',
+    'rec_price':     'У товаров в нижних блоках есть видимая цена (₽ или «по запросу»). Если карточки снизу есть, а цены не видно — баг (пустые цены снизу).',
     'forms':         'Количество тегов <form> на странице.',
     'search':        'Поиск по сайту: поле type="search" или текст «Найти»/«Поиск».',
 }
@@ -890,6 +916,10 @@ _PRODUCT = [
     _b('payment',       'Способы оплаты',             False, _d_payment),
     _b('consultation',  'Консультация',               False, _d_consultation),
     _b('found_cheaper', '«Нашли дешевле»',            False, _d_found_cheaper),
+    # Нижние блоки карточки — после основного товара («сначала карточка, потом
+    # что ниже»): сам блок (справочно) + есть ли у его товаров цена.
+    _b('rec_block',     'Блок «похожие / с этим покупают»', False, _d_rec_block),
+    _b('rec_price',     'Цены в нижних блоках',        True,  _d_rec_price),
 ]
 
 # КАТАЛОГ-корень — верхний уровень, показывает разделы. Товарных блоков нет.
@@ -921,6 +951,8 @@ def _profile_for(type_code: str, page_kind: str = '') -> list[_Block]:
         return _TOP + _CATALOG + _BOTTOM_CATALOG
     if type_code == 'main':
         return _MAIN_PROFILE
+    if type_code == 'tech':
+        return []        # тех. страницы проверяем на доступность (404/ошибки), без структуры
     # custom / неизвестный тип — только базовая структура
     return _TOP
 
@@ -980,7 +1012,8 @@ def check_content(html: str, type_code: str, css_hidden: tuple = ()) -> ContentR
             'похожие товар', 'похожие предложения', 'сопутствующ',
             'рекомендуем', 'рекомендованные', 'смотрите также',
             'вместе с этим', 'аналогичные товар', 'вам может понадоб',
-            'с этим часто',
+            'с этим часто', 'вас также', 'также может заинтерес',
+            'вам может понравиться', 'с этим товаром также',
         )
         cut = len(ctx.vis_text_lower)
         for _m in _related:
@@ -989,6 +1022,15 @@ def check_content(html: str, type_code: str, css_hidden: tuple = ()) -> ContentR
                 cut = i
         ctx.price_text = visible_text[:cut]
         ctx.price_text_lower = ctx.vis_text_lower[:cut]
+        # Область нижних блоков (рекомендации) — от первого такого маркера до
+        # конца. Считаем по ней наличие блока и цены у нижних карточек.
+        ctx.rec_text_lower = ctx.vis_text_lower[cut:] if cut < len(ctx.vis_text_lower) else ''
+        hcut = len(ctx.vis_html_lower)
+        for _m in _related:
+            j = ctx.vis_html_lower.find(_m)
+            if 0 <= j < hcut:
+                hcut = j
+        ctx.rec_html_lower = ctx.vis_html_lower[hcut:] if hcut < len(ctx.vis_html_lower) else ''
 
     # Подтип страницы-списка (категория / тег) — определяем по вёрстке:
     #   listing — есть карточки товаров (catalog-product-card-item) → строгая
