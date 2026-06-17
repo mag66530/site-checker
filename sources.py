@@ -225,7 +225,10 @@ TECH_PAGE_PATHS = {
     'smu': _TECH_PATHS_SMU,
     'smu-test': _TECH_PATHS_SMU,   # тест-стенд СМУ – те же страницы
     'imp': _TECH_PATHS_IMP,
-    # 'mpe' – slug'и пока не заданы; добавим, когда пришлют
+    'mpe': [
+        '/about/', '/catalog/spetstekhnika/', '/payment_delivery/',
+        '/contacts/', '/rekvizity/', '/sitemap/',
+    ],
 }
 
 

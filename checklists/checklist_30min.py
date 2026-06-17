@@ -968,20 +968,20 @@ if pid:
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
-    # БЛОК 3 – Дополнительно (видимый, без раскрывашки)
+    # БЛОК 3 – Дополнительно: три одинаковых пункта-галочки (по клику разворачиваются)
     with st.container(border=True):
         st.markdown('### Дополнительно')
-        _nf_col1, _nf_col2 = st.columns([3, 1], vertical_alignment='center')
-        with _nf_col1:
-            _ck_notif = st.checkbox(
-                'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 Метрики',
-                key='c30_fetch_notifications')
-        with _nf_col2:
+        _ck_notif = st.checkbox(
+            'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 Метрики',
+            key='c30_fetch_notifications')
+        if _ck_notif:
             _nd_opts = [1, 3, 7, 14, 30]
-            st.selectbox('За период', _nd_opts,
-                         format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
-                         key='c30_notify_days',
-                         disabled=not _ck_notif, label_visibility='collapsed')
+            _pc1, _pc2 = st.columns([1, 3])
+            with _pc1:
+                st.selectbox('За какой период',
+                             _nd_opts,
+                             format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
+                             key='c30_notify_days')
         st.checkbox('Добавить свой список URL', key='c30_use_custom_urls')
         if st.session_state.c30_use_custom_urls:
             st.caption('Ссылки – по одной на строку. Тип по адресу: /catalog/x/ – '
@@ -1072,13 +1072,11 @@ if pid:
     with st.container():
         _paths = _c30_paths(pid)
         _alive = _pid_alive(_read_pidfile(_paths['pid']))
-        _bcol, _ccol = st.columns([3, 1])
-        with _bcol:
-            _go = st.button('▶ Запустить проверку', type='primary',
-                            use_container_width=True, key='c30_run', disabled=_alive)
-        with _ccol:
-            if st.button('⛔ Отменить', use_container_width=True,
-                         key='c30_cancel', disabled=not _alive):
+        # Показываем ОДНУ активную кнопку: идёт прогон → «Отменить», иначе →
+        # «Запустить». Так нет «выключенной» кнопки с курсором-запретом.
+        _go = False
+        if _alive:
+            if st.button('Отменить проверку', use_container_width=True, key='c30_cancel'):
                 _kill_tree(_read_pidfile(_paths['pid']))
                 try:
                     _paths['pid'].unlink(missing_ok=True)
@@ -1086,6 +1084,9 @@ if pid:
                     pass
                 st.session_state.c30_last_error = 'Проверка отменена'
                 st.rerun()
+        else:
+            _go = st.button('Запустить проверку', type='primary',
+                            use_container_width=True, key='c30_run')
         if _go:
             flags = {
                 'check_main': st.session_state.c30_check_main,

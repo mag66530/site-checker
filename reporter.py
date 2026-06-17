@@ -302,7 +302,10 @@ def _problem_text(r):
 
 def _build_structure_sheet(wb, results):
     """Лист структурной проверки – дашборд, что чинить, сводка и детали."""
-    pages = [r for r in results if getattr(r, 'content', None) is not None]
+    # Тех. страницы выносим отдельной секцией (у них нет структуры — только
+    # доступность), чтобы они не искажали статистику структурной проверки.
+    pages = [r for r in results if getattr(r, 'content', None) is not None
+             and getattr(r, 'type_code', '') != 'tech']
     if not pages:
         return
 
@@ -525,6 +528,53 @@ def _build_structure_sheet(wb, results):
                     cell.fill = _fill(band)
             row += 1
         row += 2  # пробел между секциями
+
+    # ── Технические страницы (оплата, доставка, контакты, политики и т.п.) ──
+    # У них нет структуры — проверяем доступность: открывается / 404 / ошибка.
+    tech = [r for r in results if getattr(r, 'type_code', '') == 'tech']
+    if tech:
+        _bad = sum(1 for r in tech if not r.is_ok)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        gc = ws.cell(row=row, column=2)
+        gc.value = (f'  Технические страницы – {len(tech)} стр.'
+                    + (f'  ·  не открылось: {_bad}' if _bad else '  ·  все открываются'))
+        gc.font = _font(size=11, bold=True, color=C.err if _bad else C.ok)
+        gc.fill = _fill(C.accent_soft)
+        gc.alignment = _align(indent=1, vertical='center')
+        for cc in range(2, 5):
+            ws.cell(row=row, column=cc).fill = _fill(C.accent_soft)
+        ws.row_dimensions[row].height = 22
+        row += 1
+        for ci, h in [(2, 'Открыть'), (3, 'Статус'), (4, 'Страница')]:
+            cell = ws.cell(row=row, column=ci, value=h)
+            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.fill = _fill(C.surface)
+            cell.alignment = _align(indent=1)
+            cell.border = _border()
+        row += 1
+        for idx, r in enumerate(tech):
+            band = C.surface if idx % 2 else C.bg_elev
+            uc = ws.cell(row=row, column=2, value='открыть')
+            uc.hyperlink = r.url
+            uc.font = _font(size=10, color=C.accent, underline='single')
+            uc.fill = _fill(band)
+            uc.alignment = _align(horizontal='center', indent=0)
+            uc.border = _border(color=C.border_light)
+            _ok = r.is_ok
+            _status = ('Работает' if _ok
+                       else (str(r.http_code) if r.http_code else 'не открылась'))
+            sc = ws.cell(row=row, column=3, value=_status)
+            sc.font = _font(size=10, bold=not _ok, color=C.ok if _ok else C.err)
+            sc.fill = _fill(band if _ok else C.err_soft)
+            sc.alignment = _align(indent=1)
+            sc.border = _border(color=C.border_light)
+            pc = ws.cell(row=row, column=4, value=r.url)
+            pc.font = _font(size=10, color=C.text_soft)
+            pc.fill = _fill(band)
+            pc.alignment = _align(indent=1)
+            pc.border = _border(color=C.border_light)
+            row += 1
+        row += 2
 
 
 # ── Лист уведомлений ──────────────────────────────────────────────
