@@ -23,7 +23,7 @@ from telegram_notify import (
     format_summary_message, send_run_notification, send_message,
     format_critical_alert, format_critical_block,
 )
-from critical import analyze as analyze_critical, for_city as crit_for_city
+from critical import analyze as analyze_critical
 from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG,
     fetch_webmaster_yandex, fetch_gsc_gmail,
@@ -257,14 +257,11 @@ def run_check(pid, params, creds, log, progress):
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
 
         # Критические ошибки (п.4.3) – выделяем для срочного уведомления и для
-        # блока в подписи к отчёту. В Telegram пишем только про главный город
-        # (Москва) – остальные города остаются в полном отчёте (xlsx).
-        crit_all = analyze_critical(results)
-        _mcity = cfg.get('mandatory_city', 'Москва')
-        crit = crit_for_city(crit_all, _mcity)
-        if crit_all.has_any:
-            log(f'Критических находок: {crit_all.total} (по {_mcity}: {crit.total}, '
-                f'падений доступности в {_mcity}: {len(crit.availability)})')
+        # блока в подписи к отчёту (по всем городам).
+        crit = analyze_critical(results)
+        if crit.has_any:
+            log(f'Критических находок: {crit.total} '
+                f'(падений доступности: {len(crit.availability)})')
 
         # Telegram (полный отчёт – почта/метрика уже собраны выше)
         tg_token = creds.get('tg_token')
