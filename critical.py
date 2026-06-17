@@ -121,7 +121,7 @@ def analyze(results) -> CriticalSummary:
         # 2) soft-404 («заглушка»: 200, но контент «страница не найдена»).
         if content is not None and getattr(content, 'is_soft_404', False):
             s.others['not_found'].append(
-                CriticalItem('not_found', city, page, '404-заглушка (отдаёт 200)', url))
+                CriticalItem('not_found', city, page, '404-заглушка', url))
             continue
 
         # 3) Контакты ≠ КП.
@@ -139,7 +139,7 @@ def analyze(results) -> CriticalSummary:
             bug_keys = {getattr(b, 'key', '') for b in getattr(content, 'bugs', [])}
             if pk == 'empty':
                 s.others['cannot_buy'].append(
-                    CriticalItem('cannot_buy', city, page, 'пустой раздел (нет товаров)', url))
+                    CriticalItem('cannot_buy', city, page, 'пустой раздел', url))
             elif bug_keys & {'price', 'btn_order'}:
                 what = []
                 if 'price' in bug_keys:

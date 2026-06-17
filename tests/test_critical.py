@@ -93,7 +93,9 @@ def test_total_and_formatters():
     assert '<b>Москва</b>' in alert and 'Главная: сервер не отвечает (5xx)' in alert
     block = format_critical_block(s)
     assert '🔴' not in block and '—' not in block
-    assert 'Критические (4)' in block and 'Недоступность' in block and 'Битые переменные' in block
+    # группировка по городу, каждая проблема на своей строке
+    assert 'Критические (4)' in block and '<b>Москва</b>' in block
+    assert 'Главная: сервер не отвечает (5xx)' in block
 
 
 def test_no_critical_empty_block():

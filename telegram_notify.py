@@ -82,6 +82,7 @@ def format_summary_message(
     has_problems = (
         err_count > 0 or warn_count > 0 or text_issues_count > 0
         or metrika_pages_count > 0 or content_bugs_count > 0
+        or bool(critical_block)
     )
 
     # Короткое имя проекта: "СМУ – Сталметурал" → "СМУ".
@@ -155,14 +156,6 @@ def _short_project_name(project_name: str) -> str:
 
 # ── Критические ошибки (п.4.3): срочное сообщение + блок в подписи ───
 
-_CRIT_CAT_LABEL = {
-    'availability': 'Недоступность',
-    'kp':           'Контакты ≠ КП',
-    'cannot_buy':   'Нельзя купить',
-    'not_found':    '404 / заглушки',
-    'text':         'Битые переменные',
-}
-
 
 def format_critical_alert(project_name: str, availability: list,
                           max_cities: int = 15, max_per_city: int = 10) -> str:
@@ -189,24 +182,37 @@ def format_critical_alert(project_name: str, availability: list,
     return '\n'.join(lines)
 
 
-def format_critical_block(summary, max_examples: int = 2) -> str:
-    """Компактный блок «Критические» для подписи к файлу отчёта (caption)."""
-    groups = []
-    if getattr(summary, 'availability', None):
-        groups.append(('availability', summary.availability))
+def format_critical_block(summary, max_items: int = 14) -> str:
+    """Блок «Критические» для подписи к отчёту – группировка по городу, каждая
+    проблема на своей строке (чисто, как срочное сообщение)."""
+    items = list(getattr(summary, 'availability', []) or [])
     for cat in ('kp', 'cannot_buy', 'not_found', 'text'):
-        lst = (getattr(summary, 'others', {}) or {}).get(cat) or []
-        if lst:
-            groups.append((cat, lst))
-    if not groups:
+        items += (getattr(summary, 'others', {}) or {}).get(cat) or []
+    if not items:
         return ''
-    lines = [f'<b>Критические ({summary.total})</b>']
-    for cat, lst in groups:
-        ex = '; '.join(f'{escape_html(it.city)} {escape_html(it.page)}: {escape_html(it.detail)}'
-                       for it in lst[:max_examples])
-        more = f' …+{len(lst) - max_examples}' if len(lst) > max_examples else ''
-        lines.append(f'• {_CRIT_CAT_LABEL[cat]}: <b>{len(lst)}</b> ({ex}{more})')
-    return '\n'.join(lines)
+
+    by_city = {}
+    for it in items:
+        by_city.setdefault(it.city, []).append(it)
+
+    lines = [f'<b>Критические ({summary.total})</b>', '']
+    shown = 0
+    truncated = 0
+    for city, city_items in by_city.items():
+        if shown >= max_items:
+            truncated += len(city_items)
+            continue
+        lines.append(f'<b>{escape_html(city)}</b>')
+        for it in city_items:
+            if shown >= max_items:
+                truncated += 1
+                continue
+            lines.append(f'• {escape_html(it.page)}: {escape_html(it.detail)}')
+            shown += 1
+        lines.append('')
+    if truncated:
+        lines.append(f'… и ещё {truncated}, подробности в отчёте')
+    return '\n'.join(lines).strip()
 
 
 # ── Отправка ──────────────────────────────────────────────────────
