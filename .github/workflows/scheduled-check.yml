@@ -1,0 +1,87 @@
+name: Проверка сайтов по расписанию
+
+# Автозапуск проверки сайтов раз в сутки. Отчёт уходит в Telegram (если заданы
+# секреты telegram_bot_token + telegram_recipients_<проект>) и сохраняется как
+# artifact (бэкап на случай, если Telegram ещё не настроен).
+#
+# ВРЕМЯ: cron указывается в UTC. 13:00 UTC = 16:00 МСК. Чтобы сменить время –
+# поменяйте строку cron ниже (например, 06:00 UTC = 09:00 МСК, 00:00 UTC = 03:00 МСК).
+#
+# РУЧНОЙ ЗАПУСК (для теста сейчас, не дожидаясь расписания): вкладка Actions →
+# «Проверка сайтов по расписанию» → Run workflow (можно выбрать проекты/объём).
+#
+# Внимание: schedule срабатывает ТОЛЬКО на ветке по умолчанию репозитория.
+
+on:
+  workflow_dispatch:
+    inputs:
+      projects:
+        description: 'Проекты через запятую (smu,imp,mpe)'
+        default: 'smu,imp,mpe'
+        required: false
+      profile:
+        description: 'Объём: quick / standard / full'
+        default: 'standard'
+        required: false
+      days:
+        description: 'За сколько дней собирать почту/404'
+        default: '1'
+        required: false
+  schedule:
+    - cron: '0 13 * * *'   # 16:00 МСК (UTC+3). Сменить время – поменять эту строку.
+
+concurrency:
+  group: scheduled-check
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Установить зависимости
+        run: pip install -r requirements.txt
+
+      - name: Прогон проверки
+        env:
+          proxy_url: ${{ secrets.proxy_url }}
+          telegram_bot_token: ${{ secrets.telegram_bot_token }}
+          telegram_recipients_smu: ${{ secrets.telegram_recipients_smu }}
+          telegram_recipients_imp: ${{ secrets.telegram_recipients_imp }}
+          telegram_recipients_mpe: ${{ secrets.telegram_recipients_mpe }}
+          metrika_smu_email: ${{ secrets.metrika_smu_email }}
+          metrika_smu_password: ${{ secrets.metrika_smu_password }}
+          metrika_imp_email: ${{ secrets.metrika_imp_email }}
+          metrika_imp_password: ${{ secrets.metrika_imp_password }}
+          metrika_mpe_email: ${{ secrets.metrika_mpe_email }}
+          metrika_mpe_password: ${{ secrets.metrika_mpe_password }}
+          gsc_smu_email: ${{ secrets.gsc_smu_email }}
+          gsc_smu_password: ${{ secrets.gsc_smu_password }}
+          gsc_imp_email: ${{ secrets.gsc_imp_email }}
+          gsc_imp_password: ${{ secrets.gsc_imp_password }}
+          gsc_mpe_email: ${{ secrets.gsc_mpe_email }}
+          gsc_mpe_password: ${{ secrets.gsc_mpe_password }}
+          yandex_oauth_smu: ${{ secrets.yandex_oauth_smu }}
+          yandex_oauth_imp: ${{ secrets.yandex_oauth_imp }}
+          yandex_oauth_mpe: ${{ secrets.yandex_oauth_mpe }}
+        run: |
+          python run_scheduled.py \
+            --projects "${{ github.event.inputs.projects || 'smu,imp,mpe' }}" \
+            --profile  "${{ github.event.inputs.profile  || 'standard' }}" \
+            --days     "${{ github.event.inputs.days     || '1' }}"
+
+      - name: Сохранить отчёты (artifact-бэкап)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: reports/*.xlsx
+          if-no-files-found: ignore
+          retention-days: 14
