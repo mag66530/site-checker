@@ -1,7 +1,7 @@
 """Тесты critical – выделение критических ошибок прогона (п.4.3)."""
 import types
 
-from critical import analyze, is_availability_down
+from critical import analyze, is_availability_down, for_city
 from telegram_notify import format_critical_alert, format_critical_block
 
 
@@ -96,6 +96,22 @@ def test_total_and_formatters():
     # группировка по городу, каждая проблема на своей строке
     assert 'Критические (4)' in block and '<b>Москва</b>' in block
     assert 'Главная: сервер не отвечает (5xx)' in block
+
+
+def test_for_city_keeps_only_one_city():
+    rs = [
+        _r(status='server_error', is_ok=False, is_error=True, type_code='main', city='Москва'),
+        _r(status='timeout', is_ok=False, is_error=True, type_code='main', city='Уфа'),
+        _r(has_text_issues=True, text_issues=[1], city='Москва'),
+        _r(content=_content(page_kind='empty'), city='Томск'),
+    ]
+    s = analyze(rs)
+    assert s.total == 4
+    msk = for_city(s, 'Москва')
+    assert msk.total == 2
+    assert len(msk.availability) == 1 and msk.availability[0].city == 'Москва'
+    assert len(msk.others['text']) == 1
+    assert len(msk.others['cannot_buy']) == 0   # Томск отфильтрован
 
 
 def test_no_critical_empty_block():

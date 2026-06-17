@@ -156,3 +156,13 @@ def analyze(results) -> CriticalSummary:
                 CriticalItem('text', city, page, f'{n} битых переменных', url))
 
     return s
+
+
+def for_city(summary: CriticalSummary, city: str) -> CriticalSummary:
+    """Подмножество критических только по одному городу (для краткого Telegram –
+    в сообщениях пишем только про главный город, остальное остаётся в отчёте)."""
+    s = CriticalSummary()
+    s.availability = [it for it in summary.availability if it.city == city]
+    for cat, lst in summary.others.items():
+        s.others[cat] = [it for it in lst if it.city == city]
+    return s
