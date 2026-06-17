@@ -364,6 +364,18 @@ def test_search_page_h1_not_required():
     assert _by_key(ra)['h1'].required and ra.bug_count == 1      # контроль: H1 нужен
 
 
+def test_footer_address_mikrorayon():
+    """Адрес без улицы (нефтяные города): «микрорайон 16А, 63» – это адрес,
+    а не отсутствие адреса (раньше ложно горело багом «нет адреса»)."""
+    html = ('<header><a href="tel:+74951234567">тел</a></header>'
+            '<div class="breadcrumb">x</div><h1>Главная</h1>'
+            '<footer><a href="tel:+74951234567">+7 (495) 123-45-67</a>'
+            '<a href="mailto:a@b.ru">a@b.ru</a><a>Написать нам</a>'
+            '<span>Главный офис: микрорайон 16А, 63</span></footer>')
+    b = _by_key(check_content(html, 'main'))
+    assert b['ftr_address'].present
+
+
 def test_phone_kyrgyzstan_plus996():
     """Телефон +996 (Киргизия, .kg-поддомены ИМП) распознаётся в шапке и подвале."""
     html = ('<header><a href="tel:+996776313278">+996 (77) 631-32-78</a>'

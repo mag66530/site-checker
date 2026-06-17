@@ -534,6 +534,7 @@ def _build_structure_sheet(wb, results):
     # ошибка) + структуру (H1, хлебные крошки) + битые переменные. H1 обязателен;
     # крошки справочно (их отсутствие на служебной странице багом не считаем).
     from urllib.parse import urlparse as _urlparse
+    from sources import tech_page_label as _tech_label
     tech = [r for r in results if getattr(r, 'type_code', '') == 'tech']
     if tech:
         def _tech_bad(r):
@@ -555,12 +556,12 @@ def _build_structure_sheet(wb, results):
         ws.row_dimensions[row].height = 22
         row += 1
         _tech_headers = [
-            (2, 'Статус', 'Открывается ли страница: «Работает» / код ответа (404 и т.п.) / «404-заглушка» (отдаёт 200, но контент «страница не найдена»).'),
-            (3, 'Проблем', 'Сколько проблем на странице: структурные баги + битые переменные.'),
-            (4, 'H1', 'Заголовок H1. Обязателен – у нормальной страницы он есть.'),
-            (5, 'Крошки', 'Хлебные крошки. Справочно: показываем есть/нет, отсутствие на служебной странице не баг.'),
-            (6, 'Битые перем.', 'Битые шаблонные переменные ({{…}}, %name% и т.п.). Число = сколько найдено.'),
-            (7, 'Страница', 'Адрес страницы – ссылка-кликабельна, ведёт на страницу.'),
+            (2, 'Страница', 'Название страницы – кликабельная ссылка, ведёт на страницу.'),
+            (3, 'Статус', 'Открывается ли страница: «Работает» / код ответа (404 и т.п.) / «404-заглушка» (отдаёт 200, но контент «страница не найдена»).'),
+            (4, 'Проблем', 'Сколько проблем на странице: структурные баги + битые переменные.'),
+            (5, 'H1', 'Заголовок H1. Обязателен – у нормальной страницы он есть.'),
+            (6, 'Крошки', 'Хлебные крошки. Справочно: показываем есть/нет, отсутствие на служебной странице не баг.'),
+            (7, 'Битые перем.', 'Битые шаблонные переменные ({{…}}, %name% и т.п.). Число = сколько найдено.'),
         ]
         hdr_row = row
         for ci, h, desc in _tech_headers:
@@ -576,6 +577,18 @@ def _build_structure_sheet(wb, results):
         for idx, r in enumerate(tech):
             band = C.surface if idx % 2 else C.bg_elev
 
+            # Страница – человеческое название (Оплата, Доставка…) как ссылка.
+            try:
+                _path = _urlparse(r.url).path or r.url
+            except Exception:
+                _path = r.url
+            pgc = ws.cell(row=row, column=2, value=_tech_label(_path))
+            pgc.hyperlink = r.url
+            pgc.font = _font(size=10, color=C.accent, underline='single')
+            pgc.fill = _fill(band)
+            pgc.alignment = _align(indent=1)
+            pgc.border = _border(color=C.border_light)
+
             _soft = getattr(r.content, 'is_soft_404', False)
             if not r.is_ok:
                 _status = str(r.http_code) if r.http_code else 'не открылась'
@@ -584,14 +597,14 @@ def _build_structure_sheet(wb, results):
             else:
                 _status = 'Работает'
             _status_ok = r.is_ok and not _soft
-            sc = ws.cell(row=row, column=2, value=_status)
+            sc = ws.cell(row=row, column=3, value=_status)
             sc.font = _font(size=10, bold=not _status_ok, color=C.ok if _status_ok else C.err)
             sc.fill = _fill(band if _status_ok else C.err_soft)
             sc.alignment = _align(horizontal='center', indent=0)
             sc.border = _border(color=C.border_light)
 
             _probs = (r.content_bugs or 0) + len(r.text_issues or [])
-            pc = ws.cell(row=row, column=3)
+            pc = ws.cell(row=row, column=4)
             pc.value = _probs if _probs else ''
             pc.font = _font(size=11, bold=True, color=C.err)
             pc.alignment = _align(horizontal='center', indent=0)
@@ -601,7 +614,7 @@ def _build_structure_sheet(wb, results):
             # H1 / Крошки: если страница не открылась или это 404-заглушка –
             # структуры нет, ставим «–». Иначе берём из блоков контента.
             by_key = {b.key: b for b in r.content.blocks} if (r.is_ok and r.content) else {}
-            for ci, key in ((4, 'h1'), (5, 'breadcrumbs')):
+            for ci, key in ((5, 'h1'), (6, 'breadcrumbs')):
                 cell = ws.cell(row=row, column=ci)
                 cell.alignment = _align(horizontal='center', indent=0)
                 cell.border = _border(color=C.border_light)
@@ -616,7 +629,7 @@ def _build_structure_sheet(wb, results):
 
             # Битые переменные – число найденных.
             _ti = len(r.text_issues or []) if r.is_ok else 0
-            vc = ws.cell(row=row, column=6)
+            vc = ws.cell(row=row, column=7)
             vc.alignment = _align(horizontal='center', indent=0)
             vc.border = _border(color=C.border_light)
             if _ti:
@@ -625,20 +638,6 @@ def _build_structure_sheet(wb, results):
             else:
                 vc.value = '–'; vc.font = _font(size=10, color=C.text_muted)
                 vc.fill = _fill(band)
-
-            # Страница – путь как кликабельная ссылка (без отдельной колонки
-            # «Открыть»: путь сам ведёт на страницу). Последняя колонка – длинные
-            # адреса политик выводятся целиком (переполняют в пустые клетки справа).
-            try:
-                _path = _urlparse(r.url).path or r.url
-            except Exception:
-                _path = r.url
-            pgc = ws.cell(row=row, column=7, value=_path)
-            pgc.hyperlink = r.url
-            pgc.font = _font(size=10, color=C.accent, underline='single')
-            pgc.fill = _fill(band)
-            pgc.alignment = _align(indent=1)
-            pgc.border = _border(color=C.border_light)
             row += 1
         row += 2
 

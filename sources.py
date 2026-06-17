@@ -238,6 +238,59 @@ def get_tech_paths(project_id: str) -> list[str]:
     return TECH_PAGE_PATHS.get(project_id, [])
 
 
+# Человеческие названия тех. страниц для отчёта (ключ – путь). Чтобы в таблице
+# было «Оплата», а не «/oplata/». Подписи короткие – помещаются в первый столбец.
+TECH_PAGE_LABELS = {
+    # общие
+    '/about/': 'О компании',
+    '/o-kompanii/': 'О компании',
+    '/contacts/': 'Контакты',
+    '/contact/': 'Контакты',
+    '/sitemap/': 'Карта сайта',
+    '/rekvizity/': 'Реквизиты',
+    '/vacancy/': 'Вакансии',
+    '/vakansii/': 'Вакансии',
+    '/polzovatelskoe-soglashenie/': 'Пользовательское соглашение',
+    '/politika-konfidentsialnosti/': 'Политика конфиденциальности',
+    # СМУ
+    '/payment/': 'Оплата',
+    '/delivery/': 'Доставка',
+    '/soglasie-na-obrabotku-personalnyh-dannyh/': 'Согласие на обработку ПД',
+    '/soglasie-na-poluchenie-reklamnoy-informacii/': 'Согласие на рекламу',
+    '/polzovatelskoe-soglashenie-ob-ispolzovanii-cookie-faylov/': 'Соглашение по cookie',
+    # ИМП
+    '/faq/': 'Вопрос-ответ',
+    '/nashi-postavshiki/': 'Наши поставщики',
+    '/oplata/': 'Оплата',
+    '/dostavka/': 'Доставка',
+    '/pravila-otgruzki/': 'Правила отгрузки',
+    '/kontrol-kachestva/': 'Контроль качества',
+    '/komplektaciya-zakaza/': 'Комплектация заказа',
+    '/upakovka-zakaza/': 'Упаковка заказа',
+    '/vozvrat-tovara/': 'Возврат товара',
+    '/garantii/': 'Гарантии',
+    '/price-list/': 'Прайс-лист',
+    '/kak-sdelat-pokupku/': 'Как сделать покупку',
+    '/catalog/': 'Каталог',
+    '/uslugi-metalloobrabotki/': 'Услуги металлообработки',
+    '/proizvodstvo-metalloprokata/': 'Наше производство',
+    '/specials/': 'Спецпредложения',
+    '/postavshhikam/': 'Поставщикам',
+    '/search/': 'Поиск по товару',
+    # МПЭ
+    '/catalog/spetstekhnika/': 'Спецтехника',
+    '/payment_delivery/': 'Оплата и доставка',
+}
+
+
+def tech_page_label(path: str) -> str:
+    """Человеческое имя тех. страницы по пути; нет в карте → сам путь."""
+    if not path:
+        return path or ''
+    p = path if path.endswith('/') else path + '/'
+    return TECH_PAGE_LABELS.get(p, path)
+
+
 def _pick_random(items: list, n: int, rng: random.Random) -> list:
     """Выбрать n случайных элементов."""
     if n >= len(items):
