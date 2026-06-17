@@ -19,7 +19,11 @@ from sitemap import load_product_pathnames
 from product_links import load_product_links
 from http_checker import run_batch
 from reporter import build_report, make_report_filename
-from telegram_notify import format_summary_message, send_run_notification
+from telegram_notify import (
+    format_summary_message, send_run_notification, send_message,
+    format_critical_alert, format_critical_block,
+)
+from critical import analyze as analyze_critical
 from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG,
     fetch_webmaster_yandex, fetch_gsc_gmail,
@@ -252,10 +256,28 @@ def run_check(pid, params, creds, log, progress):
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
 
+        # Критические ошибки (п.4.3) – выделяем для срочного уведомления и для
+        # блока в подписи к отчёту.
+        crit = analyze_critical(results)
+        if crit.has_any:
+            log(f'Критических находок: {crit.total} '
+                f'(падений доступности: {len(crit.availability)})')
+
         # Telegram (полный отчёт – почта/метрика уже собраны выше)
         tg_token = creds.get('tg_token')
         tg_recipients = creds.get('tg_recipients') or []
         if tg_token and tg_recipients:
+            # Срочное ОТДЕЛЬНОЕ сообщение о падении доступности – ДО отчёта.
+            if crit.has_availability:
+                _alert = format_critical_alert(cfg['name'], crit.availability)
+                _a_sent = 0
+                for _cid in tg_recipients:
+                    try:
+                        send_message(tg_token, str(_cid).strip(), _alert, proxy_url=proxy_url)
+                        _a_sent += 1
+                    except Exception as _e:
+                        log(f'⚠ Срочное не доставлено в {_cid}: {_e}')
+                log(f'🔴 Срочное о падении доступности: отправлено {_a_sent} из {len(tg_recipients)}')
             log(f'Отправляю отчёт в Telegram ({len(tg_recipients)})…')
             try:
                 problems_for_tg = [
@@ -282,7 +304,8 @@ def run_check(pid, params, creds, log, progress):
                     top_problems=problems_for_tg,
                     content_bugs_count=sum(getattr(r, 'content_bugs', 0) or 0 for r in results),
                     content_bug_pages=sum(1 for r in results if getattr(r, 'has_content_bugs', False)),
-                    empty_sections=empty_sections)
+                    empty_sections=empty_sections,
+                    critical_block=format_critical_block(crit))
                 tg_result = send_run_notification(
                     bot_token=tg_token, recipients=tg_recipients,
                     project_name=cfg['name'], summary_text=summary_text,

@@ -69,6 +69,7 @@ def format_summary_message(
     content_bugs_count: int = 0,          # всего структурных проблем в контенте
     content_bug_pages: int = 0,           # на скольких страницах
     empty_sections: Optional[list] = None,  # пустые разделы [{city, url}]
+    critical_block: str = '',             # готовый блок «Критические» (см. format_critical_block)
 ) -> str:
     """
     Сформировать текст сообщения для Telegram.
@@ -98,6 +99,11 @@ def format_summary_message(
         header += f' – {date_only}'
     lines.append(f'<b>{header}</b>')
     lines.append('')
+
+    # Критические ошибки – сразу под заголовком, чтобы первым делом бросались в глаза.
+    if critical_block:
+        lines.append(critical_block)
+        lines.append('')
 
     # Метрики Site Checker – каждый статус с новой строки, без символов
     lines.append(f'<b>Site Checker</b> – проверено страниц: {total_checks}')
@@ -140,6 +146,58 @@ def escape_html(text: str) -> str:
     if not text:
         return ''
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def _short_project_name(project_name: str) -> str:
+    """«СМУ – Сталметурал» → «СМУ» (терпимо к любому тире)."""
+    return re.split(r'\s[––-]\s', project_name or '', maxsplit=1)[0].strip()
+
+
+# ── Критические ошибки (п.4.3): срочное сообщение + блок в подписи ───
+
+_CRIT_CAT_LABEL = {
+    'availability': 'Недоступность',
+    'kp':           'Контакты ≠ КП',
+    'cannot_buy':   'Нельзя купить',
+    'not_found':    '404 / заглушки',
+    'text':         'Битые переменные',
+}
+
+
+def format_critical_alert(project_name: str, availability: list,
+                          max_items: int = 12) -> str:
+    """Срочное ОТДЕЛЬНОЕ сообщение о падении доступности (сервер / главная)."""
+    short = escape_html(_short_project_name(project_name))
+    n = len(availability)
+    lines = [f'🔴 <b>КРИТИЧНО — {short}</b>',
+             f'Недоступность ({n}):', '']
+    for it in availability[:max_items]:
+        lines.append(f'• {escape_html(it.city)} — {escape_html(it.detail)}')
+    if n > max_items:
+        lines.append(f'… и ещё {n - max_items}')
+    lines.append('')
+    lines.append('Полный отчёт — следующим сообщением.')
+    return '\n'.join(lines)
+
+
+def format_critical_block(summary, max_examples: int = 2) -> str:
+    """Компактный блок «Критические» для подписи к файлу отчёта (caption)."""
+    groups = []
+    if getattr(summary, 'availability', None):
+        groups.append(('availability', summary.availability))
+    for cat in ('kp', 'cannot_buy', 'not_found', 'text'):
+        lst = (getattr(summary, 'others', {}) or {}).get(cat) or []
+        if lst:
+            groups.append((cat, lst))
+    if not groups:
+        return ''
+    lines = [f'🔴 <b>Критические ({summary.total})</b>']
+    for cat, lst in groups:
+        ex = '; '.join(f'{escape_html(it.city)} {escape_html(it.detail)}'
+                       for it in lst[:max_examples])
+        more = f' …+{len(lst) - max_examples}' if len(lst) > max_examples else ''
+        lines.append(f'• {_CRIT_CAT_LABEL[cat]}: <b>{len(lst)}</b> ({ex}{more})')
+    return '\n'.join(lines)
 
 
 # ── Отправка ──────────────────────────────────────────────────────
