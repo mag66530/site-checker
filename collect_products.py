@@ -1,5 +1,5 @@
 """
-collect_products.py — ручной сбор базы товарных ссылок с листингов.
+collect_products.py – ручной сбор базы товарных ссылок с листингов.
 
 Запускается локально РАЗ В МЕСЯЦ (на Streamlit Cloud месячный кэш не живёт,
 поэтому база хранится в репозитории):
@@ -12,7 +12,7 @@ collect_products.py — ручной сбор базы товарных ссыл
 Что делает:
   1. Берёт ВСЕ категории проекта из catalogs/{proj}-*.csv.
   2. Загружает первую страницу каждой категории на главном домене
-     (пагинацию не обходим — договорённость: первой страницы достаточно).
+     (пагинацию не обходим – договорённость: первой страницы достаточно).
   3. Собирает ссылки карточек товаров, складывает в
      catalogs/{proj}-products.csv + catalogs/{proj}-products-meta.json.
 
@@ -37,7 +37,7 @@ def run_for_project(project_id: str, proxy: str | None, concurrency: int) -> boo
     print(f'\n=== {cfg["name"]} ===')
     print(f'Категорий: {total}, фильтров: {len(src.filters)}')
     if cfg.get('use_proxy') and not proxy:
-        print('⚠ В конфиге проекта use_proxy=true, а прокси не задан — '
+        print('⚠ В конфиге проекта use_proxy=true, а прокси не задан – '
               'с зарубежного IP сайт может блокировать. Продолжаю без прокси.')
 
     started = time.time()
@@ -48,7 +48,7 @@ def run_for_project(project_id: str, proxy: str | None, concurrency: int) -> boo
         if pct != last_shown['pct'] and pct % 5 == 0:
             last_shown['pct'] = pct
             elapsed = time.time() - started
-            print(f'  {pct}% ({done}/{n}) — {elapsed:.0f} с')
+            print(f'  {pct}% ({done}/{n}) – {elapsed:.0f} с')
 
     def log(level, msg):
         if level == 'warn':

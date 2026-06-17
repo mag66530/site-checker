@@ -1,8 +1,8 @@
 """
-metrika_404.py — загрузка и парсинг 404-отчётов из почты Яндекс.Метрики.
+metrika_404.py – загрузка и парсинг 404-отчётов из почты Яндекс.Метрики.
 
 Письма приходят от Яндекс.Метрики (devnull@yandex.ru) в специальную папку.
-Каждый день — 7-8 писем (по одному на страну: АЗ, РБ, УЗ, АМ, КЗ, РФ, КГ + АЗ-перевод).
+Каждый день – 7-8 писем (по одному на страну: АЗ, РБ, УЗ, АМ, КЗ, РФ, КГ + АЗ-перевод).
 В каждом письме 2 xlsx: «таблица» (URL → визиты) и «график» (распределение по часам).
 Нам интересна только «таблица».
 
@@ -11,7 +11,7 @@ metrika_404.py — загрузка и парсинг 404-отчётов из п
   Строка 2: фильтры
   Строка 3: атрибуция
   Строка 4: пусто
-  Строка 5: заголовки — обычно «Заголовок страницы | Просмотры | Посетители»
+  Строка 5: заголовки – обычно «Заголовок страницы | Просмотры | Посетители»
   Строка 6+: данные
 
 Хранилище: cache/metrika-404/{project_id}/{country}/{YYYY-MM-DD}.json
@@ -55,7 +55,7 @@ YANDEX_IMAP_PORT = 993
 #   metrika_imp_password = "..."
 #   metrika_mpe_email = "mepen88@yandex.ru"
 #   metrika_mpe_password = "..."
-# Имена папок в Яндекс-почте — на русском, важно сохранять кириллицу как есть.
+# Имена папок в Яндекс-почте – на русском, важно сохранять кириллицу как есть.
 MAILBOX_CONFIG = {
     'smu': {
         'folder': 'Я.Метрика 404 и др',
@@ -78,7 +78,7 @@ MAILBOX_CONFIG = {
 # Какие страны/регионы ожидаются в письмах (по проектам).
 # Используется чтобы определить страну из темы письма.
 # Темы вида: «Отчёт «АЗ 404 отчет» за 25.05.2026»
-# Ключ — обозначение в теме, значение — человекочитаемое имя.
+# Ключ – обозначение в теме, значение – человекочитаемое имя.
 COUNTRY_LABELS = {
     'РФ': 'Россия',
     'КЗ': 'Казахстан',
@@ -98,7 +98,7 @@ COUNTRY_LABELS = {
 class Page404:
     """Одна 404-страница из отчёта Метрики."""
     page_title: str              # «Страница не найдена | Стальметурал»
-    page_url: Optional[str]      # URL — из колонки «Адрес страницы» или из заголовка
+    page_url: Optional[str]      # URL – из колонки «Адрес страницы» или из заголовка
     views: int                   # просмотры
     visitors: int                # уникальные посетители
     referer: Optional[str] = None  # откуда пришли (колонка «Реферер»)
@@ -166,7 +166,7 @@ def parse_subject(subject: str) -> Optional[dict]:
 
 
 # Сигнатура: «таблица» в имени файла. У Метрики имя файла всегда содержит «таблица»
-# (а второй файл — «график»).
+# (а второй файл – «график»).
 def is_table_attachment(filename: str) -> bool:
     if not filename:
         return False
@@ -177,7 +177,7 @@ def is_table_attachment(filename: str) -> bool:
 def parse_table_xlsx(xlsx_bytes: bytes, return_diagnostics: bool = False):
     """Распарсить xlsx-«таблицу» отчёта Метрики в список Page404.
     
-    Если return_diagnostics=True, возвращает (pages, diag_dict) где diag_dict — 
+    Если return_diagnostics=True, возвращает (pages, diag_dict) где diag_dict – 
     словарь с информацией о найденных колонках для отладки.
     """
     try:
@@ -188,8 +188,8 @@ def parse_table_xlsx(xlsx_bytes: bytes, return_diagnostics: bool = False):
     # Берём первый лист (у Метрики всегда один лист «Отчет»)
     ws = wb[wb.sheetnames[0]]
 
-    # Ищем строку с заголовками — она должна точно соответствовать одному из вариантов:
-    # «Заголовок страницы», «URL», «Адрес страницы», и т.п. В соседних колонках —
+    # Ищем строку с заголовками – она должна точно соответствовать одному из вариантов:
+    # «Заголовок страницы», «URL», «Адрес страницы», и т.п. В соседних колонках –
     # «Просмотры»/«Посетители»/«Визиты». То есть строка с НЕСКОЛЬКИМИ короткими ячейками.
     header_row_idx = None
     headers = []
@@ -215,7 +215,7 @@ def parse_table_xlsx(xlsx_bytes: bytes, return_diagnostics: bool = False):
             break
 
     if header_row_idx is None:
-        return []  # Нет заголовков — нет и данных
+        return []  # Нет заголовков – нет и данных
 
     # Определяем индексы колонок гибко
     title_idx = None
@@ -225,7 +225,7 @@ def parse_table_xlsx(xlsx_bytes: bytes, return_diagnostics: bool = False):
     referer_idx = None
     for idx, h in enumerate(headers):
         h_lower = h.lower().strip()
-        # URL/адрес — расширенный список вариантов
+        # URL/адрес – расширенный список вариантов
         if (
             h_lower in ('адрес страницы', 'url', 'адрес', 'путь', 'ссылка', 'page url')
             or 'адрес' in h_lower
@@ -243,7 +243,7 @@ def parse_table_xlsx(xlsx_bytes: bytes, return_diagnostics: bool = False):
         elif 'реферер' in h_lower or 'переход' in h_lower or 'источник' in h_lower:
             referer_idx = idx
 
-    # Минимум — должны быть либо title, либо url
+    # Минимум – должны быть либо title, либо url
     if title_idx is None and url_idx is None:
         return []
 
@@ -253,7 +253,7 @@ def parse_table_xlsx(xlsx_bytes: bytes, return_diagnostics: bool = False):
         if all(c is None or str(c).strip() == '' for c in row):
             continue
 
-        # Фильтр «Итого/среднее/всего» — проверяем все ячейки строки, не только первую
+        # Фильтр «Итого/среднее/всего» – проверяем все ячейки строки, не только первую
         row_str = ' '.join(str(c).strip().lower() for c in row if c)
         if ('итого' in row_str and 'средн' in row_str) or row_str.startswith('итого'):
             continue
@@ -272,7 +272,7 @@ def parse_table_xlsx(xlsx_bytes: bytes, return_diagnostics: bool = False):
         referer = None
         if referer_idx is not None and referer_idx < len(row) and row[referer_idx]:
             ref_str = str(row[referer_idx]).strip()
-            # «Не определен» / «Не определено» — это пусто
+            # «Не определен» / «Не определено» – это пусто
             if ref_str and not ref_str.lower().startswith('не определен'):
                 referer = ref_str
 
@@ -363,7 +363,7 @@ def _connect_via_http_proxy(
     sock = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
     sock.sendall(request.encode())
 
-    # Читаем ответ — должен быть "HTTP/1.1 200 ..."
+    # Читаем ответ – должен быть "HTTP/1.1 200 ..."
     response = b''
     while b'\r\n\r\n' not in response:
         chunk = sock.recv(4096)
@@ -434,7 +434,7 @@ def _imap_utf7_decode(b: bytes) -> str:
             # Ищем закрывающий '-'
             end = b.find(b'-', i + 1)
             if end < 0:
-                # Битая последовательность — оставим как есть
+                # Битая последовательность – оставим как есть
                 res.append(b[i:].decode('ascii', errors='replace'))
                 break
             seq = b[i+1:end]
@@ -462,9 +462,9 @@ class IMAP4_SSL_via_Proxy(imaplib.IMAP4_SSL):
     IMAP4_SSL который сначала идёт через HTTP-прокси (CONNECT),
     потом наворачивает SSL на этот сокет.
 
-    Переопределяем только _create_socket — он, согласно imaplib, должен
+    Переопределяем только _create_socket – он, согласно imaplib, должен
     вернуть готовый SSL-сокет. Метод open() родительского класса дальше
-    сам обернёт его в makefile() как полагается. Не трогаем self.file —
+    сам обернёт его в makefile() как полагается. Не трогаем self.file –
     в Python 3.12+ это property без сеттера.
     """
     def __init__(self, host, port, proxy_url, ssl_context=None, timeout=30):
@@ -479,7 +479,7 @@ class IMAP4_SSL_via_Proxy(imaplib.IMAP4_SSL):
             self._proxy_url, self.host, self.port,
             timeout=self._connect_timeout,
         )
-        # 2. Заворачиваем в SSL — родителю отдаём готовый ssl-сокет
+        # 2. Заворачиваем в SSL – родителю отдаём готовый ssl-сокет
         ssl_sock = self._custom_ssl_context.wrap_socket(
             raw_sock, server_hostname=self.host,
         )
@@ -502,8 +502,8 @@ def fetch_metrika_emails(
     Подключиться по IMAP, скачать новые письма из указанной папки,
     распарсить вложения и вернуть список отчётов Report404.
 
-    since_days — забираем письма не старше N дней (по умолчанию 30).
-    proxy_url — если задан, IMAP-соединение пойдёт через HTTP CONNECT-прокси.
+    since_days – забираем письма не старше N дней (по умолчанию 30).
+    proxy_url – если задан, IMAP-соединение пойдёт через HTTP CONNECT-прокси.
                 Нужно когда основной хостинг (Streamlit Cloud в США) блокируется
                 Яндексом. Прокси должен разрешать CONNECT на порт 993.
     """
@@ -543,7 +543,7 @@ def fetch_metrika_emails(
             log('info', 'Логин успешен. Запрашиваю список папок…')
 
         # Папки на Яндексе с русскими именами требуют кодировки IMAP UTF-7,
-        # но самый надёжный способ — заключить имя в кавычки.
+        # но самый надёжный способ – заключить имя в кавычки.
         # Сначала найдём папку среди списка
         try:
             status, folders = M.list()
@@ -562,7 +562,7 @@ def fetch_metrika_emails(
                     line = f.decode('ascii', errors='replace') if isinstance(f, bytes) else f
                 except Exception:
                     continue
-                # Имя в конце строки — берём из последних кавычек
+                # Имя в конце строки – берём из последних кавычек
                 m = re.search(r'"([^"]+)"\s*$', line)
                 if not m:
                     continue
@@ -579,7 +579,7 @@ def fetch_metrika_emails(
                     break
 
         if target_folder_encoded is None:
-            # Папка не нашлась в листинге — кодируем имя сами
+            # Папка не нашлась в листинге – кодируем имя сами
             target_folder_encoded = _imap_utf7_encode(folder).decode('ascii')
             if log:
                 log('warn', f'Папка не нашлась в листинге. Использую закодированное имя: {target_folder_encoded}')
@@ -587,7 +587,7 @@ def fetch_metrika_emails(
         if log:
             log('info', f'Открываю папку «{folder}» (IMAP-имя: {target_folder_encoded})…')
 
-        # Кодируем имя папки В BYTES сразу — imaplib попытается сделать bytes(arg, 'ascii')
+        # Кодируем имя папки В BYTES сразу – imaplib попытается сделать bytes(arg, 'ascii')
         # и упадёт на любом не-ASCII. Передавая bytes, обходим эту проверку.
         # target_folder_encoded уже содержит только ASCII (это IMAP UTF-7), но
         # обернём для надёжности.
@@ -608,7 +608,7 @@ def fetch_metrika_emails(
         # Ищем все письма за последние N дней от Яндекс.Метрики
         from datetime import datetime, timedelta
         since_date = (datetime.now() - timedelta(days=since_days)).strftime('%d-%b-%Y')
-        # IMAP-команда для поиска (только ASCII символы — даты и yandex.ru)
+        # IMAP-команда для поиска (только ASCII символы – даты и yandex.ru)
         criteria_str = f'(SINCE "{since_date}" FROM "yandex.ru")'
         criteria_bytes = criteria_str.encode('ascii')
 
@@ -660,7 +660,7 @@ def fetch_metrika_emails(
                         if payload:
                             try:
                                 table_pages, diag = parse_table_xlsx(payload, return_diagnostics=True)
-                                # Логируем диагностику — какие колонки парсер нашёл (важно для отладки)
+                                # Логируем диагностику – какие колонки парсер нашёл (важно для отладки)
                                 if log and table_pages:
                                     log('info', (
                                         f'  {subj_info["country"]}: колонки={diag["headers_found"]}, '
@@ -758,7 +758,7 @@ def list_stored_reports(project_id: str) -> list[dict]:
                 })
             except Exception:
                 continue
-    # Сортируем: сначала свежие даты, в пределах даты — по алфавиту страны
+    # Сортируем: сначала свежие даты, в пределах даты – по алфавиту страны
     result.sort(key=lambda r: (r['date'], r['country_code']), reverse=True)
     return result
 
@@ -800,15 +800,15 @@ def fetch_incremental(
     Инкрементальная загрузка: идём в IMAP только за последние lookback_days дней.
 
     По умолчанию (force_refresh=False):
-      • Новые письма — сохраняем как «fetched».
-      • Письма за уже известные даты — пропускаем как «skipped», ЕСЛИ только
+      • Новые письма – сохраняем как «fetched».
+      • Письма за уже известные даты – пропускаем как «skipped», ЕСЛИ только
         upgrade_if_better=True и свежий разбор не даёт новых данных
         (больше URL-ов или больше страниц). Иначе перезаписываем как
-        «upgraded» — это решает кейс, когда раньше парсер не вытаскивал URL,
+        «upgraded» – это решает кейс, когда раньше парсер не вытаскивал URL,
         а теперь умеет, или пользователь добавил в шаблоне Метрики колонку
         «Адрес страницы».
 
-    Если force_refresh=True — перезаписываем все отчёты за период.
+    Если force_refresh=True – перезаписываем все отчёты за период.
 
     Возвращает {'fetched': N, 'skipped': N, 'upgraded': N, 'total_in_letters': N}.
     """
@@ -840,7 +840,7 @@ def fetch_incremental(
 
         if upgrade_if_better:
             # Сравним: даёт ли свежий разбор больше URL-ов или страниц,
-            # чем то, что лежит в кеше. Если да — перезаписываем.
+            # чем то, что лежит в кеше. Если да – перезаписываем.
             old = load_report(r.project_id, r.country_code, r.report_date)
             if old is None:
                 save_report(r)
@@ -901,7 +901,7 @@ def load_reports_for_period(
     days=14 → с вчера до 14 дней назад
     days=30 → с вчера до 30 дней назад
     
-    Сегодняшний день не включается — отчёт Метрики за сегодня обычно ещё не пришёл.
+    Сегодняшний день не включается – отчёт Метрики за сегодня обычно ещё не пришёл.
     """
     from datetime import datetime as _dt, timedelta as _td
     today = _dt.now().date()

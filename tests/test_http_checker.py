@@ -1,4 +1,4 @@
-"""Тесты http_checker — классификация статусов и оценка скорости."""
+"""Тесты http_checker – классификация статусов и оценка скорости."""
 import sys
 sys.path.insert(0, '/home/claude/site-checker-py')
 
@@ -41,7 +41,7 @@ def test_classify_errors():
 
 
 def test_should_retry():
-    """Ретраим только то, что может стать ОК. 4xx — устойчивый."""
+    """Ретраим только то, что может стать ОК. 4xx – устойчивый."""
     assert should_retry(STATUS.TIMEOUT) is True
     assert should_retry(STATUS.NETWORK) is True
     assert should_retry(STATUS.SERVER_ERROR) is True
@@ -49,7 +49,7 @@ def test_should_retry():
     assert should_retry(STATUS.REDIRECT) is False
     assert should_retry(STATUS.NOT_FOUND) is False
     assert should_retry(STATUS.CLIENT_ERROR) is False
-    print('✓ Логика ретраев: 5xx/timeout/network — да, 4xx — нет')
+    print('✓ Логика ретраев: 5xx/timeout/network – да, 4xx – нет')
 
 
 def test_rate_speed():

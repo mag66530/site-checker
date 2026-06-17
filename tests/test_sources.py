@@ -1,4 +1,4 @@
-"""Тесты sources.py — проверяем что данные парсятся корректно."""
+"""Тесты sources.py – проверяем что данные парсятся корректно."""
 import sys
 sys.path.insert(0, '/home/claude/site-checker-py')
 
@@ -11,7 +11,7 @@ from sources import (
 def test_list_projects():
     projects = list_projects()
     ids = {p['id'] for p in projects}
-    # Базовые проекты должны быть; могут быть и доп. (напр. smu-test — тестовый стенд)
+    # Базовые проекты должны быть; могут быть и доп. (напр. smu-test – тестовый стенд)
     assert {'smu', 'imp', 'mpe'} <= ids, f"Нет базовых проектов, получили {ids}"
     print(f'✓ list_projects: {len(projects)} проектов ({", ".join(sorted(ids))})')
 
@@ -74,7 +74,7 @@ def test_build_plan_smu():
 
 
 def test_build_plan_mpe_no_filters():
-    """МПЭ — нет фильтров, поле filters_per_subdomain должно игнорироваться."""
+    """МПЭ – нет фильтров, поле filters_per_subdomain должно игнорироваться."""
     cfg = load_project_config('mpe')
     src = load_sources(cfg)
     plan = build_plan(

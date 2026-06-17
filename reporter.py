@@ -185,7 +185,7 @@ _STRUCT_GROUPS = [
 
 def _price_cell(bk):
     # Одна галочка: есть цена в любом виде (₽ ИЛИ «по запросу») → ✓; нет ни того
-    # ни другого или скрыто стилями → БАГ. Без «₽ + запрос» — это лишний шум.
+    # ни другого или скрыто стилями → БАГ. Без «₽ + запрос» – это лишний шум.
     price = bk.get('price')
     if price and price.required and not price.present:
         return ('БАГ', 'bug')
@@ -288,20 +288,20 @@ def _problem_text(r):
     """Понятная формулировка проблемы страницы для списка «Что чинить»."""
     pk = getattr(r.content, 'page_kind', '')
     if getattr(r.content, 'is_soft_404', False):
-        return 'страница отдаёт 404 (не найдена) — проверить ссылку или убрать из каталога'
+        return 'страница отдаёт 404 (не найдена) – проверить ссылку или убрать из каталога'
     if pk == 'empty':
-        return 'раздел пуст — нет ни товаров, ни подразделов'
+        return 'раздел пуст – нет ни товаров, ни подразделов'
     # У бага может быть пояснение (напр. «в коде есть, но покупатель не видит
-    # (скрыто/disabled)») — показываем его рядом с названием блока.
+    # (скрыто/disabled)») – показываем его рядом с названием блока.
     parts = []
     for b in r.content.bugs:
         note = getattr(b, 'note', '')
-        parts.append(f'{b.label} — {note}' if note else b.label)
+        parts.append(f'{b.label} – {note}' if note else b.label)
     return 'нет: ' + ', '.join(parts)
 
 
 def _build_structure_sheet(wb, results):
-    """Лист структурной проверки — дашборд, что чинить, сводка и детали."""
+    """Лист структурной проверки – дашборд, что чинить, сводка и детали."""
     pages = [r for r in results if getattr(r, 'content', None) is not None]
     if not pages:
         return
@@ -343,8 +343,8 @@ def _build_structure_sheet(wb, results):
 
     ws.merge_cells(f'B3:{LASTL}3')
     c = ws['B3']
-    c.value = ('Что должно быть на каждой странице для продаж — и чего не хватает. '
-               'Красное нужно чинить, серый прочерк — этого просто нет (норма).')
+    c.value = ('Что должно быть на каждой странице для продаж – и чего не хватает. '
+               'Красное нужно чинить, серый прочерк – этого просто нет (норма).')
     c.font = _font(size=11, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='center')
     ws.row_dimensions[3].height = 18
@@ -371,18 +371,18 @@ def _build_structure_sheet(wb, results):
         l.font = _font(size=9, bold=True, color=C.text_muted)
         l.alignment = _align(horizontal='center')
 
-    # ── «Что чинить» — главный блок ──
+    # ── «Что чинить» – главный блок ──
     bug_pages = sorted([r for r in pages if r.content_bugs > 0],
                        key=lambda r: -r.content_bugs)
     row = 8
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=last_col)
     hc = ws.cell(row=row, column=2)
     if bug_pages:
-        hc.value = f'  Что чинить — {len(bug_pages)} {_plural_pages(len(bug_pages))}'
+        hc.value = f'  Что чинить – {len(bug_pages)} {_plural_pages(len(bug_pages))}'
         hc.font = _font(size=14, bold=True, color=C.err)
         hc.fill = _fill(C.err_soft)
     else:
-        hc.value = '  ✓ Всё в порядке — структурных проблем не найдено'
+        hc.value = '  ✓ Всё в порядке – структурных проблем не найдено'
         hc.font = _font(size=14, bold=True, color=C.ok)
         hc.fill = _fill(C.ok_soft)
     hc.alignment = _align(indent=1, vertical='center')
@@ -430,7 +430,7 @@ def _build_structure_sheet(wb, results):
         if len(bug_pages) > 50:
             ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=last_col)
             ws.cell(row=row, column=2,
-                    value=f'… и ещё {len(bug_pages) - 50} — см. таблицы ниже').font = \
+                    value=f'… и ещё {len(bug_pages) - 50} – см. таблицы ниже').font = \
                 _font(size=10, italic=True, color=C.text_muted)
             row += 1
 
@@ -440,7 +440,7 @@ def _build_structure_sheet(wb, results):
         _font(size=13, bold=True, color=C.text)
     ws.cell(row=row + 1, column=2,
             value='✓ есть · БАГ обязательного нет · «–» необязательного нет (норма) · '
-                  'число = сколько найдено. Наведите курсор на заголовок столбца — пояснение.').font = \
+                  'число = сколько найдено. Наведите курсор на заголовок столбца – пояснение.').font = \
         _font(size=9, italic=True, color=C.text_muted)
     ws.merge_cells(start_row=row + 1, start_column=2, end_row=row + 1, end_column=last_col)
     row += 3
@@ -456,7 +456,7 @@ def _build_structure_sheet(wb, results):
         # Заголовок секции
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4 + n_cols)
         gc = ws.cell(row=row, column=2)
-        gc.value = (f'  {group_label} — {len(group_pages)} стр.'
+        gc.value = (f'  {group_label} – {len(group_pages)} стр.'
                     + (f'  ·  проблем: {g_bugs}' if g_bugs else '  ·  все в порядке'))
         gc.font = _font(size=11, bold=True, color=C.err if g_bugs else C.ok)
         gc.fill = _fill(C.accent_soft)
@@ -559,11 +559,11 @@ _NOTIF_CATEGORY_LABEL = {
 }
 
 # Группировка уведомлений по теме (один и тот же текст письма приходит по
-# каждому домену отдельно — схлопываем в одну строку, домены в список).
+# каждому домену отдельно – схлопываем в одну строку, домены в список).
 _DOMAIN_TLDS = (
     'ru|рф|by|com|net|org|su|info|biz|online|store|site|shop|pro'
 )
-# URL c путём целиком (group1 = host+path) — для извлечения режем по '/'.
+# URL c путём целиком (group1 = host+path) – для извлечения режем по '/'.
 _URL_RE = re.compile(r'https?://([^\s,;()<>"\']+)', re.IGNORECASE)
 _HOST_RE = re.compile(
     r'\b((?:[a-zа-я0-9](?:[a-zа-я0-9-]*[a-zа-я0-9])?\.)+(?:' + _DOMAIN_TLDS + r'))\b',
@@ -589,11 +589,11 @@ def _extract_domains(text: str) -> list:
 
 
 def _canon_theme(subject: str) -> str:
-    """Тема без конкретного домена/URL — ключ группировки и текст для отчёта."""
+    """Тема без конкретного домена/URL – ключ группировки и текст для отчёта."""
     s = subject or ''
     s = _URL_RE.sub('', s)
     s = _HOST_RE.sub('', s)
-    s = re.sub(r'\s+', ' ', s).strip(' .,:;/–—-«»"\'')
+    s = re.sub(r'\s+', ' ', s).strip(' .,:;/––-«»"\'')
     return s or (subject or '').strip()
 
 
@@ -601,7 +601,7 @@ def _group_notifs_by_theme(items: list) -> list:
     """Схлопнуть письма с одинаковой темой в группы.
 
     Возвращает список dict: theme, date (минимальная), domains (список),
-    first (репрезентативное письмо), count. Порядок — первое появление темы.
+    first (репрезентативное письмо), count. Порядок – первое появление темы.
     """
     from collections import OrderedDict
     groups = OrderedDict()
@@ -634,7 +634,7 @@ def _notif_row_height(domains_str: str, preview: str) -> float:
 def _review_rating_cell(rating):
     """(текст, цвет) для колонки «Оценка». rating: 1..5 или None."""
     if not rating:
-        return '—', C.text_muted
+        return '–', C.text_muted
     stars = '★' * int(rating)
     if rating >= 4:
         return f'{stars} Хороший', C.ok
@@ -658,7 +658,7 @@ _SEV2PRIO = {'fatal': 'critical', 'critical': 'critical', 'possible': 'important
 
 def _group_service_issues(items: list) -> list:
     """Схлопнуть ошибки сервиса по одной проблеме: один и тот же тип проблемы
-    приходит по каждому сайту отдельно — собираем сайты в список.
+    приходит по каждому сайту отдельно – собираем сайты в список.
     Возвращает dict: title, code, hosts (список), date (мин), count, first."""
     from collections import OrderedDict
     groups = OrderedDict()
@@ -804,7 +804,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
                 ws.row_dimensions[row].height = 20
                 row += 1
 
-                # Строки — одна на уникальную тему, домены отдельной колонкой
+                # Строки – одна на уникальную тему, домены отдельной колонкой
                 groups = _group_notifs_by_theme(p_items)
                 for g in sorted(groups, key=lambda x: x['date'] or '', reverse=True):
                     n0 = g['first']
@@ -876,7 +876,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
                     link_cell.hyperlink = review_url
                     link_cell.font = _font(size=9, color=C.accent, underline='single')
                 else:
-                    link_cell.value = '—'
+                    link_cell.value = '–'
                     link_cell.font = _font(size=9, color=C.text_muted)
                 link_cell.alignment = _align(vertical='top')
                 link_cell.border = _border(color=C.border_light)
@@ -925,7 +925,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
 
         row += 2  # пробел между секциями
 
-    # ── Секция «Вебмастер» — ошибки прямо из сервиса (API), не из почты ──
+    # ── Секция «Вебмастер» – ошибки прямо из сервиса (API), не из почты ──
     if service_issues:
         from collections import defaultdict as _dd
         _n_problems = len(_group_service_issues(service_issues))
@@ -961,7 +961,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
             ws.row_dimensions[row].height = 20
             row += 1
 
-            # Шапка: одна строка на проблему, сайты — списком в одной колонке
+            # Шапка: одна строка на проблему, сайты – списком в одной колонке
             for ci, h in enumerate(['Дата', 'Серьёзность', 'Категория', 'Проблема',
                                     'Сайты', 'Кол-во', 'Отдел'], 2):
                 cell = ws.cell(row=row, column=ci)
@@ -999,7 +999,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
         row += 2
 
 
-# ── Лист «Ошибки сервисов» (Вебмастер/GSC/Метрика — из API) ─────────
+# ── Лист «Ошибки сервисов» (Вебмастер/GSC/Метрика – из API) ─────────
 
 _SVC_SECTION = [
     ('webmaster', 'Яндекс.Вебмастер'),
@@ -1020,7 +1020,7 @@ _SVC_SEV_ORDER = {'fatal': 0, 'critical': 1, 'possible': 2,
 
 
 def _build_service_issues_sheet(wb, service_issues):
-    """Лист «Ошибки сервисов» — проблемы сайтов прямо из сервисов (не из почты).
+    """Лист «Ошибки сервисов» – проблемы сайтов прямо из сервисов (не из почты).
     Добавляется только если есть данные."""
     issues = service_issues or []
     if not issues:
@@ -1048,7 +1048,7 @@ def _build_service_issues_sheet(wb, service_issues):
     c = ws['B3']
     c.value = ('Проблемы напрямую из Яндекс.Вебмастера / GSC / Метрики (диагностика: '
                'сайтмапы, дубли, мусорные ссылки, ошибки сервера и индексации). '
-               'Не из почты — из самих сервисов по API.')
+               'Не из почты – из самих сервисов по API.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 30
@@ -1103,7 +1103,7 @@ def _build_service_issues_sheet(wb, service_issues):
                 cell.alignment = _align(wrap=True, vertical='top')
                 cell.border = _border(color=C.border_light)
 
-            # «Открыть» — ссылка в панель сервиса
+            # «Открыть» – ссылка в панель сервиса
             link_cell = ws.cell(row=row, column=6)
             _u = getattr(i, 'url', '')
             if _u:

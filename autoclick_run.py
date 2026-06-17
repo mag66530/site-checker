@@ -1,5 +1,5 @@
 """
-autoclick_run.py — один фоновый процесс, последовательно гоняет выбранные
+autoclick_run.py – один фоновый процесс, последовательно гоняет выбранные
 автокликеры (ГСК и/или Вебмастер) для проекта. Весь вывод идёт в stdout,
 который вызывающая сторона (страница «Автокликеры») перенаправляет в лог-файл.
 
@@ -30,7 +30,7 @@ def _run(script_args, title):
     for line in proc.stdout:
         print(line.rstrip(), flush=True)
     proc.wait()
-    _stamp(f'■■ {title} — код {proc.returncode}')
+    _stamp(f'■■ {title} – код {proc.returncode}')
 
 
 def main():
@@ -40,7 +40,7 @@ def main():
     ap.add_argument('--wm', action='store_true')
     a = ap.parse_args()
 
-    _stamp(f'АВТОКЛИКЕР СТАРТ — проект {a.project} '
+    _stamp(f'АВТОКЛИКЕР СТАРТ – проект {a.project} '
            f'(ГСК={a.gsc}, Вебмастер={a.wm})')
 
     if a.gsc:

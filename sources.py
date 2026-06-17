@@ -1,5 +1,5 @@
 """
-sources.py — загрузка каталогов и построение плана проверки.
+sources.py – загрузка каталогов и построение плана проверки.
 
 Работает с CSV-файлами (быстрее xlsx в десятки раз).
 
@@ -101,7 +101,7 @@ def parse_subdomains(csv_path: Path) -> list[Subdomain]:
 
 def parse_catalog(csv_path: Path) -> tuple[list[str], list[str]]:
     """
-    Загрузить каталог. Возвращает (категории, фильтры) — pathname'ы.
+    Загрузить каталог. Возвращает (категории, фильтры) – pathname'ы.
     Тип 'категория' → categories, тип 'тег' → filters.
     """
     rows = _read_csv(csv_path)
@@ -156,7 +156,7 @@ def load_sources(project: dict) -> Sources:
     subdomains = parse_subdomains(sub_path)
     categories, filters = parse_catalog(cat_path)
 
-    # Если есть отдельный файл актуальных категорий — он замещает
+    # Если есть отдельный файл актуальных категорий – он замещает
     if project.get('categories_csv'):
         categories_extra_path = PROJECT_ROOT / project['categories_csv']
         if categories_extra_path.exists():
@@ -187,7 +187,7 @@ def list_projects() -> list[dict]:
 # ── Построение плана ────────────────────────────────────────────────
 
 
-# Метки для типов задач — на русском, для отчёта
+# Метки для типов задач – на русском, для отчёта
 TYPE_LABELS = {
     'main': 'Главная',
     'catalog': 'Каталог',
@@ -223,9 +223,9 @@ _TECH_PATHS_IMP = [
 ]
 TECH_PAGE_PATHS = {
     'smu': _TECH_PATHS_SMU,
-    'smu-test': _TECH_PATHS_SMU,   # тест-стенд СМУ — те же страницы
+    'smu-test': _TECH_PATHS_SMU,   # тест-стенд СМУ – те же страницы
     'imp': _TECH_PATHS_IMP,
-    # 'mpe' — slug'и пока не заданы; добавим, когда пришлют
+    # 'mpe' – slug'и пока не заданы; добавим, когда пришлют
 }
 
 
@@ -261,7 +261,7 @@ def build_plan(
     """
     Построить план проверки: Москва + N случайных городов × M страниц.
     
-    Если передана rotation_history — pathname'ы из неё получают меньший
+    Если передана rotation_history – pathname'ы из неё получают меньший
     вес (в 3 раза реже попадают в выборку), но не исключаются полностью.
     """
     rng = random.Random(seed)
@@ -272,7 +272,7 @@ def build_plan(
     random_subs = _pick_random(others, random_subdomains_count, rng)
     selected = ([mandatory] if mandatory else []) + random_subs
 
-    # Если есть история ротации — используем weighted_sample вместо обычного _pick_random
+    # Если есть история ротации – используем weighted_sample вместо обычного _pick_random
     from history import weighted_sample
     recent = rotation_history or set()
 

@@ -4,13 +4,13 @@
 Запускается один раз для подготовки данных:
     python convert_catalogs.py
 
-На вход — папка с исходными xlsx (из старого проекта Node.js).
-На выход — папка catalogs/ с CSV-файлами по 3 проектам.
+На вход – папка с исходными xlsx (из старого проекта Node.js).
+На выход – папка catalogs/ с CSV-файлами по 3 проектам.
 
 Каждый проект → 3 файла:
-    {proj}-subdomains.csv  — поддомены (url, city)
-    {proj}-catalog.csv     — каталог (url, type)  (только для smu, imp)
-    {proj}-categories.csv  — категории (url)      (только для smu)
+    {proj}-subdomains.csv  – поддомены (url, city)
+    {proj}-catalog.csv     – каталог (url, type)  (только для smu, imp)
+    {proj}-categories.csv  – категории (url)      (только для smu)
 """
 import csv
 import os
@@ -120,7 +120,7 @@ def convert_catalog_structured(src_path, dst_path, sheet_name):
 
 
 def convert_catalog_flat(src_path, dst_path, sheet_name, url_col=0):
-    """МПЭ структура: все строки — категории, нет колонки 'сущность'."""
+    """МПЭ структура: все строки – категории, нет колонки 'сущность'."""
     wb = load_workbook(src_path, read_only=True, data_only=True)
     sheet = sheet_name if sheet_name in wb.sheetnames else first_sheet_matching(
         wb, 'структура', 'каталог'

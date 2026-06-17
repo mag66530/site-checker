@@ -1,7 +1,7 @@
 """
-webmaster_api.py — ошибки сайтов из Яндекс.Вебмастера через официальный API v4.
+webmaster_api.py – ошибки сайтов из Яндекс.Вебмастера через официальный API v4.
 
-В отличие от webmaster_recheck.py (браузер + локальный Chrome) — работает на
+В отличие от webmaster_recheck.py (браузер + локальный Chrome) – работает на
 облаке: только HTTPS + OAuth-токен. Тянет «Диагностику → проблемы сайта»
 (сайтмапы, дубли, мусорные ссылки, ошибки сервера/индексации и т.п.).
 
@@ -63,7 +63,7 @@ _SEV_FROM_YANDEX = {
     'POSSIBLE_PROBLEM': 'possible', 'RECOMMENDATION': 'recommendation',
 }
 
-# Человеческие названия типов диагностики (известные). Неизвестные —
+# Человеческие названия типов диагностики (известные). Неизвестные –
 # гуманизируем сам код (подчёркивания → пробелы, нижний регистр).
 _PROBLEM_TITLES = {
     'DISALLOW_IN_INDEXING_BY_USER': 'Запрет индексирования (вебмастер)',
@@ -96,7 +96,7 @@ def _humanize_code(code: str) -> str:
 
 
 def _norm_host(s: str) -> str:
-    """Хост без схемы/порта/www/слеша — для матчинга."""
+    """Хост без схемы/порта/www/слеша – для матчинга."""
     s = (s or '').strip()
     for pre in ('https://', 'http://'):
         if s.startswith(pre):
@@ -200,7 +200,7 @@ def _parse_diagnostics(project_id: str, host: str, host_id: str,
     if not problems:
         return issues
 
-    # Ответ бывает dict {CODE: {...}} или list [{...}] — поддерживаем оба.
+    # Ответ бывает dict {CODE: {...}} или list [{...}] – поддерживаем оба.
     items = []
     if isinstance(problems, dict):
         items = list(problems.items())
@@ -211,7 +211,7 @@ def _parse_diagnostics(project_id: str, host: str, host_id: str,
         if not isinstance(info, dict):
             continue
         state = (info.get('state') or '').upper()
-        # Исключаем только ЯВНО решённые/отсутствующие — всё прочее берём
+        # Исключаем только ЯВНО решённые/отсутствующие – всё прочее берём
         # (значения state у Яндекса плавают; лучше показать лишнее, чем скрыть).
         if state in ('ABSENT', 'OK', 'NONE', 'RESOLVED', 'GONE', 'FIXED'):
             continue
@@ -233,7 +233,7 @@ def fetch_webmaster_issues(project_id: str, token: str,
                            proxy_url: Optional[str] = None,
                            log: Optional[Callable] = None) -> list:
     """Забрать диагностику по всем хостам проекта. Возвращает список ServiceIssue
-    и сохраняет в кеш. При ошибке — пишет в лог и возвращает прежний кеш."""
+    и сохраняет в кеш. При ошибке – пишет в лог и возвращает прежний кеш."""
     def _log(msg):
         if log:
             log('info', msg)
@@ -260,7 +260,7 @@ def fetch_webmaster_issues(project_id: str, token: str,
             if not want or host_norm in want:
                 selected.append((host_norm, h.get('host_id'), host_url))
         if want and not selected:
-            _log(f'⚠ Вебмастер-API: ни один сайт аккаунта не совпал с проектом — '
+            _log(f'⚠ Вебмастер-API: ни один сайт аккаунта не совпал с проектом – '
                  f'беру все {len(api_hosts)}')
             selected = [(_norm_host(h.get('ascii_host_url', '')),
                          h.get('host_id'), h.get('ascii_host_url', ''))
@@ -277,7 +277,7 @@ def fetch_webmaster_issues(project_id: str, token: str,
                 _raw_n = len(_raw) if isinstance(_raw, (dict, list)) else 0
                 hi = _parse_diagnostics(project_id, host_norm, host_id, diag)
                 all_issues.extend(hi)
-                # Диагностика: если сырых проблем много, а активных 0 — видно в логе
+                # Диагностика: если сырых проблем много, а активных 0 – видно в логе
                 _log(f'  {host_norm}: в ответе {_raw_n}, активных {len(hi)}')
                 if _raw_n and not hi and isinstance(_raw, dict):
                     _log(f'    ключи/шаблон: {list(_raw)[:6]}')

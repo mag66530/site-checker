@@ -2,11 +2,11 @@
 gsc_list_properties.py
 ======================
 Разведка: вывести ВСЕ ресурсы (properties) аккаунта GSC.
-Нужно чтобы понять структуру — отдельные ресурсы под каждый поддомен
+Нужно чтобы понять структуру – отдельные ресурсы под каждый поддомен
 или один ресурс-домен (sc-domain:...) на всё.
 
 Перед запуском:
-    1. python gsc_save_session.py  — откроет авторизованный Chrome (порт 9222)
+    1. python gsc_save_session.py  – откроет авторизованный Chrome (порт 9222)
     2. НЕ закрывай его.
 
 Запуск:
@@ -63,7 +63,7 @@ async def main():
         await page.wait_for_timeout(4000)
 
         if 'accounts.google.com' in page.url:
-            print('Не авторизован — перезапусти gsc_save_session.py и войди.')
+            print('Не авторизован – перезапусти gsc_save_session.py и войди.')
             await browser.disconnect()
             return
 
@@ -90,7 +90,7 @@ async def main():
             except Exception:
                 continue
         if not opened:
-            print('  Не нашёл кнопку переключателя — выгребаю из общего HTML.')
+            print('  Не нашёл кнопку переключателя – выгребаю из общего HTML.')
 
         # Прокручиваем список (виртуализация подгружает строки при скролле)
         for _ in range(8):

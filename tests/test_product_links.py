@@ -1,4 +1,4 @@
-"""Тесты product_links — сбор товарных ссылок с листингов."""
+"""Тесты product_links – сбор товарных ссылок с листингов."""
 import json
 
 from product_links import (
@@ -73,7 +73,7 @@ def test_save_and_load_roundtrip(tmp_path, monkeypatch):
     assert loaded['pathnames'] == ['/catalog/armatura/tovar-1/', '/catalog/balka/tovar-2/']
     assert loaded['categories_total'] == 10
     assert loaded['categories_ok'] == 9
-    assert loaded['is_stale'] is False, 'только что собранная база — свежая'
+    assert loaded['is_stale'] is False, 'только что собранная база – свежая'
 
 
 def test_load_missing_returns_none(tmp_path, monkeypatch):

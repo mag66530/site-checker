@@ -1,4 +1,4 @@
-"""Тесты text_checker.py — особенно важно: URL-кодировка не должна ловиться."""
+"""Тесты text_checker.py – особенно важно: URL-кодировка не должна ловиться."""
 import sys
 sys.path.insert(0, '/home/claude/site-checker-py')
 
@@ -6,7 +6,7 @@ from text_checker import find_text_issues
 
 
 def test_url_encoded_not_caught():
-    """Главный кейс из жалоб v0.7: %D0%97 — это кириллица в URL, не битая переменная."""
+    """Главный кейс из жалоб v0.7: %D0%97 – это кириллица в URL, не битая переменная."""
     html = (
         '<div class="online-block-wapp">'
         '<a href="https://wa.me/79031303669?text=%D0%97%D0%B4%D1%80%D0%B0%D0%B2%D1%81%D1%82%D0%B2%D1%83%D0%B9%D1%82%D0%B5">WhatsApp</a>'
@@ -18,7 +18,7 @@ def test_url_encoded_not_caught():
 
 
 def test_real_template_issues():
-    """Реальные битые переменные — должны быть найдены."""
+    """Реальные битые переменные – должны быть найдены."""
     html = (
         '<h1>Купить трубу в городе {{city}}</h1>'
         '<p>Цена от %price% рублей</p>'
@@ -35,7 +35,7 @@ def test_real_template_issues():
 
 
 def test_script_and_style_ignored():
-    """Содержимое script/style — НЕ должно ловиться."""
+    """Содержимое script/style – НЕ должно ловиться."""
     html = (
         '<html><body>'
         '<h1>Hello</h1>'
@@ -44,7 +44,7 @@ def test_script_and_style_ignored():
         '</body></html>'
     )
     issues = find_text_issues(html)
-    # В видимом тексте — только "Hello", битых нет
+    # В видимом тексте – только "Hello", битых нет
     assert len(issues) == 0, f"Содержимое script/style не должно ловиться: {[i.match for i in issues]}"
     print('✓ Содержимое script/style игнорируется')
 

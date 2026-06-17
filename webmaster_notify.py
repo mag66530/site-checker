@@ -1,18 +1,18 @@
 """
-webmaster_notify.py — уведомления из Яндекс-почты и Gmail.
+webmaster_notify.py – уведомления из Яндекс-почты и Gmail.
 
 Источники:
-    yandex_webmaster  — Яндекс-почта, папка «Вебмастер», с классификацией по приоритету
-    ya_business       — Яндекс-почта, папка «Я.Бизнес», без классификации
-    twogis            — Яндекс-почта, папка «2ГИС», без классификации
-    gsc               — Gmail, от sc-noreply@google.com, с классификацией по приоритету
-    google_accounts   — Gmail, от no-reply@accounts.google.com, без классификации (3 дня)
+    yandex_webmaster  – Яндекс-почта, папка «Вебмастер», с классификацией по приоритету
+    ya_business       – Яндекс-почта, папка «Я.Бизнес», без классификации
+    twogis            – Яндекс-почта, папка «2ГИС», без классификации
+    gsc               – Gmail, от sc-noreply@google.com, с классификацией по приоритету
+    google_accounts   – Gmail, от no-reply@accounts.google.com, без классификации (3 дня)
 
 Приоритеты (4 уровня, только для yandex_webmaster и gsc):
-    critical        — критические: сайт недоступен, долгий ответ сервера
-    important       — важные: ошибки индексации, значительные проблемы
-    recommendation  — рекомендации по улучшению
-    info            — информационные уведомления
+    critical        – критические: сайт недоступен, долгий ответ сервера
+    important       – важные: ошибки индексации, значительные проблемы
+    recommendation  – рекомендации по улучшению
+    info            – информационные уведомления
 
 Кеш: cache/webmaster/{project_id}/{source}/{YYYY-MM-DD}-{uid_hash}.json
 """
@@ -49,7 +49,7 @@ GMAIL_IMAP_PORT = 993
 
 # ── Конфиг почтовых ящиков ───────────────────────────────────────────
 
-# Яндекс — те же credentials что у Метрики, папка «Вебмастер»
+# Яндекс – те же credentials что у Метрики, папка «Вебмастер»
 WEBMASTER_YANDEX_CONFIG = {
     'smu': {
         'folder': 'Вебмастер',
@@ -68,7 +68,7 @@ WEBMASTER_YANDEX_CONFIG = {
     },
 }
 
-# Gmail — отдельные ящики для GSC и Google-уведомлений
+# Gmail – отдельные ящики для GSC и Google-уведомлений
 GSC_GMAIL_CONFIG = {
     'smu': {
         'secret_email': 'gsc_smu_email',
@@ -84,21 +84,21 @@ GSC_GMAIL_CONFIG = {
     },
 }
 
-# Яндекс-почта — папка «Я.Бизнес» (те же credentials что у Метрики/Вебмастера)
+# Яндекс-почта – папка «Я.Бизнес» (те же credentials что у Метрики/Вебмастера)
 YABUSINESS_YANDEX_CONFIG = {
     'smu': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_smu_email', 'secret_password': 'metrika_smu_password'},
     'imp': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_imp_email', 'secret_password': 'metrika_imp_password'},
     'mpe': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_mpe_email', 'secret_password': 'metrika_mpe_password'},
 }
 
-# Яндекс-почта — папка «2ГИС»
+# Яндекс-почта – папка «2ГИС»
 TWOGIS_YANDEX_CONFIG = {
     'smu': {'folder': '2ГИС', 'secret_email': 'metrika_smu_email', 'secret_password': 'metrika_smu_password'},
     'imp': {'folder': '2ГИС', 'secret_email': 'metrika_imp_email', 'secret_password': 'metrika_imp_password'},
     'mpe': {'folder': '2ГИС', 'secret_email': 'metrika_mpe_email', 'secret_password': 'metrika_mpe_password'},
 }
 
-# Gmail — те же ящики что GSC, письма от no-reply@accounts.google.com
+# Gmail – те же ящики что GSC, письма от no-reply@accounts.google.com
 GOOGLE_ACCOUNTS_CONFIG = {
     'smu': {'secret_email': 'gsc_smu_email', 'secret_password': 'gsc_smu_password'},
     'imp': {'secret_email': 'gsc_imp_email', 'secret_password': 'gsc_imp_password'},
@@ -148,14 +148,14 @@ class WebmasterNotification:
 
     @classmethod
     def from_dict(cls, d: dict) -> 'WebmasterNotification':
-        # if k in d — старые кеш-файлы без новых полей не падают (берут default)
+        # if k in d – старые кеш-файлы без новых полей не падают (берут default)
         return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
 
 # ── Классификация приоритетов и категорий ───────────────────────────
 
 
-# Правила для Яндекс.Вебмастера — проверяются по subject + начало body
+# Правила для Яндекс.Вебмастера – проверяются по subject + начало body
 _YW_PRIORITY = [
     ('critical', [
         'долгий ответ', 'сайт недоступен', 'недоступна', 'не отвечает',
@@ -275,7 +275,7 @@ def _extract_html_body(msg) -> str:
 
 
 # Парсинг отзыва 2ГИС: оценка (число звёзд) + ссылка «Читать полностью».
-# Письма 2ГИС: анкор с текстом «читать»/«полностью», оценка — звёзды/число.
+# Письма 2ГИС: анкор с текстом «читать»/«полностью», оценка – звёзды/число.
 _2GIS_READMORE_RE = re.compile(
     r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(?:(?!</a>).)*?'
     r'(?:читать|полностью|подробн|смотреть\s+отзыв)',
@@ -294,7 +294,7 @@ def _parse_2gis_review(html: str, text: str):
     """Вернуть (rating:int|None, review_url:str|None) из письма 2ГИС.
 
     ВНИМАНИЕ: эвристики проверены на типовом письме 2ГИС, но формат может
-    меняться — при сбое возвращаем None (в отчёте будет «—»).
+    меняться – при сбое возвращаем None (в отчёте будет «–»).
     """
     rating = None
     review_url = None
@@ -307,7 +307,7 @@ def _parse_2gis_review(html: str, text: str):
         review_url = m.group(1).strip()
 
     # Оценка. Приоритет:
-    # 1) divʼы 2ГИС с классом «Stars__star-<хэш>» — каждый = 1 закрашенная
+    # 1) divʼы 2ГИС с классом «Stars__star-<хэш>» – каждый = 1 закрашенная
     #    звезда (хэш-суффикс плавающий, матчим по базе);
     # 2) глифы ★ / ⭐;
     # 3) числовые шаблоны («N из 5», «N звёзд», «оценка N»).
@@ -376,7 +376,7 @@ def _select_folder(M: imaplib.IMAP4_SSL, folder: str, log: Callable = None) -> b
         _log(f'⚠ list() не удался: {e}')
 
     if target_encoded is None:
-        # Показываем что реально доступно — частая причина «нет писем».
+        # Показываем что реально доступно – частая причина «нет писем».
         if available:
             _log(f'Папка «{folder}» не найдена. Доступные папки: {available}')
         target_encoded = _imap_utf7_encode(folder).decode('ascii')
@@ -402,7 +402,7 @@ def _cache_dir(project_id: str, source: str) -> Path:
 
 
 def _load_cached(project_id: str, source: str) -> dict[str, WebmasterNotification]:
-    """Загрузить кешированные уведомления. Ключ — msg_id."""
+    """Загрузить кешированные уведомления. Ключ – msg_id."""
     result = {}
     d = _cache_dir(project_id, source)
     for f in d.glob('*.json'):
@@ -618,7 +618,7 @@ def fetch_gsc_gmail(
 
         try:
             # App Password Google показывает с пробелами ("abcd efgh ijkl mnop"),
-            # а IMAP-логин требует без пробелов — убираем все пробелы.
+            # а IMAP-логин требует без пробелов – убираем все пробелы.
             M.login(email_addr, ''.join((password or '').split()))
         except imaplib.IMAP4.error as e:
             raise PermissionError(
@@ -630,7 +630,7 @@ def fetch_gsc_gmail(
 
         _log(f'Gmail: вошли как {email_addr}. Ищу письма GSC…')
 
-        # Открываем All Mail — это надмножество ВСЕХ писем Gmail (любые ярлыки и
+        # Открываем All Mail – это надмножество ВСЕХ писем Gmail (любые ярлыки и
         # вкладки Primary/Updates/Promotions). INBOX через IMAP может не содержать
         # письма из вкладки «Оповещения», поэтому All Mail надёжнее.
         _folder_ok = False
@@ -916,7 +916,7 @@ def fetch_google_accounts(
 
         try:
             # App Password Google показывает с пробелами ("abcd efgh ijkl mnop"),
-            # а IMAP-логин требует без пробелов — убираем все пробелы.
+            # а IMAP-логин требует без пробелов – убираем все пробелы.
             M.login(email_addr, ''.join((password or '').split()))
         except imaplib.IMAP4.error as e:
             raise PermissionError(
@@ -1019,7 +1019,7 @@ def fetch_google_accounts(
 def group_by_priority(
     notifications: list[WebmasterNotification],
 ) -> dict[str, list[WebmasterNotification]]:
-    """Разбить список на 4 группы по приоритету (сортировка внутри — по дате DESC)."""
+    """Разбить список на 4 группы по приоритету (сортировка внутри – по дате DESC)."""
     groups: dict[str, list] = {p: [] for p in PRIORITY_ORDER}
     for n in notifications:
         groups.setdefault(n.priority, []).append(n)

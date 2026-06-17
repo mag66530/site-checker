@@ -99,22 +99,22 @@ def run_check(pid, params, creds, log, progress):
             except Exception as e:
                 log(f'⚠ Свой список URL не разобран: {e}')
 
-        # Технические страницы (на главном домене) – проверяем доступность.
-        if params.get('check_tech'):
-            _tech_paths = get_tech_paths(pid)
-            _mcity = cfg.get('mandatory_city', 'Москва')
-            _main = next((s for s in src.subdomains if s.city == _mcity), None)
-            if _main and _tech_paths:
-                _tech_urls = [f'https://{_main.host}{p}' for p in _tech_paths]
-                try:
-                    _tt = build_custom_tasks_typed(_tech_urls, src)
-                    for _t in _tt:
-                        _t.type_code = 'tech'
-                        _t.type_label = 'Тех. страница'
-                    plan.tasks.extend(_tt)
-                    log(f'Технические страницы: добавлено {len(_tt)}')
-                except Exception as e:
-                    log(f'⚠ Тех. страницы: {e}')
+        # Технические страницы (на главном домене) – проверяем ВСЕГДА, при любом
+        # прогоне, вне зависимости от объёма выборки.
+        _tech_paths = get_tech_paths(pid)
+        _mcity = cfg.get('mandatory_city', 'Москва')
+        _main = next((s for s in src.subdomains if s.city == _mcity), None)
+        if _main and _tech_paths:
+            _tech_urls = [f'https://{_main.host}{p}' for p in _tech_paths]
+            try:
+                _tt = build_custom_tasks_typed(_tech_urls, src)
+                for _t in _tt:
+                    _t.type_code = 'tech'
+                    _t.type_label = 'Тех. страница'
+                plan.tasks.extend(_tt)
+                log(f'Технические страницы: добавлено {len(_tt)}')
+            except Exception as e:
+                log(f'⚠ Тех. страницы: {e}')
 
         log(f'Города: {", ".join(s.city for s in plan.selected_subdomains)}')
         log(f'Всего проверок: {len(plan.tasks)}')

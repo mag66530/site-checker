@@ -587,7 +587,6 @@ def init_session():
         'c30_check_filters': True,
         'c30_check_products': True,
         'c30_check_text': True,        # пункт 1.6 – битые переменные
-        'c30_check_tech': True,        # технические страницы (оплата/доставка/…)
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -698,14 +697,14 @@ st.markdown(
         border-bottom: 1px solid #ECEAE4;
     }
     .c30-sub:first-of-type { margin-top: .3rem; }
-    /* Подписи полей чуть крупнее и темнее — читаемо */
+    /* Подписи полей чуть крупнее и темнее – читаемо */
     [data-testid="stNumberInput"] label p,
     .stCheckbox label p, .stSelectbox label p {
         font-size: .9rem !important; color: #3A3A3A !important; font-weight: 500 !important;
     }
-    /* Значение в числовом поле — крупное, в фокусе внимания */
+    /* Значение в числовом поле – крупное, в фокусе внимания */
     [data-testid="stNumberInput"] input { font-size: 1.05rem !important; font-weight: 600 !important; }
-    /* Итог/оценка — спокойный вторичный текст */
+    /* Итог/оценка – спокойный вторичный текст */
     .c30-summary { font-size: .95rem; color: #1A1A1A; margin-top: .3rem; }
 
     /* ── Раскладка: воздух в карточках, отступы между блоками, выравнивание ── */
@@ -714,7 +713,7 @@ st.markdown(
         padding: 20px 24px !important; margin-bottom: 16px !important;
     }
     /* Раскрывашки делаем ЛЁГКИМИ (не вторая жирная рамка), чтобы «скрытое»
-       читалось как второстепенное, а карточки-секции — как главное. */
+       читалось как второстепенное, а карточки-секции – как главное. */
     [data-testid="stExpander"] {
         border: 1px solid #ECEAE4 !important; background: #FBFAF8 !important;
         box-shadow: none !important; border-radius: 10px !important;
@@ -723,7 +722,7 @@ st.markdown(
     [data-testid="stExpander"] summary {
         font-size: .9rem !important; font-weight: 600 !important; color: #5B5853 !important;
     }
-    /* Карточки-пресеты (контейнер с рамкой в колонке) — кликабельный вид */
+    /* Карточки-пресеты (контейнер с рамкой в колонке) – кликабельный вид */
     [data-testid="column"] [data-testid="stVerticalBlockBorderWrapper"] {
         padding: 14px 12px !important; margin-bottom: 0 !important;
         transition: border-color .15s;
@@ -731,14 +730,14 @@ st.markdown(
     [data-testid="column"] [data-testid="stVerticalBlockBorderWrapper"]:hover {
         border-color: #B9B2A6 !important;
     }
-    /* Метрики каталога — числа крупные, подписи спокойные (ровный ряд) */
+    /* Метрики каталога – числа крупные, подписи спокойные (ровный ряд) */
     [data-testid="stMetricValue"] { font-size: 1.7rem !important; }
     [data-testid="stMetricLabel"] p { font-size: .8rem !important; color: #8A867F !important; }
 
-    /* Пресеты как карточки (radio с подписями): клик = выбор, выбранная —
+    /* Пресеты как карточки (radio с подписями): клик = выбор, выбранная –
        рамка подсвечивается; равные, по центру, без кружка и кнопки «Выбрать». */
     .st-key-c30_preset div[role="radiogroup"] { gap: 12px !important; align-items: stretch !important; }
-    /* прячем кружок радио — карточка кликается целиком, заголовок по центру */
+    /* прячем кружок радио – карточка кликается целиком, заголовок по центру */
     .st-key-c30_preset div[role="radiogroup"] > label > div:first-child { display: none !important; }
     .st-key-c30_preset div[role="radiogroup"] > label {
         flex: 1 1 0 !important; min-height: 90px;
@@ -755,13 +754,13 @@ st.markdown(
         border-color: #1A1A1A !important; background: #ECEAE4 !important;
         box-shadow: inset 0 0 0 1px #1A1A1A;
     }
-    /* Заголовок карточки — крупнее, по центру, наш шрифт */
+    /* Заголовок карточки – крупнее, по центру, наш шрифт */
     .st-key-c30_preset div[role="radiogroup"] > label [data-testid="stMarkdownContainer"] p {
         font-family: 'Hanken Grotesk', sans-serif !important;
         font-size: 1.15rem !important; font-weight: 600 !important;
         color: #1A1A1A !important; text-align: center !important; margin: 0 !important;
     }
-    /* Подпись снизу — мельче, БЕЗ жирности, по центру */
+    /* Подпись снизу – мельче, БЕЗ жирности, по центру */
     .st-key-c30_preset [data-testid="stCaptionContainer"],
     .st-key-c30_preset [data-testid="stCaptionContainer"] p {
         font-family: 'Hanken Grotesk', sans-serif !important;
@@ -881,13 +880,13 @@ if pid:
         st.session_state.c30_in_cities = _maxsubs
     st.session_state.setdefault('c30_preset', 'standard')
 
-    # БЛОК 1 — Доступность: объём (карточки-пресеты + ручная настройка)
+    # БЛОК 1 – Доступность: объём (карточки-пресеты + ручная настройка)
     with st.container(border=True):
         st.markdown('### 1. Доступность и визуальные ошибки')
         _c30_sub('Объём проверки')
 
         # Радио-карточки пресетов. Применяем выбор в основном потоке (по
-        # возвращённому значению — оно всегда валидно), без on_change: callback
+        # возвращённому значению – оно всегда валидно), без on_change: callback
         # иногда срабатывал со старым/чужим значением и падал.
         _choice = st.radio('Объём', ['quick', 'standard', 'full'],
                            format_func=lambda p: PROFILES[p]['label'],
@@ -934,17 +933,22 @@ if pid:
     }
     budget['per_city'] = 2 + budget['cats'] + budget['filters'] + budget['products']
 
-    # БЛОК 2 — Что проверять на страницах (1.1–1.6)
+    # БЛОК 2 – Что проверять на страницах (1.1–1.6)
     with st.container(border=True):
+        _CHK_KEYS = ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
+                     'c30_check_filters', 'c30_check_products', 'c30_check_text')
+        _all_on = all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
         _hc1, _hc2 = st.columns([3, 1])
         with _hc1:
             st.markdown('### Что проверять на страницах')
         with _hc2:
-            def _c30_select_all():
-                for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
-                           'c30_check_filters', 'c30_check_products', 'c30_check_text'):
-                    st.session_state[_k] = True
-            st.button('Выбрать все', key='c30_select_all', on_click=_c30_select_all,
+            def _c30_toggle_all():
+                # переключатель: всё включено → снять всё, иначе → выбрать всё
+                _target = not all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
+                for _k in _CHK_KEYS:
+                    st.session_state[_k] = _target
+            st.button('Снять все' if _all_on else 'Выбрать все',
+                      key='c30_select_all', on_click=_c30_toggle_all,
                       use_container_width=True)
         _cb_col1, _cb_col2 = st.columns(2)
         with _cb_col1:
@@ -960,10 +964,10 @@ if pid:
             st.checkbox('1.5  Товары', key='c30_check_products')
             st.checkbox('1.6  Текстовые блоки категорий/фильтров/товаров и переменные',
                         key='c30_check_text')
-        st.checkbox('Технические страницы (оплата, доставка, контакты, политики и т.п.) '
-                    '— доступность', key='c30_check_tech')
+        st.caption('Технические страницы (оплата, доставка, контакты, политики) '
+                   'проверяются автоматически при каждом прогоне.')
 
-    # БЛОК 3 — Дополнительно (видимый, без раскрывашки)
+    # БЛОК 3 – Дополнительно (видимый, без раскрывашки)
     with st.container(border=True):
         st.markdown('### Дополнительно')
         _nf_col1, _nf_col2 = st.columns([3, 1], vertical_alignment='center')
@@ -1008,7 +1012,7 @@ if pid:
 
         # ── 404 из Метрики: отдельная выгрузка (за конкретный день или за период) ──
         st.divider()
-        st.markdown('**404 из Метрики — отдельная выгрузка**')
+        st.markdown('**404 из Метрики – отдельная выгрузка**')
         _m_email, _m_pass = get_metrika_credentials(pid)
         if not (_m_email and _m_pass):
             st.caption('Для этого проекта почта Метрики не настроена.')
@@ -1088,7 +1092,6 @@ if pid:
                 'check_filters': st.session_state.c30_check_filters and stats['has_filters'],
                 'check_products': st.session_state.c30_check_products,
                 'check_text': st.session_state.c30_check_text,
-                'check_tech': st.session_state.c30_check_tech,
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
             }
@@ -1103,7 +1106,7 @@ if pid:
             try:
                 _sk_hint = [k for k in list(st.secrets.keys())
                             if 'gsc' in k.lower() or pid in k.lower()]
-                # Какие «webmaster/oauth»-ключи реально есть — для диагностики
+                # Какие «webmaster/oauth»-ключи реально есть – для диагностики
                 _wm_hint = [k for k in list(st.secrets.keys())
                             if 'webmaster' in k.lower() or 'oauth' in k.lower()]
             except Exception:
@@ -1294,7 +1297,7 @@ if pid:
     # выбранный период. Отдельный блок в UI убран.
 
     # ── Лог прогона: самый нижний блок (под результатами), виден всегда
-    #    после завершения (как в автокликере) — даже если результатов нет. ──
+    #    после завершения (как в автокликере) – даже если результатов нет. ──
     if not _alive:
         _lp = _c30_paths(pid)['log']
         if _lp.exists():

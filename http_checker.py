@@ -1,11 +1,11 @@
 """
-http_checker.py — асинхронная проверка URL'ов.
+http_checker.py – асинхронная проверка URL'ов.
 
 Точная копия логики Node.js версии:
   • Таймаут на одну попытку: 120 сек (2 минуты)
   • До 3 попыток при сетевых ошибках, таймаутах и 5xx
-  • 4xx (включая 404) не ретраится — это устойчивый результат
-  • Между попытками — пауза 2.5 сек
+  • 4xx (включая 404) не ретраится – это устойчивый результат
+  • Между попытками – пауза 2.5 сек
   • После успешной OK-проверки опционально ищет битые переменные
 
 Поддержка HTTP-прокси:
@@ -54,7 +54,7 @@ class SPEED:
 
 
 # User-Agent от свежего Chrome 131 (актуальный на 2026 год).
-# Версия должна быть свежей — старые UA сами по себе подозрительны.
+# Версия должна быть свежей – старые UA сами по себе подозрительны.
 DEFAULT_USER_AGENT = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
@@ -69,7 +69,7 @@ def make_browser_headers(user_agent: str = DEFAULT_USER_AGENT) -> dict:
     по отсутствию или нестандартному порядку этих заголовков. Реальный Chrome
     шлёт их именно в таком составе и порядке.
     
-    Sec-Fetch-* заголовки появились в Chrome 76 (2019) — отсутствие их сразу
+    Sec-Fetch-* заголовки появились в Chrome 76 (2019) – отсутствие их сразу
     выдаёт «голый» HTTP-клиент.
     """
     return {
@@ -216,7 +216,7 @@ async def _attempt_once(
                 ) as resp:
                     http_code = resp.status
 
-                    # Редирект — берём Location и идём дальше
+                    # Редирект – берём Location и идём дальше
                     if 300 <= resp.status < 400 and 'Location' in resp.headers:
                         from urllib.parse import urljoin
                         next_url = urljoin(current_url, resp.headers['Location'])
@@ -229,7 +229,7 @@ async def _attempt_once(
                             error_message = 'Превышен лимит редиректов'
                         continue
 
-                    # Финальный ответ — читаем тело
+                    # Финальный ответ – читаем тело
                     final_url = current_url
                     try:
                         body_bytes = await resp.read()
@@ -271,7 +271,7 @@ async def _attempt_once(
 # Цена/кнопка могут быть в HTML, но скрыты правилом display:none из CSS-файла.
 # Чтобы это поймать, тянем подключённые на странице стили (свой хост),
 # разбираем «скрывающие» селекторы и передаём их в check_content. Стили
-# шаблона одинаковы на всех страницах домена — кэшируем по URL стиля.
+# шаблона одинаковы на всех страницах домена – кэшируем по URL стиля.
 
 _MAX_CSS_BYTES = 3_000_000
 
@@ -308,7 +308,7 @@ async def _fetch_css_text(session, url, timeout_ms, proxy_url) -> str:
             async with session.get(url, timeout=to, allow_redirects=True,
                                    proxy=proxy_url) as r:
                 if r.status != 200:
-                    return ''          # 401/403/404 — повтор не поможет
+                    return ''          # 401/403/404 – повтор не поможет
                 data = await r.read()
                 if len(data) > _MAX_CSS_BYTES:
                     data = data[:_MAX_CSS_BYTES]
@@ -374,7 +374,7 @@ async def check_one(
     status = a['status']
     is_ok = (status == STATUS.OK)
 
-    # Битые переменные — только для OK с body
+    # Битые переменные – только для OK с body
     text_issues = []
     if is_ok and check_text and a['body_text']:
         try:
@@ -382,7 +382,7 @@ async def check_one(
         except Exception:
             text_issues = []
 
-    # Структурная проверка контента — только для OK с body. Подтягиваем CSS,
+    # Структурная проверка контента – только для OK с body. Подтягиваем CSS,
     # чтобы цена/кнопка, скрытые стилями (display:none), считались невидимыми.
     content = None
     if is_ok and check_structure and a['body_text']:
@@ -398,7 +398,7 @@ async def check_one(
         except Exception:
             content = None
 
-    # Сверка контактов с КП — только на главной поддомена (шапка/подвал —
+    # Сверка контактов с КП – только на главной поддомена (шапка/подвал –
     # сквозные, контакты привязаны к городу/домену).
     kp_result = None
     if is_ok and kp_map and task.type_code == 'main' and a['body_text']:
@@ -464,15 +464,15 @@ async def run_batch(
     """
     Прогнать все задачи параллельно с ограничением concurrency.
     
-    on_progress(result, done, total) — вызывается после каждой завершённой
+    on_progress(result, done, total) – вызывается после каждой завершённой
     проверки (синхронно).
     
-    is_cancelled() -> bool — если возвращает True, оставшиеся задачи
+    is_cancelled() -> bool – если возвращает True, оставшиеся задачи
     помечаются как 'cancelled'.
 
-    proxy_url — если задан (или есть env HTTP_PROXY), все запросы идут через прокси.
+    proxy_url – если задан (или есть env HTTP_PROXY), все запросы идут через прокси.
     """
-    # Если прокси не задан явно — берём из переменной окружения
+    # Если прокси не задан явно – берём из переменной окружения
     if proxy_url is None:
         proxy_url = os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy')
 
@@ -484,7 +484,7 @@ async def run_batch(
     headers = make_browser_headers(user_agent)
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
 
-    # Кэш разобранных стилей (общий на весь батч — шаблонный CSS повторяется
+    # Кэш разобранных стилей (общий на весь батч – шаблонный CSS повторяется
     # на всех страницах домена, тянем каждый файл один раз).
     css_cache: dict = {}
     css_locks: dict = {}

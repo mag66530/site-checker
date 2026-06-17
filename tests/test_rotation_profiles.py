@@ -16,7 +16,7 @@ from sources import load_project_config, load_sources, build_plan
 
 
 def test_weighted_sample_no_history():
-    """Без истории — обычная выборка (все равновероятны)."""
+    """Без истории – обычная выборка (все равновероятны)."""
     pool = [f'/cat-{i}/' for i in range(100)]
     rng = random.Random(42)
     sample = weighted_sample(pool, 10, set(), rng)
@@ -26,9 +26,9 @@ def test_weighted_sample_no_history():
 
 
 def test_weighted_sample_with_history():
-    """С историей — недавно проверенные реже попадают."""
+    """С историей – недавно проверенные реже попадают."""
     pool = [f'/cat-{i}/' for i in range(100)]
-    # Первые 50 — "недавно проверены"
+    # Первые 50 – "недавно проверены"
     recent = set(pool[:50])
 
     # 10 прогонов по 20 урлов, считаем сколько раз попали "свежие" vs "недавние"
@@ -53,7 +53,7 @@ def test_weighted_sample_with_history():
 
 
 def test_weighted_sample_no_duplicates():
-    """Выборка без замены — каждый элемент максимум 1 раз."""
+    """Выборка без замены – каждый элемент максимум 1 раз."""
     pool = [f'/cat-{i}/' for i in range(20)]
     recent = set(pool[:10])
     rng = random.Random(42)
@@ -64,7 +64,7 @@ def test_weighted_sample_no_duplicates():
 
 
 def test_weighted_sample_n_larger_than_pool():
-    """Если n >= len(pool) — возвращаем весь pool."""
+    """Если n >= len(pool) – возвращаем весь pool."""
     pool = [f'/cat-{i}/' for i in range(5)]
     rng = random.Random(42)
     sample = weighted_sample(pool, 100, set(), rng)
@@ -165,9 +165,9 @@ def test_build_plan_with_rotation():
     cfg = load_project_config('smu')
     src = load_sources(cfg)
 
-    # "Недавно проверены" — первая половина категорий.
+    # "Недавно проверены" – первая половина категорий.
     # Именно половина ОТ ФАКТИЧЕСКОГО размера каталога: раньше тут стояло
-    # фиксированное 1500, а в каталоге СМУ категорий меньше — в recent
+    # фиксированное 1500, а в каталоге СМУ категорий меньше – в recent
     # попадало всё, и «свежих» не оставалось вовсе.
     recent = set(src.categories[:len(src.categories) // 2])
 
@@ -198,7 +198,7 @@ def test_build_plan_with_rotation():
     fresh_ratio = fresh_total / total
     print(f'  С ротацией: свежих {fresh_total} ({fresh_ratio*100:.0f}%), недавних {recent_total}')
     # У нас половина пула в recent. Без ротации было бы 50/50.
-    # С весом 0.3 для недавних — свежих должно быть значительно больше 50%.
+    # С весом 0.3 для недавних – свежих должно быть значительно больше 50%.
     assert fresh_ratio > 0.55, f'Ожидали >55% свежих, получили {fresh_ratio:.0%}'
     print('✓ build_plan с ротацией: свежие URL в приоритете')
 

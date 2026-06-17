@@ -2,7 +2,7 @@
 gsc_validate_fixes.py
 =====================
 Автоматически запускает «Проверить исправление» по причинам неиндексирования
-в Google Search Console — для всех ресурсов (домены и поддомены).
+в Google Search Console – для всех ресурсов (домены и поддомены).
 
 Поток (проверен на живом GSC):
     ресурс → Индексирование/Страницы → таблица причин (tr[data-rowid]) →
@@ -24,7 +24,7 @@ gsc_validate_fixes.py
 
 Логика статусов:
     Обрабатываем только причины со статусом «Не начато».
-    «Идёт проверка»/«Пройдена»/«Не удалось» — пропускаем (уже запускались).
+    «Идёт проверка»/«Пройдена»/«Не удалось» – пропускаем (уже запускались).
 """
 
 import argparse
@@ -50,7 +50,7 @@ STATUS_NOT_STARTED = 'Не начато'
 STATUS_ERROR = 'Ошибка'
 # Обрабатываем эти статусы (каждый своим путём)
 STATUS_PROCESS = (STATUS_NOT_STARTED, STATUS_ERROR)
-# Все известные статусы — чтобы читать значение из ячейки «Проверка» точно
+# Все известные статусы – чтобы читать значение из ячейки «Проверка» точно
 # (а не ловить слово «Ошибка» внутри названия причины «Ошибка сервера (5xx)»).
 KNOWN_STATUSES = (
     'Не начато', 'Ошибка', 'Отсутствует', 'Идёт проверка', 'Начата',
@@ -86,7 +86,7 @@ async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
         try:
             resp = await page.goto(url, wait_until='domcontentloaded')
         except Exception as e:
-            _log(f'goto упал ({e}) — пауза {delay}с', 'warn')
+            _log(f'goto упал ({e}) – пауза {delay}с', 'warn')
             await asyncio.sleep(delay)
             delay = min(delay * 2, 300)
             continue
@@ -94,12 +94,12 @@ async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
         status = resp.status if resp else 0
         head = (await page.inner_text('body'))[:300]
         if status == 429 or 'Too many requests' in head or 'Слишком много запросов' in head:
-            _log(f'⚠ 429 (слишком много запросов) — пауза {delay}с (попытка {i+1})', 'warn')
+            _log(f'⚠ 429 (слишком много запросов) – пауза {delay}с (попытка {i+1})', 'warn')
             await asyncio.sleep(delay)
             delay = min(delay * 2, 300)
             continue
         return True
-    _log('429 не прошёл после ретраев — пропускаю ресурс', 'error')
+    _log('429 не прошёл после ретраев – пропускаю ресурс', 'error')
     return False
 
 
@@ -108,7 +108,7 @@ async def _open_report(page, rid: str) -> bool:
     if not ok:
         return False
     await page.wait_for_timeout(3000)
-    # Скроллим до конца — второй блок «Проблемы с представлением страниц
+    # Скроллим до конца – второй блок «Проблемы с представлением страниц
     # в результатах поиска» подгружается ниже.
     for _ in range(6):
         await page.mouse.wheel(0, 1600)
@@ -119,7 +119,7 @@ async def _open_report(page, rid: str) -> bool:
 
 def _status_from_text(txt: str) -> str:
     """Статус столбца «Проверка». Ищем в части строки ПОСЛЕ источника
-    («Сайт»/«Системы Google») — там название причины уже отрезано, поэтому
+    («Сайт»/«Системы Google») – там название причины уже отрезано, поэтому
     слово «Ошибка» из названия «Ошибка сервера (5xx)» не мешает.
     Бейдж может содержать иконку/дату ('error Ошибка', 'Ошибка 11.06.2026'),
     поэтому ищем подстрокой, а не точным равенством."""
@@ -167,13 +167,13 @@ async def _validate_error(page, rid: str, reason: dict, dry_run: bool) -> dict:
         except Exception:
             res['status'] = 'no_button'
             res['message'] = 'кнопки «Подробности» нет'
-            _log(f'  {reason["name"][:50]} (Ошибка) — нет «Подробности»', 'warn')
+            _log(f'  {reason["name"][:50]} (Ошибка) – нет «Подробности»', 'warn')
             return res
 
         if dry_run:
             res['status'] = 'dry_run'
             res['message'] = '«Ошибка»: «Подробности» найдена, клик пропущен'
-            _log(f'  [DRY RUN] {reason["name"][:50]} (Ошибка) — путь есть', 'ok')
+            _log(f'  [DRY RUN] {reason["name"][:50]} (Ошибка) – путь есть', 'ok')
             return res
 
         await details.click()
@@ -208,7 +208,7 @@ async def _validate_error(page, rid: str, reason: dict, dry_run: bool) -> dict:
 
 
 async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
-    # Статус «Ошибка» — отдельный путь (Подробности → Начать новую проверку)
+    # Статус «Ошибка» – отдельный путь (Подробности → Начать новую проверку)
     if reason['status'] == STATUS_ERROR:
         return await _validate_error(page, rid, reason, dry_run)
 
@@ -216,7 +216,7 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
            'status': 'error', 'message': ''}
     try:
         # Клик по причине ПО ИМЕНИ (rowid повторяется между двумя блоками,
-        # поэтому по rowid нельзя — попадём не в тот блок).
+        # поэтому по rowid нельзя – попадём не в тот блок).
         row = page.get_by_text(reason['name'], exact=False).first
         await row.click(timeout=8000)
         await page.wait_for_timeout(4000)
@@ -228,13 +228,13 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
         except Exception:
             res['status'] = 'no_button'
             res['message'] = 'кнопки «Проверить исправление» нет (проверка недоступна)'
-            _log(f'  {reason["name"][:50]} — кнопки нет', 'warn')
+            _log(f'  {reason["name"][:50]} – кнопки нет', 'warn')
             return res
 
         if dry_run:
             res['status'] = 'dry_run'
             res['message'] = 'кнопка найдена, клик пропущен'
-            _log(f'  [DRY RUN] {reason["name"][:50]} — кнопка есть', 'ok')
+            _log(f'  [DRY RUN] {reason["name"][:50]} – кнопка есть', 'ok')
             return res
 
         await btn.click()
@@ -306,7 +306,7 @@ async def process_resource(page, rid: str, dry_run: bool,
         if res['status'] in ('ok', 'dry_run'):
             done_counter[0] += 1
 
-        # Небольшая пауза между причинами — снижает риск 429
+        # Небольшая пауза между причинами – снижает риск 429
         await asyncio.sleep(2 + random.random() * 2)
 
         # Возврат к отчёту для следующей причины
@@ -345,7 +345,7 @@ async def run(resources: list, dry_run: bool, limit: int):
             except Exception as e:
                 _log(f'Ресурс {rid} упал: {e}', 'error')
             _save_log(all_entries)
-            # Пауза между ресурсами с джиттером — снижает риск 429
+            # Пауза между ресурсами с джиттером – снижает риск 429
             if idx < len(resources) - 1:
                 await asyncio.sleep(4 + random.random() * 4)
 
@@ -361,7 +361,7 @@ async def run(resources: list, dry_run: bool, limit: int):
 
 def _resources_from_project(pid: str) -> list:
     """Ресурсы GSC из списка поддоменов проекта (catalogs/<pid>-subdomains.csv).
-    Каждый URL-префикс домена/поддомена — это ресурс GSC. Ничего собирать не надо."""
+    Каждый URL-префикс домена/поддомена – это ресурс GSC. Ничего собирать не надо."""
     import csv
     csv_path = Path(__file__).parent / 'catalogs' / f'{pid}-subdomains.csv'
     if not csv_path.exists():
@@ -403,7 +403,7 @@ def parse_args():
     ap = argparse.ArgumentParser(
         description='Авто-«Проверить исправление» в Google Search Console')
     ap.add_argument('--project', default=None,
-                    help='проект: smu|mpe|imp — ресурсы из catalogs/<pid>-subdomains.csv')
+                    help='проект: smu|mpe|imp – ресурсы из catalogs/<pid>-subdomains.csv')
     ap.add_argument('--resource', default=None, help='один ресурс (resource_id)')
     ap.add_argument('--filter', default=None,
                     help='фильтр подстрокой (только для фоллбэка gsc_properties.json)')

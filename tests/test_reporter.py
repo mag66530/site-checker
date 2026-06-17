@@ -1,4 +1,4 @@
-"""Тесты reporter — генерация xlsx и проверка содержимого."""
+"""Тесты reporter – генерация xlsx и проверка содержимого."""
 import sys
 import tempfile
 import time
@@ -42,7 +42,7 @@ def make_result(**kw):
 
 
 def test_basic_report_creation():
-    """Базовый случай — отчёт создаётся и открывается."""
+    """Базовый случай – отчёт создаётся и открывается."""
     results = [
         make_result(url='https://stalmetural.ru/', type_label='Главная'),
         make_result(url='https://stalmetural.ru/catalog/', type_label='Каталог', elapsed_ms=2800, speed_rating='normal'),
@@ -77,7 +77,7 @@ def test_basic_report_creation():
         assert 'Все детали' in wb.sheetnames
         assert 'Битые тексты' not in wb.sheetnames  # нет находок
         
-        # На листе «Все детали» — 3 строки данных + 1 шапка = 4
+        # На листе «Все детали» – 3 строки данных + 1 шапка = 4
         ws = wb['Все детали']
         rows_with_data = sum(1 for r in ws.iter_rows(values_only=True) if r[0])
         assert rows_with_data == 4
@@ -85,7 +85,7 @@ def test_basic_report_creation():
 
 
 def test_report_with_text_issues():
-    """Если есть битые тексты — добавляется третий лист."""
+    """Если есть битые тексты – добавляется третий лист."""
     issue1 = TextIssue(pattern='{{...}}', match='{{city}}',
                        context='Купить трубу в {{city}} с доставкой')
     issue2 = TextIssue(pattern='%переменная%', match='%price%',
@@ -150,7 +150,7 @@ def test_redirect_chain_in_path_column():
         wb = load_workbook(out)
         ws = wb['Все детали']
 
-        # Находим колонку «Откуда перешли» по заголовку, а не по фикс. индексу —
+        # Находим колонку «Откуда перешли» по заголовку, а не по фикс. индексу –
         # в лист «Все детали» со временем добавляли колонки (напр. «Отдел»),
         # из-за чего хардкод column=10 ломался.
         header_row = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
@@ -177,7 +177,7 @@ def test_speed_with_comma():
         from openpyxl import load_workbook
         wb = load_workbook(out)
         ws = wb['Все детали']
-        # Колонка G — «Скорость, с»
+        # Колонка G – «Скорость, с»
         speed = ws.cell(row=2, column=7).value
         assert speed == '2,34', f'Ожидалось "2,34", получили {speed!r}'
     print('✓ Скорость с запятой')
@@ -201,7 +201,7 @@ def test_make_report_filename():
         n3 = make_report_filename('smu', ts, d)
         assert n3 == 'smu-21.05.2026_3.xlsx'
         
-        # Другой проект — без суффикса
+        # Другой проект – без суффикса
         n4 = make_report_filename('mpe', ts, d)
         assert n4 == 'mpe-21.05.2026.xlsx'
     print('✓ Имена файлов: smu-21.05.2026 с инкрементом')
@@ -232,7 +232,7 @@ def test_custom_run_no_subdomains():
         wb = load_workbook(out)
         # Должен открыться без ошибок
         ws = wb['Обзор']
-        # На листе «Обзор» в параметрах прогона — только «Длительность», без «Поддоменов»
+        # На листе «Обзор» в параметрах прогона – только «Длительность», без «Поддоменов»
         text_in_overview = []
         for row in ws.iter_rows(values_only=True):
             text_in_overview.extend(str(c) for c in row if c)

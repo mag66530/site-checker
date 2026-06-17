@@ -1,4 +1,4 @@
-"""Тесты kp.py — сверка контактов сайта с КП."""
+"""Тесты kp.py – сверка контактов сайта с КП."""
 import pytest
 
 from kp import (
@@ -112,7 +112,7 @@ def test_phone_mismatch_is_bug_with_comment():
 
 
 def test_phone_ok_when_matches_any_city_number():
-    """Случай Воронежа: SEO пустой, сайт показывает «Общий» — он в КП → ОК."""
+    """Случай Воронежа: SEO пустой, сайт показывает «Общий» – он в КП → ОК."""
     kp = _kp(phone_seo='', phone_ad='+7 (962) 388-79-12',
              phone_common='+7 (499) 130-60-28',
              all_phones='4991306028;9623887912',
@@ -151,7 +151,7 @@ def test_phone_branch_match_other_city_ok():
         'almaty.x.ru': KPRow(domain='almaty.x.ru', city='Алматы',
                              phone_seo='7 (727) 354-08-98', all_phones='7273540898'),
     }
-    # На сайте Актау — номер Алматы (обслуживающий филиал)
+    # На сайте Актау – номер Алматы (обслуживающий филиал)
     page = HEAD_FOOT.format(ph='+77273540898', ph_disp='7 (727) 354-08-98',
                             em='aktau@x.ru', addr='Микрорайон 19А, 32/1')
     res = check_against_kp(page, 'aktau.x.ru', kp)
@@ -160,7 +160,7 @@ def test_phone_branch_match_other_city_ok():
 
 
 def test_non_email_kp_value_skipped():
-    """Если в КП в поле почты не e-mail («надо заказывать») — почту не сверяем."""
+    """Если в КП в поле почты не e-mail («надо заказывать») – почту не сверяем."""
     kp = _kp(phone_seo='+7 (499) 130-60-28', all_phones='4991306028',
              email='надо заказывать', address='улица Ленина, 5')
     res = check_against_kp(_page(), 'x.ru', kp)
