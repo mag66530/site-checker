@@ -394,7 +394,8 @@ async def check_one(
             except Exception:
                 css_hidden = ()
         try:
-            content = check_content(a['body_text'], task.type_code, css_hidden=css_hidden)
+            content = check_content(a['body_text'], task.type_code,
+                                    css_hidden=css_hidden, url=task.url)
         except Exception:
             content = None
 

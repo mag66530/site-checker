@@ -27,6 +27,7 @@ import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Optional, Callable
+from urllib.parse import urlparse
 
 from text_checker import html_to_visible_text
 
@@ -369,6 +370,8 @@ _PRICE_RE = re.compile(r'\d[\d\s\u00a0]{0,12}(?:₽|руб)', re.IGNORECASE)
 _PHONE_RE = re.compile(
     # Узбекистан: +998 (90) 006-84-48 / tel:998900068448
     r'\+?998[\s\-(]*\d{2}[\s\-)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'
+    # Киргизия: +996 (77) 631-32-78 (Ош и др. .kg-поддомены ИМП)
+    r'|\+?996[\s\-(]*\d{2}[\s\-)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'
     # Беларусь: +375 (44) 588-81-48
     r'|\+375[\s\-(]*\d{2}[\s\-)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'
     # Россия/Казахстан: +7/8/7 (495) 123-45-67, либо tel:74951234567 без «+»
@@ -955,6 +958,18 @@ _MAIN_PROFILE = [
 ]
 
 
+def _is_search_url(url: str) -> bool:
+    # Страница результатов поиска по сайту: /search/, /poisk/ и т.п. (по пути,
+    # чтобы не цеплять случайные query-параметры на обычных страницах).
+    if not url:
+        return False
+    try:
+        path = urlparse(url).path.lower()
+    except Exception:
+        path = url.lower()
+    return '/search' in path or '/poisk' in path
+
+
 def _profile_for(type_code: str, page_kind: str = '') -> list[_Block]:
     if type_code == 'product':
         return _TOP + _PRODUCT + _BOTTOM
@@ -977,7 +992,8 @@ def _profile_for(type_code: str, page_kind: str = '') -> list[_Block]:
 # ── Точка входа ─────────────────────────────────────────────────────
 
 
-def check_content(html: str, type_code: str, css_hidden: tuple = ()) -> ContentResult:
+def check_content(html: str, type_code: str, css_hidden: tuple = (),
+                  url: str = '') -> ContentResult:
     """
     Проверить наличие ожидаемых блоков на странице данного типа.
 
@@ -986,6 +1002,8 @@ def check_content(html: str, type_code: str, css_hidden: tuple = ()) -> ContentR
     css_hidden – разобранные селекторы скрытия из подключённых стилей
                  (parse_hidden_selectors). Нужны, чтобы цена/кнопка, спрятанные
                  правилом display:none из CSS-файла, считались невидимыми.
+    url        – адрес страницы (нужен для исключений по пути: напр. на /search/
+                 страница результатов поиска не обязана иметь H1).
     """
     result = ContentResult(type_code=type_code)
     if not html or not isinstance(html, str):
@@ -1144,6 +1162,10 @@ def check_content(html: str, type_code: str, css_hidden: tuple = ()) -> ContentR
         # карточки. Нет нижнего блока (как у МПЭ – его там нет по дизайну) –
         # проверять нечего → пункт необязателен, в отчёте «–», а не ✓ и не баг.
         if blk.key == 'rec_price' and not _rec_has_cards(ctx):
+            required = False
+        # Страница результатов поиска (/search/) не обязана иметь H1 – заголовок
+        # там динамический/отсутствует. H1 показываем справочно, но не баг.
+        if blk.key == 'h1' and _is_search_url(url):
             required = False
         # Пояснение к багу цены/кнопки: «есть в коде, но покупатель не видит»
         # (скрыто стилями display:none / disabled) vs просто «нет в коде».

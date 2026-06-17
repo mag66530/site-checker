@@ -354,6 +354,30 @@ def test_tech_page_missing_h1_is_bug():
     assert b['breadcrumbs'].key not in {bb.key for bb in r.bugs}
 
 
+def test_search_page_h1_not_required():
+    """Страница результатов поиска (/search/) не обязана иметь H1: на /search/
+    H1 справочный, отсутствие – не баг; на обычной тех. странице – баг."""
+    html = '<header><a href="tel:1">т</a></header><div>Результаты поиска</div>'
+    rs = _by_key(check_content(html, 'tech', url='https://inmetprom.ru/search/'))
+    assert not rs['h1'].present and not rs['h1'].required        # «–», не баг
+    ra = check_content(html, 'tech', url='https://inmetprom.ru/about/')
+    assert _by_key(ra)['h1'].required and ra.bug_count == 1      # контроль: H1 нужен
+
+
+def test_phone_kyrgyzstan_plus996():
+    """Телефон +996 (Киргизия, .kg-поддомены ИМП) распознаётся в шапке и подвале."""
+    html = ('<header><a href="tel:+996776313278">+996 (77) 631-32-78</a>'
+            '<button>Оставить заявку</button><span>Город: Ош</span></header>'
+            '<div class="breadcrumb">x</div><h1>Главная</h1>'
+            '<footer><a href="tel:+996776313278">+996 (77) 631-32-78</a>'
+            '<a href="mailto:osh@inmetprom.kg">osh@inmetprom.kg</a>'
+            '<a>Написать нам</a><span>Адрес: пр. Масалиева, 78</span></footer>')
+    b = _by_key(check_content(html, 'main'))
+    assert b['hdr_phone'].present
+    assert b['ftr_phone'].present
+    assert b['ftr_email'].present        # .kg-почта тоже распознаётся
+
+
 def test_hidden_price_button_is_bug():
     """Цена и кнопка СПРЯТАНЫ стилем display:none → покупатель их не видит →
     баг с пояснением «в коде есть, но покупатель не видит»."""
