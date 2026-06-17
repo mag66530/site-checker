@@ -1014,14 +1014,15 @@ if pid:
             st.caption('Для этого проекта почта Метрики не настроена.')
         else:
             from datetime import date as _date, timedelta as _td
-            _mc1, _mc2, _mc3 = st.columns([1.2, 1.2, 1], vertical_alignment='bottom')
+            _mc1, _mc2, _mc3 = st.columns([1.4, 1.2, 1], vertical_alignment='center')
             with _mc1:
                 _m_mode = st.selectbox('Что выгрузить',
                                        ['За день', 'За 7 дней', 'За 14 дней', 'За 30 дней'],
-                                       key='c30_m_mode')
+                                       key='c30_m_mode', label_visibility='collapsed')
             with _mc2:
                 _m_day = (st.date_input('День', value=_date.today() - _td(days=1),
-                                        key='c30_m_day', format='DD.MM.YYYY')
+                                        key='c30_m_day', format='DD.MM.YYYY',
+                                        label_visibility='collapsed')
                           if _m_mode == 'За день' else None)
             try:
                 if _m_mode == 'За день' and _m_day:

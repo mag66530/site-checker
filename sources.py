@@ -199,10 +199,9 @@ TYPE_LABELS = {
 }
 
 
-# Технические/служебные страницы (на главном домене проекта). Шаблон Bitrix общий
-# для СМУ/ИМП/МПЭ, поэтому пути одни и те же; если у проекта slug отличается —
-# поправим точечно. Проверяем в первую очередь доступность (открывается / 404).
-TECH_PAGE_PATHS = [
+# Технические/служебные страницы (на главном домене проекта). У каждого проекта
+# свои slug'и. Проверяем в первую очередь доступность (открывается / 404).
+_TECH_PATHS_SMU = [
     '/about/',
     '/payment/',
     '/delivery/',
@@ -214,6 +213,26 @@ TECH_PAGE_PATHS = [
     '/polzovatelskoe-soglashenie/',
     '/polzovatelskoe-soglashenie-ob-ispolzovanii-cookie-faylov/',
 ]
+_TECH_PATHS_IMP = [
+    '/o-kompanii/', '/faq/', '/vakansii/', '/nashi-postavshiki/', '/rekvizity/',
+    '/contact/', '/oplata/', '/dostavka/', '/pravila-otgruzki/', '/kontrol-kachestva/',
+    '/komplektaciya-zakaza/', '/upakovka-zakaza/', '/vozvrat-tovara/', '/garantii/',
+    '/price-list/', '/kak-sdelat-pokupku/', '/catalog/', '/uslugi-metalloobrabotki/',
+    '/proizvodstvo-metalloprokata/', '/specials/', '/postavshhikam/',
+    '/polzovatelskoe-soglashenie/', '/politika-konfidentsialnosti/', '/sitemap/', '/search/',
+]
+TECH_PAGE_PATHS = {
+    'smu': _TECH_PATHS_SMU,
+    'smu-test': _TECH_PATHS_SMU,   # тест-стенд СМУ — те же страницы
+    'imp': _TECH_PATHS_IMP,
+    # 'mpe' — slug'и пока не заданы; добавим, когда пришлют
+}
+
+
+def get_tech_paths(project_id: str) -> list[str]:
+    """Тех. страницы проекта. Нет в карте → пусто (не проверяем, чтобы не ловить
+    ложные 404 от чужих slug'ов)."""
+    return TECH_PAGE_PATHS.get(project_id, [])
 
 
 def _pick_random(items: list, n: int, rng: random.Random) -> list:

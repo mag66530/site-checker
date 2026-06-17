@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from sources import (
     load_project_config, load_sources, build_plan, build_custom_tasks_typed,
-    TECH_PAGE_PATHS,
+    get_tech_paths,
 )
 from history import load_history, save_history, WEEKLY_TTL_MS
 from sitemap import load_product_pathnames
@@ -101,10 +101,11 @@ def run_check(pid, params, creds, log, progress):
 
         # Технические страницы (на главном домене) – проверяем доступность.
         if params.get('check_tech'):
+            _tech_paths = get_tech_paths(pid)
             _mcity = cfg.get('mandatory_city', 'Москва')
             _main = next((s for s in src.subdomains if s.city == _mcity), None)
-            if _main:
-                _tech_urls = [f'https://{_main.host}{p}' for p in TECH_PAGE_PATHS]
+            if _main and _tech_paths:
+                _tech_urls = [f'https://{_main.host}{p}' for p in _tech_paths]
                 try:
                     _tt = build_custom_tasks_typed(_tech_urls, src)
                     for _t in _tt:
