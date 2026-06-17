@@ -159,11 +159,36 @@ def test_phone_branch_match_other_city_ok():
     assert phone['status'] == 'ok'
 
 
-def test_non_email_kp_value_skipped():
-    """Если в КП в поле почты не e-mail («надо заказывать») – почту не сверяем."""
+def test_non_email_kp_value_not_compared():
+    """Если в КП в поле почты не e-mail («надо заказывать») – с ним не сверяем
+    (не баг). Но раз на сайте почта есть – показываем её как «есть» (info)."""
     kp = _kp(phone_seo='+7 (499) 130-60-28', all_phones='4991306028',
              email='надо заказывать', address='улица Ленина, 5')
     res = check_against_kp(_page(), 'x.ru', kp)
+    mail = [i for i in res.issues if i['field'] == 'Почта']
+    assert mail and mail[0]['status'] == 'info'   # не баг, не сверка с заметкой
+    assert not res.has_issues
+
+
+def test_email_present_on_site_but_absent_in_kp_is_info():
+    """В КП почты для города нет, а на сайте она есть → статус «info» («есть»),
+    не «–» и не баг. Не считается расхождением."""
+    kp = _kp(phone_seo='+7 (499) 130-60-28', all_phones='4991306028',
+             email='', address='улица Ленина, 5')
+    res = check_against_kp(_page(em='msk@x.ru'), 'x.ru', kp)
+    mail = next(i for i in res.issues if i['field'] == 'Почта')
+    assert mail['status'] == 'info'
+    assert not res.has_issues          # info – не расхождение
+
+
+def test_email_absent_both_sides_no_issue():
+    """Ни в КП, ни на сайте почты нет → по почте вообще нет строки (в отчёте «–»)."""
+    kp = _kp(phone_seo='+7 (499) 130-60-28', all_phones='4991306028',
+             email='', address='улица Ленина, 5')
+    page = HEAD_FOOT.format(ph='+74991306028', ph_disp='+7 (499) 130-60-28',
+                            em='', addr='улица Ленина, 5').replace(
+        '<a href="mailto:"></a>', '')
+    res = check_against_kp(page, 'x.ru', kp)
     assert all(i['field'] != 'Почта' for i in res.issues)
 
 

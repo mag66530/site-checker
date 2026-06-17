@@ -1277,9 +1277,11 @@ def _build_kp_sheet(wb, results):
 
     ws.merge_cells('B3:G3')
     c = ws['B3']
-    c.value = ('Сверяем телефон, почту и адрес на главной каждого города с '
-               '«Картой присутствия». Телефон: ожидается SEO-номер (если нет – '
-               'рекламный, затем общий). Зелёное – совпало, красное – нет. '
+    c.value = ('Сверяем телефон, почту и адрес на главной каждого города (шапка + '
+               'подвал) с «Картой присутствия». Телефон: ожидается SEO-номер (если '
+               'нет – рекламный, затем общий). Зелёное «✓» – совпало с КП, красное – '
+               'нет. «есть» (серое) – на сайте есть, но в КП этого поля нет (сверять '
+               'не с чем, дополнить КП). «–» – нет ни в КП, ни на сайте. '
                'Что именно не так – в последнем столбце.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
@@ -1345,12 +1347,19 @@ def _build_kp_sheet(wb, results):
             cell.border = _border(color=C.border_light)
             iss = issues.get(field)
             if iss is None:
-                cell.value = '–'           # поле в КП не задано – не сверяем
+                cell.value = '–'           # и в КП нет, и на сайте нет – нечего показать
                 cell.font = _font(size=10, color=C.text_muted)
             elif iss['status'] == 'ok':
                 cell.value = '✓'
                 cell.font = _font(size=10, bold=True, color=C.ok)
                 cell.fill = _fill(C.ok_soft)
+            elif iss['status'] == 'info':
+                # на сайте есть, но в КП нет – не сверка, но и не «нет». «есть».
+                cell.value = 'есть'
+                cell.font = _font(size=9, color=C.text_soft)
+                if iss.get('comment'):
+                    cell.comment = Comment(iss['comment'], 'Site Checker',
+                                           height=80, width=240)
             elif iss['status'] == 'critical':
                 cell.value = 'КРИТ'
                 cell.font = _font(size=9, bold=True, color=C.err)
