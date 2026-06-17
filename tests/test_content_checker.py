@@ -327,11 +327,28 @@ def test_bottom_block_cards_without_price_is_bug():
     assert not b3['rec_block'].present and b3['rec_price'].present
 
 
-def test_tech_pages_no_structure_bugs():
-    """Технические страницы (type 'tech') проверяются на доступность, без
-    структурных требований – даже пустая страница не даёт контент-багов."""
-    r = check_content('<html><body>Политика конфиденциальности</body></html>', 'tech')
+def test_tech_pages_checked_like_others():
+    """Технические страницы (type 'tech') проверяются «как все»: крошки + H1.
+    Нормальная страница багов не даёт."""
+    ok = ('<div class="breadcrumb">крошки</div>'
+          '<h1>Оплата и доставка</h1>'
+          '<p>Текст про оплату.</p>')
+    r = check_content(ok, 'tech')
     assert r.bug_count == 0 and not r.bugs
+    keys = {b.key for b in r.blocks}
+    assert 'breadcrumbs' in keys and 'h1' in keys
+
+
+def test_tech_page_missing_h1_is_bug():
+    """Тех. страница без H1 – это баг (H1 обязателен). Крошки – справочно: их
+    отсутствие на служебной странице багом не считаем."""
+    r = check_content('<html><body>Политика конфиденциальности</body></html>', 'tech')
+    b = _by_key(r)
+    assert not b['h1'].present
+    assert not b['breadcrumbs'].present
+    assert r.bug_count == 1          # только H1 (крошки – не обязательны)
+    assert b['h1'].key in {bb.key for bb in r.bugs}
+    assert b['breadcrumbs'].key not in {bb.key for bb in r.bugs}
 
 
 def test_hidden_price_button_is_bug():
