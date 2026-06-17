@@ -12,14 +12,55 @@ KNOWN_FILTERS = {'/catalog/armatura/gost-5781/'}
 
 
 def test_extracts_product_links():
+    # Товары берутся из карточек (контейнер catalog-product-card-item).
     html = (
         '<div class="catalog-product-card-item">'
         '<a href="/catalog/armatura/armatura-10-at800/">Арматура 10 АТ800</a></div>'
-        '<a href="https://stalmetural.ru/catalog/armatura/armatura-12-a500/">12 А500</a>'
+        '<div class="catalog-product-card-item">'
+        '<a href="https://stalmetural.ru/catalog/armatura/armatura-12-a500/">12 А500</a></div>'
     )
     paths = extract_product_paths(html, PAGE_URL, KNOWN_CATS, KNOWN_FILTERS)
     assert '/catalog/armatura/armatura-10-at800/' in paths
     assert '/catalog/armatura/armatura-12-a500/' in paths
+
+
+def test_extracts_imp_root_level_product_from_card():
+    """ИМП: товар – КОРНЕВОЙ slug (/list-…/), карточка card-product. Берём его,
+    пропуская иконку-ассет; URL-фильтр (категория/характеристика/значение) – нет."""
+    html = (
+        '<div class="listing__cards_col card-product">'
+        '<a href="/catalog/view/theme/default/sprite.svg">иконка</a>'
+        '<a class="card-product__title" href="/list-otsinkovannyj-0-25h1250-mm-rulon-nlmk/">Лист</a>'
+        '</div>'
+    )
+    paths = extract_product_paths(html, 'https://inmetprom.ru/catalog/listovoj-prokat/list-otsinkovannyj/',
+                                  set(), set())
+    assert paths == ['/list-otsinkovannyj-0-25h1250-mm-rulon-nlmk/']
+
+
+def test_excludes_template_junk_hrefs():
+    """Битый JS-шаблон в href (${ product.href }) – не ссылка, пропускаем."""
+    html = (
+        '<div class="card-product">'
+        '<a href="${ product.href }">шаблон</a>'
+        '<a href="/list-stalnoj-goryachekatanyj-3-mm-gost/">реальный</a>'
+        '</div>'
+    )
+    paths = extract_product_paths(html, 'https://inmetprom.ru/catalog/x/', set(), set())
+    assert paths == ['/list-stalnoj-goryachekatanyj-3-mm-gost/']
+
+
+def test_excludes_imp_facet_listing_in_fallback():
+    """Без карточек: ссылка-фильтр <категория>/<характеристика>/<значение>/ –
+    это листинг, не товар (так устроен ИМП)."""
+    known_cats = {'/catalog/listovoj-prokat/list-otsinkovannyj/'}
+    html = (
+        '<a href="/catalog/listovoj-prokat/list-otsinkovannyj/tolschina-mm/0-5/">фильтр</a>'
+        '<a href="/catalog/listovoj-prokat/list-otsinkovannyj/marka/st3/">фильтр</a>'
+    )
+    paths = extract_product_paths(html, 'https://inmetprom.ru/catalog/listovoj-prokat/list-otsinkovannyj/',
+                                  known_cats, set())
+    assert paths == []
 
 
 def test_excludes_categories_filters_and_short_paths():

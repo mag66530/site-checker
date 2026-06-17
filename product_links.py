@@ -51,6 +51,73 @@ DEFAULT_USER_AGENT = (
 
 _HREF_RE = re.compile(r'<a\b[^>]*?href\s*=\s*["\']([^"\'#]+)["\']', re.IGNORECASE)
 
+# Контейнеры карточек товара у наших проектов (СМУ / МПЭ / ИМП). Карточку
+# узнаём по классу-контейнеру и берём ссылку ИЗ НЕЁ – так ловим и ИМП, где
+# карточка ведёт на КОРНЕВОЙ адрес товара (/slug/), а не под /catalog/.
+_CARD_SPLIT_RE = re.compile(
+    r'\b(?:catalog-product-card-item|card-product|card-item|listing-card)\b'
+)
+# Ассеты/статика – не товар.
+_ASSET_RE = re.compile(
+    r'\.(?:svg|png|jpe?g|gif|webp|bmp|ico|css|js|woff2?|ttf|pdf)(?:\?|$)', re.I)
+# Незарендеренные шаблонные переменные, попавшие в href (битый JS-шаблон).
+_TEMPLATE_JUNK = ('${', '{{', '}}', '<%', '%7b', '%7d')
+
+
+def _clean_href(href: str, page_url: str, page_host: str) -> str:
+    """Нормализовать href карточки к пути или вернуть '' (не товар/мусор)."""
+    href = (href or '').strip()
+    if not href or href[0] == '#':
+        return ''
+    low = href.lower()
+    if low.startswith(('mailto:', 'tel:', 'javascript:')):
+        return ''
+    if any(j in low for j in _TEMPLATE_JUNK):
+        return ''                      # битый шаблон ${...}/{{...}} – не ссылка
+    if _ASSET_RE.search(low):
+        return ''
+    try:
+        parsed = urlparse(urljoin(page_url, href))
+    except ValueError:
+        return ''
+    if parsed.hostname and page_host and parsed.hostname != page_host:
+        return ''
+    path = parsed.path or ''
+    if not path or path == '/' or '/filter/' in path \
+            or '/catalog/view/' in path or '/assets/' in path:
+        return ''
+    return path if path.endswith('/') else path + '/'
+
+
+def _looks_like_product(path: str) -> bool:
+    """Похоже на товар: под /catalog/ с 3+ сегментами (СМУ/МПЭ) ЛИБО корневой
+    длинный slug с дефисами (ИМП: /list-otsinkovannyj-…-nlmk/), а не /about/."""
+    segs = [s for s in path.strip('/').split('/') if s]
+    if not segs:
+        return False
+    if path.startswith('/catalog/'):
+        return len(segs) >= 3
+    if len(segs) == 1:
+        s = segs[0]
+        return len(s) >= 12 and s.count('-') >= 2
+    return False
+
+
+def _is_facet_listing(path: str, known_paths: set[str]) -> bool:
+    """URL-фильтр вида <категория>/<характеристика>/<значение>/ – это
+    отфильтрованный листинг, а не карточка товара (так устроен ИМП). Узнаём по
+    тому, что без последних 2 (или 4) сегментов остаётся известная категория/тег."""
+    segs = [s for s in path.strip('/').split('/') if s]
+    if len(segs) < 4:
+        return False
+    for cut in (2, 4):
+        if len(segs) - cut < 1:
+            break
+        parent = '/' + '/'.join(segs[:-cut]) + '/'
+        if parent in known_paths:
+            return True
+    return False
+
 
 # ── Извлечение товарных ссылок из HTML листинга ─────────────────────
 
@@ -64,42 +131,45 @@ def extract_product_paths(
     """
     Достать из HTML страницы-листинга пути карточек товаров.
 
-    Товар = ссылка на тот же хост, путь под /catalog/ с 3+ сегментами,
-    которого нет среди известных категорий и фильтров (и без /filter/).
+    Берём ссылку из каждой карточки товара (контейнер card-product / card-item /
+    catalog-product-card-item / listing-card). Так корректно ловятся и товары
+    ИМП, чей адрес – КОРНЕВОЙ slug (/list-otsinkovannyj-…/), а не путь под
+    /catalog/. Известные категории/фильтры, /filter/, ассеты и битые шаблонные
+    ссылки (${…}) отбрасываются.
     """
     if not html:
         return []
     page_host = urlparse(page_url).hostname or ''
-
     seen: set[str] = set()
     out: list[str] = []
-    for m in _HREF_RE.finditer(html):
-        href = m.group(1).strip()
-        if not href or href.startswith(('mailto:', 'tel:', 'javascript:')):
-            continue
-        absolute = urljoin(page_url, href)
-        try:
-            parsed = urlparse(absolute)
-        except ValueError:
-            continue
-        if parsed.hostname and page_host and parsed.hostname != page_host:
-            continue
 
-        path = parsed.path or ''
-        if not path.startswith('/catalog/'):
-            continue
-        if '/filter/' in path:
-            continue
-        # Нормализуем к виду с завершающим слешем – как в каталогах
-        norm = path if path.endswith('/') else path + '/'
-        if norm in known_category_paths or norm in known_filter_paths:
-            continue
-        segments = [s for s in norm.strip('/').split('/') if s]
-        if len(segments) < 3:
-            continue
-        if norm not in seen:
-            seen.add(norm)
-            out.append(norm)
+    def consider(path: str) -> None:
+        if (not path or path in seen
+                or path in known_category_paths or path in known_filter_paths
+                or not _looks_like_product(path)):
+            return
+        seen.add(path)
+        out.append(path)
+
+    chunks = _CARD_SPLIT_RE.split(html)
+    found_cards = len(chunks) > 1
+    for chunk in chunks[1:]:
+        # первая «товарная» ссылка в карточке – это сам товар (а не иконка/счётчик)
+        for m in _HREF_RE.finditer(chunk[:4000]):
+            path = _clean_href(m.group(1), page_url, page_host)
+            if path and _looks_like_product(path):
+                consider(path)
+                break
+
+    # Фоллбэк для листингов без распознанных карточек – по ссылкам /catalog/,
+    # отбрасывая URL-фильтры (категория + /характеристика/значение/).
+    if not found_cards:
+        known = known_category_paths | known_filter_paths
+        for m in _HREF_RE.finditer(html):
+            path = _clean_href(m.group(1), page_url, page_host)
+            if (path and path.startswith('/catalog/')
+                    and not _is_facet_listing(path, known)):
+                consider(path)
     return out
 
 
