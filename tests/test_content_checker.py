@@ -310,21 +310,24 @@ def test_product_without_price_is_bug():
 
 def test_bottom_block_cards_without_price_is_bug():
     """Нижний блок карточки («С этим товаром покупают») с карточками, у которых
-    не видно цены, → баг rec_price. С ценой → ок. Без блока → не баг."""
+    не видно цены, → баг rec_price. С ценой → ок. Без блока → N/A («–»)."""
     main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
             + '<button class="add-to-cart-btn">В корзину</button>')
     card = '<div class="catalog-product-card-item"><a href="/c/t/">Товар 2</a>{}</div>'
-    # карточки снизу без цены → баг
+    # карточки снизу без цены → баг (блок есть, цены нет – пустые цены снизу)
     b = _by_key(check_content(main + '<div>С этим товаром покупают</div>'
                               + card.format(''), 'product'))
-    assert b['rec_block'].present and not b['rec_price'].present
+    assert b['rec_block'].present
+    assert not b['rec_price'].present and b['rec_price'].required   # → БАГ
     # карточки снизу с ценой → ок
     b2 = _by_key(check_content(main + '<div>Похожие товары</div>'
                                + card.format('<span>99 000 ₽</span>'), 'product'))
     assert b2['rec_block'].present and b2['rec_price'].present
-    # нижнего блока нет → не баг
+    # нижнего блока нет (как у МПЭ – их там нет по дизайну) → проверять нечего:
+    # «Цены в нижних блоках» становится необязательным и в отчёте даёт «–», а не ✓.
     b3 = _by_key(check_content(main + '<div>Характеристики</div>', 'product'))
-    assert not b3['rec_block'].present and b3['rec_price'].present
+    assert not b3['rec_block'].present
+    assert not b3['rec_price'].present and not b3['rec_price'].required   # → «–», не баг
 
 
 def test_tech_pages_checked_like_others():

@@ -741,16 +741,21 @@ def _d_rec_block(c: _Ctx):
     return bool(c.rec_html_lower), None
 
 
+def _rec_has_cards(c: _Ctx) -> bool:
+    # Есть ли в нижнем блоке товарные карточки (а не просто ссылки/баннеры).
+    rh = c.rec_html_lower
+    return bool(rh) and ('catalog-product-card-item' in rh or 'card-product' in rh
+                         or 'listing-card' in rh or bool(_RE_MPE_CARD.search(rh)))
+
+
 def _d_rec_price(c: _Ctx):
     # У товаров в нижних блоках должна быть видимая цена (₽ или «по запросу»).
     # Если карточки снизу есть, а цены не видно – тот самый баг с пустыми ценами.
-    rh = c.rec_html_lower
-    if not rh:
-        return True, None                 # нижнего блока нет – не баг
-    has_cards = ('catalog-product-card-item' in rh or 'card-product' in rh
-                 or 'listing-card' in rh or bool(_RE_MPE_CARD.search(rh)))
-    if not has_cards:
-        return True, None                 # не товарный блок – не баг
+    # Нижнего товарного блока нет (как, напр., у МПЭ – их там нет по дизайну) –
+    # проверять нечего: возвращаем «нет», а в check_content делаем пункт
+    # необязательным, чтобы в отчёте стоял «–» (N/A), а не вводящая в заблуждение ✓.
+    if not _rec_has_cards(c):
+        return False, None
     has_price = bool(_PRICE_RE.search(c.rec_text_lower)) or 'по запросу' in c.rec_text_lower
     return has_price, None
 
@@ -1134,6 +1139,11 @@ def check_content(html: str, type_code: str, css_hidden: tuple = ()) -> ContentR
         # Каталог-корень – верхний уровень иерархии, хлебных крошек там
         # может не быть (например, главная каталога ИМП) – это не баг.
         if type_code == 'catalog' and blk.key == 'breadcrumbs':
+            required = False
+        # «Цены в нижних блоках» обязательны ТОЛЬКО если внизу есть товарные
+        # карточки. Нет нижнего блока (как у МПЭ – его там нет по дизайну) –
+        # проверять нечего → пункт необязателен, в отчёте «–», а не ✓ и не баг.
+        if blk.key == 'rec_price' and not _rec_has_cards(ctx):
             required = False
         # Пояснение к багу цены/кнопки: «есть в коде, но покупатель не видит»
         # (скрыто стилями display:none / disabled) vs просто «нет в коде».
