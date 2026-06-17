@@ -184,16 +184,11 @@ _STRUCT_GROUPS = [
 # смысловой каждый – так таблица читается, а тип цены/кнопки виден в ячейке.
 
 def _price_cell(bk):
-    price = bk.get('price'); real = bk.get('price_real'); req = bk.get('price_request')
+    # Одна галочка: есть цена в любом виде (₽ ИЛИ «по запросу») → ✓; нет ни того
+    # ни другого или скрыто стилями → БАГ. Без «₽ + запрос» — это лишний шум.
+    price = bk.get('price')
     if price and price.required and not price.present:
         return ('БАГ', 'bug')
-    has_real = bool(real and real.present); has_req = bool(req and req.present)
-    if has_real and has_req:
-        return ('₽ + запрос', 'okinfo')
-    if has_real:
-        return ('₽', 'ok')
-    if has_req:
-        return ('по запросу', 'okinfo')
     if price and price.present:
         return ('✓', 'ok')
     return ('–', 'absent')

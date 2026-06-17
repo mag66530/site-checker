@@ -924,3 +924,133 @@ def load_reports_for_period(
     reports.sort(key=lambda r: (r.report_date, r.country_code), reverse=True)
     return reports
 
+
+
+# ── Готовый xlsx только по 404 Метрики (отдельная выгрузка) ──
+
+
+def build_metrika_only_xlsx(reports, sheet_title: str = '404 из Метрики') -> bytes:
+    """
+    Сформировать простой xlsx по списку Report404 без данных Site Checker.
+
+    Используется для кнопок «Скачать отчёт за вчера» и «Скачать за период» –
+    когда пользователю нужен только агрегат Метрики, без запуска проверки сайта.
+
+    Сортировка: свежие даты сверху, в пределах даты – по убыванию просмотров.
+    Возвращает bytes (готовые для st.download_button).
+    """
+    from io import BytesIO as _BIO
+    from openpyxl import Workbook as _Wb
+    from openpyxl.styles import (
+        Font as _Font, PatternFill as _Fill, Alignment as _Align,
+        Border as _Border, Side as _Side,
+    )
+
+    # Заметные границы (раньше были слишком светлые – пользователь жаловался
+    # «почему в отчёте нет границ»). Те же цвета что и в reporter.py.
+    _side_light = _Side(style='thin', color='C7D0DA')
+    _side_strong = _Side(style='thin', color='A8B2BD')
+    _border_light = _Border(
+        top=_side_light, left=_side_light, bottom=_side_light, right=_side_light,
+    )
+    _border_strong = _Border(
+        top=_side_strong, left=_side_strong, bottom=_side_strong, right=_side_strong,
+    )
+
+    buf = _BIO()
+    wb = _Wb()
+    ws = wb.active
+    ws.title = sheet_title[:31]  # лимит Excel на имя листа
+    ws.sheet_view.showGridLines = False
+
+    headers = [
+        ('Дата', 14),
+        ('Страна', 18),
+        ('URL страницы', 60),
+        ('Просмотры', 12),
+        ('Посетители', 12),
+        ('Реферер', 38),
+        ('Заголовок страницы', 40),
+    ]
+    for i, (label, width) in enumerate(headers, 1):
+        from openpyxl.utils import get_column_letter as _gcl
+        ws.column_dimensions[_gcl(i)].width = width
+        c = ws.cell(row=1, column=i)
+        c.value = label
+        c.font = _Font(bold=True, size=10, color='71717A')
+        c.fill = _Fill(start_color='FAFAFA', end_color='FAFAFA', fill_type='solid')
+        c.alignment = _Align(horizontal='left', vertical='center', indent=1)
+        c.border = _border_strong
+    ws.row_dimensions[1].height = 24
+    ws.freeze_panes = 'A2'
+
+    # Плоский список с сортировкой
+    flat = []
+    for rep in reports:
+        for p in rep.pages:
+            flat.append((rep, p))
+    flat.sort(key=lambda rp: (rp[0].report_date, -rp[1].views), reverse=False)
+    flat.sort(key=lambda rp: rp[0].report_date, reverse=True)
+
+    from datetime import datetime as _dt2
+    for row_idx, (rep, p) in enumerate(flat, start=2):
+        try:
+            date_str = _dt2.strptime(rep.report_date, '%Y-%m-%d').strftime('%d.%m.%Y')
+        except ValueError:
+            date_str = rep.report_date
+
+        c1 = ws.cell(row=row_idx, column=1)
+        c1.value = date_str
+        c1.alignment = _Align(horizontal='left', vertical='center', indent=1)
+
+        c2 = ws.cell(row=row_idx, column=2)
+        c2.value = f'{rep.country_code} – {rep.country_name}'
+        c2.alignment = _Align(horizontal='left', vertical='center', indent=1)
+
+        url_cell = ws.cell(row=row_idx, column=3)
+        if p.page_url:
+            url_cell.value = p.page_url
+            url_cell.hyperlink = p.page_url
+            url_cell.font = _Font(
+                name='Consolas', size=10, color='1A56E8', underline='single',
+            )
+        else:
+            url_cell.value = '–'
+            url_cell.font = _Font(size=10, italic=True, color='9CA3AF')
+        url_cell.alignment = _Align(
+            horizontal='left', vertical='center', indent=1, wrap_text=True,
+        )
+
+        c4 = ws.cell(row=row_idx, column=4)
+        c4.value = p.views
+        c4.alignment = _Align(horizontal='right', vertical='center', indent=1)
+
+        c5 = ws.cell(row=row_idx, column=5)
+        c5.value = p.visitors
+        c5.alignment = _Align(horizontal='right', vertical='center', indent=1)
+
+        c6 = ws.cell(row=row_idx, column=6)
+        c6.value = p.referer or '–'
+        c6.alignment = _Align(
+            horizontal='left', vertical='center', indent=1, wrap_text=True,
+        )
+
+        c7 = ws.cell(row=row_idx, column=7)
+        c7.value = p.page_title
+        c7.alignment = _Align(
+            horizontal='left', vertical='center', indent=1, wrap_text=True,
+        )
+
+        # Границы и базовый шрифт на все ячейки строки
+        for col_idx in range(1, 8):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.border = _border_light
+            if cell.font.color is None or cell.font.color.rgb is None:
+                cell.font = _Font(size=10, color='1E212E')
+        ws.row_dimensions[row_idx].height = 22
+
+    if flat:
+        ws.auto_filter.ref = f'A1:G{len(flat) + 1}'
+
+    wb.save(buf)
+    return buf.getvalue()

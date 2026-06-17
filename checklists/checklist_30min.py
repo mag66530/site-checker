@@ -46,7 +46,7 @@ from telegram_notify import format_summary_message, send_run_notification
 from metrika_404 import (
     MAILBOX_CONFIG,
     fetch_incremental, get_latest_available_date,
-    load_reports_for_date, load_reports_for_period,
+    load_reports_for_date, load_reports_for_period, build_metrika_only_xlsx,
 )
 from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG, GSC_GMAIL_CONFIG,
@@ -591,7 +591,7 @@ def init_session():
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
         'c30_fetch_notifications': True,
-        'c30_notify_days': 7,
+        'c30_notify_days': 1,   # прогон ежедневный → по умолчанию забираем за 1 день
         # Свой список URL
         'c30_use_custom_urls': False,
         'c30_custom_urls_text': '',
@@ -969,9 +969,10 @@ if pid:
                 'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 Метрики',
                 key='c30_fetch_notifications')
         with _nf_col2:
-            _nd_opts = [3, 7, 14, 30]
+            _nd_opts = [1, 3, 7, 14, 30]
             st.selectbox('За период', _nd_opts,
-                         format_func=lambda x: f'{x} дней', key='c30_notify_days',
+                         format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
+                         key='c30_notify_days',
                          disabled=not _ck_notif, label_visibility='collapsed')
         st.checkbox('Добавить свой список URL', key='c30_use_custom_urls')
         if st.session_state.c30_use_custom_urls:
@@ -1001,6 +1002,61 @@ if pid:
                 _bt = ', '.join(f'{lbl}: {n}' for lbl, n
                                 in _Counter(t.type_label for t in _typed).items())
                 st.success(f'Будет добавлено {len(_typed)} URL – {_bt}')
+
+        # ── 404 из Метрики: отдельная выгрузка (за конкретный день или за период) ──
+        st.divider()
+        st.markdown('**404 из Метрики — отдельная выгрузка**')
+        _m_email, _m_pass = get_metrika_credentials(pid)
+        if not (_m_email and _m_pass):
+            st.caption('Для этого проекта почта Метрики не настроена.')
+        else:
+            from datetime import date as _date, timedelta as _td
+            _mc1, _mc2, _mc3 = st.columns([1.2, 1.2, 1], vertical_alignment='bottom')
+            with _mc1:
+                _m_mode = st.selectbox('Что выгрузить',
+                                       ['За день', 'За 7 дней', 'За 14 дней', 'За 30 дней'],
+                                       key='c30_m_mode')
+            with _mc2:
+                _m_day = (st.date_input('День', value=_date.today() - _td(days=1),
+                                        key='c30_m_day', format='DD.MM.YYYY')
+                          if _m_mode == 'За день' else None)
+            try:
+                if _m_mode == 'За день' and _m_day:
+                    _m_reports = load_reports_for_date(pid, _m_day.strftime('%Y-%m-%d'))
+                else:
+                    _md = {'За 7 дней': 7, 'За 14 дней': 14, 'За 30 дней': 30}.get(_m_mode, 7)
+                    _m_reports = load_reports_for_period(pid, _md)
+            except Exception:
+                _m_reports = []
+            with _mc3:
+                if _m_reports:
+                    _m_pages = sum(getattr(r, 'total_pages', 0) for r in _m_reports)
+                    st.download_button(
+                        f'Скачать ({_m_pages} стр.)',
+                        data=build_metrika_only_xlsx(_m_reports, '404 из Метрики'),
+                        file_name=f'metrika-404-{pid}.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True, key='c30_m_dl')
+                else:
+                    st.button('Нет данных', disabled=True, use_container_width=True,
+                              key='c30_m_nodata')
+            if st.button('🔄 Обновить из почты', key='c30_m_refresh',
+                         help='Зайти в почту Метрики и забрать свежие письма за 14 дней'):
+                _mp = st.progress(0, text='Подключаюсь к почте Метрики…')
+                _mlog = []
+                try:
+                    _msum = fetch_incremental(
+                        project_id=pid, email_addr=_m_email, password=_m_pass,
+                        folder=MAILBOX_CONFIG[pid]['folder'], proxy_url=get_proxy_url(),
+                        lookback_days=14, log=lambda lvl, m: _mlog.append(m),
+                        force_refresh=False, upgrade_if_better=True)
+                    _mp.empty()
+                    st.success(f'Готово · новых: {_msum.get("fetched", 0)}, '
+                               f'обновлено: {_msum.get("upgraded", 0)}')
+                    st.rerun()
+                except Exception as _e:
+                    _mp.empty()
+                    st.error(f'Не удалось обновить: {_e}')
 
     # БЛОК запуска
     with st.container():
