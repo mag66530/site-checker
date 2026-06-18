@@ -754,16 +754,44 @@ def _rec_has_cards(c: _Ctx) -> bool:
                          or 'listing-card' in rh or bool(_RE_MPE_CARD.search(rh)))
 
 
+# Разделитель карточек в нижних блоках – ТОЛЬКО специфичные товарные контейнеры
+# (СМУ: catalog-product-card-item, ИМП: card-product). Общий «card-item» НЕ берём
+# – он встречается в вёрстке десятки раз вне товарных карточек (меню/футер) и даёт
+# ложные «карточки без цены».
+_REC_CARD_RE = re.compile(r'catalog-product-card-item|card-product\b')
+
+
+def _rec_card_chunks(rec_html_lower: str) -> list[str]:
+    """Разбить нижнюю область на отдельные карточки (по контейнеру карточки)."""
+    parts = _REC_CARD_RE.split(rec_html_lower)
+    # первая часть – заголовки блока до первой карточки, отбрасываем;
+    # тело карточки ограничиваем, чтобы не захватить весь хвост страницы.
+    return [p[:3000] for p in parts[1:]] if len(parts) > 1 else []
+
+
+def _card_has_price(card_html_lower: str) -> bool:
+    """У карточки видна цена (₽/руб) ИЛИ «по запросу»."""
+    text = html_to_visible_text(card_html_lower)
+    return bool(_PRICE_RE.search(text)) or 'по запросу' in text.lower()
+
+
 def _d_rec_price(c: _Ctx):
-    # У товаров в нижних блоках должна быть видимая цена (₽ или «по запросу»).
-    # Если карточки снизу есть, а цены не видно – тот самый баг с пустыми ценами.
-    # Нижнего товарного блока нет (как, напр., у МПЭ – их там нет по дизайну) –
-    # проверять нечего: возвращаем «нет», а в check_content делаем пункт
-    # необязательным, чтобы в отчёте стоял «–» (N/A), а не вводящая в заблуждение ✓.
+    # У КАЖДОГО товара в нижних блоках должна быть видимая цена (₽ или «по
+    # запросу»). Проверяем покарточно: если хотя бы у одной карточки снизу нет
+    # ни цены, ни «по запросу» – это баг (та самая «пустая цена снизу»), даже
+    # если у соседних карточек цена есть.
+    # Нижнего товарного блока нет (как у МПЭ – их там нет по дизайну, или у ИМП –
+    # подгружаются JS и в коде их нет) – проверять нечего: возвращаем «нет», а в
+    # check_content пункт делаем необязательным, чтобы стоял «–» (N/A).
     if not _rec_has_cards(c):
         return False, None
-    has_price = bool(_PRICE_RE.search(c.rec_text_lower)) or 'по запросу' in c.rec_text_lower
-    return has_price, None
+    chunks = _rec_card_chunks(c.rec_html_lower)
+    if not chunks:
+        # карточки есть по маркеру, но разбить не вышло – область целиком.
+        has = bool(_PRICE_RE.search(c.rec_text_lower)) or 'по запросу' in c.rec_text_lower
+        return has, None
+    broken = sum(1 for ch in chunks if not _card_has_price(ch))
+    return (broken == 0), None
 
 
 def _d_specs(c: _Ctx):
