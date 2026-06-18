@@ -870,11 +870,21 @@ if pid:
     with st.container(border=True):
         st.markdown('#### Каталог проекта')
         _m1, _m2, _m3, _m4 = st.columns(4)
-        _m1.metric('Городов', stats['subdomains_count'])
-        _m2.metric('Категорий', f'{stats["categories_count"]:,}'.replace(',', ' '))
+        _m1.metric('Городов', stats['subdomains_count'],
+                   help=f'Города проекта = его поддомены (spb., kazan. …). Список берём '
+                        f'из справочника поддоменов проекта. В каждый прогон идёт главный '
+                        f'город ({cfg.get("mandatory_city", "Москва")}) плюс выбранное '
+                        f'число случайных городов из этого списка.')
+        _m2.metric('Категорий', f'{stats["categories_count"]:,}'.replace(',', ' '),
+                   help='Категории каталога (страницы вида /catalog/…) из выгрузки каталога '
+                        'проекта. Сколько из них проверять на каждый город – задаётся ниже, '
+                        'в «Объём проверки → Категорий на город».')
         _m3.metric('Фильтров',
                    f'{stats["filters_count"]:,}'.replace(',', ' ')
-                   if stats['has_filters'] else 'нет')
+                   if stats['has_filters'] else 'нет',
+                   help='Страницы-фильтры (теги, напр. подборки по параметру) из выгрузки '
+                        'каталога проекта. Есть не у всех проектов. Сколько проверять на '
+                        'город – в «Объём проверки → Фильтров на город».')
         _pbase = load_product_links(pid)
         if _pbase and _pbase['pathnames']:
             _d = datetime.fromtimestamp(_pbase['collected_at_ms'] / 1000)
