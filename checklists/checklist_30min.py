@@ -75,6 +75,20 @@ def _secret(key):
     return None
 
 
+# Иногда секрет проекта назван с опечаткой зоны (imp → «inp»). Пробуем оба
+# варианта + общий ключ без проекта.
+_PID_ALIASES = {'imp': ('imp', 'inp')}
+
+
+def _secret_pid(base, project_id):
+    """Секрет вида base_<pid> с учётом алиасов pid и общим фоллбэком base."""
+    for p in _PID_ALIASES.get(project_id, (project_id,)):
+        v = _secret(f'{base}_{p}')
+        if v:
+            return v
+    return _secret(base)
+
+
 def get_proxy_url():
     val = _secret('proxy_url')
     if val:
@@ -981,7 +995,7 @@ if pid:
     with st.container(border=True):
         st.markdown('### Дополнительно')
         _ck_notif = st.checkbox(
-            'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) + 404 Метрики',
+            'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google)',
             key='c30_fetch_notifications')
         if _ck_notif:
             _nd_opts = [1, 3, 7, 14, 30]
@@ -1125,10 +1139,8 @@ if pid:
                 _sk_hint, _wm_hint = [], []
             # Токен Яндекс OAuth (Вебмастер-API; тот же подойдёт для Метрики).
             # Имя секрета: yandex_oauth_<pid> (с запасными вариантами).
-            _wm_token = (_secret(f'yandex_oauth_{pid}')
-                         or _secret(f'webmaster_oauth_{pid}')
-                         or _secret('yandex_oauth')
-                         or _secret('webmaster_oauth'))
+            _wm_token = (_secret_pid('yandex_oauth', pid)
+                         or _secret_pid('webmaster_oauth', pid))
             creds = {
                 'proxy_url': get_proxy_url(),
                 'tg_token': _secret('telegram_bot_token'),
@@ -1140,6 +1152,8 @@ if pid:
                 'google': get_google_accounts_credentials(pid),
                 'google_folder': get_google_folder_credentials(pid),
                 'webmaster_oauth': _wm_token,
+                'metrika_oauth': _secret_pid('metrika_oauth', pid),
+                'metrika_counter': _secret_pid('metrika_counter', pid),
                 'webmaster_keys_hint': _wm_hint,
                 'secret_keys_hint': _sk_hint,
             }
