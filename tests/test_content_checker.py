@@ -352,35 +352,38 @@ def test_bottom_block_one_card_without_price_is_bug():
 def test_tech_pages_checked_like_others():
     """Технические страницы (type 'tech') проверяются «как все»: крошки + H1.
     Нормальная страница багов не даёт."""
+    long_text = 'Текст про оплату и доставку. ' * 20    # контентный текст (>400 симв)
     ok = ('<div class="breadcrumb">крошки</div>'
           '<h1>Оплата и доставка</h1>'
-          '<p>Текст про оплату.</p>')
+          f'<p>{long_text}</p>')
     r = check_content(ok, 'tech')
     assert r.bug_count == 0 and not r.bugs
     keys = {b.key for b in r.blocks}
-    assert 'breadcrumbs' in keys and 'h1' in keys
+    assert 'breadcrumbs' in keys and 'h1' in keys and 'content_text' in keys
 
 
-def test_tech_page_missing_h1_is_bug():
-    """Тех. страница без H1 – это баг (H1 обязателен). Крошки – справочно: их
-    отсутствие на служебной странице багом не считаем."""
+def test_tech_page_missing_h1_and_text_is_bug():
+    """Тех. страница без H1 и без собственного текста – баги (оба обязательны).
+    Крошки – справочно: их отсутствие на служебной странице багом не считаем."""
     r = check_content('<html><body>Политика конфиденциальности</body></html>', 'tech')
     b = _by_key(r)
-    assert not b['h1'].present
+    assert not b['h1'].present and not b['content_text'].present
     assert not b['breadcrumbs'].present
-    assert r.bug_count == 1          # только H1 (крошки – не обязательны)
-    assert b['h1'].key in {bb.key for bb in r.bugs}
-    assert b['breadcrumbs'].key not in {bb.key for bb in r.bugs}
+    assert r.bug_count == 2          # H1 + текст (крошки – не обязательны)
+    bug_keys = {bb.key for bb in r.bugs}
+    assert 'h1' in bug_keys and 'content_text' in bug_keys
+    assert 'breadcrumbs' not in bug_keys
 
 
 def test_search_page_h1_not_required():
     """Страница результатов поиска (/search/) не обязана иметь H1: на /search/
     H1 справочный, отсутствие – не баг; на обычной тех. странице – баг."""
-    html = '<header><a href="tel:1">т</a></header><div>Результаты поиска</div>'
+    long_text = 'Результаты поиска по запросу. ' * 20   # контентный текст есть
+    html = f'<header><a href="tel:1">т</a></header><div>{long_text}</div>'
     rs = _by_key(check_content(html, 'tech', url='https://inmetprom.ru/search/'))
     assert not rs['h1'].present and not rs['h1'].required        # «–», не баг
     ra = check_content(html, 'tech', url='https://inmetprom.ru/about/')
-    assert _by_key(ra)['h1'].required and ra.bug_count == 1      # контроль: H1 нужен
+    assert _by_key(ra)['h1'].required and ra.bug_count == 1      # контроль: только H1
 
 
 def test_footer_address_mikrorayon():
