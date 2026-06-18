@@ -240,10 +240,41 @@ def _panel_url(host_id: str) -> str:
     return f'https://webmaster.yandex.ru/site/{host_id}/diagnostics/'
 
 
+def _extract_inprogress_codes(payload) -> set:
+    """Из ответа /diagnostics/checks/ собрать коды проблем «на проверке».
+    Структура у Яндекса может отличаться — разбираем максимально терпимо."""
+    codes = set()
+    if not payload:
+        return codes
+    # Кандидаты-контейнеры со списком проверок
+    items = None
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = (payload.get('checks') or payload.get('problems')
+                 or payload.get('items') or payload.get('tasks') or [])
+        if isinstance(items, dict):       # вдруг {CODE: {...}}
+            items = [{**v, 'code': k} for k, v in items.items()]
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        status = str(it.get('status') or it.get('state')
+                     or it.get('check_state') or '').upper()
+        # «на проверке»: IN_PROGRESS / CHECKING / PROGRESS
+        if 'PROGRESS' in status or 'CHECK' in status or status == 'IN_PROGRESS':
+            code = (it.get('code') or it.get('type') or it.get('problem_type')
+                    or it.get('problem') or '')
+            if code:
+                codes.add(str(code).upper())
+    return codes
+
+
 def _parse_diagnostics(project_id: str, host: str, host_id: str,
-                       payload: dict) -> list:
-    """Из ответа /diagnostics/ собрать список ServiceIssue (только активные)."""
+                       payload: dict, inprogress_codes: set = None) -> list:
+    """Из ответа /diagnostics/ собрать список ServiceIssue (только активные).
+    inprogress_codes — коды, что сейчас «на проверке» (из /diagnostics/checks/)."""
     issues = []
+    inprogress_codes = inprogress_codes or set()
     problems = (payload or {}).get('problems')
     if not problems:
         return issues
@@ -267,6 +298,9 @@ def _parse_diagnostics(project_id: str, host: str, host_id: str,
         # Исключаем только ЯВНО решённые/отсутствующие – всё прочее берём.
         if st_up in ('ABSENT', 'OK', 'NONE', 'RESOLVED', 'GONE', 'FIXED'):
             continue
+        # «На проверке» приходит из /diagnostics/checks/ — перебивает state.
+        if str(code).upper() in inprogress_codes:
+            st_up = 'IN_PROGRESS'
         sev_raw = (info.get('severity') or '').upper()
         severity = _SEV_FROM_YANDEX.get(sev_raw, 'info')
         date = ''
@@ -321,6 +355,8 @@ def fetch_webmaster_issues(project_id: str, token: str,
 
         all_issues = []
         _dumped = False
+        _dumped_checks = False
+        _checks_warned = False
         for host_norm, host_id, _url in selected:
             if not host_id:
                 continue
@@ -337,7 +373,26 @@ def fetch_webmaster_issues(project_id: str, token: str,
                               else _raw[0])
                     _log(f'  RAW problem пример: {_j.dumps(_first, ensure_ascii=False)[:400]}')
                     _dumped = True
-                hi = _parse_diagnostics(project_id, host_norm, host_id, diag)
+
+                # Коды «на проверке» — из отдельного эндпоинта /diagnostics/checks/
+                _inprogress = set()
+                try:
+                    _checks = _get(
+                        token, f'/user/{user_id}/hosts/{host_id}/diagnostics/checks/',
+                        proxy_url)
+                    if not _dumped_checks and _checks:
+                        import json as _j
+                        _log(f'  RAW checks пример: '
+                             f'{_j.dumps(_checks, ensure_ascii=False)[:400]}')
+                        _dumped_checks = True
+                    _inprogress = _extract_inprogress_codes(_checks)
+                except Exception as _ce:
+                    if not _checks_warned:
+                        _log(f'  /diagnostics/checks/: {_ce}')
+                        _checks_warned = True
+
+                hi = _parse_diagnostics(project_id, host_norm, host_id, diag,
+                                        inprogress_codes=_inprogress)
                 all_issues.extend(hi)
                 # Диагностика: если сырых проблем много, а активных 0 – видно в логе
                 _log(f'  {host_norm}: в ответе {_raw_n}, активных {len(hi)}')
