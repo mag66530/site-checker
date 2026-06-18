@@ -361,6 +361,31 @@ def test_cards_without_photo_is_bug():
     assert ok['photos'].present
 
 
+def test_catalog_root_photos_not_bug_without_product_cards():
+    """Корень каталога: заглушки picture.missing у плиток РАЗДЕЛОВ (карточек
+    товаров нет) НЕ считаются багом «Фото товаров» – пункт необязателен («–»).
+    Раньше из-за этого на каждом корне каталога МПЭ ложно горел «Фото: БАГ»."""
+    tiles = ''.join(f'<a href="/catalog/razdel-{i}/"><img src="/img/picture.missing.webp"></a>'
+                    for i in range(8))
+    html = COMMON + SMU_MARKER + '<h1>Каталог</h1>' + tiles
+    b = _by_key(check_content(html, 'catalog', url='https://stalmetural.ru/catalog/'))
+    assert b['catalog_blocks'].present              # разделы нашлись
+    assert not b['photos'].required                # фото не обязательно → не баг
+
+
+def test_catalog_root_photos_bug_with_product_cards_shows_count():
+    """Если на корне каталога ЕСТЬ карточки товаров и у части нет фото – это баг
+    с числом (сколько без фото)."""
+    cards = ('<div class="catalog-product-card-item"><a href="/c/t1/">Т1</a>'
+             '<img src="/img/picture.missing.webp"><span>100 ₽</span></div>'
+             '<div class="catalog-product-card-item"><a href="/c/t2/">Т2</a>'
+             '<img src="/img/real.jpg"><span>200 ₽</span></div>')
+    tiles = ''.join(f'<a href="/catalog/razdel-{i}/">Раздел {i}</a>' for i in range(5))
+    html = COMMON + SMU_MARKER + '<h1>Каталог</h1>' + tiles + cards
+    b = _by_key(check_content(html, 'catalog', url='https://stalmetural.ru/catalog/'))
+    assert b['photos'].required and not b['photos'].present and b['photos'].count == 1
+
+
 def test_tech_pages_checked_like_others():
     """Технические страницы (type 'tech') проверяются «как все»: крошки + H1.
     Нормальная страница багов не даёт."""
