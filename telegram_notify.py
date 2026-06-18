@@ -182,36 +182,39 @@ def format_critical_alert(project_name: str, availability: list,
     return '\n'.join(lines)
 
 
+# Человекочитаемые темы критических ошибок для краткой сводки в Telegram.
+_CRIT_THEME_LABEL = {
+    'availability': 'Сервер недоступен',
+    'slow':         'Долгий ответ сервера',
+    'not_found':    '404 страницы',
+    'cannot_buy':   'Нельзя купить (нет цены/кнопки)',
+    'kp':           'Контакты не совпадают с КП',
+    'text':         'Битые переменные в тексте',
+}
+# Порядок тем в сводке по важности (тай-брейк при равном количестве).
+_CRIT_THEME_ORDER = ['availability', 'not_found', 'slow', 'cannot_buy', 'kp', 'text']
+
+
 def format_critical_block(summary, max_items: int = 14) -> str:
-    """Блок «Критические» для подписи к отчёту – группировка по городу, каждая
-    проблема на своей строке (чисто, как срочное сообщение)."""
-    items = list(getattr(summary, 'availability', []) or [])
-    for cat in ('kp', 'cannot_buy', 'not_found', 'text'):
-        items += (getattr(summary, 'others', {}) or {}).get(cat) or []
-    if not items:
+    """Блок «Критические» для подписи к отчёту – КРАТКАЯ СВОДКА ПО ТЕМАМ:
+    тема + количество, без перечисления каждой ссылки. Конкретные адреса –
+    в xlsx. Так сообщение читаемо даже при сотнях ошибок (раньше каждая шла
+    отдельной строкой, и при множестве ошибок получалась «каша», не влезавшая
+    в сообщение). max_items сохранён для обратной совместимости (не используется)."""
+    counts = {'availability': len(getattr(summary, 'availability', []) or [])}
+    for cat, items in (getattr(summary, 'others', {}) or {}).items():
+        counts[cat] = len(items or [])
+    total = sum(counts.values())
+    if not total:
         return ''
 
-    by_city = {}
-    for it in items:
-        by_city.setdefault(it.city, []).append(it)
-
-    lines = [f'<b>Критические ({summary.total})</b>', '']
-    shown = 0
-    truncated = 0
-    for city, city_items in by_city.items():
-        if shown >= max_items:
-            truncated += len(city_items)
-            continue
-        lines.append(f'<b>{escape_html(city)}</b>')
-        for it in city_items:
-            if shown >= max_items:
-                truncated += 1
-                continue
-            lines.append(f'• {escape_html(it.page)}: {escape_html(it.detail)}')
-            shown += 1
-        lines.append('')
-    if truncated:
-        lines.append(f'… и ещё {truncated}, подробности в отчёте')
+    order = {c: i for i, c in enumerate(_CRIT_THEME_ORDER)}
+    themes = sorted((c for c in counts if counts[c]),
+                    key=lambda c: (-counts[c], order.get(c, 99)))
+    lines = [f'<b>Критические ({total})</b>', '']
+    for c in themes:
+        label = _CRIT_THEME_LABEL.get(c, c)
+        lines.append(f'• {escape_html(label)}: <b>{counts[c]}</b>')
     return '\n'.join(lines).strip()
 
 

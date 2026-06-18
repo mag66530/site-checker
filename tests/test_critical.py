@@ -93,9 +93,22 @@ def test_total_and_formatters():
     assert '<b>Москва</b>' in alert and 'Главная: сервер не отвечает (5xx)' in alert
     block = format_critical_block(s)
     assert '🔴' not in block and '—' not in block
-    # группировка по городу, каждая проблема на своей строке
-    assert 'Критические (4)' in block and '<b>Москва</b>' in block
-    assert 'Главная: сервер не отвечает (5xx)' in block
+    # КРАТКАЯ сводка по темам: тема + количество, без перечисления каждой ссылки
+    assert 'Критические (4)' in block
+    assert 'Сервер недоступен: <b>2</b>' in block      # server_error + timeout
+    assert '404 страницы: <b>1</b>' in block
+    assert 'Битые переменные' in block
+    # поштучно города/страницы НЕ перечисляем (это была «каша»)
+    assert '<b>Москва</b>' not in block and 'Главная:' not in block
+
+
+def test_slow_server_is_critical_theme():
+    """«Долгий ответ сервера» (very_slow) попадает в критические темой со счётом."""
+    s = analyze([_r(speed_rating='very_slow'),
+                 _r(speed_rating='very_slow', city='Уфа')])
+    assert len(s.others['slow']) == 2
+    block = format_critical_block(s)
+    assert 'Долгий ответ сервера: <b>2</b>' in block
 
 
 def test_for_city_keeps_only_one_city():
