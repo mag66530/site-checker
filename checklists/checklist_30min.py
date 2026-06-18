@@ -51,6 +51,7 @@ from metrika_404 import (
 from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG, GSC_GMAIL_CONFIG,
     YABUSINESS_YANDEX_CONFIG, TWOGIS_YANDEX_CONFIG, GOOGLE_ACCOUNTS_CONFIG,
+    GOOGLE_FOLDER_YANDEX_CONFIG,
     PRIORITY_LABELS, PRIORITY_ORDER, CATEGORY_LABELS,
     fetch_webmaster_yandex, fetch_gsc_gmail,
     fetch_yandex_folder_simple, fetch_google_accounts,
@@ -115,6 +116,14 @@ def get_google_accounts_credentials(project_id):
     if not cfg:
         return None, None
     return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
+
+
+def get_google_folder_credentials(project_id):
+    """Яндекс-папка с письмами GSC («Гугл» / «Google Search Console»)."""
+    cfg = GOOGLE_FOLDER_YANDEX_CONFIG.get(project_id)
+    if not cfg:
+        return None, None, None
+    return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
 
 
 def get_telegram_recipients(project_id):
@@ -1129,6 +1138,7 @@ if pid:
                 'yab': get_yabusiness_credentials(pid),
                 'twogis': get_twogis_credentials(pid),
                 'google': get_google_accounts_credentials(pid),
+                'google_folder': get_google_folder_credentials(pid),
                 'webmaster_oauth': _wm_token,
                 'webmaster_keys_hint': _wm_hint,
                 'secret_keys_hint': _sk_hint,

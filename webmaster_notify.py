@@ -98,6 +98,14 @@ TWOGIS_YANDEX_CONFIG = {
     'mpe': {'folder': '2ГИС', 'secret_email': 'metrika_mpe_email', 'secret_password': 'metrika_mpe_password'},
 }
 
+# Яндекс-почта – папка с письмами Google Search Console (названа по-разному:
+# «Гугл» у МПЭ/СМУ, «Google Search Console» у остальных). Содержимое одинаковое.
+GOOGLE_FOLDER_YANDEX_CONFIG = {
+    'mpe': {'folder': 'Гугл', 'secret_email': 'metrika_mpe_email', 'secret_password': 'metrika_mpe_password'},
+    'smu': {'folder': 'Гугл', 'secret_email': 'metrika_smu_email', 'secret_password': 'metrika_smu_password'},
+    'imp': {'folder': 'Google Search Console', 'secret_email': 'metrika_imp_email', 'secret_password': 'metrika_imp_password'},
+}
+
 # Gmail – те же ящики что GSC, письма от no-reply@accounts.google.com
 GOOGLE_ACCOUNTS_CONFIG = {
     'smu': {'secret_email': 'gsc_smu_email', 'secret_password': 'gsc_smu_password'},
@@ -762,6 +770,7 @@ def fetch_yandex_folder_simple(
     lookback_days: int = 14,
     proxy_url: Optional[str] = None,
     log: Optional[Callable] = None,
+    classify: bool = False,
 ) -> dict:
     """
     Скачать письма из произвольной папки Яндекс-почты без классификации по приоритету.
@@ -852,6 +861,14 @@ def fetch_yandex_folder_simple(
                     _html = _extract_html_body(msg)
                     _rating, _review_url = _parse_2gis_review(_html, body)
 
+                # Классификация по приоритету/категории (для GSC-папки) —
+                # иначе всё «инфо». Правила GSC по subject+началу тела.
+                if classify:
+                    _prio = _classify_priority(subject, body, _GSC_PRIORITY)
+                    _cat = _classify_category(subject, body)
+                else:
+                    _prio, _cat = 'info', 'other'
+
                 n = WebmasterNotification(
                     msg_id=msg_id,
                     project_id=project_id,
@@ -859,8 +876,8 @@ def fetch_yandex_folder_simple(
                     date=date_iso,
                     subject=subject,
                     body_preview=body[:400].strip(),
-                    priority='info',
-                    category='other',
+                    priority=_prio,
+                    category=_cat,
                     rating=_rating,
                     review_url=_review_url,
                 )
