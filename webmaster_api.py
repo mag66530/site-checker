@@ -357,6 +357,7 @@ def fetch_webmaster_issues(project_id: str, token: str,
         _dumped = False
         _dumped_checks = False
         _checks_warned = False
+        _checks_dead = False        # /diagnostics/checks/ вернул 404 — не дёргаем
         for host_norm, host_id, _url in selected:
             if not host_id:
                 continue
@@ -375,21 +376,25 @@ def fetch_webmaster_issues(project_id: str, token: str,
                     _dumped = True
 
                 # Коды «на проверке» — из отдельного эндпоинта /diagnostics/checks/
+                # (если он есть; на части аккаунтов отдаёт 404 — тогда не дёргаем).
                 _inprogress = set()
-                try:
-                    _checks = _get(
-                        token, f'/user/{user_id}/hosts/{host_id}/diagnostics/checks/',
-                        proxy_url)
-                    if not _dumped_checks and _checks:
-                        import json as _j
-                        _log(f'  RAW checks пример: '
-                             f'{_j.dumps(_checks, ensure_ascii=False)[:400]}')
-                        _dumped_checks = True
-                    _inprogress = _extract_inprogress_codes(_checks)
-                except Exception as _ce:
-                    if not _checks_warned:
-                        _log(f'  /diagnostics/checks/: {_ce}')
-                        _checks_warned = True
+                if not _checks_dead:
+                    try:
+                        _checks = _get(
+                            token, f'/user/{user_id}/hosts/{host_id}/diagnostics/checks/',
+                            proxy_url)
+                        if not _dumped_checks and _checks:
+                            import json as _j
+                            _log(f'  RAW checks пример: '
+                                 f'{_j.dumps(_checks, ensure_ascii=False)[:400]}')
+                            _dumped_checks = True
+                        _inprogress = _extract_inprogress_codes(_checks)
+                    except Exception as _ce:
+                        if '404' in str(_ce):
+                            _checks_dead = True   # эндпоинта нет — больше не пробуем
+                        if not _checks_warned:
+                            _log(f'  /diagnostics/checks/: {_ce}')
+                            _checks_warned = True
 
                 hi = _parse_diagnostics(project_id, host_norm, host_id, diag,
                                         inprogress_codes=_inprogress)
@@ -400,6 +405,11 @@ def fetch_webmaster_issues(project_id: str, token: str,
                     _log(f'    ключи/шаблон: {list(_raw)[:6]}')
             except Exception as e:
                 _log(f'⚠ Вебмастер-API ({host_norm}): {e}')
+
+        # Какие вообще значения state встречаются у активных проблем — чтобы
+        # понять, есть ли в /diagnostics/ признак «на проверке».
+        _seen_states = sorted({(i.state or '∅') for i in all_issues})
+        _log(f'Вебмастер-API: встреченные state активных проблем: {_seen_states}')
 
         all_issues.sort(key=lambda i: (SEVERITY_ORDER.get(i.severity, 9), i.host))
         save_issues(project_id, all_issues)
