@@ -113,8 +113,14 @@ def run_check(pid, params, creds, log, progress):
             try:
                 _tt = build_custom_tasks_typed(_tech_urls, src)
                 for _t in _tt:
-                    _t.type_code = 'tech'
-                    _t.type_label = 'Тех. страница'
+                    _p = urlparse(_t.url).path.rstrip('/')
+                    if _p.endswith('/specials'):
+                        # Спецпредложения – это листинг товаров, проверяем как раздел.
+                        _t.type_code = 'category'
+                        _t.type_label = 'Спецпредложения'
+                    else:
+                        _t.type_code = 'tech'
+                        _t.type_label = 'Тех. страница'
                 plan.tasks.extend(_tt)
                 log(f'Технические страницы: добавлено {len(_tt)}')
             except Exception as e:

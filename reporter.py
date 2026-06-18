@@ -609,6 +609,9 @@ def _build_structure_sheet(wb, results):
             _ca = getattr(r, 'contacts_addr', None)
             if _ca:
                 _probs += len(_ca.get('mismatched') or [])
+            _pp = getattr(r, 'page_phone', None)
+            if _pp and _pp.get('status') in ('bug', 'critical'):
+                _probs += 1
             pc = ws.cell(row=row, column=4)
             pc.value = _probs if _probs else ''
             pc.font = _font(size=11, bold=True, color=C.err)
@@ -660,6 +663,14 @@ def _build_structure_sheet(wb, results):
                     _addr_comment = '\n'.join(
                         f'{m["city"]}: сайт «{m["site"]}» / КП «{m["kp"]}»' for m in _mm[:20])
                 _parts.append(_txt)
+            if _pp:
+                _ps = _pp.get('status')
+                _pmark = {'ok': '✓', 'info': 'инфо'}.get(_ps, 'расхождение')
+                _parts.append(f'Телефон {_pmark}')
+                if _ps in ('bug', 'critical') and _pp.get('comment'):
+                    _addr_bad = True
+                    _addr_comment = ((_addr_comment + '\n') if _addr_comment else '') \
+                        + f'Телефон: {_pp["comment"]}'
             ec = ws.cell(row=row, column=9)
             ec.alignment = _align(indent=1)
             ec.border = _border(color=C.border_light)

@@ -217,7 +217,7 @@ _TECH_PATHS_IMP = [
     '/o-kompanii/', '/faq/', '/vakansii/', '/nashi-postavshiki/', '/rekvizity/',
     '/contact/', '/oplata/', '/dostavka/', '/pravila-otgruzki/', '/kontrol-kachestva/',
     '/komplektaciya-zakaza/', '/upakovka-zakaza/', '/vozvrat-tovara/', '/garantii/',
-    '/price-list/', '/kak-sdelat-pokupku/', '/catalog/', '/uslugi-metalloobrabotki/',
+    '/price-list/', '/kak-sdelat-pokupku/', '/uslugi-metalloobrabotki/',
     '/proizvodstvo-metalloprokata/', '/specials/', '/postavshhikam/',
     '/polzovatelskoe-soglashenie/', '/politika-konfidentsialnosti/', '/sitemap/', '/search/',
 ]

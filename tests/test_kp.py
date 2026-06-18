@@ -233,3 +233,12 @@ def test_contacts_page_addresses_vs_kp():
     assert res['matched'] == 2          # Москва + Орёл (ё=е)
     assert len(res['mismatched']) == 1 and res['mismatched'][0]['city'] == 'Уфа'
     assert res['not_in_kp'] == []
+
+
+def test_page_phone_vs_kp():
+    """Сверка телефона в контенте страницы (kak-sdelat-pokupku) с КП города."""
+    from kp import check_page_phone
+    kp = _kp(phone_seo='+7 (499) 130-60-28', all_phones='4991306028')
+    assert check_page_phone('Звоните +7 (499) 130-60-28', 'x.ru', kp)['status'] == 'ok'
+    assert check_page_phone('Звоните +7 (495) 000-11-22', 'x.ru', kp)['status'] == 'bug'
+    assert check_page_phone('Текст без номера', 'x.ru', kp)['status'] == 'bug'

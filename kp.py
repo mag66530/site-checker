@@ -382,6 +382,31 @@ def check_against_kp(html: str, domain: str, kp: dict[str, KPRow]) -> KPCheckRes
     return res
 
 
+def check_page_phone(html: str, domain: str, kp: dict) -> Optional[dict]:
+    """Сверить телефон(ы) на странице с КП города (для /kak-sdelat-pokupku/ и т.п.).
+    Возвращает {status, comment} или None если города нет в КП."""
+    row = kp.get(_norm_host(domain))
+    if not row:
+        return None
+    site = {p for p in split_phones(html or '') if not p.startswith('000')}
+    kp_ph = row.phone_set()
+    if not kp_ph:
+        return {'status': 'critical',
+                'comment': f'в КП нет номера для города «{row.city}»'}
+    if not site:
+        return {'status': 'bug', 'comment': 'на странице не найден телефон'}
+    if site & kp_ph:
+        return {'status': 'ok', 'comment': ''}
+    all_kp = set()
+    for rr in kp.values():
+        all_kp |= rr.phone_set()
+    if site & all_kp:
+        return {'status': 'ok', 'comment': 'номер обслуживающего филиала'}
+    return {'status': 'bug',
+            'comment': 'телефон на странице не из КП: '
+                       + ', '.join(_fmt(p) for p in site)}
+
+
 # ── Сверка адресов ВСЕХ городов на странице «Контакты» с КП ───────────
 
 # Город и адрес в списке офисов: <b>Город</b><br> Адрес …</div>.
