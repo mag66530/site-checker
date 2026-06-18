@@ -285,6 +285,27 @@ def test_tech_section_mandatory_bug_and_broken_links():
     print('✓ Тех. секция: обязательный баг + битые ссылки в отчёте')
 
 
+def test_cell_state_bug_shows_count():
+    """Ячейка грида: обязательный блок с числом (напр. «Фото товаров» – сколько
+    без фото) показывает «БАГ (N)», а без числа – просто «БАГ»."""
+    from reporter import _cell_state
+    from types import SimpleNamespace as NS
+    col = {'kind': 'block', 'key': 'photos', 'label': 'Фото товаров'}
+    by_key = {'photos': NS(key='photos', label='Фото товаров', required=True,
+                           present=False, count=23)}
+    assert _cell_state(col, by_key) == ('БАГ (23)', 'bug')
+    # обязательный без числа (count=None) – просто «БАГ»
+    col2 = {'kind': 'block', 'key': 'h1', 'label': 'H1'}
+    bk2 = {'h1': NS(key='h1', label='H1', required=True, present=False, count=None)}
+    assert _cell_state(col2, bk2) == ('БАГ', 'bug')
+    # обязательный с count=0 (напр. «Карточки товаров» = 0) – «БАГ», не «БАГ (0)»
+    col3 = {'kind': 'block', 'key': 'product_cards', 'label': 'Карточки'}
+    bk3 = {'product_cards': NS(key='product_cards', label='Карточки', required=True,
+                              present=False, count=0)}
+    assert _cell_state(col3, bk3) == ('БАГ', 'bug')
+    print('✓ Ячейка «БАГ (N)» показывает число, где оно есть')
+
+
 if __name__ == '__main__':
     test_basic_report_creation()
     test_report_with_text_issues()

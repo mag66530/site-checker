@@ -248,6 +248,10 @@ def _cell_state(col, by_key):
     if b is None:
         return ('', 'absent')
     if b.required and not b.present:
+        # Если у блока есть число (напр. «Фото товаров» – сколько без фото) –
+        # показываем его прямо в баге: «БАГ (23)», как обещает подсказка столбца.
+        if b.count:
+            return (f'БАГ ({b.count})', 'bug')
         return ('БАГ', 'bug')
     if b.present:
         if b.count is not None:
