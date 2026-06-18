@@ -149,6 +149,25 @@ def get_telegram_recipients(project_id):
     return []
 
 
+def _resolve_m404_period() -> dict:
+    """Период 404-Метрики из session_state → {metrika_404_date1, _date2}.
+    'За день' → конкретная дата; 'За неделю' → 7daysAgo..today;
+    'За период' → выбранные С/По."""
+    mode = st.session_state.get('c30_m404_mode', 'За неделю')
+    if mode == 'За день':
+        d = st.session_state.get('c30_m404_day')
+        ds = d.strftime('%Y-%m-%d') if d else 'yesterday'
+        return {'metrika_404_date1': ds, 'metrika_404_date2': ds}
+    if mode == 'За период':
+        df = st.session_state.get('c30_m404_from')
+        dt = st.session_state.get('c30_m404_to')
+        return {
+            'metrika_404_date1': df.strftime('%Y-%m-%d') if df else '7daysAgo',
+            'metrika_404_date2': dt.strftime('%Y-%m-%d') if dt else 'today',
+        }
+    return {'metrika_404_date1': '7daysAgo', 'metrika_404_date2': 'today'}
+
+
 def format_duration(sec: int) -> str:
     if sec < 60:
         return f'{sec} сек'
@@ -619,7 +638,7 @@ def init_session():
         'c30_fetch_notifications': True,
         'c30_notify_days': 1,   # прогон ежедневный → по умолчанию забираем за 1 день
         'c30_fetch_metrika_404': True,    # 404 из Метрики (API) в отчёт
-        'c30_m404_mode': 'За 7 дней',     # период 404 (трафик мал → 7+ дней)
+        'c30_m404_mode': 'За неделю',     # период 404 (трафик мал → неделя+)
         # Свой список URL
         'c30_use_custom_urls': False,
         'c30_custom_urls_text': '',
@@ -1031,11 +1050,26 @@ if pid:
                  'проекта) за выбранный период. За день трафик на 404 мал — '
                  'обычно нужен период 7+ дней.')
         if _ck_m404:
-            _m404_opts = ['За день', 'За 7 дней', 'За 14 дней', 'За 30 дней']
-            _pm1, _pm2 = st.columns([1, 3])
+            from datetime import date as _date, timedelta as _td
+            _pm1, _pm2, _pm3 = st.columns([1.3, 1.3, 1.3])
             with _pm1:
-                st.selectbox('Период 404', _m404_opts,
-                             key='c30_m404_mode', label_visibility='collapsed')
+                _m404_mode = st.selectbox(
+                    'Период 404', ['За день', 'За неделю', 'За период'],
+                    key='c30_m404_mode', label_visibility='collapsed')
+            if _m404_mode == 'За день':
+                with _pm2:
+                    st.date_input('Дата', value=_date.today() - _td(days=1),
+                                  key='c30_m404_day', format='DD.MM.YYYY',
+                                  label_visibility='collapsed')
+            elif _m404_mode == 'За период':
+                with _pm2:
+                    st.date_input('С', value=_date.today() - _td(days=7),
+                                  key='c30_m404_from', format='DD.MM.YYYY',
+                                  label_visibility='collapsed')
+                with _pm3:
+                    st.date_input('По', value=_date.today(),
+                                  key='c30_m404_to', format='DD.MM.YYYY',
+                                  label_visibility='collapsed')
         st.checkbox('Проверять, что ссылки на тех. страницах реально открываются (404)',
                     key='c30_check_links',
                     help='Прозваниваем каждую внутреннюю ссылку в тексте тех. страниц '
@@ -1187,9 +1221,7 @@ if pid:
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
                 'fetch_metrika_404': st.session_state.get('c30_fetch_metrika_404', True),
-                'metrika_404_days': {
-                    'За день': 1, 'За 7 дней': 7, 'За 14 дней': 14, 'За 30 дней': 30,
-                }.get(st.session_state.get('c30_m404_mode', 'За 7 дней'), 7),
+                **_resolve_m404_period(),
             }
             # Свой список URL (если включён) – добавится к обычной выборке проекта.
             _custom_urls = []

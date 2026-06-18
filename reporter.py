@@ -1487,6 +1487,26 @@ def _build_kp_sheet(wb, results):
         row += 1
 
 
+# Страна по доменной зоне URL (для листа «404 из Метрики»).
+_TLD_COUNTRY = {
+    'ru': 'Россия', 'kz': 'Казахстан', 'by': 'Беларусь', 'kg': 'Кыргызстан',
+    'uz': 'Узбекистан', 'am': 'Армения', 'az': 'Азербайджан', 'ua': 'Украина',
+}
+
+
+def _country_by_url(url: str) -> str:
+    """Страна по TLD домена URL. Неизвестно → прочерк."""
+    from urllib.parse import urlparse as _up
+    host = (url or '').strip()
+    try:
+        netloc = _up(host).netloc or host.split('/')[0]
+    except ValueError:
+        netloc = host.split('/')[0]
+    netloc = netloc.split(':')[0].strip('.')   # без порта
+    tld = netloc.rsplit('.', 1)[-1].lower() if '.' in netloc else ''
+    return _TLD_COUNTRY.get(tld, '–')
+
+
 # ── Главная функция ────────────────────────────────────────────────
 
 
@@ -2037,9 +2057,9 @@ def build_report(
                 cell.alignment = _align()
                 cell.border = _border(color=C.border_light)
 
-                # Страна
+                # Страна — определяем по доменной зоне URL
                 cell = ws4.cell(row=row_idx, column=2)
-                cell.value = f'{fr["country_code"]} – {fr["country_name"]}'
+                cell.value = _country_by_url(fr['url'])
                 cell.font = _font(size=10)
                 cell.alignment = _align()
                 cell.border = _border(color=C.border_light)

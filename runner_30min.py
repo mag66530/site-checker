@@ -6,7 +6,7 @@ runner_30min.py – логика прогона 30-мин чек-листа БЕ
 внутри Streamlit. Возвращает результаты, путь отчёта и т.п.
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -38,6 +38,32 @@ from webmaster_api import fetch_webmaster_issues, load_issues
 
 REPORTS_DIR = Path(__file__).parent / 'reports'
 REPORTS_DIR.mkdir(exist_ok=True)
+
+
+def _resolve_metrika_date(s):
+    """'today'|'yesterday'|'NdaysAgo'|'YYYY-MM-DD' → datetime (или None)."""
+    import re
+    s = (s or '').strip()
+    if s == 'today':
+        return datetime.now()
+    if s == 'yesterday':
+        return datetime.now() - timedelta(days=1)
+    m = re.match(r'(\d+)daysAgo$', s)
+    if m:
+        return datetime.now() - timedelta(days=int(m.group(1)))
+    try:
+        return datetime.strptime(s, '%Y-%m-%d')
+    except Exception:
+        return None
+
+
+def _metrika_period_display(d1, d2):
+    """Человекочитаемый период: «18.06.2026» или «12.06.2026 – 18.06.2026»."""
+    a, b = _resolve_metrika_date(d1), _resolve_metrika_date(d2)
+    if not a or not b:
+        return None
+    fa, fb = a.strftime('%d.%m.%Y'), b.strftime('%d.%m.%Y')
+    return fa if fa == fb else f'{fa} – {fb}'
 
 
 def run_check(pid, params, creds, log, progress):
@@ -255,17 +281,20 @@ def run_check(pid, params, creds, log, progress):
             log('Сбор уведомлений выключен.')
 
         # ── 404 из Метрики (API) — отдельная галка со своим периодом ──
+        _m404_disp = None
         if params.get('fetch_metrika_404', True):
             _mt_token = creds.get('metrika_oauth')
-            _m404_days = int(params.get('metrika_404_days', 7))
+            _d1 = params.get('metrika_404_date1') or '7daysAgo'
+            _d2 = params.get('metrika_404_date2') or 'today'
             if _mt_token:
-                log(f'Метрика-API: тяну 404 за {_m404_days} дн…')
+                log(f'Метрика-API: тяну 404 за {_d1}…{_d2}…')
                 try:
                     from metrika_api import fetch_today_404
                     _today_404 = fetch_today_404(
                         pid, _mt_token, _proxy, _nlog,
                         counter=creds.get('metrika_counter'),
-                        date1=f'{_m404_days}daysAgo', date2='today')
+                        date1=_d1, date2=_d2)
+                    _m404_disp = _metrika_period_display(_d1, _d2)
                 except Exception as _e:
                     log(f'⚠ Метрика-API: {_e}')
             else:
@@ -292,7 +321,8 @@ def run_check(pid, params, creds, log, progress):
             selected_subdomains=plan.selected_subdomains, results=results,
             output_path=report_path, notifications=_notifs or None,
             metrika_reports=_metrika_reports,
-            metrika_data_date=get_latest_available_date(pid),
+            metrika_data_date=(_m404_disp if _today_404
+                               else get_latest_available_date(pid)),
             service_issues=_service_issues)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
