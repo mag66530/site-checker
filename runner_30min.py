@@ -154,6 +154,7 @@ def run_check(pid, params, creds, log, progress):
         results = asyncio.run(run_batch(
             plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
             retry_delay_ms=2500, check_text=bool(params.get('check_text', True)),
+            check_links=bool(params.get('check_links', False)),
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
 
         finished_ms = int(datetime.now().timestamp() * 1000)

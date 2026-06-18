@@ -460,6 +460,7 @@ class _Ctx:
     # Нижние блоки карточки товара («С этим товаром покупают», «Похожие»,
     # «Вас также может заинтересовать») – видимая часть от первого такого блока.
     rec_html_lower: str = ''
+    rec_html_full: str = ''
     rec_text_lower: str = ''
 
 
@@ -775,23 +776,37 @@ def _card_has_price(card_html_lower: str) -> bool:
     return bool(_PRICE_RE.search(text)) or 'по запросу' in text.lower()
 
 
+def _is_real_rec_card(card_html_lower: str) -> bool:
+    """Это настоящая товарная карточка (ссылка на товар + непустой текст), а не
+    случайное вхождение класса card-product в скриптах/футере/под-элементах."""
+    if not re.search(r'href="/[a-z0-9\-/]', card_html_lower):
+        return False
+    return len(html_to_visible_text(card_html_lower).strip()) > 3
+
+
 def _d_rec_price(c: _Ctx):
     # У КАЖДОГО товара в нижних блоках должна быть видимая цена (₽ или «по
-    # запросу»). Проверяем покарточно: если хотя бы у одной карточки снизу нет
-    # ни цены, ни «по запросу» – это баг (та самая «пустая цена снизу»), даже
-    # если у соседних карточек цена есть.
-    # Нижнего товарного блока нет (как у МПЭ – их там нет по дизайну, или у ИМП –
-    # подгружаются JS и в коде их нет) – проверять нечего: возвращаем «нет», а в
-    # check_content пункт делаем необязательным, чтобы стоял «–» (N/A).
+    # запросу»). Проверяем покарточно ТОЛЬКО реальные карточки (со ссылкой и
+    # текстом): класс card-product/… встречается в вёрстке и вне карточек, и без
+    # фильтра давал ложный «нет цен» (особенно на ИМП).
+    # Нижнего товарного блока нет (МПЭ – нет по дизайну, ИМП – грузится JS) –
+    # проверять нечего: возвращаем «нет», а в check_content пункт необязателен («–»).
     if not _rec_has_cards(c):
         return False, None
-    chunks = _rec_card_chunks(c.rec_html_lower)
-    if not chunks:
-        # карточки есть по маркеру, но разбить не вышло – область целиком.
-        has = bool(_PRICE_RE.search(c.rec_text_lower)) or 'по запросу' in c.rec_text_lower
-        return has, None
-    broken = sum(1 for ch in chunks if not _card_has_price(ch))
-    return (broken == 0), None
+    rec_full = c.rec_html_full or c.rec_html_lower
+    # Покарточно проверяем только надёжный контейнер (СМУ:
+    # catalog-product-card-item) – так ловим «пустые цены снизу». У ИМП класс
+    # card-product встречается в разметке дублями/фрагментами (одна карусель даёт
+    # десятки ложных «карточек без цены») – там проверяем область целиком (есть ли
+    # видимая цена вообще), без покарточного разбора, чтобы не плодить ложные баги.
+    if 'catalog-product-card-item' in rec_full:
+        chunks = [ch for ch in re.split(r'catalog-product-card-item', rec_full)[1:]
+                  if _is_real_rec_card(ch)]
+        if chunks:
+            broken = sum(1 for ch in chunks if not _card_has_price(ch))
+            return (broken == 0), None
+    has = bool(_PRICE_RE.search(c.rec_text_lower)) or 'по запросу' in c.rec_text_lower
+    return has, None
 
 
 # «Нет фото»: вместо картинки товара подставлена заглушка. Точные маркеры в src
@@ -1048,8 +1063,10 @@ def _d_tech_map(c: _Ctx):
 
 def _d_tech_feedback(c: _Ctx):
     body = _content_html(c)
-    return ('<form' in body and ('обратной связи' in body or 'обратная связь' in body
-            or 'связаться' in body or 'оставить заявк' in body)), None
+    has_form = '<form' in body or body.count('<input') >= 2
+    related = any(m in body for m in (
+        'обратной связи', 'обратная связь', 'связаться', 'заявк', 'оставить сообщ'))
+    return (has_form and related), None
 
 
 def _d_tech_vacancies(c: _Ctx):
@@ -1079,19 +1096,53 @@ def _d_tech_links(c: _Ctx):
     return len(real) >= 1, len(real)
 
 
+# Ссылки в контенте, которые осмысленно «прозвонить» на 404. Не сетевая функция –
+# только достаёт адреса (саму проверку открываемости делает http_checker).
+_SKIP_LINK_PREFIXES = ('#', 'javascript:', 'mailto:', 'tel:', 'data:', 'sms:', 'callto:')
+
+
+def extract_content_links(html: str, limit: int = 60) -> list[str]:
+    """Адреса ссылок из контентной области (без сквозных шапки/подвала/меню).
+
+    Отбрасываем якоря (#…), javascript:, mailto:, tel:, data:. Поддерживаем
+    обе кавычки. Дедуп по href (без учёта регистра), порядок сохраняем, режем
+    до limit. Возвращаем href как есть (относительные/абсолютные) – разрешает
+    и фильтрует по домену уже вызывающая сторона (http_checker)."""
+    if not html:
+        return []
+    body = _CONTENT_CHROME_RE.sub(' ', html)
+    out, seen = [], set()
+    for m in re.finditer(r'<a\b[^>]*?\shref\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
+                         body, re.I | re.S):
+        h = (m.group(1) or m.group(2) or '').strip()
+        if not h or h.lower().startswith(_SKIP_LINK_PREFIXES):
+            continue
+        key = h.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
+        if len(out) >= limit:
+            break
+    return out
+
+
 _TECH = [
     _b('content_text', 'Текст',          True,  _d_content_text),
     _b('breadcrumbs',  'Хлебные крошки', False, _d_breadcrumbs),
     _b('h1',           'Заголовок H1',   True,  _d_h1),
 ]
 
-# Спец-блоки тех. страниц (пока справочно – required=False).
+# Спец-блоки тех. страниц. Часть – ОБЯЗАТЕЛЬНЫЕ (баг, если нет): надёжные и
+# однозначно «должны быть» на своей странице (есть на всех проектах). Остальные –
+# справочные (✓/–), т.к. непостоянны или легитимно могут отсутствовать.
 _TB_IMAGES    = _b('tech_images',       'Картинки',             False, _d_tech_images)
+_TB_IMAGES_R  = _b('tech_images',       'Картинки',             True,  _d_tech_images)   # /about/
 _TB_CATALOG   = _b('tech_catalog_link', 'Ссылка на каталог',    False, _d_tech_catalog_link)
-_TB_MAP       = _b('tech_map',          'Карта',                False, _d_tech_map)
+_TB_MAP_R     = _b('tech_map',          'Карта',                True,  _d_tech_map)       # /contacts/
 _TB_FORM      = _b('tech_feedback',     'Форма обратной связи', False, _d_tech_feedback)
 _TB_VACANCIES = _b('tech_vacancies',    'Вакансии',             False, _d_tech_vacancies)
-_TB_SEARCH    = _b('tech_search',       'Строка поиска',        False, _d_tech_search_box)
+_TB_SEARCH_R  = _b('tech_search',       'Строка поиска',        True,  _d_tech_search_box) # /search/
 _TB_LINKS     = _b('tech_links',        'Ссылки',               False, _d_tech_links)
 
 
@@ -1104,16 +1155,16 @@ def _tech_profile_for(url: str) -> list:
     except Exception:
         path = (url or '').lower()
     extra = []
-    if '/contact' in path:                                   # контакты
-        extra = [_TB_MAP, _TB_FORM]
+    if '/contact' in path:                                   # контакты: карта обязательна
+        extra = [_TB_MAP_R, _TB_FORM]
     elif '/vakansii' in path or '/vacancy' in path:          # вакансии
         extra = [_TB_VACANCIES]
-    elif '/search' in path or '/poisk' in path:              # поиск по сайту
-        extra = [_TB_SEARCH]
+    elif '/search' in path or '/poisk' in path:              # поиск: строка поиска обязательна
+        extra = [_TB_SEARCH_R]
     elif 'proizvodstvo' in path or 'uslugi-metallo' in path:  # производство / услуги
         extra = [_TB_IMAGES, _TB_LINKS]
-    elif '/about' in path or '/o-kompanii' in path:           # о компании
-        extra = [_TB_IMAGES, _TB_CATALOG]
+    elif '/about' in path or '/o-kompanii' in path:           # о компании: картинки обязательны
+        extra = [_TB_IMAGES_R, _TB_CATALOG]
     elif ('delivery' in path or '/payment' in path or '/oplata' in path
           or '/dostavka' in path):                            # оплата / доставка
         extra = [_TB_CATALOG, _TB_IMAGES]
@@ -1249,6 +1300,14 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
             if 0 <= j < hcut:
                 hcut = j
         ctx.rec_html_lower = ctx.vis_html_lower[hcut:] if hcut < len(ctx.vis_html_lower) else ''
+        # Полная (не vis) нижняя область – для покарточного разбора: strip_hidden
+        # выбрасывает href, а по нему отличаем реальные карточки от мусора.
+        hcut_f = len(ctx.html_lower)
+        for _m in _related:
+            j = ctx.html_lower.find(_m)
+            if 0 <= j < hcut_f:
+                hcut_f = j
+        ctx.rec_html_full = ctx.html_lower[hcut_f:] if hcut_f < len(ctx.html_lower) else ''
 
     # Подтип страницы-списка (категория / тег) – определяем по вёрстке:
     #   listing – есть карточки товаров (catalog-product-card-item) → строгая

@@ -391,11 +391,46 @@ def test_search_page_h1_not_required():
     """Страница результатов поиска (/search/) не обязана иметь H1: на /search/
     H1 справочный, отсутствие – не баг; на обычной тех. странице – баг."""
     long_text = 'Результаты поиска по запросу. ' * 20   # контентный текст есть
-    html = f'<header><a href="tel:1">т</a></header><div>{long_text}</div>'
+    box = '<input type="search">'                        # строка поиска (обязат. на /search/)
+    html = f'<header><a href="tel:1">т</a></header><div>{box}{long_text}</div>'
     rs = _by_key(check_content(html, 'tech', url='https://inmetprom.ru/search/'))
     assert not rs['h1'].present and not rs['h1'].required        # «–», не баг
-    ra = check_content(html, 'tech', url='https://inmetprom.ru/about/')
-    assert _by_key(ra)['h1'].required and ra.bug_count == 1      # контроль: только H1
+    # Контроль: на обычной тех. странице («О компании») H1 обязателен – его нет
+    # → баг. Картинку добавляем, чтобы единственным багом остался именно H1.
+    about = f'<header><a href="tel:1">т</a></header><div><img src="/a.jpg">{long_text}</div>'
+    ra = check_content(about, 'tech', url='https://inmetprom.ru/about/')
+    assert _by_key(ra)['h1'].required and not _by_key(ra)['h1'].present
+    assert ra.bug_count == 1 and ra.bugs[0].key == 'h1'         # только H1
+
+
+def test_tech_required_spec_blocks_are_bugs():
+    """Часть спец-элементов тех. страниц сделана обязательной (баг, если нет):
+    карта на «Контактах», картинки на «О компании», строка поиска на странице
+    поиска. Базовый контент (H1 + текст) на месте, чтобы изолировать спец-баг."""
+    base = '<header><a href="tel:1">т</a></header><h1>Заголовок</h1><p>' \
+           + ('Содержательный текст страницы. ' * 20) + '</p>'
+
+    # Контакты без карты → баг по карте; с картой → нет бага.
+    no_map = check_content(base, 'tech', url='https://inmetprom.ru/contacts/')
+    assert _by_key(no_map)['tech_map'].required and not _by_key(no_map)['tech_map'].present
+    assert 'tech_map' in {b.key for b in no_map.bugs}
+    with_map = check_content(base + '<div class="ymaps"></div>', 'tech',
+                             url='https://inmetprom.ru/contacts/')
+    assert 'tech_map' not in {b.key for b in with_map.bugs}
+
+    # О компании без картинок → баг по картинкам; с картинкой → нет бага.
+    no_img = check_content(base, 'tech', url='https://inmetprom.ru/about/')
+    assert 'tech_images' in {b.key for b in no_img.bugs}
+    with_img = check_content(base + '<img src="/team.jpg">', 'tech',
+                             url='https://inmetprom.ru/about/')
+    assert 'tech_images' not in {b.key for b in with_img.bugs}
+
+    # Поиск без строки поиска → баг; со строкой → нет бага.
+    no_box = check_content(base, 'tech', url='https://inmetprom.ru/search/')
+    assert 'tech_search' in {b.key for b in no_box.bugs}
+    with_box = check_content(base + '<input type="search">', 'tech',
+                             url='https://inmetprom.ru/search/')
+    assert 'tech_search' not in {b.key for b in with_box.bugs}
 
 
 def test_tech_per_page_profiles():
@@ -413,6 +448,36 @@ def test_tech_per_page_profiles():
     bk = _by_key(us)
     assert bk['tech_images'].present and bk['tech_links'].present
     assert vac.bug_count == 0 and sr.bug_count == 0 and us.bug_count == 0
+
+
+def test_extract_content_links_filters_and_dedup():
+    """extract_content_links: только контент (без шапки/меню/подвала), без
+    якорей/js/mailto/tel, обе кавычки, дедуп без учёта регистра."""
+    from content_checker import extract_content_links
+    html = (
+        '<header><a href="/in-header/">h</a></header>'
+        '<nav><a href="/menu/">m</a></nav>'
+        '<main>'
+        "<a href='/single-quote/'>sq</a>"
+        '<a href="/dup/">d1</a><a href="/DUP/">d2</a>'
+        '<a href="#anchor">a</a><a href="javascript:void(0)">j</a>'
+        '<a href="mailto:x@y.ru">e</a><a href="tel:+74951234567">t</a>'
+        '<a href="/real/">r</a>'
+        '</main>'
+        '<footer><a href="/in-footer/">f</a></footer>'
+    )
+    links = extract_content_links(html)
+    assert '/single-quote/' in links and '/real/' in links
+    for skip in ('/in-header/', '/menu/', '/in-footer/', '#anchor',
+                 'javascript:void(0)', 'mailto:x@y.ru', 'tel:+74951234567'):
+        assert skip not in links
+    assert sum(1 for l in links if l.lower() == '/dup/') == 1   # дедуп ё=е по регистру
+
+
+def test_extract_content_links_limit():
+    from content_checker import extract_content_links
+    html = '<main>' + ''.join(f'<a href="/p{i}/">x</a>' for i in range(100)) + '</main>'
+    assert len(extract_content_links(html, limit=10)) == 10
 
 
 def test_footer_address_mikrorayon():

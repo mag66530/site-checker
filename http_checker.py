@@ -182,6 +182,10 @@ class CheckResult:
     # Сверка телефона в контенте страницы с КП (например /kak-sdelat-pokupku/)
     page_phone: Optional[dict] = None
 
+    # «Ссылки реально открываются» (404) – тяжёлая опц. проверка по каждой ссылке.
+    # {'checked': int, 'broken': [{'url': str, 'code': int}]} | None (не проверяли)
+    broken_links: Optional[dict] = None
+
     checked_at: Optional[str] = None
 
 
@@ -345,6 +349,74 @@ async def _css_sel_for_url(session, url, timeout_ms, proxy_url, cache, locks, gu
         return sels
 
 
+# ── «Ссылки реально открываются» (404) ──────────────────────────────
+
+
+async def _link_status(session, url, timeout_ms, proxy_url):
+    """Код ответа ссылки (после редиректов). HEAD дёшево; если сервер не любит
+    HEAD (405/501/5xx) – перепроверяем GET. None – не удалось определить
+    (таймаут/сеть): такое НЕ считаем битым (это не «нет страницы»)."""
+    to = aiohttp.ClientTimeout(total=min(timeout_ms, 20000) / 1000)
+    try:
+        async with session.head(url, timeout=to, allow_redirects=True,
+                                proxy=proxy_url) as r:
+            # 2xx/3xx и даже 401/403 – ссылка ведёт на существующую страницу
+            # (доступ/метод – не «битость»). 404/410 – явно битая.
+            if r.status < 405 or r.status in (410,):
+                return r.status
+    except Exception:
+        pass
+    try:
+        async with session.get(url, timeout=to, allow_redirects=True,
+                               proxy=proxy_url) as r:
+            return r.status
+    except Exception:
+        return None
+
+
+async def check_content_links(session, html, base_url, *, proxy_url=None,
+                              timeout_ms=20000, limit=25):
+    """Проверить, что ссылки в контенте реально открываются (не 404).
+
+    Только ВНУТРЕННИЕ ссылки (тот же сайт): внешние часто блокируют ботов и
+    дают ложные «битые». Битой считаем ТОЛЬКО явный 404/410 (страницы нет);
+    таймаут/сеть/5xx/403 не считаем (это не «нет страницы» и оно флаки).
+    Возвращает {'checked', 'broken':[{'url','code'}]} или None (нечего звонить)."""
+    from content_checker import extract_content_links
+    from urllib.parse import urljoin, urlparse
+    if not html:
+        return None
+
+    def _host(h):
+        h = (h or '').lower()
+        return h[4:] if h.startswith('www.') else h
+
+    base_host = _host(urlparse(base_url).netloc)
+    todo, seen = [], set()
+    for h in extract_content_links(html, limit=limit * 4):
+        absu = urljoin(base_url, h)
+        pu = urlparse(absu)
+        if pu.scheme not in ('http', 'https') or _host(pu.netloc) != base_host:
+            continue                       # только http(s) и только свой сайт
+        key = absu.split('#')[0]
+        if key in seen:
+            continue
+        seen.add(key)
+        todo.append(key)
+        if len(todo) >= limit:
+            break
+    if not todo:
+        return None
+
+    codes = await asyncio.gather(
+        *[_link_status(session, u, timeout_ms, proxy_url) for u in todo],
+        return_exceptions=True)
+    broken = [{'url': u, 'code': code}
+              for u, code in zip(todo, codes)
+              if not isinstance(code, Exception) and code in (404, 410)]
+    return {'checked': len(todo), 'broken': broken}
+
+
 # ── Проверка с ретраями ─────────────────────────────────────────────
 
 
@@ -358,6 +430,7 @@ async def check_one(
     check_text: bool = True,
     text_patterns: str | None = None,
     check_structure: bool = True,
+    check_links: bool = False,
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
     get_css_hidden: Optional[Callable] = None,
@@ -440,6 +513,18 @@ async def check_one(
         except Exception:
             page_phone = None
 
+    # «Ссылки реально открываются» (404) – тяжёлая опц. проверка (запрос по
+    # каждой ссылке). Делаем только если включено, страница открылась и это
+    # тех. страница (их немного, они на главном домене – нагрузка ограничена).
+    broken_links = None
+    if check_links and is_ok and a['body_text'] and task.type_code == 'tech':
+        try:
+            broken_links = await check_content_links(
+                session, a['body_text'], a['final_url'] or task.url,
+                proxy_url=proxy_url, timeout_ms=timeout_ms)
+        except Exception:
+            broken_links = None
+
     return CheckResult(
         url=task.url,
         city=task.city,
@@ -467,6 +552,7 @@ async def check_one(
         kp_result=kp_result,
         contacts_addr=contacts_addr,
         page_phone=page_phone,
+        broken_links=broken_links,
         checked_at=None,
     )
 
@@ -485,6 +571,7 @@ async def run_batch(
     check_text: bool = True,
     text_patterns: str | None = None,
     check_structure: bool = True,
+    check_links: bool = False,
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
     proxy_url: Optional[str] = None,
@@ -545,6 +632,7 @@ async def run_batch(
                     check_text=check_text,
                     text_patterns=text_patterns,
                     check_structure=check_structure,
+                    check_links=check_links,
                     proxy_url=proxy_url,
                     kp_map=kp_map,
                     get_css_hidden=get_css_hidden,

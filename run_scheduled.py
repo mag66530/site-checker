@@ -93,6 +93,7 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'custom_urls': [],
         'check_main': True, 'check_catalog': True, 'check_categories': True,
         'check_filters': has_filters, 'check_products': True, 'check_text': True,
+        'check_links': False,   # «ссылки открываются (404)» – тяжёлая, по запросу
         'fetch_notifications': fetch_notifications,
         'notify_days': int(days),
     }
