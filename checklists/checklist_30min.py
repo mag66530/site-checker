@@ -153,7 +153,7 @@ def _resolve_m404_period() -> dict:
     """Период 404-Метрики из session_state → {metrika_404_date1, _date2}.
     'За день' → конкретная дата; 'За неделю' → 7daysAgo..today;
     'За период' → выбранные С/По."""
-    mode = st.session_state.get('c30_m404_mode', 'За неделю')
+    mode = st.session_state.get('c30_m404_mode', 'За день')
     if mode == 'За день':
         d = st.session_state.get('c30_m404_day')
         ds = d.strftime('%Y-%m-%d') if d else 'yesterday'
@@ -165,7 +165,8 @@ def _resolve_m404_period() -> dict:
             'metrika_404_date1': df.strftime('%Y-%m-%d') if df else '7daysAgo',
             'metrika_404_date2': dt.strftime('%Y-%m-%d') if dt else 'today',
         }
-    return {'metrika_404_date1': '7daysAgo', 'metrika_404_date2': 'today'}
+    _days = {'За неделю': 7, 'За 14 дней': 14, 'За 30 дней': 30}.get(mode, 7)
+    return {'metrika_404_date1': f'{_days}daysAgo', 'metrika_404_date2': 'today'}
 
 
 def format_duration(sec: int) -> str:
@@ -638,7 +639,7 @@ def init_session():
         'c30_fetch_notifications': True,
         'c30_notify_days': 1,   # прогон ежедневный → по умолчанию забираем за 1 день
         'c30_fetch_metrika_404': True,    # 404 из Метрики (API) в отчёт
-        'c30_m404_mode': 'За неделю',     # период 404 (трафик мал → неделя+)
+        'c30_m404_mode': 'За день',       # при включении сразу «За день» + дата
         # Свой список URL
         'c30_use_custom_urls': False,
         'c30_custom_urls_text': '',
@@ -1044,32 +1045,32 @@ if pid:
                              format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
                              key='c30_notify_days')
         _ck_m404 = st.checkbox(
-            'Собрать 404 из Метрики (в отчёт, лист «404 из Метрики»)',
+            'Собрать 404 из Метрики',
             key='c30_fetch_metrika_404',
             help='Берёт 404-страницы напрямую из Метрики (API, по всем счётчикам '
                  'проекта) за выбранный период. За день трафик на 404 мал – '
                  'обычно нужен период 7+ дней.')
         if _ck_m404:
             from datetime import date as _date, timedelta as _td
-            _pm1, _pm2, _pm3 = st.columns([1.3, 1.3, 1.3])
-            with _pm1:
-                _m404_mode = st.selectbox(
-                    'Период 404', ['За день', 'За неделю', 'За период'],
-                    key='c30_m404_mode', label_visibility='collapsed')
+            # Селектор без обёртки в колонки (пустые колонки оставляли
+            # «призрачные» виджеты при выключении чекбокса). Поля даты —
+            # сразу под селектором, появляются в том же ране.
+            _m404_mode = st.selectbox(
+                'Период 404',
+                ['За день', 'За неделю', 'За 14 дней', 'За 30 дней', 'За период'],
+                key='c30_m404_mode', label_visibility='collapsed')
             if _m404_mode == 'За день':
-                with _pm2:
-                    st.date_input('Дата', value=_date.today() - _td(days=1),
-                                  key='c30_m404_day', format='DD.MM.YYYY',
-                                  label_visibility='collapsed')
+                st.date_input('Дата', value=_date.today() - _td(days=1),
+                              key='c30_m404_day', format='DD.MM.YYYY',
+                              label_visibility='collapsed')
             elif _m404_mode == 'За период':
+                _pm2, _pm3 = st.columns(2)
                 with _pm2:
                     st.date_input('С', value=_date.today() - _td(days=7),
-                                  key='c30_m404_from', format='DD.MM.YYYY',
-                                  label_visibility='collapsed')
+                                  key='c30_m404_from', format='DD.MM.YYYY')
                 with _pm3:
                     st.date_input('По', value=_date.today(),
-                                  key='c30_m404_to', format='DD.MM.YYYY',
-                                  label_visibility='collapsed')
+                                  key='c30_m404_to', format='DD.MM.YYYY')
         st.checkbox('Проверять, что ссылки на тех. страницах реально открываются (404)',
                     key='c30_check_links',
                     help='Прозваниваем каждую внутреннюю ссылку в тексте тех. страниц '
