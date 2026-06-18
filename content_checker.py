@@ -1063,8 +1063,10 @@ def _d_tech_map(c: _Ctx):
 
 def _d_tech_feedback(c: _Ctx):
     body = _content_html(c)
-    return ('<form' in body and ('обратной связи' in body or 'обратная связь' in body
-            or 'связаться' in body or 'оставить заявк' in body)), None
+    has_form = '<form' in body or body.count('<input') >= 2
+    related = any(m in body for m in (
+        'обратной связи', 'обратная связь', 'связаться', 'заявк', 'оставить сообщ'))
+    return (has_form and related), None
 
 
 def _d_tech_vacancies(c: _Ctx):
@@ -1100,13 +1102,16 @@ _TECH = [
     _b('h1',           'Заголовок H1',   True,  _d_h1),
 ]
 
-# Спец-блоки тех. страниц (пока справочно – required=False).
+# Спец-блоки тех. страниц. Часть – ОБЯЗАТЕЛЬНЫЕ (баг, если нет): надёжные и
+# однозначно «должны быть» на своей странице (есть на всех проектах). Остальные –
+# справочные (✓/–), т.к. непостоянны или легитимно могут отсутствовать.
 _TB_IMAGES    = _b('tech_images',       'Картинки',             False, _d_tech_images)
+_TB_IMAGES_R  = _b('tech_images',       'Картинки',             True,  _d_tech_images)   # /about/
 _TB_CATALOG   = _b('tech_catalog_link', 'Ссылка на каталог',    False, _d_tech_catalog_link)
-_TB_MAP       = _b('tech_map',          'Карта',                False, _d_tech_map)
+_TB_MAP_R     = _b('tech_map',          'Карта',                True,  _d_tech_map)       # /contacts/
 _TB_FORM      = _b('tech_feedback',     'Форма обратной связи', False, _d_tech_feedback)
 _TB_VACANCIES = _b('tech_vacancies',    'Вакансии',             False, _d_tech_vacancies)
-_TB_SEARCH    = _b('tech_search',       'Строка поиска',        False, _d_tech_search_box)
+_TB_SEARCH_R  = _b('tech_search',       'Строка поиска',        True,  _d_tech_search_box) # /search/
 _TB_LINKS     = _b('tech_links',        'Ссылки',               False, _d_tech_links)
 
 
@@ -1119,16 +1124,16 @@ def _tech_profile_for(url: str) -> list:
     except Exception:
         path = (url or '').lower()
     extra = []
-    if '/contact' in path:                                   # контакты
-        extra = [_TB_MAP, _TB_FORM]
+    if '/contact' in path:                                   # контакты: карта обязательна
+        extra = [_TB_MAP_R, _TB_FORM]
     elif '/vakansii' in path or '/vacancy' in path:          # вакансии
         extra = [_TB_VACANCIES]
-    elif '/search' in path or '/poisk' in path:              # поиск по сайту
-        extra = [_TB_SEARCH]
+    elif '/search' in path or '/poisk' in path:              # поиск: строка поиска обязательна
+        extra = [_TB_SEARCH_R]
     elif 'proizvodstvo' in path or 'uslugi-metallo' in path:  # производство / услуги
         extra = [_TB_IMAGES, _TB_LINKS]
-    elif '/about' in path or '/o-kompanii' in path:           # о компании
-        extra = [_TB_IMAGES, _TB_CATALOG]
+    elif '/about' in path or '/o-kompanii' in path:           # о компании: картинки обязательны
+        extra = [_TB_IMAGES_R, _TB_CATALOG]
     elif ('delivery' in path or '/payment' in path or '/oplata' in path
           or '/dostavka' in path):                            # оплата / доставка
         extra = [_TB_CATALOG, _TB_IMAGES]

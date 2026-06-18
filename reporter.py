@@ -400,7 +400,8 @@ def _build_structure_sheet(wb, results):
     # Тех. страницы с расхождением контактов с КП (адреса городов / телефон) –
     # тоже выводим наверх как ошибку.
     for r in results:
-        if getattr(r, 'type_code', '') == 'tech' and _contacts_problem_text(r):
+        if getattr(r, 'type_code', '') == 'tech' and (
+                (getattr(r, 'content_bugs', 0) or 0) > 0 or _contacts_problem_text(r)):
             bug_pages.append(r)
     bug_pages = sorted(bug_pages, key=lambda r: -(getattr(r, 'content_bugs', 0) or 0))
     row = 8
@@ -589,8 +590,8 @@ def _build_structure_sheet(wb, results):
             (6, 'Крошки', 'Хлебные крошки. Справочно: показываем есть/нет, отсутствие на служебной странице не баг.'),
             (7, 'Текст', 'Есть ли на странице собственный текст (помимо сквозных шапки и подвала). Обязателен.'),
             (8, 'Битые перем.', 'Битые шаблонные переменные ({{…}}, %name% и т.п.). Число = сколько найдено.'),
-            (9, 'Элементы страницы', 'Спец-проверки в зависимости от страницы: картинки, ссылка на каталог, карта, форма обратной связи (✓ есть / – нет). Пока справочно.'),
-            (10, 'Что не так', 'Подробно расхождения контактов с КП (адреса городов / телефон страницы).'),
+            (9, 'Элементы страницы', 'Спец-проверки в зависимости от страницы: картинки, ссылка на каталог, карта, форма обратной связи, строка поиска (✓ есть / – нет / БАГ – обязательного нет). Обязательны: карта на «Контактах», картинки на «О компании», строка поиска на странице поиска.'),
+            (10, 'Что не так', 'Подробно: структурные баги (нет карты/картинок/строки поиска и т.п.) и расхождения контактов с КП (адреса городов / телефон страницы).'),
         ]
         hdr_row = row
         for ci, h, desc in _tech_headers:
@@ -678,8 +679,14 @@ def _build_structure_sheet(wb, results):
             # + краткий итог сверки адресов/телефона с КП.
             _spec = [b for b in (r.content.blocks if (r.is_ok and r.content) else [])
                      if b.key.startswith('tech_')]
-            _parts = [f'{b.label} {"✓" if b.present else "–"}' for b in _spec]
             _addr_bad = False
+            _parts = []
+            for b in _spec:
+                if b.required and not b.present:
+                    _parts.append(f'{b.label}: БАГ')   # обязательный элемент, а его нет
+                    _addr_bad = True
+                else:
+                    _parts.append(f'{b.label} {"✓" if b.present else "–"}')
             if _ca:
                 _mm = _ca.get('mismatched') or []
                 _txt = f'Адреса городов {_ca.get("matched", 0)}/{_ca.get("on_page", 0)}'
@@ -700,8 +707,10 @@ def _build_structure_sheet(wb, results):
             ec.font = _font(size=9, color=C.err if _addr_bad else
                             (C.text_soft if _parts else C.text_muted))
 
-            # Что не так – видимый текст расхождений контактов с КП (в след. столбце).
-            _wn = _contacts_problem_text(r)
+            # Что не так – подробно: структурные баги (нет карты/картинок/строки
+            # поиска и т.п.) и расхождения контактов с КП. Пусто, если проблем нет.
+            _has_problem = (r.content_bugs or 0) > 0 or bool(_contacts_problem_text(r))
+            _wn = _problem_text(r) if _has_problem else ''
             wn = ws.cell(row=row, column=10, value=_wn or '–')
             wn.alignment = _align(indent=1, wrap=True)
             wn.border = _border(color=C.border_light)
