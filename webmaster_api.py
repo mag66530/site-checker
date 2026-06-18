@@ -366,14 +366,19 @@ def fetch_webmaster_issues(project_id: str, token: str,
                             proxy_url)
                 _raw = (diag or {}).get('problems')
                 _raw_n = len(_raw) if isinstance(_raw, (dict, list)) else 0
-                # Одноразовый дамп сырого problem-объекта — увидеть реальные
-                # поля статуса (state/verification_state/…).
-                if not _dumped and _raw_n:
+                # Дамп: сырой problem-объект первой АКТИВНОЙ проблемы (state≠ABSENT)
+                # — увидеть все поля (вдруг есть признак «на проверке»).
+                if not _dumped and isinstance(_raw, dict) and _raw_n:
                     import json as _j
-                    _first = (list(_raw.values())[0] if isinstance(_raw, dict)
-                              else _raw[0])
-                    _log(f'  RAW problem пример: {_j.dumps(_first, ensure_ascii=False)[:400]}')
-                    _dumped = True
+                    _act = None
+                    for _c, _v in _raw.items():
+                        if isinstance(_v, dict) and str(_v.get('state', '')).upper() != 'ABSENT':
+                            _act = (_c, _v)
+                            break
+                    if _act:
+                        _log(f'  RAW активная проблема [{_act[0]}]: '
+                             f'{_j.dumps(_act[1], ensure_ascii=False)[:500]}')
+                        _dumped = True
 
                 # Коды «на проверке» — из отдельного эндпоинта /diagnostics/checks/
                 # (если он есть; на части аккаунтов отдаёт 404 — тогда не дёргаем).
@@ -406,10 +411,14 @@ def fetch_webmaster_issues(project_id: str, token: str,
             except Exception as e:
                 _log(f'⚠ Вебмастер-API ({host_norm}): {e}')
 
-        # Какие вообще значения state встречаются у активных проблем — чтобы
-        # понять, есть ли в /diagnostics/ признак «на проверке».
+        # Какие значения state встречаются + пары severity×state — чтобы понять,
+        # бывает ли у КРИТИЧЕСКИХ состояние UNDEFINED («на проверке»).
         _seen_states = sorted({(i.state or '∅') for i in all_issues})
         _log(f'Вебмастер-API: встреченные state активных проблем: {_seen_states}')
+        from collections import Counter as _C
+        _pairs = _C((i.severity, i.state or '∅') for i in all_issues)
+        _log(f'Вебмастер-API: severity×state: '
+             f'{sorted(_pairs.items())}')
 
         all_issues.sort(key=lambda i: (SEVERITY_ORDER.get(i.severity, 9), i.host))
         save_issues(project_id, all_issues)
