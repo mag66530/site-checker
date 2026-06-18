@@ -782,6 +782,15 @@ st.markdown(
     /* Метрики каталога – числа крупные, подписи спокойные (ровный ряд) */
     [data-testid="stMetricValue"] { font-size: 1.7rem !important; }
     [data-testid="stMetricLabel"] p { font-size: .8rem !important; color: #8A867F !important; }
+    /* Значок подсказки «?» глобально скрыт (app.py). У метрик «Каталог проекта»
+       он нужен (откуда города/категории/…) – возвращаем точечно и аккуратно. */
+    [data-testid="stMetricLabel"] [data-testid="stTooltipIcon"] {
+        display: inline-flex !important; align-items: center;
+        margin-left: 5px; cursor: help;
+    }
+    [data-testid="stMetricLabel"] [data-testid="stTooltipIcon"] svg {
+        width: 15px !important; height: 15px !important; opacity: .7;
+    }
 
     /* Пресеты как карточки (radio с подписями): клик = выбор, выбранная –
        рамка подсвечивается; равные, по центру, без кружка и кнопки «Выбрать». */
