@@ -31,7 +31,7 @@ _STATUS_LABEL = {
     'cancelled': 'отменено',
 }
 
-_OTHER_CATEGORIES = ('kp', 'cannot_buy', 'not_found', 'text')
+_OTHER_CATEGORIES = ('kp', 'cannot_buy', 'not_found', 'text', 'slow')
 
 
 @dataclass
@@ -154,6 +154,11 @@ def analyze(results) -> CriticalSummary:
             n = len(getattr(r, 'text_issues', []) or [])
             s.others['text'].append(
                 CriticalItem('text', city, page, f'{n} битых переменных', url))
+
+        # 6) Долгий ответ сервера (очень медленно) – критично для UX/SEO.
+        if getattr(r, 'speed_rating', '') == 'very_slow':
+            s.others['slow'].append(
+                CriticalItem('slow', city, page, 'долгий ответ сервера', url))
 
     return s
 
