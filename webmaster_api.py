@@ -88,11 +88,28 @@ _PROBLEM_TITLES = {
     'NOT_MOBILE_FRIENDLY': 'Сайт не оптимизирован для мобильных',
     'EXTERNAL_LINKS_SPAM': 'Мусорные ссылки в донорах',
     'TURBO_NO_FEED': 'Нет Турбо-страниц',
+    'NOT_IN_SPRAV': 'Организация не добавлена в Яндекс Бизнес',
+    'NO_SPRAV_COMPANIES': 'Организация не добавлена в Яндекс Бизнес',
+    'HOST_NOT_VERIFIED': 'Права на сайт не подтверждены',
+    'DOMAIN_NOT_VERIFIED': 'Права на сайт не подтверждены',
+    'NO_METRIKA_COUNTER': 'Нет счётчика Яндекс.Метрики',
+    'FAVICON_ERROR': 'Проблема с фавиконкой',
+    'SOFT_404': 'Страницы-обманки (soft 404)',
+    'USELESS_PAGES': 'Малополезные страницы',
+    'MANY_REDIRECTS': 'Много редиректов',
+    'URL_ERRORS': 'Ошибки в URL',
+    'DOCS_IN_SEARCH_DECREASED': 'Снизилось число страниц в поиске',
+    'TURBO_HOST_INACTIVE': 'Турбо-страницы неактивны',
 }
 
 
 def _humanize_code(code: str) -> str:
-    return _PROBLEM_TITLES.get(code) or code.replace('_', ' ').capitalize()
+    """Человеческое название по коду диагностики. Неизвестный код показываем
+    как есть (UPPER_SNAKE) — это явно «код», а не ломаный текст вроде
+    'Not in sprav'. Когда узнаем новый код — добавляем в _PROBLEM_TITLES."""
+    if not code:
+        return 'Проблема (без кода)'
+    return _PROBLEM_TITLES.get(code) or code.upper()
 
 
 def _norm_host(s: str) -> str:
