@@ -162,6 +162,7 @@ def run_check(pid, params, creds, log, progress):
 
         report_filename = make_report_filename(pid, started_ms, REPORTS_DIR)
         report_path = REPORTS_DIR / report_filename
+        _today_404 = None   # отчёт 404 за сегодня из Метрика-API
         # ── Сбор почты/Метрики ДО сборки отчёта – чтобы отчёт сразу полный ──
         if params['fetch_notifications']:
             log('Собираю уведомления из почты…')
@@ -248,6 +249,20 @@ def run_check(pid, params, creds, log, progress):
                 log(f'⚠ Вебмастер-API: токен не задан (ожидаю секрет '
                     f'yandex_oauth_{pid}). '
                     f'Найденные похожие ключи в секретах: {_wm_keys or "нет"}')
+
+            # 404 за СЕГОДНЯ напрямую из Метрики (API) — почта даёт только вчера
+            _mt_token = creds.get('metrika_oauth')
+            if _mt_token:
+                log('Метрика-API: тяну 404 за сегодня…')
+                try:
+                    from metrika_api import fetch_today_404
+                    _today_404 = fetch_today_404(
+                        pid, _mt_token, _proxy, _nlog,
+                        counter=creds.get('metrika_counter'))
+                except Exception as _e:
+                    log(f'⚠ Метрика-API: {_e}')
+            else:
+                log(f'⚠ Метрика-API: токен не задан (metrika_oauth_{pid})')
         else:
             log('Сбор уведомлений выключен.')
 
@@ -259,7 +274,10 @@ def run_check(pid, params, creds, log, progress):
             + load_notifications(pid, 'twogis', _nd)
             + load_notifications(pid, 'google_accounts', _nd)
         )
-        _metrika_reports = load_reports_for_period(pid, _nd) or None
+        _metrika_reports = load_reports_for_period(pid, _nd) or []
+        if _today_404:                       # сегодняшние 404 (API) — первыми
+            _metrika_reports = [_today_404] + list(_metrika_reports)
+        _metrika_reports = _metrika_reports or None
         _service_issues = load_issues(pid) or None
         build_report(
             project_name=cfg['name'], started_at_ms=started_ms,
