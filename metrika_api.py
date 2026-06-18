@@ -10,7 +10,7 @@ metrika_api.py — 404-страницы из Яндекс.Метрики за С
 Секрет: metrika_oauth_<pid> (или общий metrika_oauth).
 counter_id — ниже в COUNTER_IDS.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Callable
 
 try:
@@ -21,111 +21,112 @@ except ImportError:
 from metrika_404 import Report404, Page404
 
 API_URL = 'https://api-metrika.yandex.net/stat/v1/data'
+COUNTERS_URL = 'https://api-metrika.yandex.net/management/v1/counters'
 
-# ID счётчиков Метрики по проектам
+# Основной счётчик проекта (для совместимости / fallback).
 COUNTER_IDS = {
     'mpe': '99551890',
     'smu': '15630172',
     'imp': '94649678',
 }
 
-# Точный заголовок 404-страницы по проекту (подстрока, нижний регистр).
-# Совпадает по самому надёжному куску, общему для всех вариантов проекта.
-_404_TITLES = {
-    'smu': 'страница не найдена | стальметурал',
-    'mpe': 'страница не найдена',
-    'imp': 'страница не найдена (ошибка 404)',
+# У проекта несколько счётчиков (по доменам стран) — 404 собираем из ВСЕХ.
+COUNTER_GROUPS = {
+    'smu': [
+        '15630172',  # stalmetural.ru
+        '92479924',  # stalmetural.kz
+        '92597022',  # stalmetural.kg
+        '92480064',  # stalmetural.am
+        '92628866',  # stalmetural.by
+        '92479352',  # stalmetural.uz
+        '92907275',  # steemet.uz
+        '92479314',  # smg.az
+    ],
+    'mpe': ['99551890'],
+    'imp': ['94649678'],
 }
-# Запасные маркеры, если для проекта не задан точный заголовок.
-_404_MARKERS = [
-    '404', 'страница не найдена', 'не найдена', 'not found',
-    'page not found', 'нет такой страницы', 'ошибка 404',
-]
+
+# Серверный фильтр: заголовок содержит «найдена» (чистая подстрока, без
+# спецсимволов) — сужает выборку. Точная проверка «не найдена» — на клиенте
+# (устойчиво к вариациям заголовка по доменам и скрытым символам \xa0).
+_404_SERVER_FILTER = "ym:pv:title=@'найдена'"
 
 
 def counter_id(project_id: str) -> Optional[str]:
     return COUNTER_IDS.get(project_id)
 
 
-def _404_match_str(project_id: str) -> str:
-    """Подстрока для фильтра API: точный заголовок проекта или базовый маркер."""
-    return _404_TITLES.get(project_id) or 'страница не найдена'
+def _parse_counters(override) -> list:
+    """override (секрет metrika_counter_<pid>) → список id. Принимает строку
+    '15630172, 92479924 …', список/кортеж, или одиночный id."""
+    if not override:
+        return []
+    if isinstance(override, (list, tuple)):
+        items = [str(x) for x in override]
+    else:
+        import re as _re
+        items = _re.split(r'[\s,;]+', str(override))
+    return [s.strip() for s in items if s and s.strip()]
 
 
-def _is_404_title(title: str, project_id: str = None) -> bool:
-    t = (title or '').lower()
-    exact = _404_TITLES.get(project_id) if project_id else None
-    if exact:
-        return exact in t
-    return any(m in t for m in _404_MARKERS)
+def _counters_for(project_id, override=None):
+    """Список счётчиков проекта. Приоритет:
+    1) список из секрета (если задано >1 счётчика);
+    2) группа COUNTER_GROUPS;
+    3) одиночный override / зашитый COUNTER_IDS."""
+    ov = _parse_counters(override)
+    if len(ov) > 1:                      # явный список из секрета — главный
+        return ov
+    if project_id in COUNTER_GROUPS:
+        return COUNTER_GROUPS[project_id]
+    if ov:
+        return ov
+    cid = counter_id(project_id)
+    return [cid] if cid else []
 
 
-def fetch_today_404(project_id: str, token: str,
-                    proxy_url: Optional[str] = None,
-                    log: Optional[Callable] = None,
-                    counter: Optional[str] = None) -> Optional[Report404]:
-    """Забрать 404-страницы за сегодня. Возвращает Report404 или None.
-    counter — id счётчика (из секрета); если None — берём зашитый COUNTER_IDS."""
-    def _log(msg):
-        if log:
-            log('info', msg)
+def _is_404_title(title) -> bool:
+    """404 по заголовку: нормализуем (nbsp→пробел, нижний регистр) и ищем
+    «не найдена» — ловит все варианты («... | Стальметурал», «(Ошибка 404)»)."""
+    t = (title or '').replace('\xa0', ' ').lower()
+    return 'не найдена' in t
 
-    if requests is None:
-        _log('⚠ Метрика-API: requests не установлен')
-        return None
-    cid = str(counter).strip() if counter else counter_id(project_id)
-    if not cid:
-        _log(f'⚠ Метрика-API: нет counter_id для {project_id}')
-        return None
-    if not token:
-        _log(f'⚠ Метрика-API: токен не задан (metrika_oauth_{project_id})')
-        return None
 
-    # Фильтр по заголовку на стороне API: title содержит 404-заголовок проекта.
-    flt = f"ym:pv:title=@'{_404_match_str(project_id)}'"
+def _query_counter_404(cid, token, proxy_url, date1, date2, log):
+    """404-страницы одного счётчика за период. Возвращает (pages, total_views)."""
     params = {
         'ids': cid,
-        'date1': 'today', 'date2': 'today',
+        'date1': date1, 'date2': date2,
         'metrics': 'ym:pv:pageviews',
         'dimensions': 'ym:pv:title,ym:pv:URL',
-        'filters': flt,
+        'filters': _404_SERVER_FILTER,
         'accuracy': 'full',
-        'limit': 1000,
+        'limit': 5000,
         'sort': '-ym:pv:pageviews',
     }
     headers = {'Authorization': f'OAuth {token}'}
     proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
-
     try:
         r = requests.get(API_URL, params=params, headers=headers,
                          proxies=proxies, timeout=40)
     except Exception as e:
-        _log(f'❌ Метрика-API: сеть — {e}')
-        return None
-    if r.status_code == 401:
-        _log('❌ Метрика-API: токен невалиден/просрочен (401)')
-        return None
-    if r.status_code == 403:
-        _log('❌ Метрика-API: нет доступа к счётчику (403) — проверь права токена')
-        return None
+        log(f'⚠ Метрика-API сч.{cid}: сеть — {e}')
+        return [], 0
     if r.status_code >= 400:
-        _log(f'❌ Метрика-API: HTTP {r.status_code}: {r.text[:200]}')
-        return None
-
+        log(f'⚠ Метрика-API сч.{cid}: HTTP {r.status_code}: {r.text[:160]}')
+        return [], 0
     try:
-        data = r.json().get('data', []) or []
+        data = (r.json() or {}).get('data', []) or []
     except Exception as e:
-        _log(f'❌ Метрика-API: разбор ответа — {e}')
-        return None
+        log(f'⚠ Метрика-API сч.{cid}: разбор — {e}')
+        return [], 0
 
-    pages = []
-    total_views = 0
+    pages, tv = [], 0
     for row in data:
         dims = row.get('dimensions', [])
         title = (dims[0].get('name') if len(dims) > 0 else '') or ''
         url = (dims[1].get('name') if len(dims) > 1 else '') or ''
-        # Подстраховка: серверный фильтр мог пропустить — проверяем ещё раз
-        if not _is_404_title(title, project_id):
+        if not _is_404_title(title):       # точная проверка на клиенте
             continue
         try:
             views = int(round(float(row.get('metrics', [0])[0])))
@@ -133,29 +134,227 @@ def fetch_today_404(project_id: str, token: str,
             views = 0
         pages.append(Page404(page_title=title, page_url=url or None,
                              views=views, visitors=0))
-        total_views += views
+        tv += views
+    return pages, tv
 
-    today = datetime.now().strftime('%Y-%m-%d')
-    _log(f'✓ Метрика-API: 404-страниц за сегодня {len(pages)} '
+
+def fetch_today_404(project_id: str, token: str,
+                    proxy_url: Optional[str] = None,
+                    log: Optional[Callable] = None,
+                    counter: Optional[str] = None,
+                    date1: str = '7daysAgo', date2: str = 'today'
+                    ) -> Optional[Report404]:
+    """404-страницы за ПЕРИОД по ВСЕМ счётчикам проекта (домены стран).
+    По умолчанию последние 7 дней (трафик на 404 мал — за один день часто 0).
+    date1/date2 — 'today' | 'yesterday' | 'NdaysAgo' | 'YYYY-MM-DD'."""
+    def _log(msg):
+        if log:
+            log('info', msg)
+
+    if requests is None:
+        _log('⚠ Метрика-API: requests не установлен')
+        return None
+    if not token:
+        _log(f'⚠ Метрика-API: токен не задан (metrika_oauth_{project_id})')
+        return None
+    counters = _counters_for(project_id, counter)
+    if not counters:
+        _log(f'⚠ Метрика-API: нет счётчиков для {project_id}')
+        return None
+
+    _log(f'Метрика-API: {len(counters)} счётчик(ов), период {date1}…{date2}, '
+         f'фильтр {_404_SERVER_FILTER}')
+    all_pages, total_views = [], 0
+    for cid in counters:
+        pg, tv = _query_counter_404(cid, token, proxy_url, date1, date2, _log)
+        all_pages.extend(pg)
+        total_views += tv
+        _log(f'  счётчик {cid}: 404-адресов {len(pg)} (просмотров {tv})')
+
+    rep_date = datetime.now().strftime('%Y-%m-%d')
+    _log(f'✓ Метрика-API: 404-адресов за {date1}…{date2} всего {len(all_pages)} '
          f'(просмотров {total_views})')
-    if not pages:
+    if not all_pages:
+        _log('Метрика-API: 0 строк по всем счётчикам. Проверь токен/права и '
+             'что за период были 404.')
         return None
     return Report404(
-        project_id=project_id, country_code='API', country_name='Сегодня (API)',
-        report_date=today, received_at=datetime.now().isoformat(),
-        pages=pages, total_views=total_views, total_pages=len(pages))
+        project_id=project_id, country_code='API',
+        country_name=f'За период {date1}…{date2} (API)',
+        report_date=rep_date, received_at=datetime.now().isoformat(),
+        pages=all_pages, total_views=total_views, total_pages=len(all_pages))
+
+
+def list_counters(token, proxy_url=None):
+    """Вывести все счётчики, доступные токену (Management API).
+    Показывает id, имя, сайт и зеркала (поддомены) — для поиска нужного."""
+    if requests is None:
+        print('requests не установлен'); return
+    headers = {'Authorization': f'OAuth {token}'}
+    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    params = {'per_page': 1000}
+    try:
+        r = requests.get(COUNTERS_URL, params=params, headers=headers,
+                         proxies=proxies, timeout=40)
+    except Exception as e:
+        print('Сеть:', e); return
+    print('HTTP', r.status_code)
+    if r.status_code >= 400:
+        print('Ответ:', r.text[:400]); return
+    counters = (r.json() or {}).get('counters', []) or []
+    print(f'Счётчиков доступно: {len(counters)}\n')
+    for c in counters:
+        site2 = c.get('site2') or {}
+        mirrors = site2.get('mirrors2') or []
+        print(f"id={c.get('id')}  «{c.get('name')}»  site={c.get('site')}")
+        if mirrors:
+            print(f"    зеркала ({len(mirrors)}): {', '.join(mirrors[:8])}"
+                  + (' …' if len(mirrors) > 8 else ''))
+    print('\n→ Нужен счётчик, у которого в зеркалах поддомены '
+          '(voronezh.stalmetural.ru и т.п.).')
+
+
+def counter_info(token, counter, proxy_url=None):
+    """Детали одного счётчика: site, зеркала (mirrors2) и фильтры."""
+    if requests is None:
+        print('requests не установлен'); return
+    headers = {'Authorization': f'OAuth {token}'}
+    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    url = f'https://api-metrika.yandex.net/management/v1/counter/{counter}'
+    try:
+        r = requests.get(url, headers=headers, proxies=proxies, timeout=40)
+    except Exception as e:
+        print('Сеть:', e); return
+    print('HTTP', r.status_code)
+    if r.status_code >= 400:
+        print('Ответ:', r.text[:400]); return
+    c = (r.json() or {}).get('counter', {}) or {}
+    site2 = c.get('site2') or {}
+    mirrors = site2.get('mirrors2') or []
+    print(f"id={c.get('id')}  «{c.get('name')}»  site={c.get('site')}")
+    print(f"\nЗеркала mirrors2 ({len(mirrors)}):")
+    for m in mirrors:
+        print(f'  {m}')
+    if not mirrors:
+        print('  (пусто)')
+    flt = c.get('filters') or []
+    print(f"\nФильтры счётчика ({len(flt)}):")
+    import json as _json
+    for f in flt:
+        print('  ' + _json.dumps(f, ensure_ascii=False))
+    if not flt:
+        print('  (пусто)')
+
+
+def probe_counter(project_id, token, proxy_url=None, counter=None,
+                  date='yesterday'):
+    """Диагностика доступа: запрос БЕЗ фильтра (любые данные за день).
+    Печатает total просмотров + топ заголовков. Если 0 — токен не видит счётчик
+    или счётчик не тот. Используется из CLI: python metrika_api.py check ..."""
+    cid = str(counter).strip() if counter else counter_id(project_id)
+    print(f'Проверка: проект={project_id} счётчик={cid} дата={date}')
+    if requests is None:
+        print('requests не установлен'); return
+    params = {
+        'ids': cid, 'date1': date, 'date2': date,
+        'metrics': 'ym:pv:pageviews',
+        'dimensions': 'ym:pv:title',
+        'accuracy': 'full', 'limit': 2000, 'sort': '-ym:pv:pageviews',
+    }
+    headers = {'Authorization': f'OAuth {token}'}
+    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    try:
+        r = requests.get(API_URL, params=params, headers=headers,
+                         proxies=proxies, timeout=40)
+    except Exception as e:
+        print('Сеть:', e); return
+    print('HTTP', r.status_code)
+    if r.status_code >= 400:
+        print('Ответ:', r.text[:400]); return
+    payload = r.json()
+    totals = payload.get('totals') or []
+    total_pv = totals[0] if totals else '—'
+    data = payload.get('data', []) or []
+    print(f'Всего просмотров за день: {total_pv}; строк (заголовков): {len(data)}')
+
+    # Заголовки с «найд»/«404» — печатаем через repr(), чтобы увидеть скрытые
+    # символы (неразрывный пробел \xa0, другой дефис, хвостовые пробелы).
+    hits = []
+    for row in data:
+        title = (row.get('dimensions', [{}])[0].get('name') or '')
+        low = title.lower()
+        if 'найд' in low or '404' in low:
+            hits.append((row.get('metrics', ['—'])[0], title))
+    print(f'\n=== Заголовки с «найд»/«404» ({len(hits)}) — repr показывает спецсимволы ===')
+    for pv, title in hits[:30]:
+        print(f'  {pv:>8}  {title!r}')
+    if not hits:
+        print('  (нет — за день 404 не было, либо заголовок без «найд»/«404»)')
+
+    print('\n=== Топ-20 заголовков (repr — видно спецсимволы) ===')
+    for row in data[:20]:
+        title = (row.get('dimensions', [{}])[0].get('name') or '')
+        pv = row.get('metrics', ['—'])[0]
+        print(f'  {pv:>8}  {title!r}')
+    if not data:
+        print('→ 0 данных: токен НЕ видит этот счётчик, либо счётчик не тот, '
+              'либо за этот день нет визитов.')
 
 
 if __name__ == '__main__':
-    # Самотест распознавания заголовков по проектам
-    cases = [
-        ('smu', 'Страница не найдена | Стальметурал', True),
-        ('mpe', 'Страница не найдена', True),
-        ('imp', 'Страница не найдена (Ошибка 404)', True),
-        ('mpe', 'Каталог труб', False),
-        ('smu', 'Деталь не найдена в каталоге', False),  # не 404
-    ]
-    for pid, title, want in cases:
-        got = _is_404_title(title, pid)
-        print('OK' if got == want else 'FAIL', pid, repr(title), '→', got)
-    print('counters:', COUNTER_IDS)
+    # Прямой тест запроса к API:
+    #   python metrika_api.py <pid> <token> [date] [counter] [proxy]
+    #   date: today | yesterday | YYYY-MM-DD (по умолчанию today)
+    # Без аргументов — печатает фильтры/счётчики (offline).
+    import sys
+    if len(sys.argv) < 3:
+        print(f'Серверный фильтр: {_404_SERVER_FILTER}  + client-проверка «не найдена»')
+        print('Счётчики по проектам:')
+        for k in COUNTER_GROUPS:
+            print(f'  {k}: {_counters_for(k)}')
+        print('\nТест 404:  python metrika_api.py <pid> <token> [date1] [date2] [counter] [proxy]')
+        print('Проверка:  python metrika_api.py check <pid> <token> [counter] [date] [proxy]')
+        print('Счётчики:  python metrika_api.py list_counters <token> [proxy]')
+        print('Детали:    python metrika_api.py counter_info <token> <counter> [proxy]')
+        sys.exit(0)
+
+    # Список всех счётчиков токена
+    if sys.argv[1] == 'list_counters':
+        _tok = sys.argv[2]
+        _prx = sys.argv[3] if len(sys.argv) > 3 else None
+        list_counters(_tok, _prx)
+        sys.exit(0)
+
+    # Детали одного счётчика (зеркала + фильтры)
+    if sys.argv[1] == 'counter_info':
+        _tok = sys.argv[2]
+        _cnt = sys.argv[3]
+        _prx = sys.argv[4] if len(sys.argv) > 4 else None
+        counter_info(_tok, _cnt, _prx)
+        sys.exit(0)
+
+    # Диагностика доступа без фильтра
+    if sys.argv[1] == 'check':
+        _pid = sys.argv[2]
+        _tok = sys.argv[3]
+        _cnt = sys.argv[4] if len(sys.argv) > 4 else None
+        _date = sys.argv[5] if len(sys.argv) > 5 else 'yesterday'
+        _prx = sys.argv[6] if len(sys.argv) > 6 else None
+        probe_counter(_pid, _tok, _prx, counter=_cnt, date=_date)
+        sys.exit(0)
+
+    _pid = sys.argv[1]
+    _tok = sys.argv[2]
+    _date1 = sys.argv[3] if len(sys.argv) > 3 else '7daysAgo'
+    _date2 = sys.argv[4] if len(sys.argv) > 4 else 'today'
+    _cnt = sys.argv[5] if len(sys.argv) > 5 else None
+    _prx = sys.argv[6] if len(sys.argv) > 6 else None
+    rep = fetch_today_404(_pid, _tok, _prx, lambda lvl, m: print(m),
+                          counter=_cnt, date1=_date1, date2=_date2)
+    if rep:
+        print(f'\nИТОГО за {_date1}…{_date2}: {rep.total_pages} адресов, '
+              f'{rep.total_views} просмотров')
+        for p in rep.pages[:30]:
+            print(f'  {p.views:>5}  {p.page_url}')
+    else:
+        print('\nИТОГО: пусто (см. сообщения выше)')
