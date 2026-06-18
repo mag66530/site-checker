@@ -460,6 +460,7 @@ class _Ctx:
     # Нижние блоки карточки товара («С этим товаром покупают», «Похожие»,
     # «Вас также может заинтересовать») – видимая часть от первого такого блока.
     rec_html_lower: str = ''
+    rec_html_full: str = ''
     rec_text_lower: str = ''
 
 
@@ -775,23 +776,37 @@ def _card_has_price(card_html_lower: str) -> bool:
     return bool(_PRICE_RE.search(text)) or 'по запросу' in text.lower()
 
 
+def _is_real_rec_card(card_html_lower: str) -> bool:
+    """Это настоящая товарная карточка (ссылка на товар + непустой текст), а не
+    случайное вхождение класса card-product в скриптах/футере/под-элементах."""
+    if not re.search(r'href="/[a-z0-9\-/]', card_html_lower):
+        return False
+    return len(html_to_visible_text(card_html_lower).strip()) > 3
+
+
 def _d_rec_price(c: _Ctx):
     # У КАЖДОГО товара в нижних блоках должна быть видимая цена (₽ или «по
-    # запросу»). Проверяем покарточно: если хотя бы у одной карточки снизу нет
-    # ни цены, ни «по запросу» – это баг (та самая «пустая цена снизу»), даже
-    # если у соседних карточек цена есть.
-    # Нижнего товарного блока нет (как у МПЭ – их там нет по дизайну, или у ИМП –
-    # подгружаются JS и в коде их нет) – проверять нечего: возвращаем «нет», а в
-    # check_content пункт делаем необязательным, чтобы стоял «–» (N/A).
+    # запросу»). Проверяем покарточно ТОЛЬКО реальные карточки (со ссылкой и
+    # текстом): класс card-product/… встречается в вёрстке и вне карточек, и без
+    # фильтра давал ложный «нет цен» (особенно на ИМП).
+    # Нижнего товарного блока нет (МПЭ – нет по дизайну, ИМП – грузится JS) –
+    # проверять нечего: возвращаем «нет», а в check_content пункт необязателен («–»).
     if not _rec_has_cards(c):
         return False, None
-    chunks = _rec_card_chunks(c.rec_html_lower)
-    if not chunks:
-        # карточки есть по маркеру, но разбить не вышло – область целиком.
-        has = bool(_PRICE_RE.search(c.rec_text_lower)) or 'по запросу' in c.rec_text_lower
-        return has, None
-    broken = sum(1 for ch in chunks if not _card_has_price(ch))
-    return (broken == 0), None
+    rec_full = c.rec_html_full or c.rec_html_lower
+    # Покарточно проверяем только надёжный контейнер (СМУ:
+    # catalog-product-card-item) – так ловим «пустые цены снизу». У ИМП класс
+    # card-product встречается в разметке дублями/фрагментами (одна карусель даёт
+    # десятки ложных «карточек без цены») – там проверяем область целиком (есть ли
+    # видимая цена вообще), без покарточного разбора, чтобы не плодить ложные баги.
+    if 'catalog-product-card-item' in rec_full:
+        chunks = [ch for ch in re.split(r'catalog-product-card-item', rec_full)[1:]
+                  if _is_real_rec_card(ch)]
+        if chunks:
+            broken = sum(1 for ch in chunks if not _card_has_price(ch))
+            return (broken == 0), None
+    has = bool(_PRICE_RE.search(c.rec_text_lower)) or 'по запросу' in c.rec_text_lower
+    return has, None
 
 
 # «Нет фото»: вместо картинки товара подставлена заглушка. Точные маркеры в src
@@ -1249,6 +1264,14 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
             if 0 <= j < hcut:
                 hcut = j
         ctx.rec_html_lower = ctx.vis_html_lower[hcut:] if hcut < len(ctx.vis_html_lower) else ''
+        # Полная (не vis) нижняя область – для покарточного разбора: strip_hidden
+        # выбрасывает href, а по нему отличаем реальные карточки от мусора.
+        hcut_f = len(ctx.html_lower)
+        for _m in _related:
+            j = ctx.html_lower.find(_m)
+            if 0 <= j < hcut_f:
+                hcut_f = j
+        ctx.rec_html_full = ctx.html_lower[hcut_f:] if hcut_f < len(ctx.html_lower) else ''
 
     # Подтип страницы-списка (категория / тег) – определяем по вёрстке:
     #   listing – есть карточки товаров (catalog-product-card-item) → строгая
