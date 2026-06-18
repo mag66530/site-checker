@@ -241,6 +241,50 @@ def test_custom_run_no_subdomains():
     print('✓ Custom-прогон без поддоменов: отчёт корректный')
 
 
+def test_tech_section_mandatory_bug_and_broken_links():
+    """Тех. страница с обязательным багом (нет карты на «Контактах») и битой
+    ссылкой (404) корректно отображается в листе «Структура страниц»."""
+    from content_checker import check_content
+    base = ('<header><a href="tel:1">т</a></header><h1>Контакты</h1><p>'
+            + ('Адрес и режим работы. ' * 30) + '</p>')
+    tech_content = check_content(base, 'tech', url='https://inmetprom.ru/contact/')
+    # Нужна хотя бы одна НЕ тех. страница с контентом, иначе лист структуры
+    # не строится (тех. секция живёт внутри него).
+    cat_html = ('<header><a href="tel:+74951234567">+7 (495) 123-45-67</a></header>'
+                '<div class="breadcrumb">x</div><h1>Категория</h1>'
+                '<div class="catalog-product-card-item"><a href="/catalog/c/t/">Т</a>'
+                '<span>1 200 ₽</span><span class="an-ico-basket"></span></div>')
+    cat_content = check_content(cat_html, 'category', url='https://inmetprom.ru/catalog/truby/')
+    results = [
+        make_result(url='https://inmetprom.ru/catalog/truby/', type_code='category',
+                    type_label='Категория', content=cat_content,
+                    content_bugs=cat_content.bug_count,
+                    has_content_bugs=cat_content.has_bugs),
+        make_result(url='https://inmetprom.ru/contact/', type_code='tech',
+                    type_label='Тех. страница', content=tech_content,
+                    content_bugs=tech_content.bug_count,
+                    has_content_bugs=tech_content.has_bugs,
+                    broken_links={'checked': 5, 'broken': [
+                        {'url': 'https://inmetprom.ru/dead/', 'code': 404}]}),
+    ]
+    selected = [Subdomain(url='https://inmetprom.ru/', city='Москва', host='inmetprom.ru')]
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'tech.xlsx'
+        build_report(project_name='ИМП', started_at_ms=int(time.time() * 1000) - 5000,
+                     finished_at_ms=int(time.time() * 1000),
+                     selected_subdomains=selected, results=results, output_path=out)
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert 'Структура страниц' in wb.sheetnames
+        ws = wb['Структура страниц']
+        blob = ' | '.join(str(c) for row in ws.iter_rows(values_only=True)
+                          for c in row if c)
+        assert 'Карта: БАГ' in blob       # обязательный спец-элемент отсутствует
+        assert 'битых' in blob            # битая ссылка (404)
+        assert '—' not in blob            # короткое тире, не длинное
+    print('✓ Тех. секция: обязательный баг + битые ссылки в отчёте')
+
+
 if __name__ == '__main__':
     test_basic_report_creation()
     test_report_with_text_issues()
