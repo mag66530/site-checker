@@ -974,13 +974,44 @@ _CATALOG = [
 _CONTENT_CHROME_RE = re.compile(r'<(header|footer|nav)\b[^>]*>.*?</\1>', re.I | re.S)
 
 
+def _content_html(c: _Ctx) -> str:
+    """HTML страницы без сквозных шапки/подвала/меню – «контентная» область.
+    Берём полный HTML (не vis): strip_hidden иногда убирает блоки, которые
+    показываются JS (карта, mission-секция), а нам важно их наличие в коде."""
+    return _CONTENT_CHROME_RE.sub(' ', c.html_lower)
+
+
 def _d_content_text(c: _Ctx):
     # Собственный текст страницы: убираем сквозные шапку/подвал/меню (по тегам) и
-    # считаем видимый текст остатка. У нормальной тех. страницы он есть, у
-    # пустой/битой – нет.
-    stripped = _CONTENT_CHROME_RE.sub(' ', c.vis_html_lower)
-    text = html_to_visible_text(stripped)
-    return len(text.strip()) > 400, None
+    # считаем текст остатка. Порог невысокий (150) – разделы-витрины каталога
+    # (напр. «Спецтехника») состоят из карточек, текста там мало, но он есть; а
+    # совсем пустую/битую страницу (только шапка/подвал) поймаем.
+    text = html_to_visible_text(_content_html(c))
+    return len(text.strip()) > 150, None
+
+
+# ── Спец-элементы тех. страниц (справочно – есть/нет, считаем по контенту, не
+# по шапке/подвалу, иначе форма/картинки-логотипы давали бы ложное «есть») ──
+def _d_tech_images(c: _Ctx):
+    n = len(re.findall(r'<img\b', _content_html(c)))
+    return n >= 1, n
+
+
+def _d_tech_catalog_link(c: _Ctx):
+    # Ссылка на каталог в контенте (кнопка «Перейти к каталогу» и т.п.).
+    return bool(re.search(r'<a\b[^>]*href="[^"]*/catalog', _content_html(c))), None
+
+
+def _d_tech_map(c: _Ctx):
+    h = c.html_lower    # карта-контейнер часто скрыт до JS – смотрим полный HTML
+    return ('ymaps' in h or 'api-maps.yandex' in h or 'yandex.ru/map' in h
+            or '2gis' in h or ('<iframe' in h and 'map' in h)), None
+
+
+def _d_tech_feedback(c: _Ctx):
+    body = _content_html(c)
+    return ('<form' in body and ('обратной связи' in body or 'обратная связь' in body
+            or 'связаться' in body or 'оставить заявк' in body)), None
 
 
 _TECH = [
@@ -988,6 +1019,31 @@ _TECH = [
     _b('breadcrumbs',  'Хлебные крошки', False, _d_breadcrumbs),
     _b('h1',           'Заголовок H1',   True,  _d_h1),
 ]
+
+# Спец-блоки тех. страниц (пока справочно – required=False).
+_TB_IMAGES  = _b('tech_images',       'Картинки',             False, _d_tech_images)
+_TB_CATALOG = _b('tech_catalog_link', 'Ссылка на каталог',    False, _d_tech_catalog_link)
+_TB_MAP     = _b('tech_map',          'Карта',                False, _d_tech_map)
+_TB_FORM    = _b('tech_feedback',     'Форма обратной связи', False, _d_tech_feedback)
+
+
+def _tech_profile_for(url: str) -> list:
+    """Профиль тех. страницы по её адресу: базовые (текст/H1/крошки) + спец-блоки
+    в зависимости от того, что это за страница (о компании / контакты / …)."""
+    try:
+        path = urlparse(url).path.lower()
+    except Exception:
+        path = (url or '').lower()
+    extra = []
+    if '/about' in path or '/o-kompanii' in path:
+        extra = [_TB_IMAGES, _TB_CATALOG]
+    elif '/contact' in path:
+        extra = [_TB_MAP, _TB_FORM]
+    elif 'delivery' in path or '/payment' in path or '/oplata' in path or '/dostavka' in path:
+        extra = [_TB_CATALOG, _TB_IMAGES]
+    elif 'spetstekhnika' in path:
+        extra = [_TB_CATALOG]
+    return _TECH + extra
 
 # Главная: шапка (сверху) → H1 → формы/поиск → подвал (снизу). Порядок как на
 # странице. Шапка и подвал обязательны, H1 на главной строго не требуем.
@@ -1188,7 +1244,8 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
         or 'в корзину' in ctx.text_lower or 'в один клик' in ctx.text_lower
     )
 
-    for blk in _profile_for(type_code, page_kind):
+    _profile = _tech_profile_for(url) if type_code == 'tech' else _profile_for(type_code, page_kind)
+    for blk in _profile:
         if blk.key in absent:
             continue        # этого элемента у проекта нет по дизайну – не показываем
         try:

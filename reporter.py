@@ -544,14 +544,14 @@ def _build_structure_sheet(wb, results):
                 return True
             return bool(r.content_bugs or r.has_text_issues)
         _bad = sum(1 for r in tech if _tech_bad(r))
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
         gc = ws.cell(row=row, column=2)
         gc.value = (f'  Технические страницы – {len(tech)} стр.'
                     + (f'  ·  проблем: {_bad}' if _bad else '  ·  все в порядке'))
         gc.font = _font(size=11, bold=True, color=C.err if _bad else C.ok)
         gc.fill = _fill(C.accent_soft)
         gc.alignment = _align(indent=1, vertical='center')
-        for cc in range(2, 9):
+        for cc in range(2, 10):
             ws.cell(row=row, column=cc).fill = _fill(C.accent_soft)
         ws.row_dimensions[row].height = 22
         row += 1
@@ -563,6 +563,7 @@ def _build_structure_sheet(wb, results):
             (6, 'Крошки', 'Хлебные крошки. Справочно: показываем есть/нет, отсутствие на служебной странице не баг.'),
             (7, 'Текст', 'Есть ли на странице собственный текст (помимо сквозных шапки и подвала). Обязателен.'),
             (8, 'Битые перем.', 'Битые шаблонные переменные ({{…}}, %name% и т.п.). Число = сколько найдено.'),
+            (9, 'Элементы страницы', 'Спец-проверки в зависимости от страницы: картинки, ссылка на каталог, карта, форма обратной связи (✓ есть / – нет). Пока справочно.'),
         ]
         hdr_row = row
         for ci, h, desc in _tech_headers:
@@ -639,6 +640,20 @@ def _build_structure_sheet(wb, results):
             else:
                 vc.value = '–'; vc.font = _font(size=10, color=C.text_muted)
                 vc.fill = _fill(band)
+
+            # Элементы страницы – спец-проверки (картинки/каталог-ссылка/карта/форма).
+            _spec = [b for b in (r.content.blocks if (r.is_ok and r.content) else [])
+                     if b.key.startswith('tech_')]
+            ec = ws.cell(row=row, column=9)
+            ec.alignment = _align(indent=1)
+            ec.border = _border(color=C.border_light)
+            ec.fill = _fill(band)
+            if _spec:
+                ec.value = ' · '.join(f'{b.label} {"✓" if b.present else "–"}' for b in _spec)
+                ec.font = _font(size=9, color=C.text_soft)
+            else:
+                ec.value = '–'
+                ec.font = _font(size=10, color=C.text_muted)
             row += 1
         row += 2
 
