@@ -432,8 +432,9 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 
         results = asyncio.run(run_batch(
             plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
-            retry_delay_ms=2500, check_text=True, on_progress=on_progress,
-            proxy_url=proxy_url, kp_map=kp_map,
+            retry_delay_ms=2500, check_text=True,
+            check_links=bool(flags.get('check_links', False)),
+            on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map,
         ))
 
         finished_ms = int(time.time() * 1000)
@@ -610,6 +611,7 @@ def init_session():
         'c30_check_filters': True,
         'c30_check_products': True,
         'c30_check_text': True,        # пункт 1.6 – битые переменные
+        'c30_check_links': False,      # «ссылки открываются (404)» – тяжёлая, по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -1005,6 +1007,11 @@ if pid:
                              _nd_opts,
                              format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
                              key='c30_notify_days')
+        st.checkbox('Проверять, что ссылки на тех. страницах реально открываются (404)',
+                    key='c30_check_links',
+                    help='Прозваниваем каждую внутреннюю ссылку в тексте тех. страниц '
+                         '(оплата, доставка, контакты, политики и т.п.) и помечаем те, '
+                         'что отдают 404/410. Дольше – по запросу на каждую ссылку.')
         st.checkbox('Добавить свой список URL', key='c30_use_custom_urls')
         if st.session_state.c30_use_custom_urls:
             st.caption('Ссылки – по одной на строку. Тип по адресу: /catalog/x/ – '
@@ -1118,6 +1125,7 @@ if pid:
                 'check_filters': st.session_state.c30_check_filters and stats['has_filters'],
                 'check_products': st.session_state.c30_check_products,
                 'check_text': st.session_state.c30_check_text,
+                'check_links': st.session_state.get('c30_check_links', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
             }

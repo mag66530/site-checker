@@ -299,6 +299,17 @@ def _contacts_problem_text(r):
     return '; '.join(parts)
 
 
+def _broken_links_text(r):
+    """Битые ссылки (404/410) в контенте страницы – краткий текст для отчёта."""
+    bl = getattr(r, 'broken_links', None)
+    if not bl or not bl.get('broken'):
+        return ''
+    items = bl['broken']
+    ex = '; '.join(f'{b["code"]} {b["url"]}' for b in items[:3])
+    more = f' и ещё {len(items) - 3}' if len(items) > 3 else ''
+    return f'битые ссылки ({len(items)}): ' + ex + more
+
+
 def _problem_text(r):
     """Понятная формулировка проблемы страницы для списка «Что чинить»."""
     parts = []
@@ -318,6 +329,9 @@ def _problem_text(r):
                     for b in content.bugs]
             if bugs:
                 parts.append('нет: ' + ', '.join(bugs))
+    _bl = _broken_links_text(r)
+    if _bl:
+        parts.append(_bl)
     return '; '.join(parts) if parts else 'проблема'
 
 
@@ -401,7 +415,8 @@ def _build_structure_sheet(wb, results):
     # тоже выводим наверх как ошибку.
     for r in results:
         if getattr(r, 'type_code', '') == 'tech' and (
-                (getattr(r, 'content_bugs', 0) or 0) > 0 or _contacts_problem_text(r)):
+                (getattr(r, 'content_bugs', 0) or 0) > 0
+                or _contacts_problem_text(r) or _broken_links_text(r)):
             bug_pages.append(r)
     bug_pages = sorted(bug_pages, key=lambda r: -(getattr(r, 'content_bugs', 0) or 0))
     row = 8
@@ -569,7 +584,8 @@ def _build_structure_sheet(wb, results):
                 return True
             if getattr(r.content, 'is_soft_404', False):
                 return True
-            return bool(r.content_bugs or r.has_text_issues)
+            return bool(r.content_bugs or r.has_text_issues
+                        or _broken_links_text(r))
         _bad = sum(1 for r in tech if _tech_bad(r))
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=10)
         gc = ws.cell(row=row, column=2)
@@ -585,12 +601,12 @@ def _build_structure_sheet(wb, results):
         _tech_headers = [
             (2, 'Страница', 'Название страницы – кликабельная ссылка, ведёт на страницу.'),
             (3, 'Статус', 'Открывается ли страница: «Работает» / код ответа (404 и т.п.) / «404-заглушка» (отдаёт 200, но контент «страница не найдена»).'),
-            (4, 'Проблем', 'Сколько проблем на странице: структурные баги + битые переменные.'),
+            (4, 'Проблем', 'Сколько проблем на странице: структурные баги, битые переменные, расхождения контактов с КП и битые ссылки (404).'),
             (5, 'H1', 'Заголовок H1. Обязателен – у нормальной страницы он есть.'),
             (6, 'Крошки', 'Хлебные крошки. Справочно: показываем есть/нет, отсутствие на служебной странице не баг.'),
             (7, 'Текст', 'Есть ли на странице собственный текст (помимо сквозных шапки и подвала). Обязателен.'),
             (8, 'Битые перем.', 'Битые шаблонные переменные ({{…}}, %name% и т.п.). Число = сколько найдено.'),
-            (9, 'Элементы страницы', 'Спец-проверки в зависимости от страницы: картинки, ссылка на каталог, карта, форма обратной связи, строка поиска (✓ есть / – нет / БАГ – обязательного нет). Обязательны: карта на «Контактах», картинки на «О компании», строка поиска на странице поиска.'),
+            (9, 'Элементы страницы', 'Спец-проверки в зависимости от страницы: картинки, ссылка на каталог, карта, форма обратной связи, строка поиска (✓ есть / – нет / БАГ – обязательного нет). Обязательны: карта на «Контактах», картинки на «О компании», строка поиска на странице поиска. Если включена проверка ссылок – тут же «Ссылки: N ✓» или «N битых» (404/410).'),
             (10, 'Что не так', 'Подробно: структурные баги (нет карты/картинок/строки поиска и т.п.) и расхождения контактов с КП (адреса городов / телефон страницы).'),
         ]
         hdr_row = row
@@ -640,6 +656,9 @@ def _build_structure_sheet(wb, results):
             _pp = getattr(r, 'page_phone', None)
             if _pp and _pp.get('status') in ('bug', 'critical'):
                 _probs += 1
+            _blk = getattr(r, 'broken_links', None)
+            _broken_n = len(_blk['broken']) if (_blk and _blk.get('broken')) else 0
+            _probs += _broken_n
             pc = ws.cell(row=row, column=4)
             pc.value = _probs if _probs else ''
             pc.font = _font(size=11, bold=True, color=C.err)
@@ -699,6 +718,11 @@ def _build_structure_sheet(wb, results):
                 _parts.append('Телефон ' + {'ok': '✓', 'info': 'инфо'}.get(_ps, 'расхождение'))
                 if _ps in ('bug', 'critical'):
                     _addr_bad = True
+            if _broken_n:
+                _parts.append(f'Ссылки: {_broken_n} битых')
+                _addr_bad = True
+            elif _blk:                       # проверяли – все ссылки открылись
+                _parts.append(f'Ссылки: {_blk.get("checked", 0)} ✓')
             ec = ws.cell(row=row, column=9)
             ec.alignment = _align(indent=1)
             ec.border = _border(color=C.border_light)
@@ -709,7 +733,8 @@ def _build_structure_sheet(wb, results):
 
             # Что не так – подробно: структурные баги (нет карты/картинок/строки
             # поиска и т.п.) и расхождения контактов с КП. Пусто, если проблем нет.
-            _has_problem = (r.content_bugs or 0) > 0 or bool(_contacts_problem_text(r))
+            _has_problem = ((r.content_bugs or 0) > 0
+                            or bool(_contacts_problem_text(r)) or _broken_n > 0)
             _wn = _problem_text(r) if _has_problem else ''
             wn = ws.cell(row=row, column=10, value=_wn or '–')
             wn.alignment = _align(indent=1, wrap=True)

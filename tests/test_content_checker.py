@@ -450,6 +450,36 @@ def test_tech_per_page_profiles():
     assert vac.bug_count == 0 and sr.bug_count == 0 and us.bug_count == 0
 
 
+def test_extract_content_links_filters_and_dedup():
+    """extract_content_links: только контент (без шапки/меню/подвала), без
+    якорей/js/mailto/tel, обе кавычки, дедуп без учёта регистра."""
+    from content_checker import extract_content_links
+    html = (
+        '<header><a href="/in-header/">h</a></header>'
+        '<nav><a href="/menu/">m</a></nav>'
+        '<main>'
+        "<a href='/single-quote/'>sq</a>"
+        '<a href="/dup/">d1</a><a href="/DUP/">d2</a>'
+        '<a href="#anchor">a</a><a href="javascript:void(0)">j</a>'
+        '<a href="mailto:x@y.ru">e</a><a href="tel:+74951234567">t</a>'
+        '<a href="/real/">r</a>'
+        '</main>'
+        '<footer><a href="/in-footer/">f</a></footer>'
+    )
+    links = extract_content_links(html)
+    assert '/single-quote/' in links and '/real/' in links
+    for skip in ('/in-header/', '/menu/', '/in-footer/', '#anchor',
+                 'javascript:void(0)', 'mailto:x@y.ru', 'tel:+74951234567'):
+        assert skip not in links
+    assert sum(1 for l in links if l.lower() == '/dup/') == 1   # дедуп ё=е по регистру
+
+
+def test_extract_content_links_limit():
+    from content_checker import extract_content_links
+    html = '<main>' + ''.join(f'<a href="/p{i}/">x</a>' for i in range(100)) + '</main>'
+    assert len(extract_content_links(html, limit=10)) == 10
+
+
 def test_footer_address_mikrorayon():
     """Адрес без улицы (нефтяные города): «микрорайон 16А, 63» – это адрес,
     а не отсутствие адреса (раньше ложно горело багом «нет адреса»)."""

@@ -1096,6 +1096,37 @@ def _d_tech_links(c: _Ctx):
     return len(real) >= 1, len(real)
 
 
+# Ссылки в контенте, которые осмысленно «прозвонить» на 404. Не сетевая функция –
+# только достаёт адреса (саму проверку открываемости делает http_checker).
+_SKIP_LINK_PREFIXES = ('#', 'javascript:', 'mailto:', 'tel:', 'data:', 'sms:', 'callto:')
+
+
+def extract_content_links(html: str, limit: int = 60) -> list[str]:
+    """Адреса ссылок из контентной области (без сквозных шапки/подвала/меню).
+
+    Отбрасываем якоря (#…), javascript:, mailto:, tel:, data:. Поддерживаем
+    обе кавычки. Дедуп по href (без учёта регистра), порядок сохраняем, режем
+    до limit. Возвращаем href как есть (относительные/абсолютные) – разрешает
+    и фильтрует по домену уже вызывающая сторона (http_checker)."""
+    if not html:
+        return []
+    body = _CONTENT_CHROME_RE.sub(' ', html)
+    out, seen = [], set()
+    for m in re.finditer(r'<a\b[^>]*?\shref\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
+                         body, re.I | re.S):
+        h = (m.group(1) or m.group(2) or '').strip()
+        if not h or h.lower().startswith(_SKIP_LINK_PREFIXES):
+            continue
+        key = h.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
+        if len(out) >= limit:
+            break
+    return out
+
+
 _TECH = [
     _b('content_text', 'Текст',          True,  _d_content_text),
     _b('breadcrumbs',  'Хлебные крошки', False, _d_breadcrumbs),
