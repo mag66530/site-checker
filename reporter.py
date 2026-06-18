@@ -885,7 +885,7 @@ def _group_service_issues(items: list) -> list:
     """Схлопнуть ошибки сервиса по одной проблеме: один и тот же тип проблемы
     приходит по каждому сайту отдельно – собираем сайты в список.
     Возвращает dict: title, code, hosts (список), date (мин), count, first."""
-    from collections import OrderedDict
+    from collections import OrderedDict, Counter
     groups = OrderedDict()
     for i in items:
         title = getattr(i, 'title', '') or getattr(i, 'code', '')
@@ -894,16 +894,26 @@ def _group_service_issues(items: list) -> list:
         if g is None:
             g = {'title': title, 'code': getattr(i, 'code', ''),
                  'hosts': [], 'date': getattr(i, 'date', ''),
-                 'count': 0, 'first': i}
+                 'count': 0, 'first': i, 'states': Counter()}
             groups[key] = g
         g['count'] += 1
         host = getattr(i, 'host', '')
         if host and host not in g['hosts']:
             g['hosts'].append(host)
+        st = getattr(i, 'state', '') or '—'
+        g['states'][st] += 1
         d = getattr(i, 'date', '')
         if d and (not g['date'] or d < g['date']):
             g['date'] = d
     return list(groups.values())
+
+
+def _format_states(states) -> str:
+    """Counter состояний → строка «16 - на проверке. 45 - проблема актуальна».
+    Плейсхолдер «—» (нет данных, старый кеш) не выводим."""
+    parts = [f'{n} - {label}' for label, n in states.most_common()
+             if label and label != '—']
+    return '. '.join(parts)
 
 
 # Секции в порядке убывания релевантности:
@@ -936,9 +946,10 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
     ws.column_dimensions['C'].width = 18   # Приоритет / пусто
     ws.column_dimensions['D'].width = 18   # Категория / пусто
     ws.column_dimensions['E'].width = 50   # Тема
-    ws.column_dimensions['F'].width = 42   # Домены
-    ws.column_dimensions['G'].width = 60   # Превью
-    ws.column_dimensions['H'].width = 22   # Отдел
+    ws.column_dimensions['F'].width = 42   # Домены / Сайты
+    ws.column_dimensions['G'].width = 60   # Превью / Состояние (Вебмастер-API)
+    ws.column_dimensions['H'].width = 22   # Отдел / Кол-во
+    ws.column_dimensions['I'].width = 22   # Отдел (секция Вебмастер-API)
 
     # ── Заголовок листа ──
     ws.merge_cells('B2:H2')
@@ -1155,7 +1166,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
         from collections import defaultdict as _dd
         _n_problems = len(_group_service_issues(service_issues))
         _n_hosts = len({getattr(i, 'host', '') for i in service_issues})
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
         sc = ws.cell(row=row, column=2)
         sc.value = (f'Вебмастер  ({_n_problems} проблем на {_n_hosts} сайтах, '
                     f'{len(service_issues)} всего)')
@@ -1177,7 +1188,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
             p_bg = _NOTIF_PRIORITY_BG[priority]
             p_label = _NOTIF_PRIORITY_LABEL[priority]
 
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
             pc = ws.cell(row=row, column=2)
             pc.value = f'  {p_label}  ({len(p_items)})'
             pc.font = _font(size=10, bold=True, color=p_color)
@@ -1186,9 +1197,9 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
             ws.row_dimensions[row].height = 20
             row += 1
 
-            # Шапка: одна строка на проблему, сайты – списком в одной колонке
+            # Шапка: одна строка на проблему, сайты – списком + их состояния
             for ci, h in enumerate(['Дата', 'Серьёзность', 'Категория', 'Проблема',
-                                    'Сайты', 'Кол-во', 'Отдел'], 2):
+                                    'Сайты', 'Состояние', 'Кол-во', 'Отдел'], 2):
                 cell = ws.cell(row=row, column=ci)
                 cell.value = h
                 cell.font = _font(size=9, bold=True, color=C.text_muted)
@@ -1208,6 +1219,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
                     ('Диагностика', {'color': C.text_soft}),
                     (g['title'], {'bold': priority == 'critical', 'color': p_color}),
                     (hosts_str, {'size': 9, 'color': C.text_soft}),
+                    (_format_states(g['states']), {'size': 9, 'color': C.text_soft}),
                     (len(g['hosts']), {'size': 10, 'bold': True, 'color': C.text_soft}),
                     (_dept_service_issue(g['first']), {'size': 9, 'color': C.text_soft}),
                 ], 2):
@@ -1216,7 +1228,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
                     cell.font = _font(**kw)
                     cell.alignment = _align(
                         wrap=True, vertical='top',
-                        horizontal='center' if ci == 7 else 'general')
+                        horizontal='center' if ci == 8 else 'general')
                     cell.border = _border(color=C.border_light)
                 row += 1
 

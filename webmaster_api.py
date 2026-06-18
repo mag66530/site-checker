@@ -42,6 +42,7 @@ class ServiceIssue:
     detail: str = ''      # пояснение/значение
     url: str = ''         # ссылка в панель Вебмастера
     date: str = ''        # дата последнего изменения (YYYY-MM-DD)
+    state: str = ''       # состояние: «на проверке» / «проблема актуальна» / …
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -112,6 +113,25 @@ _PROBLEM_TITLES = {
     'DOCUMENTS_MISSING_DESCRIPTION': 'Страницы без meta description',
     'DUPLICATE_CONTENT_ATTRS': 'Дубли страниц (одинаковый контент)',
 }
+
+
+# Состояние проблемы (verification_state / state) → человекочитаемо.
+_STATE_LABELS = {
+    'IN_PROGRESS': 'на проверке',
+    'CHECKING': 'на проверке',
+    'PROBLEM_ACTUAL': 'проблема актуальна',
+    'PRESENT': 'проблема актуальна',
+    'NEW': 'проблема актуальна',
+    'ACTUAL': 'проблема актуальна',
+}
+
+
+def _state_label(state: str) -> str:
+    """Состояние из API → текст. Неизвестное — как есть (нижний регистр)."""
+    s = (state or '').upper()
+    if s in _STATE_LABELS:
+        return _STATE_LABELS[s]
+    return (state or '—').replace('_', ' ').lower()
 
 
 def _humanize_code(code: str) -> str:
@@ -253,7 +273,8 @@ def _parse_diagnostics(project_id: str, host: str, host_id: str,
             project_id=project_id, service='webmaster', host=host,
             severity=severity, code=str(code),
             title=_humanize_code(str(code)),
-            detail='', url=_panel_url(host_id), date=date))
+            detail='', url=_panel_url(host_id), date=date,
+            state=_state_label(state)))
     return issues
 
 
