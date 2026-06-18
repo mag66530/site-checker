@@ -617,6 +617,8 @@ def init_session():
         'c30_check_gsc': True,
         'c30_fetch_notifications': True,
         'c30_notify_days': 1,   # прогон ежедневный → по умолчанию забираем за 1 день
+        'c30_fetch_metrika_404': True,    # 404 из Метрики (API) в отчёт
+        'c30_m404_mode': 'За 7 дней',     # период 404 (трафик мал → 7+ дней)
         # Свой список URL
         'c30_use_custom_urls': False,
         'c30_custom_urls_text': '',
@@ -1007,6 +1009,18 @@ if pid:
                              _nd_opts,
                              format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
                              key='c30_notify_days')
+        _ck_m404 = st.checkbox(
+            'Собрать 404 из Метрики (в отчёт, лист «404 из Метрики»)',
+            key='c30_fetch_metrika_404',
+            help='Берёт 404-страницы напрямую из Метрики (API, по всем счётчикам '
+                 'проекта) за выбранный период. За день трафик на 404 мал — '
+                 'обычно нужен период 7+ дней.')
+        if _ck_m404:
+            _m404_opts = ['За день', 'За 7 дней', 'За 14 дней', 'За 30 дней']
+            _pm1, _pm2 = st.columns([1, 3])
+            with _pm1:
+                st.selectbox('Период 404', _m404_opts,
+                             key='c30_m404_mode', label_visibility='collapsed')
         st.checkbox('Проверять, что ссылки на тех. страницах реально открываются (404)',
                     key='c30_check_links',
                     help='Прозваниваем каждую внутреннюю ссылку в тексте тех. страниц '
@@ -1128,6 +1142,10 @@ if pid:
                 'check_links': st.session_state.get('c30_check_links', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
+                'fetch_metrika_404': st.session_state.get('c30_fetch_metrika_404', True),
+                'metrika_404_days': {
+                    'За день': 1, 'За 7 дней': 7, 'За 14 дней': 14, 'За 30 дней': 30,
+                }.get(st.session_state.get('c30_m404_mode', 'За 7 дней'), 7),
             }
             # Свой список URL (если включён) – добавится к обычной выборке проекта.
             _custom_urls = []

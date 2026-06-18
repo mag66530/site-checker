@@ -163,12 +163,12 @@ def run_check(pid, params, creds, log, progress):
 
         report_filename = make_report_filename(pid, started_ms, REPORTS_DIR)
         report_path = REPORTS_DIR / report_filename
-        _today_404 = None   # отчёт 404 за сегодня из Метрика-API
+        _today_404 = None   # отчёт 404 из Метрика-API
+        _nlog = lambda lvl, msg: log(msg)
+        _proxy = creds.get('proxy_url')
         # ── Сбор почты/Метрики ДО сборки отчёта – чтобы отчёт сразу полный ──
         if params['fetch_notifications']:
             log('Собираю уведомления из почты…')
-            _nlog = lambda lvl, msg: log(msg)
-            _proxy = creds.get('proxy_url')
 
             _yw_e, _yw_p = creds.get('metrika') or (None, None)
             _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
@@ -251,21 +251,27 @@ def run_check(pid, params, creds, log, progress):
                     f'yandex_oauth_{pid}). '
                     f'Найденные похожие ключи в секретах: {_wm_keys or "нет"}')
 
-            # 404 за СЕГОДНЯ напрямую из Метрики (API) — почта даёт только вчера
+        else:
+            log('Сбор уведомлений выключен.')
+
+        # ── 404 из Метрики (API) — отдельная галка со своим периодом ──
+        if params.get('fetch_metrika_404', True):
             _mt_token = creds.get('metrika_oauth')
+            _m404_days = int(params.get('metrika_404_days', 7))
             if _mt_token:
-                log('Метрика-API: тяну 404 за сегодня…')
+                log(f'Метрика-API: тяну 404 за {_m404_days} дн…')
                 try:
                     from metrika_api import fetch_today_404
                     _today_404 = fetch_today_404(
                         pid, _mt_token, _proxy, _nlog,
-                        counter=creds.get('metrika_counter'))
+                        counter=creds.get('metrika_counter'),
+                        date1=f'{_m404_days}daysAgo', date2='today')
                 except Exception as _e:
                     log(f'⚠ Метрика-API: {_e}')
             else:
                 log(f'⚠ Метрика-API: токен не задан (metrika_oauth_{pid})')
         else:
-            log('Сбор уведомлений выключен.')
+            log('Сбор 404 из Метрики выключен.')
 
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         _notifs = (
