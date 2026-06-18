@@ -258,10 +258,14 @@ def _parse_diagnostics(project_id: str, host: str, host_id: str,
     for code, info in items:
         if not isinstance(info, dict):
             continue
-        state = (info.get('state') or '').upper()
-        # Исключаем только ЯВНО решённые/отсутствующие – всё прочее берём
-        # (значения state у Яндекса плавают; лучше показать лишнее, чем скрыть).
-        if state in ('ABSENT', 'OK', 'NONE', 'RESOLVED', 'GONE', 'FIXED'):
+        # Состояние проверки — из нескольких возможных полей (у Яндекса плавает:
+        # state / verification_state / check_status / recheck_state).
+        raw_state = (info.get('state') or info.get('verification_state')
+                     or info.get('check_status') or info.get('recheck_state')
+                     or info.get('status') or '')
+        st_up = str(raw_state).upper()
+        # Исключаем только ЯВНО решённые/отсутствующие – всё прочее берём.
+        if st_up in ('ABSENT', 'OK', 'NONE', 'RESOLVED', 'GONE', 'FIXED'):
             continue
         sev_raw = (info.get('severity') or '').upper()
         severity = _SEV_FROM_YANDEX.get(sev_raw, 'info')
@@ -274,7 +278,7 @@ def _parse_diagnostics(project_id: str, host: str, host_id: str,
             severity=severity, code=str(code),
             title=_humanize_code(str(code)),
             detail='', url=_panel_url(host_id), date=date,
-            state=_state_label(state)))
+            state=st_up))               # храним СЫРОЙ код, маппинг — в reporter
     return issues
 
 
@@ -316,6 +320,7 @@ def fetch_webmaster_issues(project_id: str, token: str,
                         for h in api_hosts]
 
         all_issues = []
+        _dumped = False
         for host_norm, host_id, _url in selected:
             if not host_id:
                 continue
@@ -324,6 +329,14 @@ def fetch_webmaster_issues(project_id: str, token: str,
                             proxy_url)
                 _raw = (diag or {}).get('problems')
                 _raw_n = len(_raw) if isinstance(_raw, (dict, list)) else 0
+                # Одноразовый дамп сырого problem-объекта — увидеть реальные
+                # поля статуса (state/verification_state/…).
+                if not _dumped and _raw_n:
+                    import json as _j
+                    _first = (list(_raw.values())[0] if isinstance(_raw, dict)
+                              else _raw[0])
+                    _log(f'  RAW problem пример: {_j.dumps(_first, ensure_ascii=False)[:400]}')
+                    _dumped = True
                 hi = _parse_diagnostics(project_id, host_norm, host_id, diag)
                 all_issues.extend(hi)
                 # Диагностика: если сырых проблем много, а активных 0 – видно в логе
