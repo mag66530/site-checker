@@ -165,7 +165,8 @@ def _resolve_m404_period() -> dict:
             'metrika_404_date1': df.strftime('%Y-%m-%d') if df else '7daysAgo',
             'metrika_404_date2': dt.strftime('%Y-%m-%d') if dt else 'today',
         }
-    return {'metrika_404_date1': '7daysAgo', 'metrika_404_date2': 'today'}
+    _days = {'За неделю': 7, 'За 14 дней': 14, 'За 30 дней': 30}.get(mode, 7)
+    return {'metrika_404_date1': f'{_days}daysAgo', 'metrika_404_date2': 'today'}
 
 
 def format_duration(sec: int) -> str:
@@ -1029,7 +1030,7 @@ if pid:
                              format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
                              key='c30_notify_days')
         _ck_m404 = st.checkbox(
-            'Собрать 404 из Метрики (в отчёт, лист «404 из Метрики»)',
+            'Собрать 404 из Метрики',
             key='c30_fetch_metrika_404',
             help='Берёт 404-страницы напрямую из Метрики (API, по всем счётчикам '
                  'проекта) за выбранный период. За день трафик на 404 мал — '
@@ -1039,7 +1040,8 @@ if pid:
             _pm1, _pm2, _pm3 = st.columns([1.3, 1.3, 1.3])
             with _pm1:
                 _m404_mode = st.selectbox(
-                    'Период 404', ['За день', 'За неделю', 'За период'],
+                    'Период 404',
+                    ['За день', 'За неделю', 'За 14 дней', 'За 30 дней', 'За период'],
                     key='c30_m404_mode', label_visibility='collapsed')
             if _m404_mode == 'За день':
                 with _pm2:
