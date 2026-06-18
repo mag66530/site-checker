@@ -604,6 +604,7 @@ def init_session():
         'c30_report_path': None,
         'c30_started_at': None,
         'c30_finished_at': None,
+        'c30_run_sig': None,    # «подпись» показываемого прогона (проект+объём+галочки)
         # URL-проверки
         'c30_check_main': True,
         'c30_check_catalog': True,
@@ -825,6 +826,10 @@ with st.container(border=True):
         st.session_state.c30_project_id = new_pid
         st.session_state.c30_results = None
         st.session_state.c30_report_path = None
+        st.session_state.c30_last_error = None
+        # Сбрасываем «подпись прогона» – чтобы при смене проекта не показывался
+        # старый лог/результат от прошлого проекта или прошлой сессии.
+        st.session_state.c30_run_sig = None
         # Поля выборки перечитаются под новый проект (свои лимиты городов).
         for _k in ('c30_in_cities', 'c30_in_cats', 'c30_in_filters', 'c30_in_products'):
             st.session_state.pop(_k, None)
@@ -961,21 +966,21 @@ if pid:
 
     # БЛОК 2 – Что проверять на страницах (1.1–1.6)
     with st.container(border=True):
-        _CHK_KEYS = ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
-                     'c30_check_filters', 'c30_check_products', 'c30_check_text')
-        _all_on = all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
+        # Учитываем только РЕАЛЬНО показанные галочки: фильтры есть не у всех
+        # проектов (если их нет – чекбокс не рисуется, и его нельзя учитывать в
+        # «Выбрать/Снять все», иначе кнопка врёт).
+        _CHK_KEYS = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
+                     'c30_check_products', 'c30_check_text']
+        if stats['has_filters']:
+            _CHK_KEYS.insert(3, 'c30_check_filters')
         _hc1, _hc2 = st.columns([3, 1])
         with _hc1:
             st.markdown('### Что проверять на страницах')
+        # Кнопку «Выбрать/Снять все» рисуем в плейсхолдере, а заполняем ПОСЛЕ
+        # галочек – тогда её подпись всегда совпадает с фактическим состоянием
+        # (был баг: висело «Снять все», хотя не выбрано ничего).
         with _hc2:
-            def _c30_toggle_all():
-                # переключатель: всё включено → снять всё, иначе → выбрать всё
-                _target = not all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
-                for _k in _CHK_KEYS:
-                    st.session_state[_k] = _target
-            st.button('Снять все' if _all_on else 'Выбрать все',
-                      key='c30_select_all', on_click=_c30_toggle_all,
-                      use_container_width=True)
+            _toggle_ph = st.empty()
         _cb_col1, _cb_col2 = st.columns(2)
         with _cb_col1:
             st.checkbox('1.1  Главная', key='c30_check_main')
@@ -990,6 +995,16 @@ if pid:
             st.checkbox('1.5  Товары', key='c30_check_products')
             st.checkbox('1.6  Текстовые блоки категорий/фильтров/товаров и переменные',
                         key='c30_check_text')
+        _all_on = all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
+
+        def _c30_toggle_all():
+            # всё включено → снять всё, иначе → выбрать всё
+            _target = not all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
+            for _k in _CHK_KEYS:
+                st.session_state[_k] = _target
+        _toggle_ph.button('Снять все' if _all_on else 'Выбрать все',
+                          key='c30_select_all', on_click=_c30_toggle_all,
+                          use_container_width=True)
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1041,7 +1056,7 @@ if pid:
                                 in _Counter(t.type_label for t in _typed).items())
                 st.success(f'Будет добавлено {len(_typed)} URL – {_bt}')
 
-        # ── 404 из Метрики: по галочке (как «свой список URL») ──
+        # ── 404 из Метрики: отдельная выгрузка за день/период ──
         st.checkbox('Выгрузить 404 из Метрики отдельно (за день или период)',
                     key='c30_show_metrika')
         if st.session_state.c30_show_metrika:
@@ -1050,7 +1065,10 @@ if pid:
                 st.caption('Для этого проекта почта Метрики не настроена.')
             else:
                 from datetime import date as _date, timedelta as _td
-                _mc1, _mc2, _mc3 = st.columns([1.4, 1.2, 1], vertical_alignment='center')
+                st.caption('404-адреса берём из писем Яндекс.Метрики (в почте). '
+                           'Порядок: 1) выберите период · 2) «Загрузить из почты» '
+                           '(заберём свежие письма) · 3) «Скачать xlsx».')
+                _mc1, _mc2 = st.columns([1.4, 1.2], vertical_alignment='center')
                 with _mc1:
                     _m_mode = st.selectbox('Что выгрузить',
                                            ['За день', 'За 7 дней', 'За 14 дней', 'За 30 дней'],
@@ -1068,27 +1086,35 @@ if pid:
                         _m_reports = load_reports_for_period(pid, _md)
                 except Exception:
                     _m_reports = []
-                with _mc3:
+                _m_pages = sum(getattr(r, 'total_pages', 0) for r in _m_reports) if _m_reports else 0
+                _dl_col, _rf_col = st.columns(2)
+                with _dl_col:
                     if _m_reports:
-                        _m_pages = sum(getattr(r, 'total_pages', 0) for r in _m_reports)
                         st.download_button(
-                            f'Скачать ({_m_pages} стр.)',
+                            f'Скачать xlsx ({_m_pages} стр.)',
                             data=build_metrika_only_xlsx(_m_reports, '404 из Метрики'),
                             file_name=f'metrika-404-{pid}.xlsx',
                             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                            use_container_width=True, key='c30_m_dl')
+                            use_container_width=True, type='primary', key='c30_m_dl')
                     else:
-                        st.button('Нет данных', disabled=True, use_container_width=True,
-                                  key='c30_m_nodata')
-                if st.button('Обновить из почты', key='c30_m_refresh',
-                             help='Зайти в почту Метрики и забрать свежие письма за 14 дней'):
+                        st.button('Скачать xlsx (нет данных)', disabled=True,
+                                  use_container_width=True, key='c30_m_nodata')
+                with _rf_col:
+                    _do_refresh = st.button(
+                        'Загрузить из почты', key='c30_m_refresh',
+                        use_container_width=True,
+                        help='Зайти в почту Метрики и забрать свежие письма за 14 дней')
+                if not _m_reports:
+                    st.caption('За выбранный период данных пока нет. Нажмите '
+                               '«Загрузить из почты» – заберём письма Метрики за 14 дней, '
+                               'после чего появится кнопка «Скачать xlsx».')
+                if _do_refresh:
                     _mp = st.progress(0, text='Подключаюсь к почте Метрики…')
-                    _mlog = []
                     try:
                         _msum = fetch_incremental(
                             project_id=pid, email_addr=_m_email, password=_m_pass,
                             folder=MAILBOX_CONFIG[pid]['folder'], proxy_url=get_proxy_url(),
-                            lookback_days=14, log=lambda lvl, m: _mlog.append(m),
+                            lookback_days=14, log=lambda lvl, m: None,
                             force_refresh=False, upgrade_if_better=True)
                         _mp.empty()
                         st.success(f'Готово · новых: {_msum.get("fetched", 0)}, '
@@ -1098,10 +1124,28 @@ if pid:
                         _mp.empty()
                         st.error(f'Не удалось обновить: {_e}')
 
+    # «Подпись прогона» – проект + объём выборки + что проверяем. По ней решаем,
+    # показывать ли блок результатов/лог: показываем только для прогона, который
+    # запущен в этой сессии при текущих настройках. Сменили проект, объём или
+    # набор галочек (или зашли утром заново) – старый лог не показываем.
+    _cur_sig = (
+        pid, int(random_cities), int(budget['cats']), int(budget['filters']),
+        int(budget['products']),
+        bool(st.session_state.c30_check_main), bool(st.session_state.c30_check_catalog),
+        bool(st.session_state.c30_check_categories), bool(st.session_state.c30_check_filters),
+        bool(st.session_state.c30_check_products), bool(st.session_state.c30_check_text),
+        bool(st.session_state.get('c30_check_links', False)),
+        bool(st.session_state.get('c30_fetch_notifications', True)),
+    )
+
     # БЛОК запуска
     with st.container():
         _paths = _c30_paths(pid)
         _alive = _pid_alive(_read_pidfile(_paths['pid']))
+        # Идёт прогон – «присваиваем» его текущим настройкам, чтобы после
+        # завершения показать его результаты/лог (даже если зашли в новой сессии).
+        if _alive:
+            st.session_state.c30_run_sig = _cur_sig
         # Показываем ОДНУ активную кнопку: идёт прогон → «Отменить», иначе →
         # «Запустить». Так нет «выключенной» кнопки с курсором-запретом.
         _go = False
@@ -1170,6 +1214,7 @@ if pid:
             st.session_state.c30_results = None
             st.session_state.c30_report_path = None
             st.session_state.c30_last_error = None
+            st.session_state.c30_run_sig = _cur_sig   # этот прогон – «наш», его и покажем
             _launch_checklist_bg(pid, params, creds)
             st.rerun()
 
@@ -1177,6 +1222,8 @@ if pid:
     _paths = _c30_paths(pid)
     _alive = _pid_alive(_read_pidfile(_paths['pid']))
     _done = _paths['result'].exists() or _paths['report'].exists()
+    # Показывать результат/лог только для «нашего» прогона (текущие настройки).
+    _show_run = (st.session_state.get('c30_run_sig') == _cur_sig)
     # Завершение определяем по появлению артефакта (отчёт/результат), а не только
     # по живости pid: на Linux дочерний процесс может стать zombie и «жить» в
     # таблице процессов, из-за чего _alive остаётся True и UI зависает на прогрессе.
@@ -1235,13 +1282,13 @@ if pid:
         st.rerun()
 
     # ── Ошибка прогона (если была) ──────────────────────────────────
-    if st.session_state.get('c30_last_error'):
+    if _show_run and st.session_state.get('c30_last_error'):
         st.error(f'Прогон завершился с ошибкой: {st.session_state.c30_last_error}')
 
     # ── Запасная кнопка скачивания ──────────────────────────────────
     # Если отчёт на диске есть, но блок результатов ниже не отрисовался
     # (нет распарсенных результатов) – всё равно даём скачать xlsx.
-    if (st.session_state.get('c30_report_path')
+    if (_show_run and st.session_state.get('c30_report_path')
             and not st.session_state.get('c30_results')):
         _rp = Path(st.session_state.c30_report_path)
         if _rp.exists():
@@ -1253,7 +1300,7 @@ if pid:
                     use_container_width=True, type='primary', key='c30_dl_fallback')
 
     # ── Результаты прогона ──────────────────────────────────────────
-    if st.session_state.c30_results and not st.session_state.c30_is_running:
+    if _show_run and st.session_state.c30_results and not st.session_state.c30_is_running:
         results = st.session_state.c30_results
         total = len(results)
         ok_count = sum(1 for r in results if r.is_ok)
@@ -1331,9 +1378,10 @@ if pid:
     # «Уведомления»), собираются по галке «Собрать уведомления» за
     # выбранный период. Отдельный блок в UI убран.
 
-    # ── Лог прогона: самый нижний блок (под результатами), виден всегда
-    #    после завершения (как в автокликере) – даже если результатов нет. ──
-    if not _alive:
+    # ── Лог прогона: самый нижний блок (под результатами). Показываем только
+    #    для «нашего» прогона (текущие настройки) – иначе утром/после смены
+    #    проекта висел бы старый лог. ──
+    if _show_run and not _alive:
         _lp = _c30_paths(pid)['log']
         if _lp.exists():
             _log_txt = _lp.read_text(encoding='utf-8', errors='ignore')
