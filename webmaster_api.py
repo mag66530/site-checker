@@ -240,10 +240,41 @@ def _panel_url(host_id: str) -> str:
     return f'https://webmaster.yandex.ru/site/{host_id}/diagnostics/'
 
 
+def _extract_inprogress_codes(payload) -> set:
+    """Из ответа /diagnostics/checks/ собрать коды проблем «на проверке».
+    Структура у Яндекса может отличаться — разбираем максимально терпимо."""
+    codes = set()
+    if not payload:
+        return codes
+    # Кандидаты-контейнеры со списком проверок
+    items = None
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = (payload.get('checks') or payload.get('problems')
+                 or payload.get('items') or payload.get('tasks') or [])
+        if isinstance(items, dict):       # вдруг {CODE: {...}}
+            items = [{**v, 'code': k} for k, v in items.items()]
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        status = str(it.get('status') or it.get('state')
+                     or it.get('check_state') or '').upper()
+        # «на проверке»: IN_PROGRESS / CHECKING / PROGRESS
+        if 'PROGRESS' in status or 'CHECK' in status or status == 'IN_PROGRESS':
+            code = (it.get('code') or it.get('type') or it.get('problem_type')
+                    or it.get('problem') or '')
+            if code:
+                codes.add(str(code).upper())
+    return codes
+
+
 def _parse_diagnostics(project_id: str, host: str, host_id: str,
-                       payload: dict) -> list:
-    """Из ответа /diagnostics/ собрать список ServiceIssue (только активные)."""
+                       payload: dict, inprogress_codes: set = None) -> list:
+    """Из ответа /diagnostics/ собрать список ServiceIssue (только активные).
+    inprogress_codes — коды, что сейчас «на проверке» (из /diagnostics/checks/)."""
     issues = []
+    inprogress_codes = inprogress_codes or set()
     problems = (payload or {}).get('problems')
     if not problems:
         return issues
@@ -267,6 +298,9 @@ def _parse_diagnostics(project_id: str, host: str, host_id: str,
         # Исключаем только ЯВНО решённые/отсутствующие – всё прочее берём.
         if st_up in ('ABSENT', 'OK', 'NONE', 'RESOLVED', 'GONE', 'FIXED'):
             continue
+        # «На проверке» приходит из /diagnostics/checks/ — перебивает state.
+        if str(code).upper() in inprogress_codes:
+            st_up = 'IN_PROGRESS'
         sev_raw = (info.get('severity') or '').upper()
         severity = _SEV_FROM_YANDEX.get(sev_raw, 'info')
         date = ''
@@ -321,6 +355,9 @@ def fetch_webmaster_issues(project_id: str, token: str,
 
         all_issues = []
         _dumped = False
+        _dumped_checks = False
+        _checks_warned = False
+        _checks_dead = False        # /diagnostics/checks/ вернул 404 — не дёргаем
         for host_norm, host_id, _url in selected:
             if not host_id:
                 continue
@@ -329,15 +366,43 @@ def fetch_webmaster_issues(project_id: str, token: str,
                             proxy_url)
                 _raw = (diag or {}).get('problems')
                 _raw_n = len(_raw) if isinstance(_raw, (dict, list)) else 0
-                # Одноразовый дамп сырого problem-объекта — увидеть реальные
-                # поля статуса (state/verification_state/…).
-                if not _dumped and _raw_n:
+                # Дамп: сырой problem-объект первой АКТИВНОЙ проблемы (state≠ABSENT)
+                # — увидеть все поля (вдруг есть признак «на проверке»).
+                if not _dumped and isinstance(_raw, dict) and _raw_n:
                     import json as _j
-                    _first = (list(_raw.values())[0] if isinstance(_raw, dict)
-                              else _raw[0])
-                    _log(f'  RAW problem пример: {_j.dumps(_first, ensure_ascii=False)[:400]}')
-                    _dumped = True
-                hi = _parse_diagnostics(project_id, host_norm, host_id, diag)
+                    _act = None
+                    for _c, _v in _raw.items():
+                        if isinstance(_v, dict) and str(_v.get('state', '')).upper() != 'ABSENT':
+                            _act = (_c, _v)
+                            break
+                    if _act:
+                        _log(f'  RAW активная проблема [{_act[0]}]: '
+                             f'{_j.dumps(_act[1], ensure_ascii=False)[:500]}')
+                        _dumped = True
+
+                # Коды «на проверке» — из отдельного эндпоинта /diagnostics/checks/
+                # (если он есть; на части аккаунтов отдаёт 404 — тогда не дёргаем).
+                _inprogress = set()
+                if not _checks_dead:
+                    try:
+                        _checks = _get(
+                            token, f'/user/{user_id}/hosts/{host_id}/diagnostics/checks/',
+                            proxy_url)
+                        if not _dumped_checks and _checks:
+                            import json as _j
+                            _log(f'  RAW checks пример: '
+                                 f'{_j.dumps(_checks, ensure_ascii=False)[:400]}')
+                            _dumped_checks = True
+                        _inprogress = _extract_inprogress_codes(_checks)
+                    except Exception as _ce:
+                        if '404' in str(_ce):
+                            _checks_dead = True   # эндпоинта нет — больше не пробуем
+                        if not _checks_warned:
+                            _log(f'  /diagnostics/checks/: {_ce}')
+                            _checks_warned = True
+
+                hi = _parse_diagnostics(project_id, host_norm, host_id, diag,
+                                        inprogress_codes=_inprogress)
                 all_issues.extend(hi)
                 # Диагностика: если сырых проблем много, а активных 0 – видно в логе
                 _log(f'  {host_norm}: в ответе {_raw_n}, активных {len(hi)}')
@@ -345,6 +410,15 @@ def fetch_webmaster_issues(project_id: str, token: str,
                     _log(f'    ключи/шаблон: {list(_raw)[:6]}')
             except Exception as e:
                 _log(f'⚠ Вебмастер-API ({host_norm}): {e}')
+
+        # Какие значения state встречаются + пары severity×state — чтобы понять,
+        # бывает ли у КРИТИЧЕСКИХ состояние UNDEFINED («на проверке»).
+        _seen_states = sorted({(i.state or '∅') for i in all_issues})
+        _log(f'Вебмастер-API: встреченные state активных проблем: {_seen_states}')
+        from collections import Counter as _C
+        _pairs = _C((i.severity, i.state or '∅') for i in all_issues)
+        _log(f'Вебмастер-API: severity×state: '
+             f'{sorted(_pairs.items())}')
 
         all_issues.sort(key=lambda i: (SEVERITY_ORDER.get(i.severity, 9), i.host))
         save_issues(project_id, all_issues)

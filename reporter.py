@@ -912,6 +912,7 @@ def _group_service_issues(items: list) -> list:
 _WM_STATE_LABELS = {
     'IN_PROGRESS': 'на проверке',
     'CHECKING': 'на проверке',
+    'UNDEFINED': 'на проверке',   # состояние не определено = идёт перепроверка
     'PROBLEM_ACTUAL': 'проблема актуальна',
     'PRESENT': 'проблема актуальна',
     'ACTUAL': 'проблема актуальна',

@@ -1056,13 +1056,12 @@ if pid:
             'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google)',
             key='c30_fetch_notifications')
         if _ck_notif:
-            _nd_opts = [1, 3, 7, 14, 30]
-            _pc1, _pc2 = st.columns([1, 3])
-            with _pc1:
-                st.selectbox('За какой период',
-                             _nd_opts,
-                             format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
-                             key='c30_notify_days')
+            # Без st.columns (пустая вторая колонка оставляла «призрачный»
+            # селектор при выключенном чекбоксе — как было у 404).
+            st.selectbox('За какой период',
+                         [1, 3, 7, 14, 30],
+                         format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
+                         key='c30_notify_days', label_visibility='collapsed')
         _ck_m404 = st.checkbox(
             'Собрать 404 из Метрики',
             key='c30_fetch_metrika_404',
