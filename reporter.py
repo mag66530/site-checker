@@ -904,12 +904,39 @@ def _group_service_issues(items: list) -> list:
     return list(groups.values())
 
 
+# Коды состояния проблемы Вебмастера → человекочитаемо.
+_WM_STATE_LABELS = {
+    'IN_PROGRESS': 'на проверке',
+    'CHECKING': 'на проверке',
+    'PROBLEM_ACTUAL': 'проблема актуальна',
+    'PRESENT': 'проблема актуальна',
+    'ACTUAL': 'проблема актуальна',
+    'NEW': 'новая',
+}
+
+
+def _state_human(code: str):
+    """Код состояния → текст. Пусто/«—» → None (не выводим).
+    Старый кеш с уже-человеческим текстом — отдаём как есть."""
+    s = (code or '').strip()
+    if not s or s == '—':
+        return None
+    up = s.upper()
+    if up in _WM_STATE_LABELS:
+        return _WM_STATE_LABELS[up]
+    return s.lower()
+
+
 def _format_states(states) -> str:
-    """Counter состояний → строка «16 - на проверке. 45 - проблема актуальна».
-    Плейсхолдер «—» (нет данных, старый кеш) не выводим."""
-    parts = [f'{n} - {label}' for label, n in states.most_common()
-             if label and label != '—']
-    return '. '.join(parts)
+    """Counter кодов состояния → «16 - на проверке. 45 - проблема актуальна».
+    Коды агрегируются по человекочитаемой метке."""
+    from collections import Counter
+    agg = Counter()
+    for code, n in states.items():
+        h = _state_human(code)
+        if h:
+            agg[h] += n
+    return '\n'.join(f'{n} — {label}' for label, n in agg.most_common())
 
 
 # Секции в порядке убывания релевантности:
