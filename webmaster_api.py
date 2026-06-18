@@ -100,6 +100,17 @@ _PROBLEM_TITLES = {
     'URL_ERRORS': 'Ошибки в URL',
     'DOCS_IN_SEARCH_DECREASED': 'Снизилось число страниц в поиске',
     'TURBO_HOST_INACTIVE': 'Турбо-страницы неактивны',
+    # Реальные коды из панели Вебмастера:
+    'URL_ALERT_5XX': 'Ошибки сервера 5xx на страницах',
+    'MAIN_PAGE_ERROR': 'Ошибка на главной странице',
+    'ERROR_IN_ROBOTS_TXT': 'Ошибка в robots.txt',
+    'ERRORS_IN_SITEMAPS': 'Ошибки в файлах sitemap',
+    'NO_SITEMAPS': 'Не добавлены файлы sitemap',
+    'DOCUMENTS_MISSING_TITLE': 'Страницы без тега title',
+    'NO_SITEMAP_MODIFICATIONS': 'Sitemap давно не обновлялся',
+    'MAIN_PAGE_REDIRECTS': 'Главная перенаправляет (редирект)',
+    'DOCUMENTS_MISSING_DESCRIPTION': 'Страницы без meta description',
+    'DUPLICATE_CONTENT_ATTRS': 'Дубли страниц (одинаковый контент)',
 }
 
 

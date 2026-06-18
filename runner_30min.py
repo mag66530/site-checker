@@ -203,6 +203,17 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Google: {_e}')
 
+            # Папка GSC в Яндекс-почте («Гугл» / «Google Search Console») —
+            # то же содержимое, что GSC → пишем в source 'gsc', классифицируем.
+            _gf_e, _gf_p, _gf_f = creds.get('google_folder') or (None, None, None)
+            if _gf_e and _gf_p and _gf_f:
+                log(f'GSC-папка «{_gf_f}»: собираю…')
+                try:
+                    fetch_yandex_folder_simple(pid, _gf_e, _gf_p, _gf_f, 'gsc',
+                                               _nd, _proxy, _nlog, classify=True)
+                except Exception as _e:
+                    log(f'⚠ GSC-папка: {_e}')
+
             # 404-отчёты из почты Метрики (та же учётка metrika_{pid}, своя папка)
             _mb_cfg = MAILBOX_CONFIG.get(pid)
             if _yw_e and _yw_p and _mb_cfg:
