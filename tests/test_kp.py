@@ -214,3 +214,31 @@ def test_kp_csv_loads(proj):
     # У каждой записи есть домен и хотя бы город
     for dom, row in list(kp.items())[:5]:
         assert row.domain and '.' in row.domain
+
+
+def test_contacts_page_addresses_vs_kp():
+    """Сверка адресов всех городов на странице «Контакты» с КП: совпадение,
+    расхождение и нормализация города ё=е."""
+    from kp import check_contacts_addresses
+    html = ('<div><b>Москва</b><br> улица Ленина, 5</div>'
+            '<div><b>Уфа</b><br> проспект Мира, 10</div>'
+            '<div><b>Орел</b><br> улица Победы, 1</div>')
+    kp = {
+        'msk':  KPRow(domain='msk', city='Москва', address='улица Ленина, 5'),
+        'ufa':  KPRow(domain='ufa', city='Уфа', address='улица Гагарина, 99'),
+        'orel': KPRow(domain='orel', city='Орёл', address='улица Победы, 1'),
+    }
+    res = check_contacts_addresses(html, kp)
+    assert res['on_page'] == 3
+    assert res['matched'] == 2          # Москва + Орёл (ё=е)
+    assert len(res['mismatched']) == 1 and res['mismatched'][0]['city'] == 'Уфа'
+    assert res['not_in_kp'] == []
+
+
+def test_page_phone_vs_kp():
+    """Сверка телефона в контенте страницы (kak-sdelat-pokupku) с КП города."""
+    from kp import check_page_phone
+    kp = _kp(phone_seo='+7 (499) 130-60-28', all_phones='4991306028')
+    assert check_page_phone('Звоните +7 (499) 130-60-28', 'x.ru', kp)['status'] == 'ok'
+    assert check_page_phone('Звоните +7 (495) 000-11-22', 'x.ru', kp)['status'] == 'bug'
+    assert check_page_phone('Текст без номера', 'x.ru', kp)['status'] == 'bug'

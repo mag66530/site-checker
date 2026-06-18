@@ -382,6 +382,73 @@ def check_against_kp(html: str, domain: str, kp: dict[str, KPRow]) -> KPCheckRes
     return res
 
 
+def check_page_phone(html: str, domain: str, kp: dict) -> Optional[dict]:
+    """Сверить телефон(ы) на странице с КП города (для /kak-sdelat-pokupku/ и т.п.).
+    Возвращает {status, comment} или None если города нет в КП."""
+    row = kp.get(_norm_host(domain))
+    if not row:
+        return None
+    site = {p for p in split_phones(html or '') if not p.startswith('000')}
+    kp_ph = row.phone_set()
+    if not kp_ph:
+        return {'status': 'critical',
+                'comment': f'в КП нет номера для города «{row.city}»'}
+    if not site:
+        return {'status': 'bug', 'comment': 'на странице не найден телефон'}
+    if site & kp_ph:
+        return {'status': 'ok', 'comment': ''}
+    all_kp = set()
+    for rr in kp.values():
+        all_kp |= rr.phone_set()
+    if site & all_kp:
+        return {'status': 'ok', 'comment': 'номер обслуживающего филиала'}
+    return {'status': 'bug',
+            'comment': 'телефон на странице не из КП: '
+                       + ', '.join(_fmt(p) for p in site)}
+
+
+# ── Сверка адресов ВСЕХ городов на странице «Контакты» с КП ───────────
+
+# Город и адрес в списке офисов: <b>Город</b><br> Адрес …</div>.
+_CONTACTS_PAIR_RE = re.compile(
+    r'<b>\s*([А-ЯЁ][^<]{1,40}?)\s*</b>\s*<br[^>]*>\s*([^<]{3,90}?)\s*</', re.I)
+
+
+def extract_contacts_addresses(html: str) -> dict:
+    """Со страницы «Контакты» – пары {город: адрес} из списка офисов по городам."""
+    out = {}
+    for m in _CONTACTS_PAIR_RE.finditer(html or ''):
+        city = re.sub(r'\s+', ' ', m.group(1)).strip()
+        addr = re.sub(r'\s+', ' ', m.group(2)).strip()
+        # адрес – со уличным маркером или номером дома (а не «Заказать звонок» и т.п.)
+        if city and addr and (any(w in addr.lower() for w in (
+                'улиц', 'ул.', 'проспект', 'пр.', 'пр-кт', 'шоссе', 'переул',
+                'пер.', 'набережн', 'бульвар', 'площад', 'проезд', 'микрорайон'))
+                or re.search(r'\d', addr)):
+            out[city] = addr
+    return out
+
+
+def check_contacts_addresses(html: str, kp: dict) -> dict:
+    """Сверить адреса всех городов на странице «Контакты» с КП.
+    Возвращает: {on_page, matched, mismatched:[{city,site,kp}], not_in_kp:[city]}."""
+    page = extract_contacts_addresses(html)
+    _nc = lambda s: (s or '').strip().lower().replace('ё', 'е')
+    kp_by_city = {_nc(row.city): row for row in kp.values() if row.address}
+    matched, mismatched, not_in_kp = 0, [], []
+    for city, site_addr in page.items():
+        row = kp_by_city.get(_nc(city))
+        if not row:
+            not_in_kp.append(city)
+            continue
+        if address_match(site_addr, row.address):
+            matched += 1
+        else:
+            mismatched.append({'city': city, 'site': site_addr, 'kp': row.address})
+    return {'on_page': len(page), 'matched': matched,
+            'mismatched': mismatched, 'not_in_kp': not_in_kp}
+
+
 def _fmt(norm10: str) -> str:
     """4991306028 → +7 (499) 130-60-28 для читаемого комментария."""
     if len(norm10) != 10:

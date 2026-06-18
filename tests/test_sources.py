@@ -19,7 +19,8 @@ def test_list_projects():
 def test_smu_sources():
     cfg = load_project_config('smu')
     src = load_sources(cfg)
-    assert len(src.subdomains) == 34, f"СМУ: ожидалось 34 поддомена, получили {len(src.subdomains)}"
+    # Список городов пополняется – проверяем «не меньше базы», а не точное число.
+    assert len(src.subdomains) >= 34, f"СМУ: ожидалось ≥34 поддомена, получили {len(src.subdomains)}"
     assert len(src.categories) > 1000, f"СМУ: мало категорий ({len(src.categories)})"
     assert len(src.filters) > 13000, f"СМУ: мало фильтров ({len(src.filters)})"
     moscow = next((s for s in src.subdomains if s.city == 'Москва'), None)
@@ -31,7 +32,8 @@ def test_smu_sources():
 def test_imp_sources():
     cfg = load_project_config('imp')
     src = load_sources(cfg)
-    assert len(src.subdomains) == 239, f"ИМП: ожидалось 239, получили {len(src.subdomains)}"
+    # Список городов пополняется – проверяем «не меньше базы», а не точное число.
+    assert len(src.subdomains) >= 239, f"ИМП: ожидалось ≥239, получили {len(src.subdomains)}"
     assert len(src.categories) > 1400, f"ИМП: мало категорий"
     assert len(src.filters) > 14000, f"ИМП: мало фильтров"
     print(f'✓ ИМП: {len(src.subdomains)} городов, '

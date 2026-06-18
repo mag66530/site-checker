@@ -794,6 +794,27 @@ def _d_rec_price(c: _Ctx):
     return (broken == 0), None
 
 
+# «Нет фото»: вместо картинки товара подставлена заглушка. Точные маркеры в src
+# (picture.missing – МПЭ; общие no-photo/noimage/nophoto и т.п.). Слово
+# «placeholder» НЕ берём – оно встречается в вёрстке повсеместно (ложные баги).
+_NO_PHOTO_RE = re.compile(
+    r'src="[^"]*(?:picture\.missing|no[-_]?photo|no[-_]?image|nophoto|noimage|'
+    r'not-?found|/stub[\./])', re.I)
+
+
+def _d_cards_photos(c: _Ctx):
+    # У карточек товаров есть фото: ищем заглушку «нет фото» в картинках.
+    # Нашли хоть одну – у части товаров фото нет (баг с пустыми фото).
+    n = len(_NO_PHOTO_RE.findall(c.html_lower))
+    return (n == 0), (n or None)
+
+
+def _d_catalog_blocks(c: _Ctx):
+    # Блоки каталога на корне: ссылки на разделы/подкатегории (/catalog/<раздел>/).
+    n = len(set(re.findall(r'href="[^"]*/catalog/[a-z0-9\-]+/', c.html_lower)))
+    return n >= 3, n
+
+
 def _d_specs(c: _Ctx):
     present = 'характеристик' in c.text_lower or 'артикул' in c.text_lower
     return present, None
@@ -828,6 +849,16 @@ def _d_seo_text(c: _Ctx):
 # отчёта не оставалось вопроса «а что значит этот столбец?».
 # Везде проверяется НАЛИЧИЕ блока, не его наполнение.
 BLOCK_DESCRIPTIONS = {
+    'photos':        'Фото товаров: ищем заглушку «нет фото» (picture.missing и т.п.) в картинках карточек. Нашли – у части товаров фото нет. Число = сколько без фото.',
+    'catalog_blocks':'Блоки каталога на корне: ссылки на разделы/подкатегории (/catalog/…). Число = сколько разных разделов.',
+    'content_text':  'Собственный текст страницы (помимо сквозных шапки и подвала). Обязателен у тех. страниц.',
+    'tech_images':   'Картинки в контенте страницы (помимо логотипа в шапке/подвале).',
+    'tech_catalog_link': 'Ссылка на каталог в контенте (кнопка «Перейти к каталогу» и т.п.).',
+    'tech_map':      'Карта на странице (Яндекс.Карты / 2ГИС / iframe карты).',
+    'tech_feedback': 'Форма обратной связи в контенте (форма + «обратная связь / связаться / заявка»).',
+    'tech_vacancies':'Вакансии: есть список вакансий и ссылки «узнать подробнее».',
+    'tech_search':   'Строка поиска по сайту в контенте.',
+    'tech_links':    'Рабочие ссылки в контенте (настоящие адреса, не «#» / javascript:void). Число = сколько.',
     'h1':            'Непустой тег <h1>. Проверяется наличие, не текст. Число = сколько H1 на странице.',
     'breadcrumbs':   'Хлебные крошки: микроразметка BreadcrumbList или класс breadcrumb в вёрстке.',
     'hdr_phone':     'Телефон в шапке: номер +7… внутри региона <header>. Обязателен.',
@@ -914,6 +945,7 @@ _LISTING = [
     _b('filters',       'Фильтры',                    False, _d_filters),
     _b('sort',          'Сортировка',                 False, _d_sort),
     _b('product_cards', 'Карточки товаров',          True,  _d_product_cards),
+    _b('photos',        'Фото товаров',               True,  _d_cards_photos),
     _b('price',         'Цена (есть)',                True,  _d_price),
     _b('price_real',    'Цена в рублях',              False, _d_price_real),
     _b('price_request', 'Цена по запросу',            False, _d_price_request),
@@ -955,28 +987,148 @@ _PRODUCT = [
     _b('payment',       'Способы оплаты',             False, _d_payment),
     _b('consultation',  'Консультация',               False, _d_consultation),
     _b('found_cheaper', '«Нашли дешевле»',            False, _d_found_cheaper),
+    _b('photos',        'Фото товаров',               True,  _d_cards_photos),
     # Нижние блоки карточки – после основного товара («сначала карточка, потом
     # что ниже»): сам блок (справочно) + есть ли у его товаров цена.
     _b('rec_block',     'Блок «похожие / с этим покупают»', False, _d_rec_block),
     _b('rec_price',     'Цены в нижних блоках',        True,  _d_rec_price),
 ]
 
-# КАТАЛОГ-корень – верхний уровень, показывает разделы. Товарных блоков нет.
+# КАТАЛОГ-корень – верхний уровень, показывает разделы. Проверяем: блоки каталога
+# (ссылки на подкатегории), плитку тегов, а также блок «Популярные позиции» снизу –
+# у его карточек проверяем фото и цену (как у листинга).
 _CATALOG = [
-    _b('tag_tiles',     'Плитка тегов (часто ищут)',  False, _d_tag_tiles),
+    _b('catalog_blocks', 'Блоки каталога',            True,  _d_catalog_blocks),
+    _b('tag_tiles',      'Плитка тегов (часто ищут)', False, _d_tag_tiles),
+    _b('photos',         'Фото товаров',              True,  _d_cards_photos),
+    _b('price',          'Цена (популярные)',         False, _d_price),
 ]
 
 # Технические страницы (оплата, доставка, контакты, реквизиты, политики, карта
 # сайта) – это обычные контентные страницы того же шаблона. Проверяем их «как
-# все»: H1 (обязателен – нормальная страница его имеет) и хлебные крошки
-# (справочно: показываем есть/нет, но отсутствие не баг – у части служебных
-# страниц, напр. карты сайта, крошек может не быть по дизайну). Битые переменные
-# и soft-404 ловит сквозной движок (check_text / soft-404) на любой странице –
-# тех. страницы не исключение.
+# все»: контентный текст (на всех тех. страницах должен быть), H1 (обязателен) и
+# хлебные крошки (справочно: у части служебных страниц крошек может не быть).
+# Битые переменные и soft-404 ловит сквозной движок на любой странице.
+_CONTENT_CHROME_RE = re.compile(r'<(header|footer|nav)\b[^>]*>.*?</\1>', re.I | re.S)
+
+
+def _content_html(c: _Ctx) -> str:
+    """HTML страницы без сквозных шапки/подвала/меню – «контентная» область.
+    Берём полный HTML (не vis): strip_hidden иногда убирает блоки, которые
+    показываются JS (карта, mission-секция), а нам важно их наличие в коде."""
+    return _CONTENT_CHROME_RE.sub(' ', c.html_lower)
+
+
+def _d_content_text(c: _Ctx):
+    # Собственный текст страницы: убираем сквозные шапку/подвал/меню (по тегам) и
+    # считаем текст остатка. Порог невысокий (150) – разделы-витрины каталога
+    # (напр. «Спецтехника») состоят из карточек, текста там мало, но он есть; а
+    # совсем пустую/битую страницу (только шапка/подвал) поймаем.
+    text = html_to_visible_text(_content_html(c))
+    return len(text.strip()) > 150, None
+
+
+# ── Спец-элементы тех. страниц (справочно – есть/нет, считаем по контенту, не
+# по шапке/подвалу, иначе форма/картинки-логотипы давали бы ложное «есть») ──
+def _d_tech_images(c: _Ctx):
+    n = len(re.findall(r'<img\b', _content_html(c)))
+    return n >= 1, n
+
+
+def _d_tech_catalog_link(c: _Ctx):
+    # Ссылка на каталог в контенте (кнопка «Перейти к каталогу» и т.п.).
+    return bool(re.search(r'<a\b[^>]*href="[^"]*/catalog', _content_html(c))), None
+
+
+def _d_tech_map(c: _Ctx):
+    h = c.html_lower    # карта-контейнер часто скрыт до JS – смотрим полный HTML
+    return ('ymaps' in h or 'api-maps.yandex' in h or 'yandex.ru/map' in h
+            or '2gis' in h or ('<iframe' in h and 'map' in h)), None
+
+
+def _d_tech_feedback(c: _Ctx):
+    body = _content_html(c)
+    return ('<form' in body and ('обратной связи' in body or 'обратная связь' in body
+            or 'связаться' in body or 'оставить заявк' in body)), None
+
+
+def _d_tech_vacancies(c: _Ctx):
+    # Есть вакансии и ссылки «узнать подробнее» (открываются).
+    body = _content_html(c)
+    has_vac = 'ваканс' in body
+    has_more = 'узнать подробнее' in body or 'подробнее' in body
+    return (has_vac and has_more), None
+
+
+def _d_tech_search_box(c: _Ctx):
+    # Строка поиска по сайту в контенте.
+    body = _content_html(c)
+    return ('type="search"' in body or 'role="search"' in body
+            or 'поиск по сайту' in body or 'name="q"' in body
+            or 'name="query"' in body or 'name="s"' in body), None
+
+
+def _d_tech_links(c: _Ctx):
+    # Рабочие ссылки в контенте: настоящие адреса (не «#», не javascript:void,
+    # не пустые). «Не битые» проверяем по виду href; реальный код ответа (404)
+    # тут не запрашиваем – это отдельная тяжёлая проверка.
+    body = _content_html(c)
+    real = [h for h in re.findall(r'<a\b[^>]*href="([^"]*)"', body)
+            if h.strip() and not h.strip().lower().startswith(
+                ('#', 'javascript:', 'mailto:', 'tel:'))]
+    return len(real) >= 1, len(real)
+
+
 _TECH = [
-    _b('breadcrumbs', 'Хлебные крошки', False, _d_breadcrumbs),
-    _b('h1',          'Заголовок H1',   True,  _d_h1),
+    _b('content_text', 'Текст',          True,  _d_content_text),
+    _b('breadcrumbs',  'Хлебные крошки', False, _d_breadcrumbs),
+    _b('h1',           'Заголовок H1',   True,  _d_h1),
 ]
+
+# Спец-блоки тех. страниц (пока справочно – required=False).
+_TB_IMAGES    = _b('tech_images',       'Картинки',             False, _d_tech_images)
+_TB_CATALOG   = _b('tech_catalog_link', 'Ссылка на каталог',    False, _d_tech_catalog_link)
+_TB_MAP       = _b('tech_map',          'Карта',                False, _d_tech_map)
+_TB_FORM      = _b('tech_feedback',     'Форма обратной связи', False, _d_tech_feedback)
+_TB_VACANCIES = _b('tech_vacancies',    'Вакансии',             False, _d_tech_vacancies)
+_TB_SEARCH    = _b('tech_search',       'Строка поиска',        False, _d_tech_search_box)
+_TB_LINKS     = _b('tech_links',        'Ссылки',               False, _d_tech_links)
+
+
+def _tech_profile_for(url: str) -> list:
+    """Профиль тех. страницы по её адресу: базовые (текст/H1/крошки) + спец-блоки
+    в зависимости от того, что это за страница (о компании / контакты / …).
+    Покрывает пути СМУ, ИМП и МПЭ."""
+    try:
+        path = urlparse(url).path.lower()
+    except Exception:
+        path = (url or '').lower()
+    extra = []
+    if '/contact' in path:                                   # контакты
+        extra = [_TB_MAP, _TB_FORM]
+    elif '/vakansii' in path or '/vacancy' in path:          # вакансии
+        extra = [_TB_VACANCIES]
+    elif '/search' in path or '/poisk' in path:              # поиск по сайту
+        extra = [_TB_SEARCH]
+    elif 'proizvodstvo' in path or 'uslugi-metallo' in path:  # производство / услуги
+        extra = [_TB_IMAGES, _TB_LINKS]
+    elif '/about' in path or '/o-kompanii' in path:           # о компании
+        extra = [_TB_IMAGES, _TB_CATALOG]
+    elif ('delivery' in path or '/payment' in path or '/oplata' in path
+          or '/dostavka' in path):                            # оплата / доставка
+        extra = [_TB_CATALOG, _TB_IMAGES]
+    elif 'spetstekhnika' in path:                             # раздел спецтехники
+        extra = [_TB_CATALOG]
+    elif 'price-list' in path:                                # прайс-лист
+        extra = [_TB_LINKS]
+    elif ('politika' in path or 'polzovatelskoe' in path
+          or 'soglasie' in path or 'soglashenie' in path):    # политики / соглашения
+        extra = [_TB_LINKS]
+    elif any(k in path for k in (
+            'postavsh', 'garantii', 'vozvrat', 'upakovka', 'komplektaciya',
+            'kontrol-kachestva', 'pravila-otgruzki', 'rekvizit')):
+        extra = [_TB_IMAGES]                                  # текст + картинки
+    return _TECH + extra
 
 # Главная: шапка (сверху) → H1 → формы/поиск → подвал (снизу). Порядок как на
 # странице. Шапка и подвал обязательны, H1 на главной строго не требуем.
@@ -1177,7 +1329,8 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
         or 'в корзину' in ctx.text_lower or 'в один клик' in ctx.text_lower
     )
 
-    for blk in _profile_for(type_code, page_kind):
+    _profile = _tech_profile_for(url) if type_code == 'tech' else _profile_for(type_code, page_kind)
+    for blk in _profile:
         if blk.key in absent:
             continue        # этого элемента у проекта нет по дизайну – не показываем
         try:

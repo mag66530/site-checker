@@ -176,6 +176,12 @@ class CheckResult:
     # Сверка контактов с КП (только для главных страниц поддоменов)
     kp_result: Optional[dict] = None
 
+    # Сверка адресов всех городов на странице «Контакты» с КП (только /contacts/)
+    contacts_addr: Optional[dict] = None
+
+    # Сверка телефона в контенте страницы с КП (например /kak-sdelat-pokupku/)
+    page_phone: Optional[dict] = None
+
     checked_at: Optional[str] = None
 
 
@@ -414,6 +420,26 @@ async def check_one(
         except Exception:
             kp_result = None
 
+    # Сверка адресов ВСЕХ городов на странице «Контакты» с КП.
+    contacts_addr = None
+    if (is_ok and kp_map and task.type_code == 'tech' and a['body_text']
+            and '/contact' in task.url.lower()):
+        try:
+            from kp import check_contacts_addresses
+            contacts_addr = check_contacts_addresses(a['body_text'], kp_map)
+        except Exception:
+            contacts_addr = None
+
+    # Сверка телефона в контенте страницы с КП (например /kak-sdelat-pokupku/).
+    page_phone = None
+    if (is_ok and kp_map and task.type_code == 'tech' and a['body_text']
+            and 'kak-sdelat-pokupku' in task.url.lower()):
+        try:
+            from kp import check_page_phone
+            page_phone = check_page_phone(a['body_text'], task.subdomain, kp_map)
+        except Exception:
+            page_phone = None
+
     return CheckResult(
         url=task.url,
         city=task.city,
@@ -439,6 +465,8 @@ async def check_one(
         content_bugs=content.bug_count if content else 0,
         has_content_bugs=bool(content and content.has_bugs),
         kp_result=kp_result,
+        contacts_addr=contacts_addr,
+        page_phone=page_phone,
         checked_at=None,
     )
 

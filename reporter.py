@@ -544,14 +544,14 @@ def _build_structure_sheet(wb, results):
                 return True
             return bool(r.content_bugs or r.has_text_issues)
         _bad = sum(1 for r in tech if _tech_bad(r))
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
         gc = ws.cell(row=row, column=2)
         gc.value = (f'  Технические страницы – {len(tech)} стр.'
                     + (f'  ·  проблем: {_bad}' if _bad else '  ·  все в порядке'))
         gc.font = _font(size=11, bold=True, color=C.err if _bad else C.ok)
         gc.fill = _fill(C.accent_soft)
         gc.alignment = _align(indent=1, vertical='center')
-        for cc in range(2, 8):
+        for cc in range(2, 10):
             ws.cell(row=row, column=cc).fill = _fill(C.accent_soft)
         ws.row_dimensions[row].height = 22
         row += 1
@@ -561,7 +561,9 @@ def _build_structure_sheet(wb, results):
             (4, 'Проблем', 'Сколько проблем на странице: структурные баги + битые переменные.'),
             (5, 'H1', 'Заголовок H1. Обязателен – у нормальной страницы он есть.'),
             (6, 'Крошки', 'Хлебные крошки. Справочно: показываем есть/нет, отсутствие на служебной странице не баг.'),
-            (7, 'Битые перем.', 'Битые шаблонные переменные ({{…}}, %name% и т.п.). Число = сколько найдено.'),
+            (7, 'Текст', 'Есть ли на странице собственный текст (помимо сквозных шапки и подвала). Обязателен.'),
+            (8, 'Битые перем.', 'Битые шаблонные переменные ({{…}}, %name% и т.п.). Число = сколько найдено.'),
+            (9, 'Элементы страницы', 'Спец-проверки в зависимости от страницы: картинки, ссылка на каталог, карта, форма обратной связи (✓ есть / – нет). Пока справочно.'),
         ]
         hdr_row = row
         for ci, h, desc in _tech_headers:
@@ -604,6 +606,12 @@ def _build_structure_sheet(wb, results):
             sc.border = _border(color=C.border_light)
 
             _probs = (r.content_bugs or 0) + len(r.text_issues or [])
+            _ca = getattr(r, 'contacts_addr', None)
+            if _ca:
+                _probs += len(_ca.get('mismatched') or [])
+            _pp = getattr(r, 'page_phone', None)
+            if _pp and _pp.get('status') in ('bug', 'critical'):
+                _probs += 1
             pc = ws.cell(row=row, column=4)
             pc.value = _probs if _probs else ''
             pc.font = _font(size=11, bold=True, color=C.err)
@@ -614,7 +622,7 @@ def _build_structure_sheet(wb, results):
             # H1 / Крошки: если страница не открылась или это 404-заглушка –
             # структуры нет, ставим «–». Иначе берём из блоков контента.
             by_key = {b.key: b for b in r.content.blocks} if (r.is_ok and r.content) else {}
-            for ci, key in ((5, 'h1'), (6, 'breadcrumbs')):
+            for ci, key in ((5, 'h1'), (6, 'breadcrumbs'), (7, 'content_text')):
                 cell = ws.cell(row=row, column=ci)
                 cell.alignment = _align(horizontal='center', indent=0)
                 cell.border = _border(color=C.border_light)
@@ -629,7 +637,7 @@ def _build_structure_sheet(wb, results):
 
             # Битые переменные – число найденных.
             _ti = len(r.text_issues or []) if r.is_ok else 0
-            vc = ws.cell(row=row, column=7)
+            vc = ws.cell(row=row, column=8)
             vc.alignment = _align(horizontal='center', indent=0)
             vc.border = _border(color=C.border_light)
             if _ti:
@@ -638,6 +646,43 @@ def _build_structure_sheet(wb, results):
             else:
                 vc.value = '–'; vc.font = _font(size=10, color=C.text_muted)
                 vc.fill = _fill(band)
+
+            # Элементы страницы – спец-проверки (картинки/каталог-ссылка/карта/форма)
+            # + сверка адресов всех городов с КП (на странице «Контакты»).
+            _spec = [b for b in (r.content.blocks if (r.is_ok and r.content) else [])
+                     if b.key.startswith('tech_')]
+            _parts = [f'{b.label} {"✓" if b.present else "–"}' for b in _spec]
+            _addr_comment = None
+            _addr_bad = False
+            if _ca:
+                _mm = _ca.get('mismatched') or []
+                _txt = f'Адреса городов {_ca.get("matched", 0)}/{_ca.get("on_page", 0)}'
+                if _mm:
+                    _txt += f' · расхождений {len(_mm)}'
+                    _addr_bad = True
+                    _addr_comment = '\n'.join(
+                        f'{m["city"]}: сайт «{m["site"]}» / КП «{m["kp"]}»' for m in _mm[:20])
+                _parts.append(_txt)
+            if _pp:
+                _ps = _pp.get('status')
+                _pmark = {'ok': '✓', 'info': 'инфо'}.get(_ps, 'расхождение')
+                _parts.append(f'Телефон {_pmark}')
+                if _ps in ('bug', 'critical') and _pp.get('comment'):
+                    _addr_bad = True
+                    _addr_comment = ((_addr_comment + '\n') if _addr_comment else '') \
+                        + f'Телефон: {_pp["comment"]}'
+            ec = ws.cell(row=row, column=9)
+            ec.alignment = _align(indent=1)
+            ec.border = _border(color=C.border_light)
+            ec.fill = _fill(C.err_soft if _addr_bad else band)
+            if _parts:
+                ec.value = ' · '.join(_parts)
+                ec.font = _font(size=9, color=C.err if _addr_bad else C.text_soft)
+                if _addr_comment:
+                    ec.comment = Comment(_addr_comment, 'Site Checker', height=160, width=320)
+            else:
+                ec.value = '–'
+                ec.font = _font(size=10, color=C.text_muted)
             row += 1
         row += 2
 
