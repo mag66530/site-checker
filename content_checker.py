@@ -1014,6 +1014,33 @@ def _d_tech_feedback(c: _Ctx):
             or 'связаться' in body or 'оставить заявк' in body)), None
 
 
+def _d_tech_vacancies(c: _Ctx):
+    # Есть вакансии и ссылки «узнать подробнее» (открываются).
+    body = _content_html(c)
+    has_vac = 'ваканс' in body
+    has_more = 'узнать подробнее' in body or 'подробнее' in body
+    return (has_vac and has_more), None
+
+
+def _d_tech_search_box(c: _Ctx):
+    # Строка поиска по сайту в контенте.
+    body = _content_html(c)
+    return ('type="search"' in body or 'role="search"' in body
+            or 'поиск по сайту' in body or 'name="q"' in body
+            or 'name="query"' in body or 'name="s"' in body), None
+
+
+def _d_tech_links(c: _Ctx):
+    # Рабочие ссылки в контенте: настоящие адреса (не «#», не javascript:void,
+    # не пустые). «Не битые» проверяем по виду href; реальный код ответа (404)
+    # тут не запрашиваем – это отдельная тяжёлая проверка.
+    body = _content_html(c)
+    real = [h for h in re.findall(r'<a\b[^>]*href="([^"]*)"', body)
+            if h.strip() and not h.strip().lower().startswith(
+                ('#', 'javascript:', 'mailto:', 'tel:'))]
+    return len(real) >= 1, len(real)
+
+
 _TECH = [
     _b('content_text', 'Текст',          True,  _d_content_text),
     _b('breadcrumbs',  'Хлебные крошки', False, _d_breadcrumbs),
@@ -1021,28 +1048,48 @@ _TECH = [
 ]
 
 # Спец-блоки тех. страниц (пока справочно – required=False).
-_TB_IMAGES  = _b('tech_images',       'Картинки',             False, _d_tech_images)
-_TB_CATALOG = _b('tech_catalog_link', 'Ссылка на каталог',    False, _d_tech_catalog_link)
-_TB_MAP     = _b('tech_map',          'Карта',                False, _d_tech_map)
-_TB_FORM    = _b('tech_feedback',     'Форма обратной связи', False, _d_tech_feedback)
+_TB_IMAGES    = _b('tech_images',       'Картинки',             False, _d_tech_images)
+_TB_CATALOG   = _b('tech_catalog_link', 'Ссылка на каталог',    False, _d_tech_catalog_link)
+_TB_MAP       = _b('tech_map',          'Карта',                False, _d_tech_map)
+_TB_FORM      = _b('tech_feedback',     'Форма обратной связи', False, _d_tech_feedback)
+_TB_VACANCIES = _b('tech_vacancies',    'Вакансии',             False, _d_tech_vacancies)
+_TB_SEARCH    = _b('tech_search',       'Строка поиска',        False, _d_tech_search_box)
+_TB_LINKS     = _b('tech_links',        'Ссылки',               False, _d_tech_links)
 
 
 def _tech_profile_for(url: str) -> list:
     """Профиль тех. страницы по её адресу: базовые (текст/H1/крошки) + спец-блоки
-    в зависимости от того, что это за страница (о компании / контакты / …)."""
+    в зависимости от того, что это за страница (о компании / контакты / …).
+    Покрывает пути СМУ, ИМП и МПЭ."""
     try:
         path = urlparse(url).path.lower()
     except Exception:
         path = (url or '').lower()
     extra = []
-    if '/about' in path or '/o-kompanii' in path:
-        extra = [_TB_IMAGES, _TB_CATALOG]
-    elif '/contact' in path:
+    if '/contact' in path:                                   # контакты
         extra = [_TB_MAP, _TB_FORM]
-    elif 'delivery' in path or '/payment' in path or '/oplata' in path or '/dostavka' in path:
+    elif '/vakansii' in path or '/vacancy' in path:          # вакансии
+        extra = [_TB_VACANCIES]
+    elif '/search' in path or '/poisk' in path:              # поиск по сайту
+        extra = [_TB_SEARCH]
+    elif 'proizvodstvo' in path or 'uslugi-metallo' in path:  # производство / услуги
+        extra = [_TB_IMAGES, _TB_LINKS]
+    elif '/about' in path or '/o-kompanii' in path:           # о компании
+        extra = [_TB_IMAGES, _TB_CATALOG]
+    elif ('delivery' in path or '/payment' in path or '/oplata' in path
+          or '/dostavka' in path):                            # оплата / доставка
         extra = [_TB_CATALOG, _TB_IMAGES]
-    elif 'spetstekhnika' in path:
+    elif 'spetstekhnika' in path:                             # раздел спецтехники
         extra = [_TB_CATALOG]
+    elif 'price-list' in path:                                # прайс-лист
+        extra = [_TB_LINKS]
+    elif ('politika' in path or 'polzovatelskoe' in path
+          or 'soglasie' in path or 'soglashenie' in path):    # политики / соглашения
+        extra = [_TB_LINKS]
+    elif any(k in path for k in (
+            'postavsh', 'garantii', 'vozvrat', 'upakovka', 'komplektaciya',
+            'kontrol-kachestva', 'pravila-otgruzki', 'rekvizit')):
+        extra = [_TB_IMAGES]                                  # текст + картинки
     return _TECH + extra
 
 # Главная: шапка (сверху) → H1 → формы/поиск → подвал (снизу). Порядок как на

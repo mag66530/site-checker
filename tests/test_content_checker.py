@@ -386,6 +386,23 @@ def test_search_page_h1_not_required():
     assert _by_key(ra)['h1'].required and ra.bug_count == 1      # контроль: только H1
 
 
+def test_tech_per_page_profiles():
+    """Профиль тех. страницы зависит от адреса: вакансии / поиск / услуги.
+    Спец-блоки справочные – багов не дают."""
+    base = '<h1>Заголовок</h1><p>' + ('Текст страницы. ' * 20) + '</p>'
+    vac = check_content(base + '<div>Открытые вакансии</div><a>Узнать подробнее</a>',
+                        'tech', url='https://inmetprom.ru/vakansii/')
+    assert _by_key(vac)['tech_vacancies'].present
+    sr = check_content(base + '<input type="search">', 'tech',
+                       url='https://inmetprom.ru/search/')
+    assert _by_key(sr)['tech_search'].present
+    us = check_content(base + '<img src="a.jpg"><a href="/uslugi/x/">Услуга</a>', 'tech',
+                       url='https://inmetprom.ru/uslugi-metalloobrabotki/')
+    bk = _by_key(us)
+    assert bk['tech_images'].present and bk['tech_links'].present
+    assert vac.bug_count == 0 and sr.bug_count == 0 and us.bug_count == 0
+
+
 def test_footer_address_mikrorayon():
     """Адрес без улицы (нефтяные города): «микрорайон 16А, 63» – это адрес,
     а не отсутствие адреса (раньше ложно горело багом «нет адреса»)."""
