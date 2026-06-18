@@ -330,6 +330,25 @@ def test_bottom_block_cards_without_price_is_bug():
     assert not b3['rec_price'].present and not b3['rec_price'].required   # → «–», не баг
 
 
+def test_bottom_block_one_card_without_price_is_bug():
+    """Покарточная проверка: если ХОТЯ БЫ у одной карточки снизу нет цены/«по
+    запросу» – баг, даже когда у соседних карточек цена есть."""
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    good = ('<div class="catalog-product-card-item"><a href="/c/t1/">Товар 1</a>'
+            '<span>99 000 ₽</span></div>')
+    request = ('<div class="catalog-product-card-item"><a href="/c/t2/">Товар 2</a>'
+               '<span>Цена по запросу</span></div>')
+    broken = ('<div class="catalog-product-card-item"><a href="/c/t3/">Товар 3</a></div>')
+    # одна карточка без цены среди нормальных → баг
+    b = _by_key(check_content(main + '<div>Похожие товары</div>' + good + broken, 'product'))
+    assert b['rec_block'].present
+    assert not b['rec_price'].present and b['rec_price'].required   # → БАГ
+    # все карточки с ценой / «по запросу» → ок
+    b2 = _by_key(check_content(main + '<div>Похожие товары</div>' + good + request, 'product'))
+    assert b2['rec_price'].present
+
+
 def test_tech_pages_checked_like_others():
     """Технические страницы (type 'tech') проверяются «как все»: крошки + H1.
     Нормальная страница багов не даёт."""
