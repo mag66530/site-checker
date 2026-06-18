@@ -194,14 +194,15 @@ def test_empty_section_is_bug():
 
 
 def test_catalog_root_minimal_columns():
-    """Каталог: без карточек/фильтров/сортировки/H2 – лишних столбцов нет."""
+    """Каталог-корень: блоки каталога + фото + цена популярных + плитка тегов,
+    но без листинговых столбцов (карточки/фильтры/сортировка/пагинация/H2)."""
     html = COMMON + SMU_MARKER
     r = check_content(html, 'catalog')
     keys = {b.key for b in r.blocks}
-    for absent in ('product_cards', 'price', 'btn_order', 'filters', 'sort',
+    for absent in ('product_cards', 'btn_order', 'filters', 'sort',
                    'pagination', 'h2'):
         assert absent not in keys, f'В каталоге не должно быть столбца {absent}'
-    assert 'tag_tiles' in keys
+    assert 'catalog_blocks' in keys and 'photos' in keys and 'tag_tiles' in keys
     # Хлебные крошки на корне каталога не обязательны
     b = _by_key(r)
     assert not b['breadcrumbs'].required
