@@ -11,6 +11,7 @@ metrika_api.py — 404-страницы из Яндекс.Метрики за С
 counter_id — ниже в COUNTER_IDS.
 """
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional, Callable
 
 try:
@@ -28,6 +29,13 @@ COUNTER_IDS = {
     'mpe': '99551890',
     'smu': '15630172',
     'imp': '94649678',
+}
+
+# Авто-дискавери счётчиков для проектов с сотнями счётчиков (по городам).
+# Берём из Management API все счётчики, где site содержит include и НЕ содержит
+# ни одного exclude (Яндекс.Карты, pulscen и т.п.). Результат кешируется.
+COUNTER_AUTO = {
+    'mpe': {'include': 'mepen', 'exclude': ['yandex', 'pulscen', 'maps', 'карты']},
 }
 
 # У проекта несколько счётчиков (по доменам стран) — 404 собираем из ВСЕХ.
@@ -69,14 +77,95 @@ def _parse_counters(override) -> list:
     return [s.strip() for s in items if s and s.strip()]
 
 
-def _counters_for(project_id, override=None):
+_COUNTER_CACHE_DIR = Path(__file__).parent / 'cache' / 'metrika-counters'
+
+
+def _counter_cache_path(project_id):
+    return _COUNTER_CACHE_DIR / f'{project_id}.json'
+
+
+def _load_counter_cache(project_id, ttl_hours=24):
+    p = _counter_cache_path(project_id)
+    if not p.exists():
+        return None
+    try:
+        import json as _json
+        d = _json.loads(p.read_text(encoding='utf-8'))
+        ts = datetime.fromisoformat(d.get('saved_at'))
+        if datetime.now() - ts > timedelta(hours=ttl_hours):
+            return None
+        return d.get('ids') or None
+    except Exception:
+        return None
+
+
+def _save_counter_cache(project_id, ids):
+    import json as _json
+    p = _counter_cache_path(project_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps({'saved_at': datetime.now().isoformat(), 'ids': ids},
+                             ensure_ascii=False), encoding='utf-8')
+
+
+def discover_counters(token, include, exclude, proxy_url=None, log=None):
+    """Из Management API собрать id счётчиков, у кого site содержит include и
+    не содержит ни один exclude (по site и name). С пагинацией."""
+    def _log(m):
+        if log:
+            log('info', m)
+    if requests is None:
+        return []
+    headers = {'Authorization': f'OAuth {token}'}
+    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    inc = include.lower()
+    exc = [e.lower() for e in (exclude or [])]
+    ids, offset, per = [], 1, 1000
+    while True:
+        try:
+            r = requests.get(COUNTERS_URL, headers=headers, proxies=proxies,
+                             params={'per_page': per, 'offset': offset}, timeout=40)
+        except Exception as e:
+            _log(f'⚠ discover_counters: сеть — {e}')
+            break
+        if r.status_code >= 400:
+            _log(f'⚠ discover_counters: HTTP {r.status_code}: {r.text[:160]}')
+            break
+        chunk = (r.json() or {}).get('counters', []) or []
+        for c in chunk:
+            site = (c.get('site') or '').lower()
+            name = (c.get('name') or '').lower()
+            if inc in site and not any(x in site or x in name for x in exc):
+                ids.append(str(c.get('id')))
+        if len(chunk) < per:
+            break
+        offset += per
+    return ids
+
+
+def _counters_for(project_id, override=None, token=None, proxy_url=None, log=None):
     """Список счётчиков проекта. Приоритет:
     1) список из секрета (если задано >1 счётчика);
-    2) группа COUNTER_GROUPS;
-    3) одиночный override / зашитый COUNTER_IDS."""
+    2) авто-дискавери (COUNTER_AUTO) с кешем 24ч;
+    3) группа COUNTER_GROUPS;
+    4) одиночный override / зашитый COUNTER_IDS."""
     ov = _parse_counters(override)
     if len(ov) > 1:                      # явный список из секрета — главный
         return ov
+    auto = COUNTER_AUTO.get(project_id)
+    if auto and token:
+        cached = _load_counter_cache(project_id)
+        if cached:
+            if log:
+                log('info', f'Метрика-API: счётчиков из кеша {len(cached)}')
+            return cached
+        found = discover_counters(token, auto['include'], auto.get('exclude'),
+                                  proxy_url, log)
+        if found:
+            _save_counter_cache(project_id, found)
+            if log:
+                log('info', f'Метрика-API: дискавери счётчиков {len(found)} '
+                            f'(site~{auto["include"]})')
+            return found
     if project_id in COUNTER_GROUPS:
         return COUNTER_GROUPS[project_id]
     if ov:
@@ -157,7 +246,8 @@ def fetch_today_404(project_id: str, token: str,
     if not token:
         _log(f'⚠ Метрика-API: токен не задан (metrika_oauth_{project_id})')
         return None
-    counters = _counters_for(project_id, counter)
+    counters = _counters_for(project_id, counter, token=token,
+                             proxy_url=proxy_url, log=log)
     if not counters:
         _log(f'⚠ Метрика-API: нет счётчиков для {project_id}')
         return None
@@ -316,6 +406,7 @@ if __name__ == '__main__':
         print('Проверка:  python metrika_api.py check <pid> <token> [counter] [date] [proxy]')
         print('Счётчики:  python metrika_api.py list_counters <token> [proxy]')
         print('Детали:    python metrika_api.py counter_info <token> <counter> [proxy]')
+        print('Дискавери: python metrika_api.py discover <pid> <token> [proxy]')
         sys.exit(0)
 
     # Список всех счётчиков токена
@@ -323,6 +414,21 @@ if __name__ == '__main__':
         _tok = sys.argv[2]
         _prx = sys.argv[3] if len(sys.argv) > 3 else None
         list_counters(_tok, _prx)
+        sys.exit(0)
+
+    # Авто-дискавери счётчиков проекта (по site)
+    if sys.argv[1] == 'discover':
+        _pid = sys.argv[2]
+        _tok = sys.argv[3]
+        _prx = sys.argv[4] if len(sys.argv) > 4 else None
+        auto = COUNTER_AUTO.get(_pid)
+        if not auto:
+            print(f'Для {_pid} нет правила COUNTER_AUTO'); sys.exit(0)
+        ids = discover_counters(_tok, auto['include'], auto.get('exclude'),
+                                _prx, lambda lvl, m: print(m))
+        print(f'\nНайдено счётчиков (site~{auto["include"]}, '
+              f'кроме {auto.get("exclude")}): {len(ids)}')
+        print(', '.join(ids))
         sys.exit(0)
 
     # Детали одного счётчика (зеркала + фильтры)
