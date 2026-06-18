@@ -349,6 +349,17 @@ def test_bottom_block_one_card_without_price_is_bug():
     assert b2['rec_price'].present
 
 
+def test_cards_without_photo_is_bug():
+    """Заглушка «нет фото» (picture.missing и т.п.) в карточке → баг «Фото товаров»."""
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">100 ₽</div>'
+            '<button class="add-to-cart-btn">В корзину</button>')
+    bad = _by_key(check_content(main + '<img src="/local/img/picture.missing.webp">', 'product'))
+    assert not bad['photos'].present and bad['photos'].required   # → БАГ
+    assert bad['photos'].count == 1
+    ok = _by_key(check_content(main + '<img src="/upload/real-photo.jpg">', 'product'))
+    assert ok['photos'].present
+
+
 def test_tech_pages_checked_like_others():
     """Технические страницы (type 'tech') проверяются «как все»: крошки + H1.
     Нормальная страница багов не даёт."""
