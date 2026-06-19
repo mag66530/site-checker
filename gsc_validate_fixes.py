@@ -272,6 +272,29 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
     return res
 
 
+async def _switch_filter(page, data_value: str) -> bool:
+    """Переключить фильтр страниц отчёта GSC.
+    Кликаем именно стрелку-дропдаун фильтра (div.e2CuFe.mJra4.eU809d) — рядом
+    с текстом «Все обработанные страницы», НЕ иконку бокового меню. Затем
+    выбираем пункт по data-value. True если переключили."""
+    try:
+        arrow = await page.query_selector('div.e2CuFe.mJra4.eU809d')
+        if not arrow:
+            return False
+        await arrow.click()
+        await page.wait_for_timeout(1500)
+        opt = await page.query_selector(
+            f'div.MocG8c[data-value="{data_value}"], [data-value="{data_value}"]')
+        if not opt:
+            return False
+        await opt.click()
+        await page.wait_for_timeout(3000)
+        return True
+    except Exception as e:
+        _log(f'  фильтр {data_value}: переключение не удалось — {e}', 'warn')
+        return False
+
+
 async def process_resource(page, rid: str, dry_run: bool,
                            limit: int, done_counter: list) -> list:
     entries = []
@@ -290,38 +313,6 @@ async def process_resource(page, rid: str, dry_run: bool,
 
     processed = set()   # общее для обоих фильтров — не кликать причину дважды
 
-    async def _switch_filter(value: str) -> bool:
-        """Переключить фильтр страниц отчёта (по data-value). True если кликнули.
-        Опция лежит в закрытом дропдауне (element not visible) — поэтому сперва
-        пытаемся открыть селектор, затем кликаем; при невидимости — нативный
-        JS-клик (срабатывает на скрытом элементе и дёргает jsaction)."""
-        try:
-            el = await page.query_selector(f'div.MocG8c[data-value="{value}"]')
-            if not el:
-                return False
-            # 1) попытка открыть дропдаун фильтра (combobox/листбокс)
-            try:
-                trigger = await page.query_selector(
-                    '[aria-haspopup="listbox"], [role="combobox"], '
-                    '[aria-expanded="false"]')
-                if trigger:
-                    await trigger.click(timeout=2000)
-                    await page.wait_for_timeout(700)
-            except Exception:
-                pass
-            # 2) клик по опции: обычный → нативный JS-клик (на скрытом элементе)
-            try:
-                await el.click(timeout=3000)
-            except Exception:
-                await el.evaluate(
-                    'e => { e.click(); '
-                    'e.dispatchEvent(new MouseEvent("click", {bubbles:true})); }')
-            await page.wait_for_timeout(3000)
-            return True
-        except Exception as _e:
-            _log(f'  фильтр {value}: клик не удался — {_e}', 'warn')
-            return False
-
     async def _loop(filter_value: str = None):
         """Прокликать все необработанные причины текущего фильтра."""
         while True:
@@ -331,7 +322,7 @@ async def process_resource(page, rid: str, dry_run: bool,
             # _open_report ниже перезагружает отчёт и СБРАСЫВАЕТ фильтр —
             # для второго фильтра переустанавливаем его перед чтением причин.
             if filter_value:
-                await _switch_filter(filter_value)
+                await _switch_filter(page, filter_value)
             reasons = await _read_reasons(page)
             target = next((r for r in reasons
                            if r['status'] in STATUS_PROCESS
@@ -357,7 +348,7 @@ async def process_resource(page, rid: str, dry_run: bool,
 
     # Фильтр 2: «Все отправленные страницы» (ALL_SUBMITTED_URLS)
     if not (limit and done_counter[0] >= limit):
-        if await _switch_filter('ALL_SUBMITTED_URLS'):
+        if await _switch_filter(page, 'ALL_SUBMITTED_URLS'):
             _log('  ── Фильтр: Все отправленные страницы ──')
             await _loop('ALL_SUBMITTED_URLS')
         else:
