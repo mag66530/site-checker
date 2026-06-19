@@ -277,33 +277,37 @@ async def _switch_filter(page, data_value: str) -> bool:
     Кликаем именно стрелку-дропдаун фильтра (div.e2CuFe.mJra4.eU809d) — рядом
     с текстом «Все обработанные страницы», НЕ иконку бокового меню. Затем
     выбираем пункт по data-value. True если переключили."""
-    try:
-        arrow = await page.query_selector('div.e2CuFe.mJra4.eU809d')
-        if not arrow:
+    async def _click_visible(selector: str, timeout: int = 4000) -> bool:
+        """Кликнуть первый ВИДИМЫЙ элемент по селектору (в DOM бывают скрытые
+        дубли). Таймауты + фоллбэк на нативный JS-клик — без 30с-зависаний."""
+        els = await page.query_selector_all(selector)
+        if not els:
             return False
-        await arrow.click()
-        await page.wait_for_timeout(1500)
-        # В DOM несколько элементов с этим data-value (скрытые дубли) —
-        # берём ВИДИМЫЙ из открытого меню.
-        opts = await page.query_selector_all(f'[data-value="{data_value}"]')
-        if not opts:
-            return False
-        target = None
-        for o in opts:
+        tgt = None
+        for e in els:
             try:
-                if await o.is_visible():
-                    target = o
+                if await e.is_visible():
+                    tgt = e
                     break
             except Exception:
                 continue
-        if target is None:
-            # ни один не виден — нативный JS-клик по первому (дёргает jsaction)
-            await opts[0].evaluate('e => e.click()')
-        else:
-            try:
-                await target.click(timeout=4000)
-            except Exception:
-                await target.evaluate('e => e.click()')
+        if tgt is None:
+            await els[0].evaluate('e => e.click()')   # ни один не виден → JS-клик
+            return True
+        try:
+            await tgt.click(timeout=timeout)
+        except Exception:
+            await tgt.evaluate('e => e.click()')
+        return True
+
+    try:
+        # 1) стрелка-дропдаун фильтра (видимая)
+        if not await _click_visible('div.e2CuFe.mJra4.eU809d'):
+            return False
+        await page.wait_for_timeout(1500)
+        # 2) пункт меню по data-value (видимый из открытого дропдауна)
+        if not await _click_visible(f'[data-value="{data_value}"]'):
+            return False
         await page.wait_for_timeout(3000)
         return True
     except Exception as e:
@@ -330,15 +334,20 @@ async def process_resource(page, rid: str, dry_run: bool,
     processed = set()   # общее для обоих фильтров — не кликать причину дважды
 
     async def _loop(filter_value: str = None):
-        """Прокликать все необработанные причины текущего фильтра."""
+        """Прокликать все необработанные причины текущего фильтра.
+        filter_value — переустанавливать фильтр перед каждым чтением (т.к.
+        _open_report перезагружает отчёт и сбрасывает фильтр на дефолтный)."""
+        first = True
         while True:
             if limit and done_counter[0] >= limit:
                 _log(f'Достигнут лимит {limit}', 'warn')
                 return
-            # _open_report ниже перезагружает отчёт и СБРАСЫВАЕТ фильтр —
-            # для второго фильтра переустанавливаем его перед чтением причин.
             if filter_value:
-                await _switch_filter(page, filter_value)
+                ok = await _switch_filter(page, filter_value)
+                if first and not ok:
+                    _log('  фильтр не переключился — пропуск')
+                    return
+            first = False
             reasons = await _read_reasons(page)
             target = next((r for r in reasons
                            if r['status'] in STATUS_PROCESS
@@ -355,7 +364,8 @@ async def process_resource(page, rid: str, dry_run: bool,
             # Небольшая пауза между причинами – снижает риск 429
             await asyncio.sleep(2 + random.random() * 2)
 
-            # Возврат к отчёту для следующей причины
+            # Возврат к отчёту для следующей причины (сбросит фильтр —
+            # на следующей итерации переустановим)
             if not await _open_report(page, rid):
                 return
 
@@ -364,11 +374,8 @@ async def process_resource(page, rid: str, dry_run: bool,
 
     # Фильтр 2: «Все отправленные страницы» (ALL_SUBMITTED_URLS)
     if not (limit and done_counter[0] >= limit):
-        if await _switch_filter(page, 'ALL_SUBMITTED_URLS'):
-            _log('  ── Фильтр: Все отправленные страницы ──')
-            await _loop('ALL_SUBMITTED_URLS')
-        else:
-            _log('  фильтр «Все отправленные страницы» не найден — пропуск')
+        _log('  ── Фильтр: Все отправленные страницы ──')
+        await _loop('ALL_SUBMITTED_URLS')
 
     return entries
 
