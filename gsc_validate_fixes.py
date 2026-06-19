@@ -283,11 +283,27 @@ async def _switch_filter(page, data_value: str) -> bool:
             return False
         await arrow.click()
         await page.wait_for_timeout(1500)
-        opt = await page.query_selector(
-            f'div.MocG8c[data-value="{data_value}"], [data-value="{data_value}"]')
-        if not opt:
+        # В DOM несколько элементов с этим data-value (скрытые дубли) —
+        # берём ВИДИМЫЙ из открытого меню.
+        opts = await page.query_selector_all(f'[data-value="{data_value}"]')
+        if not opts:
             return False
-        await opt.click()
+        target = None
+        for o in opts:
+            try:
+                if await o.is_visible():
+                    target = o
+                    break
+            except Exception:
+                continue
+        if target is None:
+            # ни один не виден — нативный JS-клик по первому (дёргает jsaction)
+            await opts[0].evaluate('e => e.click()')
+        else:
+            try:
+                await target.click(timeout=4000)
+            except Exception:
+                await target.evaluate('e => e.click()')
         await page.wait_for_timeout(3000)
         return True
     except Exception as e:
