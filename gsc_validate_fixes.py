@@ -291,12 +291,31 @@ async def process_resource(page, rid: str, dry_run: bool,
     processed = set()   # общее для обоих фильтров — не кликать причину дважды
 
     async def _switch_filter(value: str) -> bool:
-        """Переключить фильтр страниц отчёта (по data-value). True если кликнули."""
+        """Переключить фильтр страниц отчёта (по data-value). True если кликнули.
+        Опция лежит в закрытом дропдауне (element not visible) — поэтому сперва
+        пытаемся открыть селектор, затем кликаем; при невидимости — нативный
+        JS-клик (срабатывает на скрытом элементе и дёргает jsaction)."""
         try:
             el = await page.query_selector(f'div.MocG8c[data-value="{value}"]')
             if not el:
                 return False
-            await el.click()
+            # 1) попытка открыть дропдаун фильтра (combobox/листбокс)
+            try:
+                trigger = await page.query_selector(
+                    '[aria-haspopup="listbox"], [role="combobox"], '
+                    '[aria-expanded="false"]')
+                if trigger:
+                    await trigger.click(timeout=2000)
+                    await page.wait_for_timeout(700)
+            except Exception:
+                pass
+            # 2) клик по опции: обычный → нативный JS-клик (на скрытом элементе)
+            try:
+                await el.click(timeout=3000)
+            except Exception:
+                await el.evaluate(
+                    'e => { e.click(); '
+                    'e.dispatchEvent(new MouseEvent("click", {bubbles:true})); }')
             await page.wait_for_timeout(3000)
             return True
         except Exception as _e:
