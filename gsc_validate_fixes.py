@@ -154,7 +154,9 @@ async def _validate_error(page, rid: str, reason: dict, dry_run: bool) -> dict:
     res = {'resource': rid, 'reason': reason['name'],
            'status': 'error', 'message': ''}
     try:
-        row = page.get_by_text(reason['name'], exact=False).first
+        # Клик по всей строке таблицы (tr[data-rowid]) — span внутри не
+        # кликабелен (element is not visible). GSC открывает причину по клику tr.
+        row = page.locator(f'tr[data-rowid="{reason["rowid"]}"]').first
         await row.click(timeout=8000)
         await page.wait_for_timeout(4000)
 
@@ -215,9 +217,10 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
     res = {'resource': rid, 'reason': reason['name'],
            'status': 'error', 'message': ''}
     try:
-        # Клик по причине ПО ИМЕНИ (rowid повторяется между двумя блоками,
-        # поэтому по rowid нельзя – попадём не в тот блок).
-        row = page.get_by_text(reason['name'], exact=False).first
+        # Клик по всей СТРОКЕ таблицы (tr[data-rowid]) — span с текстом внутри
+        # ячейки не кликабелен (element is not visible). GSC открывает страницу
+        # причины именно по клику на tr.
+        row = page.locator(f'tr[data-rowid="{reason["rowid"]}"]').first
         await row.click(timeout=8000)
         await page.wait_for_timeout(4000)
 
