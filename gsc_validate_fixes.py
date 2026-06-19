@@ -288,30 +288,61 @@ async def process_resource(page, rid: str, dry_run: bool,
     _dist = Counter(r['status'] for r in reasons)
     _log(f'  причин в отчёте: {len(reasons)}; статусы: {dict(_dist)}')
 
-    processed = set()
-    while True:
-        if limit and done_counter[0] >= limit:
-            _log(f'Достигнут лимит {limit}', 'warn')
-            break
-        reasons = await _read_reasons(page)
-        target = next((r for r in reasons
-                       if r['status'] in STATUS_PROCESS
-                       and r['name'] not in processed), None)
-        if not target:
-            break
-        processed.add(target['name'])
+    processed = set()   # общее для обоих фильтров — не кликать причину дважды
 
-        res = await _validate_one(page, rid, target, dry_run)
-        entries.append(res)
-        if res['status'] in ('ok', 'dry_run'):
-            done_counter[0] += 1
+    async def _switch_filter(value: str) -> bool:
+        """Переключить фильтр страниц отчёта (по data-value). True если кликнули."""
+        try:
+            el = await page.query_selector(f'div.MocG8c[data-value="{value}"]')
+            if not el:
+                return False
+            await el.click()
+            await page.wait_for_timeout(3000)
+            return True
+        except Exception as _e:
+            _log(f'  фильтр {value}: клик не удался — {_e}', 'warn')
+            return False
 
-        # Небольшая пауза между причинами – снижает риск 429
-        await asyncio.sleep(2 + random.random() * 2)
+    async def _loop(filter_value: str = None):
+        """Прокликать все необработанные причины текущего фильтра."""
+        while True:
+            if limit and done_counter[0] >= limit:
+                _log(f'Достигнут лимит {limit}', 'warn')
+                return
+            # _open_report ниже перезагружает отчёт и СБРАСЫВАЕТ фильтр —
+            # для второго фильтра переустанавливаем его перед чтением причин.
+            if filter_value:
+                await _switch_filter(filter_value)
+            reasons = await _read_reasons(page)
+            target = next((r for r in reasons
+                           if r['status'] in STATUS_PROCESS
+                           and r['name'] not in processed), None)
+            if not target:
+                return
+            processed.add(target['name'])
 
-        # Возврат к отчёту для следующей причины
-        if not await _open_report(page, rid):
-            break
+            res = await _validate_one(page, rid, target, dry_run)
+            entries.append(res)
+            if res['status'] in ('ok', 'dry_run'):
+                done_counter[0] += 1
+
+            # Небольшая пауза между причинами – снижает риск 429
+            await asyncio.sleep(2 + random.random() * 2)
+
+            # Возврат к отчёту для следующей причины
+            if not await _open_report(page, rid):
+                return
+
+    # Фильтр 1: «Все обработанные страницы» (дефолт при открытии)
+    await _loop()
+
+    # Фильтр 2: «Все отправленные страницы» (ALL_SUBMITTED_URLS)
+    if not (limit and done_counter[0] >= limit):
+        if await _switch_filter('ALL_SUBMITTED_URLS'):
+            _log('  ── Фильтр: Все отправленные страницы ──')
+            await _loop('ALL_SUBMITTED_URLS')
+        else:
+            _log('  фильтр «Все отправленные страницы» не найден — пропуск')
 
     return entries
 
