@@ -138,6 +138,10 @@ async def _read_reasons(page) -> list[dict]:
     out = []
     for tr in await page.query_selector_all('tr[data-rowid]'):
         try:
+            # rowid повторяется между блоками (обработанные/представление) и
+            # между фильтрами — читаем только ВИДИМЫЕ строки текущего вида.
+            if not await tr.is_visible():
+                continue
             rid = await tr.get_attribute('data-rowid')
             txt = (await tr.inner_text()).strip().replace('\n', ' ')
             if not txt:
@@ -154,9 +158,12 @@ async def _validate_error(page, rid: str, reason: dict, dry_run: bool) -> dict:
     res = {'resource': rid, 'reason': reason['name'],
            'status': 'error', 'message': ''}
     try:
-        # Клик по всей строке таблицы (tr[data-rowid]) — span внутри не
-        # кликабелен (element is not visible). GSC открывает причину по клику tr.
-        row = page.locator(f'tr[data-rowid="{reason["rowid"]}"]').first
+        # Клик по ВИДИМОЙ строке таблицы. rowid повторяется между блоками →
+        # .first попадал на скрытый дубль (not visible). :visible + has_text
+        # (имя причины уникально) выбирают нужную видимую строку. GSC открывает
+        # причину по клику на tr, а не на span внутри.
+        row = page.locator('tr[data-rowid]:visible',
+                           has_text=reason['name']).first
         await row.click(timeout=8000)
         await page.wait_for_timeout(4000)
 
@@ -217,10 +224,11 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
     res = {'resource': rid, 'reason': reason['name'],
            'status': 'error', 'message': ''}
     try:
-        # Клик по всей СТРОКЕ таблицы (tr[data-rowid]) — span с текстом внутри
-        # ячейки не кликабелен (element is not visible). GSC открывает страницу
-        # причины именно по клику на tr.
-        row = page.locator(f'tr[data-rowid="{reason["rowid"]}"]').first
+        # Клик по ВИДИМОЙ строке (tr). rowid повторяется между блоками →
+        # берём видимую по имени причины (имя уникально). span внутри не
+        # кликабелен — кликаем сам tr.
+        row = page.locator('tr[data-rowid]:visible',
+                           has_text=reason['name']).first
         await row.click(timeout=8000)
         await page.wait_for_timeout(4000)
 
