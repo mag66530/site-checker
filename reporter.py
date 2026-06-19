@@ -1551,6 +1551,92 @@ def _country_by_url(url: str) -> str:
     return _TLD_COUNTRY.get(tld, '–')
 
 
+# ── Лист «Автокликер» ──────────────────────────────────────────────
+
+
+def _build_autoclick_sheet(wb, autoclick):
+    """Итоги автокликера (перекликивание ошибок в Вебмастере/ГСК) — сводка
+    по сайтам. Добавляется только если автокликер запускался."""
+    if not autoclick:
+        return
+    ws = wb.create_sheet('Автокликер')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.accent
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 40   # Сайт
+    ws.column_dimensions['C'].width = 16   # Сервис
+    ws.column_dimensions['D'].width = 12   # Проблем
+    ws.column_dimensions['E'].width = 14   # Прокликано
+    ws.column_dimensions['F'].width = 16   # Проверяются
+    ws.column_dimensions['G'].width = 14   # Без кнопки
+    ws.column_dimensions['H'].width = 12   # Ошибки
+
+    ws.merge_cells('B2:H2')
+    c = ws['B2']
+    c.value = 'Автокликер — перекликивание ошибок'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    # Недоступен (нет браузера / облако)
+    if not autoclick.get('available'):
+        ws.merge_cells('B4:H4')
+        c = ws['B4']
+        c.value = autoclick.get('note') or (
+            'Автокликер не запускался: нужен локальный залогиненный Chrome '
+            '(CDP 9222). На облаке недоступен.')
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True, vertical='top')
+        ws.row_dimensions[4].height = 44
+        return
+
+    sites = autoclick.get('sites') or []
+    _t_prob = sum(s.get('problems', 0) for s in sites)
+    _t_click = sum(s.get('clicked', 0) for s in sites)
+    _t_check = sum(s.get('checking', 0) for s in sites)
+    _t_skip = sum(s.get('no_button', 0) for s in sites)
+
+    ws.merge_cells('B3:H3')
+    c = ws['B3']
+    c.value = (f'Сайтов обработано: {len(sites)}.  Проблем: {_t_prob}.  '
+               f'Прокликано: {_t_click}.  Уже проверяются: {_t_check}.  '
+               f'Без кнопки: {_t_skip}.')
+    c.font = _font(size=11, color=C.text_soft)
+    ws.row_dimensions[3].height = 22
+
+    hdr_row = 5
+    headers = ['Сайт', 'Сервис', 'Проблем', 'Прокликано',
+               'Проверяются', 'Без кнопки', 'Ошибки']
+    for ci, h in enumerate(headers, 2):
+        cell = ws.cell(row=hdr_row, column=ci, value=h)
+        cell.font = _font(size=9, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align(horizontal='center' if ci > 3 else 'left')
+        cell.border = _border()
+    ws.row_dimensions[hdr_row].height = 22
+    ws.freeze_panes = f'B{hdr_row + 1}'
+
+    row = hdr_row + 1
+    for s in sorted(sites, key=lambda x: x.get('clicked', 0), reverse=True):
+        ws.row_dimensions[row].height = 20
+        vals = [
+            (s.get('site', ''), 'left', C.text),
+            (s.get('service', ''), 'center', C.text_soft),
+            (s.get('problems', 0), 'center', C.text_soft),
+            (s.get('clicked', 0), 'center', C.ok if s.get('clicked') else C.text_muted),
+            (s.get('checking', 0), 'center', C.warn if s.get('checking') else C.text_muted),
+            (s.get('no_button', 0), 'center', C.text_muted),
+            (s.get('errors', 0), 'center', C.err if s.get('errors') else C.text_muted),
+        ]
+        for ci, (val, halign, color) in enumerate(vals, 2):
+            cell = ws.cell(row=row, column=ci, value=val)
+            cell.font = _font(size=10, color=color,
+                              bold=(ci == 5 and bool(s.get('clicked'))))
+            cell.alignment = _align(horizontal=halign, indent=1 if halign == 'left' else 0)
+            cell.border = _border(color=C.border_light)
+        row += 1
+
+
 # ── Главная функция ────────────────────────────────────────────────
 
 
@@ -1567,6 +1653,7 @@ def build_report(
     metrika_is_stale: bool = False,# True если данные не за вчера, а за более ранний день
     notifications: list = None,    # список WebmasterNotification – добавит лист «Уведомления»
     service_issues: list = None,   # список ServiceIssue – добавит лист «Ошибки сервисов»
+    autoclick: dict = None,        # итоги автокликера – добавит лист «Автокликер»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -2172,6 +2259,9 @@ def build_report(
     # Лист «Уведомления» добавляем всегда (при пустых данных – заглушка).
     # Сюда же идут ошибки из Вебмастера по API (секция «Вебмастер»).
     _build_notifications_sheet(wb, notifications, service_issues)
+
+    # ЛИСТ: «Автокликер» — итоги перекликивания ошибок (если запускался).
+    _build_autoclick_sheet(wb, autoclick)
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)

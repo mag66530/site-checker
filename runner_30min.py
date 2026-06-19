@@ -66,6 +66,81 @@ def _metrika_period_display(d1, d2):
     return fa if fa == fb else f'{fa} – {fb}'
 
 
+# ── Автокликер (локально: залогиненный Chrome через CDP 9222) ────────
+
+
+def _cdp_alive(host='127.0.0.1', port=9222, timeout=1.0) -> bool:
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def _parse_wm_recheck_log():
+    """webmaster_recheck_log.json → список сводок по сайтам."""
+    import json
+    p = Path(__file__).parent / 'webmaster_recheck_log.json'
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding='utf-8'))
+    except Exception:
+        return []
+    out = []
+    for e in data.get('entries', []):
+        out.append({
+            'site': e.get('site', ''), 'service': 'Вебмастер',
+            'problems': e.get('problems', 0), 'clicked': e.get('clicked', 0),
+            'checking': e.get('checking', 0), 'no_button': e.get('no_button', 0),
+            'errors': e.get('errors', 0),
+        })
+    return out
+
+
+def _run_autoclicker(pid, params, log):
+    """Прокликать ошибки (Вебмастер/ГСК) залогиненным локальным Chrome и
+    дождаться завершения. Возвращает dict для листа «Автокликер»."""
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    if not _cdp_alive():
+        log('⚠ Автокликер: Chrome/CDP 9222 не запущен — пропускаю '
+            '(нужен локальный залогиненный браузер).')
+        return {'available': False,
+                'note': 'Chrome/CDP 9222 не запущен — автокликер пропущен. '
+                        'Нужен локальный залогиненный браузер (вкладка '
+                        '«Автокликеры» → «Открыть браузер для входа»).'}
+    args = [_sys.executable, 'autoclick_run.py', '--project', pid]
+    if params.get('autoclick_wm'):
+        args.append('--wm')
+    if params.get('autoclick_gsc'):
+        args.append('--gsc')
+    # Чистим прошлый лог Вебмастера — чтобы парсить только текущий прогон.
+    try:
+        (root / 'webmaster_recheck_log.json').unlink(missing_ok=True)
+    except Exception:
+        pass
+    log(f'Автокликер: запускаю ({" ".join(args[2:])})… '
+        f'чек-лист завершится после перекликивания всех ошибок.')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace')
+        for line in proc.stdout:
+            log(f'  [клик] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        log(f'⚠ Автокликер: {e}')
+        return {'available': True, 'sites': [], 'note': str(e)}
+    sites = _parse_wm_recheck_log()
+    log(f'✓ Автокликер: сайтов {len(sites)}, '
+        f'прокликано {sum(s.get("clicked", 0) for s in sites)}')
+    return {'available': True, 'sites': sites}
+
+
 def run_check(pid, params, creds, log, progress):
     """Выполнить прогон. log(msg), progress(frac, text) – колбэки.
     Возвращает dict с results / report_path / started_at / finished_at / error."""
@@ -302,6 +377,11 @@ def run_check(pid, params, creds, log, progress):
         else:
             log('Сбор 404 из Метрики выключен.')
 
+        # ── Автокликер (локально) — блокирует до перекликивания всех ошибок ──
+        _autoclick = None
+        if params.get('autoclick'):
+            _autoclick = _run_autoclicker(pid, params, log)
+
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         _notifs = (
             load_notifications(pid, 'yandex_webmaster', _nd)
@@ -323,7 +403,7 @@ def run_check(pid, params, creds, log, progress):
             metrika_reports=_metrika_reports,
             metrika_data_date=(_m404_disp if _today_404
                                else get_latest_available_date(pid)),
-            service_issues=_service_issues)
+            service_issues=_service_issues, autoclick=_autoclick)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

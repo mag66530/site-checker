@@ -640,6 +640,9 @@ def init_session():
         'c30_notify_days': 1,   # прогон ежедневный → по умолчанию забираем за 1 день
         'c30_fetch_metrika_404': True,    # 404 из Метрики (API) в отчёт
         'c30_m404_mode': 'За день',       # при включении сразу «За день» + дата
+        'c30_autoclick': False,           # автокликер (локально) после проверки
+        'c30_ac_wm': False,
+        'c30_ac_gsc': False,
         # Свой список URL
         'c30_use_custom_urls': False,
         'c30_custom_urls_text': '',
@@ -1094,6 +1097,32 @@ if pid:
                     help='Прозваниваем каждую внутреннюю ссылку в тексте тех. страниц '
                          '(оплата, доставка, контакты, политики и т.п.) и помечаем те, '
                          'что отдают 404/410. Дольше – по запросу на каждую ссылку.')
+
+        # ── Автокликер (локально) ──────────────────────────────────
+        _ck_ac = st.checkbox(
+            'Запустить автокликер после проверки (локально)',
+            key='c30_autoclick',
+            help='Перекликивает «Проверить» по ошибкам в Вебмастере/ГСК '
+                 'залогиненным локальным Chrome. Чек-лист завершится ТОЛЬКО '
+                 'когда все ошибки прокликаны. На облаке недоступно (нет браузера).')
+        if _ck_ac:
+            _ac1, _ac2 = st.columns(2)
+            with _ac1:
+                st.checkbox('Прокликать Вебмастер', key='c30_ac_wm')
+            with _ac2:
+                st.checkbox('Прокликать ГСК', key='c30_ac_gsc')
+            if st.button('🌐 Открыть браузер для входа', key='c30_ac_browser',
+                         use_container_width=True):
+                try:
+                    subprocess.Popen([sys.executable, 'open_browser.py'],
+                                     cwd=str(PROJECT_ROOT))
+                    st.info('Открываю Chrome. Войди в Google (GSC) и Yandex '
+                            '(Вебмастер) под аккаунтами проекта, окно не закрывай, '
+                            'затем запускай проверку.')
+                except Exception as _e:
+                    st.error(f'Не удалось открыть браузер: {_e}')
+            st.caption('Нужен залогиненный Chrome (CDP 9222). Без браузера '
+                       'автокликер пропускается с пометкой в отчёте.')
         st.checkbox('Добавить свой список URL', key='c30_use_custom_urls')
         if st.session_state.c30_use_custom_urls:
             st.caption('Ссылки – по одной на строку. Тип по адресу: /catalog/x/ – '
@@ -1241,6 +1270,9 @@ if pid:
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
                 'fetch_metrika_404': st.session_state.get('c30_fetch_metrika_404', True),
                 **_resolve_m404_period(),
+                'autoclick': st.session_state.get('c30_autoclick', False),
+                'autoclick_wm': st.session_state.get('c30_ac_wm', False),
+                'autoclick_gsc': st.session_state.get('c30_ac_gsc', False),
             }
             # Свой список URL (если включён) – добавится к обычной выборке проекта.
             _custom_urls = []
