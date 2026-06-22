@@ -138,6 +138,10 @@ async def _read_reasons(page) -> list[dict]:
     out = []
     for tr in await page.query_selector_all('tr[data-rowid]'):
         try:
+            # rowid повторяется между блоками (обработанные/представление) и
+            # между фильтрами — читаем только ВИДИМЫЕ строки текущего вида.
+            if not await tr.is_visible():
+                continue
             rid = await tr.get_attribute('data-rowid')
             txt = (await tr.inner_text()).strip().replace('\n', ' ')
             if not txt:
@@ -154,7 +158,12 @@ async def _validate_error(page, rid: str, reason: dict, dry_run: bool) -> dict:
     res = {'resource': rid, 'reason': reason['name'],
            'status': 'error', 'message': ''}
     try:
-        row = page.get_by_text(reason['name'], exact=False).first
+        # Клик по ВИДИМОЙ строке таблицы. rowid повторяется между блоками →
+        # .first попадал на скрытый дубль (not visible). :visible + has_text
+        # (имя причины уникально) выбирают нужную видимую строку. GSC открывает
+        # причину по клику на tr, а не на span внутри.
+        row = page.locator('tr[data-rowid]:visible',
+                           has_text=reason['name']).first
         await row.click(timeout=8000)
         await page.wait_for_timeout(4000)
 
@@ -215,9 +224,11 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
     res = {'resource': rid, 'reason': reason['name'],
            'status': 'error', 'message': ''}
     try:
-        # Клик по причине ПО ИМЕНИ (rowid повторяется между двумя блоками,
-        # поэтому по rowid нельзя – попадём не в тот блок).
-        row = page.get_by_text(reason['name'], exact=False).first
+        # Клик по ВИДИМОЙ строке (tr). rowid повторяется между блоками →
+        # берём видимую по имени причины (имя уникально). span внутри не
+        # кликабелен — кликаем сам tr.
+        row = page.locator('tr[data-rowid]:visible',
+                           has_text=reason['name']).first
         await row.click(timeout=8000)
         await page.wait_for_timeout(4000)
 
@@ -272,6 +283,49 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
     return res
 
 
+async def _switch_filter(page, data_value: str) -> bool:
+    """Переключить фильтр страниц отчёта GSC.
+    Кликаем именно стрелку-дропдаун фильтра (div.e2CuFe.mJra4.eU809d) — рядом
+    с текстом «Все обработанные страницы», НЕ иконку бокового меню. Затем
+    выбираем пункт по data-value. True если переключили."""
+    async def _click_visible(selector: str, timeout: int = 4000) -> bool:
+        """Кликнуть первый ВИДИМЫЙ элемент по селектору (в DOM бывают скрытые
+        дубли). Таймауты + фоллбэк на нативный JS-клик — без 30с-зависаний."""
+        els = await page.query_selector_all(selector)
+        if not els:
+            return False
+        tgt = None
+        for e in els:
+            try:
+                if await e.is_visible():
+                    tgt = e
+                    break
+            except Exception:
+                continue
+        if tgt is None:
+            await els[0].evaluate('e => e.click()')   # ни один не виден → JS-клик
+            return True
+        try:
+            await tgt.click(timeout=timeout)
+        except Exception:
+            await tgt.evaluate('e => e.click()')
+        return True
+
+    try:
+        # 1) стрелка-дропдаун фильтра (видимая)
+        if not await _click_visible('div.e2CuFe.mJra4.eU809d'):
+            return False
+        await page.wait_for_timeout(1500)
+        # 2) пункт меню по data-value (видимый из открытого дропдауна)
+        if not await _click_visible(f'[data-value="{data_value}"]'):
+            return False
+        await page.wait_for_timeout(3000)
+        return True
+    except Exception as e:
+        _log(f'  фильтр {data_value}: переключение не удалось — {e}', 'warn')
+        return False
+
+
 async def process_resource(page, rid: str, dry_run: bool,
                            limit: int, done_counter: list) -> list:
     entries = []
@@ -288,30 +342,51 @@ async def process_resource(page, rid: str, dry_run: bool,
     _dist = Counter(r['status'] for r in reasons)
     _log(f'  причин в отчёте: {len(reasons)}; статусы: {dict(_dist)}')
 
-    processed = set()
-    while True:
-        if limit and done_counter[0] >= limit:
-            _log(f'Достигнут лимит {limit}', 'warn')
-            break
-        reasons = await _read_reasons(page)
-        target = next((r for r in reasons
-                       if r['status'] in STATUS_PROCESS
-                       and r['name'] not in processed), None)
-        if not target:
-            break
-        processed.add(target['name'])
+    processed = set()   # общее для обоих фильтров — не кликать причину дважды
 
-        res = await _validate_one(page, rid, target, dry_run)
-        entries.append(res)
-        if res['status'] in ('ok', 'dry_run'):
-            done_counter[0] += 1
+    async def _loop(filter_value: str = None):
+        """Прокликать все необработанные причины текущего фильтра.
+        filter_value — переустанавливать фильтр перед каждым чтением (т.к.
+        _open_report перезагружает отчёт и сбрасывает фильтр на дефолтный)."""
+        first = True
+        while True:
+            if limit and done_counter[0] >= limit:
+                _log(f'Достигнут лимит {limit}', 'warn')
+                return
+            if filter_value:
+                ok = await _switch_filter(page, filter_value)
+                if first and not ok:
+                    _log('  фильтр не переключился — пропуск')
+                    return
+            first = False
+            reasons = await _read_reasons(page)
+            target = next((r for r in reasons
+                           if r['status'] in STATUS_PROCESS
+                           and r['name'] not in processed), None)
+            if not target:
+                return
+            processed.add(target['name'])
 
-        # Небольшая пауза между причинами – снижает риск 429
-        await asyncio.sleep(2 + random.random() * 2)
+            res = await _validate_one(page, rid, target, dry_run)
+            entries.append(res)
+            if res['status'] in ('ok', 'dry_run'):
+                done_counter[0] += 1
 
-        # Возврат к отчёту для следующей причины
-        if not await _open_report(page, rid):
-            break
+            # Небольшая пауза между причинами – снижает риск 429
+            await asyncio.sleep(2 + random.random() * 2)
+
+            # Возврат к отчёту для следующей причины (сбросит фильтр —
+            # на следующей итерации переустановим)
+            if not await _open_report(page, rid):
+                return
+
+    # Фильтр 1: «Все обработанные страницы» (дефолт при открытии)
+    await _loop()
+
+    # Фильтр 2: «Все отправленные страницы» (ALL_SUBMITTED_URLS)
+    if not (limit and done_counter[0] >= limit):
+        _log('  ── Фильтр: Все отправленные страницы ──')
+        await _loop('ALL_SUBMITTED_URLS')
 
     return entries
 
