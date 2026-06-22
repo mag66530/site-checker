@@ -141,7 +141,7 @@ _alive = _pid_alive(_read_pid())
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
     if st.button('▶ Запустить проверку', use_container_width=True,
-                 type='primary', disabled=_alive):
+                 disabled=_alive):
         args = ['forms_run.py', '--project', pid_key]
         if not clear_log:
             args.append('--no-clear-excel')
