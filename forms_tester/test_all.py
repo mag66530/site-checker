@@ -1238,6 +1238,7 @@ def _status_clean_reason(raw: str):
 
 def init_excel_log(path: str, очистить: bool = True) -> None:
     """Готовит файл лога: при «очистить» удаляет старый, создаёт новый с шапкой LOG_HEADERS."""
+    from openpyxl.utils import get_column_letter
     if очистить and os.path.exists(path):
         try:
             os.remove(path)
@@ -1250,6 +1251,8 @@ def init_excel_log(path: str, очистить: bool = True) -> None:
         ws.title = "Логи"
         for col, val in enumerate(LOG_HEADERS, 1):
             ws.cell(row=1, column=col, value=val)
+            # стартовая ширина по заголовку (потом подрастёт под содержимое)
+            ws.column_dimensions[get_column_letter(col)].width = len(str(val)) + 3
         wb.save(path)
         print(f"✅ Создан новый Excel файл: {path}")
 
@@ -1258,11 +1261,17 @@ def append_log_row(path: str, row: dict) -> None:
     """Добавляет строку лога в конец файла по порядку колонок LOG_KEYS_ORDER.
     Колонку «Статус» подкрашивает: зелёный – Успешно/Заполнено, красный – Ошибка."""
     from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
     wb = load_workbook(path)
     ws = wb.active
     r = ws.max_row + 1
     for col, key in enumerate(LOG_KEYS_ORDER, 1):
-        ws.cell(r, col, row.get(key, ""))
+        val = row.get(key, "")
+        ws.cell(r, col, val)
+        # авто-ширина: растим колонку под содержимое (с разумным потолком)
+        letter = get_column_letter(col)
+        cur = ws.column_dimensions[letter].width or (len(LOG_HEADERS[col - 1]) + 3)
+        ws.column_dimensions[letter].width = min(max(cur, len(str(val)) + 3), 70)
     try:
         si = LOG_KEYS_ORDER.index("статус") + 1
         sval = str(row.get("статус", "")).strip().lower()

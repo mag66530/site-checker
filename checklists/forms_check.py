@@ -281,46 +281,51 @@ if not _alive and st.session_state.get('forms_dep_error'):
 st.divider()
 
 # ── Прогресс ────────────────────────────────────────────────────────
+# Всё в этой секции привязано к ВЫБРАННОМУ проекту (pid_key): при смене
+# проекта статус/прогресс/лог/скачивание обновляются под него.
 st.subheader('Прогресс')
-if st.session_state.get('forms_started'):
+
+_sel = pid_key
+_run_proj = st.session_state.get('forms_project')      # какой проект реально гоняли
+_this = (_run_proj == _sel)                            # выбранный == запущенный
+xlsx = ROOT / 'cache' / 'forms' / _sel / 'log_forms.xlsx'
+
+if _this and st.session_state.get('forms_started'):
     st.caption(f'Последний запуск: {st.session_state["forms_started"]}')
 
-_proj_for_xlsx = st.session_state.get('forms_project', pid_key)
-xlsx = ROOT / 'cache' / 'forms' / _proj_for_xlsx / 'log_forms.xlsx'
-
-if _alive:
-    # Таймер
+if _alive and _this:
+    # Идёт проверка ВЫБРАННОГО проекта – живой прогресс
     _ts = st.session_state.get('forms_started_ts')
     _elapsed = int(time.time() - _ts) if _ts else None
     _mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
-    # Сколько форм уже проверено / сколько ожидается
     _done = _rows_done(xlsx)
-    _total = _count_expected(_proj_for_xlsx)
+    _total = _count_expected(_sel)
 
     if _total and _done is not None:
-        _frac = min(_done / _total, 0.99)
-        st.progress(_frac, text=f'Проверено форм: {_done} из ~{_total}')
+        st.progress(min(_done / _total, 0.99), text=f'Проверено форм: {_done} из ~{_total}')
     else:
-        # без точного числа – плавно растущая шкала по времени (визуальный признак работы)
-        _frac = min(0.95, (_elapsed or 0) / 90.0)
-        st.progress(_frac, text='Идёт проверка…')
+        st.progress(min(0.95, (_elapsed or 0) / 90.0), text='Идёт проверка…')
 
     st.caption(f'⏳ Идёт… {_mmss}. Обычно занимает от пары до нескольких минут '
                '(зависит от числа форм). Страница обновляется сама – можно уйти '
                'на другие вкладки, прогон не прервётся.')
-
     with st.expander('Подробный лог', expanded=True):
         _txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore') if LOG_FILE.exists() else ''
         st.code('\n'.join(_txt.splitlines()[-300:]) or '…', language='text')
-
     time.sleep(2)
     st.rerun()
+
+elif _alive and not _this:
+    # Идёт проверка ДРУГОГО проекта – не путаем
+    st.info(f'Сейчас идёт проверка проекта «{PROJECTS[_run_proj]["name"]}». '
+            'Переключи выбор проекта на него, чтобы видеть прогресс.')
+    time.sleep(2)
+    st.rerun()
+
 else:
-    # Не идёт: показываем итог/лог ТОЛЬКО для запуска текущей сессии. Иначе
-    # старый лог с прошлого прогона (или с прошлой сессии на сервере) «висел»
-    # бы тут – из-за этого казалось, что прогресс не сбрасывается.
-    _ran = bool(st.session_state.get('forms_started'))
-    if _ran and LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
+    # Ничего не идёт. Лог/статус показываем только для прогона ВЫБРАННОГО проекта.
+    if _this and st.session_state.get('forms_started') and \
+            LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
         st.markdown('**Статус:** ✅ завершено / остановлено')
         with st.expander('Подробный лог', expanded=False):
             st.code('\n'.join(LOG_FILE.read_text(encoding='utf-8', errors='ignore')
@@ -328,16 +333,18 @@ else:
     else:
         st.caption('Лог появится после запуска.')
 
-    # ── Результат: Excel (только для запуска текущей сессии) ─────────
-    if _ran and xlsx.exists():
+    # ── Результат: Excel выбранного проекта (имя файла = Проект-Дата) ──
+    if xlsx.exists():
         st.divider()
         st.subheader('Результаты (Excel)')
-        st.caption(f'Лог проекта {PROJECTS[_proj_for_xlsx]["name"]} '
+        _date = datetime.fromtimestamp(xlsx.stat().st_mtime).strftime('%d.%m.%Y')
+        _fname = f'{_sel.capitalize()}-{_date}.xlsx'   # напр. Mpe-23.06.2026.xlsx
+        st.caption(f'Лог проекта {PROJECTS[_sel]["name"]} '
                    '– дата, страница, форма, статус и комментарий с причиной (если не сработало).')
         st.download_button(
-            '⬇ Скачать log_forms.xlsx',
+            f'⬇ Скачать {_fname}',
             data=xlsx.read_bytes(),
-            file_name=f'log_forms_{_proj_for_xlsx}.xlsx',
+            file_name=_fname,
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             use_container_width=True,
         )
