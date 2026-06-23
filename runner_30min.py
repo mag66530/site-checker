@@ -266,7 +266,10 @@ def run_check(pid, params, creds, log, progress):
         report_path = REPORTS_DIR / report_filename
         _today_404 = None   # отчёт 404 из Метрика-API
         _nlog = lambda lvl, msg: log(msg)
-        _proxy = creds.get('proxy_url')
+        # Прокси для почты/Метрики/Вебмастера – тот же, что и для страниц: с
+        # учётом use_proxy проекта. Иначе при use_proxy=false сбор всё равно лез
+        # через (возможно мёртвый) прокси из secrets, хотя страницы шли напрямую.
+        _proxy = proxy_url
         # ── Сбор почты/Метрики ДО сборки отчёта – чтобы отчёт сразу полный ──
         if params['fetch_notifications']:
             log('Собираю уведомления из почты…')

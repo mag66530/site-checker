@@ -512,7 +512,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
                 tg_result = send_run_notification(
                     bot_token=tg_token, recipients=tg_recipients,
                     project_name=cfg['name'], summary_text=summary_text,
-                    report_file=report_path, proxy_url=creds['proxy_url'],
+                    report_file=report_path, proxy_url=proxy_url,
                     log=lambda lvl, msg: append_log(msg),
                 )
                 append_log(f'✓ Telegram: отправлено {tg_result["sent"]}, '
@@ -526,7 +526,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
         if flags['fetch_notifications']:
             append_log('Собираю уведомления из почты…')
             _nlog = lambda lvl, msg: append_log(msg)
-            _proxy = creds['proxy_url']
+            _proxy = proxy_url   # с учётом use_proxy проекта (как для страниц)
 
             _yw_e, _yw_p = creds['metrika']
             _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
