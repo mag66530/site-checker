@@ -1255,12 +1255,23 @@ def init_excel_log(path: str, очистить: bool = True) -> None:
 
 
 def append_log_row(path: str, row: dict) -> None:
-    """Добавляет строку лога в конец файла по порядку колонок LOG_KEYS_ORDER."""
+    """Добавляет строку лога в конец файла по порядку колонок LOG_KEYS_ORDER.
+    Колонку «Статус» подкрашивает: зелёный – Успешно/Заполнено, красный – Ошибка."""
+    from openpyxl.styles import Font
     wb = load_workbook(path)
     ws = wb.active
     r = ws.max_row + 1
     for col, key in enumerate(LOG_KEYS_ORDER, 1):
         ws.cell(r, col, row.get(key, ""))
+    try:
+        si = LOG_KEYS_ORDER.index("статус") + 1
+        sval = str(row.get("статус", "")).strip().lower()
+        if sval in ("успешно", "заполнено"):
+            ws.cell(r, si).font = Font(color="1E8E3E", bold=True)   # зелёный
+        elif sval.startswith("ошибк"):
+            ws.cell(r, si).font = Font(color="C62828", bold=True)   # красный
+    except Exception:
+        pass
     wb.save(path)
 
 
