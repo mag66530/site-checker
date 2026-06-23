@@ -316,7 +316,7 @@ else:
         st.divider()
         st.subheader('Результаты (Excel)')
         st.caption(f'Лог проекта {PROJECTS[_proj_for_xlsx]["name"]} '
-                   '– колонки: дата, страница, форма, статус, код ответа и т.д.')
+                   '– дата, страница, форма, статус и комментарий с причиной (если не сработало).')
         st.download_button(
             '⬇ Скачать log_forms.xlsx',
             data=xlsx.read_bytes(),
