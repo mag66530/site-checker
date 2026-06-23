@@ -1228,7 +1228,8 @@ def _значение_формы_для_имени(fc: dict):
     return "unknown"
 
 
-def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
+def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True):
+    # headless=True – браузер работает скрыто (окно не показывается); False – видимый.
     # Всегда читаем актуальный config.py с диска (после «Сохранить» в редакторе иначе остаётся кэш).
     import importlib
 
@@ -2060,7 +2061,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
         Здесь же в дальнейшем включается headless / переиспользование контекста.
         """
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
+            browser = p.chromium.launch(headless=headless)
             context = browser.new_context()
             page = context.new_page()
             try:
@@ -2137,7 +2138,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
             print(f"   📜 Сценарий: {len(шаги)} шаг(ов), базовый URL: {base_url}")
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
+            browser = p.chromium.launch(headless=headless)
             context = browser.new_context()
             page = context.new_page()
             try:

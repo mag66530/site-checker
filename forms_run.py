@@ -39,6 +39,8 @@ def main() -> int:
                     help='Идентификатор проекта: smu / imp / mpe')
     ap.add_argument('--no-clear-excel', action='store_true',
                     help='Не очищать log_forms.xlsx перед прогоном')
+    ap.add_argument('--show-browser', action='store_true',
+                    help='Показывать окно браузера (по умолчанию скрыто, headless)')
     a = ap.parse_args()
 
     name = PROJECT_NAMES[a.project]
@@ -70,7 +72,8 @@ def main() -> int:
         from form_tester.stop_signal import make_stop_check
 
         stop = make_stop_check()  # отмена – через kill процесса со стороны страницы
-        run_test(ОЧИСТИТЬ_EXCEL=not a.no_clear_excel, stop_flag=stop)
+        run_test(ОЧИСТИТЬ_EXCEL=not a.no_clear_excel, stop_flag=stop,
+                 headless=not a.show_browser)
     except SystemExit as e:
         return int(e.code) if isinstance(e.code, int) else 1
     except Exception as e:

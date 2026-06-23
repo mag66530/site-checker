@@ -131,6 +131,10 @@ st.divider()
 st.subheader('Запуск проверки')
 
 clear_log = st.checkbox('Очищать лог Excel перед прогоном', value=True)
+show_browser = st.checkbox('Показывать окно браузера', value=False)
+st.caption('По умолчанию браузер работает скрыто (headless) – окно не '
+           'показывается, отчёт всё равно формируется. Включи галочку выше, '
+           'если хочешь видеть, как он заполняет формы.')
 
 st.caption('Запуск фоновый – интерфейс сразу свободен. Можно уйти в чек-листы '
            'и работать параллельно, проверка крутится сама. Заявки '
@@ -145,6 +149,8 @@ with _run_col:
         args = ['forms_run.py', '--project', pid_key]
         if not clear_log:
             args.append('--no-clear-excel')
+        if show_browser:
+            args.append('--show-browser')
         try:
             LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
             LOG_FILE.write_text('', encoding='utf-8')
