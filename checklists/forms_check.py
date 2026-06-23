@@ -167,6 +167,22 @@ def _rows_done(xlsx: Path):
 
 
 # ── Заголовок + подсказка «❓» ───────────────────────────────────────
+# Кнопку скачивания отчёта подсвечиваем зелёным.
+st.markdown(
+    """
+    <style>
+    [data-testid="stDownloadButton"] button {
+        background: #1E8E3E !important; border: 1px solid #1E8E3E !important;
+    }
+    [data-testid="stDownloadButton"] button * { color: #FFFFFF !important; }
+    [data-testid="stDownloadButton"] button:hover {
+        background: #176D30 !important; border-color: #176D30 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 _th, _qh = st.columns([0.88, 0.12], vertical_alignment='bottom')
 with _th:
     st.title('📝 Проверка форм')
@@ -306,8 +322,9 @@ else:
     _ran = bool(st.session_state.get('forms_started'))
     if _ran and LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
         st.markdown('**Статус:** ✅ завершено / остановлено')
-        st.code('\n'.join(LOG_FILE.read_text(encoding='utf-8', errors='ignore')
-                          .splitlines()[-300:]), language='text')
+        with st.expander('Подробный лог', expanded=False):
+            st.code('\n'.join(LOG_FILE.read_text(encoding='utf-8', errors='ignore')
+                              .splitlines()[-300:]), language='text')
     else:
         st.caption('Лог появится после запуска.')
 
