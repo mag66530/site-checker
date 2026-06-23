@@ -196,6 +196,7 @@ st.markdown(
 pages = [
     st.Page('checklists/checklist_30min.py', title='Чек-лист', icon='🔎', default=True),
     st.Page('checklists/autoclickers.py', title='Автокликеры', icon='🖱'),
+    st.Page('checklists/forms_check.py', title='Проверка форм', icon='📝'),
 ]
 
 st.navigation(pages).run()
