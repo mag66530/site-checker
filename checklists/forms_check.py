@@ -208,8 +208,15 @@ with _run_col:
         ready, _missing = _deps_ready()
         if not ready:
             # Движка нет в этом окружении (типично для облака по ссылке) –
-            # не запускаем, показываем понятную инструкцию ниже.
+            # не запускаем, показываем понятную инструкцию ниже. Заодно сбрасываем
+            # прогресс и старый лог, чтобы не висел результат прошлого запуска.
             st.session_state['forms_dep_error'] = _missing
+            st.session_state.pop('forms_started', None)
+            st.session_state.pop('forms_started_ts', None)
+            try:
+                LOG_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
             st.rerun()
         else:
             st.session_state.pop('forms_dep_error', None)
@@ -293,16 +300,19 @@ if _alive:
     time.sleep(2)
     st.rerun()
 else:
-    # Не идёт: показываем итог и лог последнего прогона
-    if LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
+    # Не идёт: показываем итог/лог ТОЛЬКО для запуска текущей сессии. Иначе
+    # старый лог с прошлого прогона (или с прошлой сессии на сервере) «висел»
+    # бы тут – из-за этого казалось, что прогресс не сбрасывается.
+    _ran = bool(st.session_state.get('forms_started'))
+    if _ran and LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
         st.markdown('**Статус:** ✅ завершено / остановлено')
         st.code('\n'.join(LOG_FILE.read_text(encoding='utf-8', errors='ignore')
                           .splitlines()[-300:]), language='text')
     else:
         st.caption('Лог появится после запуска.')
 
-    # ── Результат: Excel ────────────────────────────────────────────
-    if xlsx.exists():
+    # ── Результат: Excel (только для запуска текущей сессии) ─────────
+    if _ran and xlsx.exists():
         st.divider()
         st.subheader('Результаты (Excel)')
         st.caption(f'Лог проекта {PROJECTS[_proj_for_xlsx]["name"]} '
