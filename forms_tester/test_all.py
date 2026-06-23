@@ -35,7 +35,7 @@ def normalize_phone_for_submit(phone: str) -> str:
 def response_indicates_captcha_block(text: str) -> bool:
     """
     Текст ответа явно указывает на ошибку/блокировку по капче.
-    Не использует подстроку «captcha» по всему HTML — в разметке часто есть recaptcha/hcaptcha в скриптах без ошибки отправки.
+    Не использует подстроку «captcha» по всему HTML – в разметке часто есть recaptcha/hcaptcha в скриптах без ошибки отправки.
     """
     t = (text or "").lower()
     if "капч" in t and any(
@@ -98,7 +98,7 @@ def _resolve_form_field_token(
     """
     Значение токена из «поля» формы.
     Известные ключи: ПОЧТА, ТЕЛЕФОН, ИМЯ, КОММЕНТАРИЙ, ГОРОД, ИМЯ_ТЕСТА (и email/phone/…).
-    Любая другая непустая строка — буквальное значение для поля.
+    Любая другая непустая строка – буквальное значение для поля.
     """
     if token is None:
         return ""
@@ -131,8 +131,8 @@ def _resolve_form_field_token(
 
 def _apply_container_expand(scope, форма_config: dict):
     """
-    расширить_контейнер / expand_container: row | form | none (пусто — без расширения).
-    Например, css попал на .bx-soa-customer, а textarea — в соседней колонке: укажите row или css: div.row.
+    расширить_контейнер / expand_container: row | form | none (пусто – без расширения).
+    Например, css попал на .bx-soa-customer, а textarea – в соседней колонке: укажите row или css: div.row.
     """
     mode = (
         форма_config.get("расширить_контейнер") or форма_config.get("expand_container") or ""
@@ -383,14 +383,14 @@ def _normalize_scenario_click_css_selector(s: str) -> str:
 def _playwright_form_css_selector(форма_config: dict) -> str:
     """CSS-селектор формы для page.locator (или пусто, если тип «text»).
     Один токен class: form.X матчит любой токен в class (в т.ч. an-row calculation-order).
-    Для «короткой» формы в конфиге пишут class: calculation-order — тогда :not(.an-row),
+    Для «короткой» формы в конфиге пишут class: calculation-order – тогда :not(.an-row),
     чтобы не сливалась со второй формой an-row calculation-order.
-    Один токен (кроме calculation-order): form.token — как CSS-класс (подходит и при class="row col-md-12").
+    Один токен (кроме calculation-order): form.token – как CSS-класс (подходит и при class="row col-md-12").
     Несколько слов: form.a.b.c как раньше.
-    Ключ «css» — произвольный CSS-селектор (должен находить форму или её корень).
-    Ключ «name» — атрибут name (CSS [name="..."]), часто поле Bitrix; для контейнера заказа
+    Ключ «css» – произвольный CSS-селектор (должен находить форму или её корень).
+    Ключ «name» – атрибут name (CSS [name="..."]), часто поле Bitrix; для контейнера заказа
     лучше «css» (например .bx-soa-customer), если по name попадает один input.
-    Ключ «text» — не CSS; возвращает пусто (см. отправить_форму_через_playwright).
+    Ключ «text» – не CSS; возвращает пусто (см. отправить_форму_через_playwright).
     """
     if "text" in форма_config and str(форма_config.get("text", "")).strip():
         return ""
@@ -423,8 +423,8 @@ def _playwright_form_css_selector(форма_config: dict) -> str:
 
 def _alternate_form_root_selector(sel: str) -> str | None:
     """
-    Многие сайты без <form>: блоки в div / section. Тогда form.* не матчится — пробуем div.*.
-    form[attr] (например data-source) — то же: div[attr].
+    Многие сайты без <form>: блоки в div / section. Тогда form.* не матчится – пробуем div.*.
+    form[attr] (например data-source) – то же: div[attr].
     """
     if sel.startswith("form.") or sel.startswith("form#"):
         return "div" + sel[4:]
@@ -482,12 +482,12 @@ _MODAL_TRIGGER_PREFIXES = frozenset(
 def _parse_modal_trigger(raw: str) -> tuple[str, str]:
     """
     Триггер модалки в конфиге:
-    - без префикса или data-source: — значение в атрибуте data-source (как раньше);
-    - text: — подпись кнопки/ссылки (роль button/link);
-    - css: — произвольный CSS-селектор Playwright;
-    - id: — id элемента;
-    - class: — класс(ы) на button/a;
-    - name: — атрибут name (например name:ORDER_PROP_3).
+    - без префикса или data-source: – значение в атрибуте data-source (как раньше);
+    - text: – подпись кнопки/ссылки (роль button/link);
+    - css: – произвольный CSS-селектор Playwright;
+    - id: – id элемента;
+    - class: – класс(ы) на button/a;
+    - name: – атрибут name (например name:ORDER_PROP_3).
     Префикс срабатывает только если он из известного списка (строка «foo:bar» без префикса остаётся целиком для data-source).
     """
     s = (raw or "").strip()
@@ -509,7 +509,7 @@ def format_modal_selector_type(raw: str | None) -> str:
 
 
 def format_modal_value_for_log(raw: str | None) -> str:
-    """Колонка «Значение типа»: только значение без префикса «class:» и т.п. (тип — в колонке «Тип»)."""
+    """Колонка «Значение типа»: только значение без префикса «class:» и т.п. (тип – в колонке «Тип»)."""
     return _parse_modal_trigger(raw or "")[1]
 
 
@@ -533,7 +533,7 @@ def _find_modal_opener(page, kind: str, val: str):
         return None
 
     def _fallback_by_id_or_hash():
-        """Если data-source не сработал — часто в конфиге указан id кнопки/ссылки (без префикса id:)."""
+        """Если data-source не сработал – часто в конфиге указан id кнопки/ссылки (без префикса id:)."""
         id_esc = val.replace('"', '\\"')
         for sel in (f'[id="{id_esc}"]', f"#{val}"):
             try:
@@ -653,7 +653,7 @@ def _find_modal_root(page):
 
 
 def _modal_scope_for_fill(page, modal):
-    """Область, в которой реально есть поля (часто modal — пустой #form-callback)."""
+    """Область, в которой реально есть поля (часто modal – пустой #form-callback)."""
     try:
         if modal.count():
             n = modal.locator(
@@ -698,7 +698,7 @@ def _fill_modal_fields(
             pass
         return False
 
-    # Имя — типовые name + Bitrix / произвольные
+    # Имя – типовые name + Bitrix / произвольные
     name_sels = tuple(
         f'input[name="{nm}"]'
         for nm in (
@@ -828,16 +828,16 @@ def _fill_modal_fields(
 
     if имя_теста and not filled_name:
         print(
-            "      ⚠️ Модалка: не удалось заполнить имя — откройте DevTools и проверьте name/placeholder полей."
+            "      ⚠️ Модалка: не удалось заполнить имя – откройте DevTools и проверьте name/placeholder полей."
         )
     if телефон and not filled_phone:
         print(
-            "      ⚠️ Модалка: не удалось заполнить телефон — проверьте name/placeholder или укажите ТЕЛЕФОН в конфиге."
+            "      ⚠️ Модалка: не удалось заполнить телефон – проверьте name/placeholder или укажите ТЕЛЕФОН в конфиге."
         )
 
 
 def _click_modal_submit(modal):
-    """Отправка формы в модалке — несколько типовых вариантов кнопки."""
+    """Отправка формы в модалке – несколько типовых вариантов кнопки."""
     for sel in (
         "button.form__submit",
         "button[type='submit']",
@@ -871,7 +871,7 @@ def _click_modal_submit(modal):
 
 
 def _label_has_policy_link(locator) -> bool:
-    """В label часто ссылка на политику — клик по label открывает страницу, а не чекбокс."""
+    """В label часто ссылка на политику – клик по label открывает страницу, а не чекбокс."""
     try:
         return locator.locator("a[href]").count() > 0
     except Exception:
@@ -941,7 +941,7 @@ def _click_checkbox_via_label_or_js(box, page):
 def _playwright_check_consent_checkboxes(form_locator, page):
     """
     Отмечает обязательные чекбоксы (152-ФЗ и т.д.).
-    Bitrix/кастомные темы часто скрывают input — кликаем по label, иначе force/check + JS.
+    Bitrix/кастомные темы часто скрывают input – кликаем по label, иначе force/check + JS.
     """
     boxes = form_locator.locator("input[type='checkbox'][required]")
     n = boxes.count()
@@ -1012,7 +1012,7 @@ def _ensure_modal_consent(scope, page):
         except Exception:
             pass
 
-    # Не кликаем по произвольным label с текстом «политик…» — там часто <a href>, открывается страница политики.
+    # Не кликаем по произвольным label с текстом «политик…» – там часто <a href>, открывается страница политики.
     # Только чекбоксы внутри label с подходящим текстом (без клика по ссылке).
     for pattern in (r"соглас", r"персональн", r"обработк"):
         try:
@@ -1031,7 +1031,7 @@ def _ensure_modal_consent(scope, page):
         except Exception:
             pass
 
-    # Последний проход: неотмеченные чекбоксы в форме модалки (часто один — согласие)
+    # Последний проход: неотмеченные чекбоксы в форме модалки (часто один – согласие)
     try:
         form = scope.locator("form").last
         if not form.count():
@@ -1091,14 +1091,14 @@ def _interpret_response_status(result: requests.Response) -> str:
     if "спасибо" in text or "успешно" in text or "принят" in text:
         return "УСПЕШНО"
     if result.status_code == 200:
-        return "УСПЕШНО (статус 200) — проверьте админку (возможна ложная успешность)"
+        return "УСПЕШНО (статус 200) – проверьте админку (возможна ложная успешность)"
     return f"ОШИБКА (статус {result.status_code})"
 
 
 def scenario_blocks_from_page(страница: dict) -> list:
     """
     Список сценариев на странице: [{'название', 'включено', 'шаги'}, ...].
-    Поддержка: ключ «сценарии»; иначе legacy — плоский список шагов в «шаги».
+    Поддержка: ключ «сценарии»; иначе legacy – плоский список шагов в «шаги».
     """
     if "сценарии" in страница and страница["сценарии"] is not None:
         cs = страница["сценарии"] or []
@@ -1145,7 +1145,7 @@ def prep_steps_from_page(страница: dict) -> list:
     Шаги «подготовки» страницы (ключ «подготовка», алиас «prep»).
 
     Это best-effort действия сразу после загрузки страницы: снять оверлей
-    (например подтверждение города), навести на карточку и т.п. — то, что
+    (например подтверждение города), навести на карточку и т.п. – то, что
     раньше было зашито в коде под конкретные сайты. Возвращает только
     включённые шаги с нормализованным действием (пауза / клик / наведение).
     """
@@ -1171,14 +1171,17 @@ def prep_steps_from_page(страница: dict) -> list:
 
 
 # --- Лог Excel: единый формат колонок (создание файла и запись строк) ---
+# Технические колонки («Режим», «Тип», «Значение типа») убраны из отчёта:
+# в строке-словаре их ключи (тип / тип_селектора / ид) ещё формируются, но в
+# лог не пишутся (append_log_row берёт только ключи из LOG_KEYS_ORDER).
 LOG_HEADERS = [
-    "Дата", "Время", "Режим", "Страница", "URL", "Тип", "Значение типа",
+    "Дата", "Время", "Страница", "URL",
     "Название", "Имя", "Телефон", "Почта", "Комментарий", "Статус", "Код",
 ]
 
 # Ключи строки-словаря в порядке колонок LOG_HEADERS.
 LOG_KEYS_ORDER = [
-    "дата", "время", "тип", "страница", "url", "тип_селектора", "ид",
+    "дата", "время", "страница", "url",
     "название", "имя", "телефон", "почта", "комментарий", "статус", "код",
 ]
 
@@ -1458,7 +1461,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
             ).strip():
                 print(
                     "      ⚠️ Поле hash пустое (на сайте его часто подставляет JS). "
-                    "Если заявка не доходит — смотрите вкладку Network при ручной отправке "
+                    "Если заявка не доходит – смотрите вкладку Network при ручной отправке "
                     "или используйте сценарий Playwright для этой формы."
                 )
 
@@ -1538,7 +1541,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
         if not u or u == "about:blank" or u.startswith("about:"):
             _goto_with_retry(page, base_url)
             page.wait_for_timeout(2000)
-        # Снятие оверлеев (подтверждение города и т.п.) — через ключ «подготовка»
+        # Снятие оверлеев (подтверждение города и т.п.) – через ключ «подготовка»
         # в конфиге страницы, см. _run_page_prep (раньше здесь был хардкод mepen.ru).
 
     def _resolve_scenario_url(page, base_url: str, href) -> str:
@@ -1566,7 +1569,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
 
         Раньше под это были зашиты site-specific костыли (оверлей города на
         mepen.ru, наведение на карточку на «Листинге»). Теперь шаги берутся из
-        конфига страницы (ключ «подготовка»). Любая ошибка гасится — прогон не
+        конфига страницы (ключ «подготовка»). Любая ошибка гасится – прогон не
         падает из-за подготовки.
         """
         pg = next(
@@ -1618,7 +1621,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                             loc.hover()
                             page.wait_for_timeout(400)
                             print(f"      🧹 Подготовка: наведение {sel!r}")
-                # неизвестное действие в «подготовке» — тихо пропускаем
+                # неизвестное действие в «подготовке» – тихо пропускаем
             except Exception as e:
                 print(f"      ⚠️ Подготовка ({act}): {e}")
 
@@ -1634,7 +1637,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
     ):
         """
         Заполнение и отправка формы на уже открытой странице.
-        initial_url: если задан — сначала переход; иначе считаем, что нужная страница уже загружена.
+        initial_url: если задан – сначала переход; иначе считаем, что нужная страница уже загружена.
         """
         nctx = название_контекста if название_контекста is not None else название
         имя_теста = имя_теста_из_конфига(
@@ -1705,7 +1708,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                         break
 
             print(
-                f"      Селектор: {sel_desc!r} — найдено форм: {n_match}, берём №{idx + 1}"
+                f"      Селектор: {sel_desc!r} – найдено форм: {n_match}, берём №{idx + 1}"
             )
             if n_match == 0:
                 tried_txt = ", ".join(repr(t) for t in _expand_form_selector_fallbacks(sel))
@@ -1713,8 +1716,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                     "Нет элементов по селектору. Перепробованы варианты: "
                     f"{tried_txt}. "
                     "Уточните ключ «css» в конфиге (например div.row, .bx-soa-customer), "
-                    "проверьте классы в DevTools (для второй формы — «an-row calculation-order», не только "
-                    "«calculation-order»). Если блок подгружается по AJAX — добавьте шаг «перейти»/«пауза» перед формой."
+                    "проверьте классы в DevTools (для второй формы – «an-row calculation-order», не только "
+                    "«calculation-order»). Если блок подгружается по AJAX – добавьте шаг «перейти»/«пауза» перед формой."
                 )
             if idx >= n_match:
                 raise RuntimeError(
@@ -1727,7 +1730,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                 _root_tag = form.evaluate("el => el.tagName.toLowerCase()")
             except Exception:
                 _root_tag = ""
-            # Селектор по name может указывать на одно поле — поднимаемся к <form>, если есть.
+            # Селектор по name может указывать на одно поле – поднимаемся к <form>, если есть.
             if _root_tag in ("input", "textarea", "select"):
                 anc = form.locator("xpath=ancestor::form[1]")
                 if anc.count() > 0:
@@ -1838,7 +1841,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                             pass
                 if not phone_filled and телефон_отправки:
                     print(
-                        "      ⚠️ Поле телефона не найдено по типовым name/type — проверьте разметку формы."
+                        "      ⚠️ Поле телефона не найдено по типовым name/type – проверьте разметку формы."
                     )
 
                 if ПОЧТА:
@@ -1871,7 +1874,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
             # Многошаговые формы (например, Bitrix-чекаут): только заполнить поля,
             # а саму отправку делает отдельный шаг сценария «клик» («Далее»/«Оформить заказ»).
             if not cfg_enabled(форма_config.get("отправлять", True)):
-                print(f"   ✍️ {название} — поля заполнены (без отправки).")
+                print(f"   ✍️ {название} – поля заполнены (без отправки).")
                 записать_в_excel(
                     {
                         "тип": "PLAYWRIGHT-FORM",
@@ -1904,7 +1907,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
             ):
                 статус = "ОШИБКА (сообщение на странице)"
             else:
-                статус = "УСПЕШНО (Playwright — как ручная отправка)"
+                статус = "УСПЕШНО (Playwright – как ручная отправка)"
 
             записать_в_excel(
                 {
@@ -1967,7 +1970,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
         log_url = page.url or url_for_excel
 
         try:
-            # Наведение на карточку и прочая «подготовка» страницы — из конфига
+            # Наведение на карточку и прочая «подготовка» страницы – из конфига
             # (ключ «подготовка»). Раньше тут был хардкод под страницу «Листинг».
             _run_page_prep(page, страница)
 
@@ -2068,7 +2071,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
     def отправить_форму_через_playwright(url, форма_config, название):
         """
         Отправка формы через Chromium: как у живого пользователя (JS, hash, AJAX Bitrix).
-        Ручная отправка с почтой менеджера совпадает с этим путём; requests без JS — нет.
+        Ручная отправка с почтой менеджера совпадает с этим путём; requests без JS – нет.
         """
         страница = определить_страницу(url)
         имя_теста = имя_теста_из_конфига(
@@ -2117,7 +2120,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
     ):
         """Один сеанс браузера: цепочка шагов (пауза, переход, клик, форма, модалка)."""
         if not шаги:
-            print("   ⚠️ Сценарий пуст — пропуск.")
+            print("   ⚠️ Сценарий пуст – пропуск.")
             return
         if ФОРМЫ_ЧЕРЕЗ_REQUESTS:
             print(
@@ -2149,7 +2152,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                         print(f"   ⚠️ Шаг {i + 1}: ожидался словарь, пропуск.")
                         continue
                     if not cfg_enabled(step.get("включено", True)):
-                        print(f"   ⏭️ Шаг {i + 1}: отключён в конфиге — пропуск.")
+                        print(f"   ⏭️ Шаг {i + 1}: отключён в конфиге – пропуск.")
                         continue
 
                     act = _нормализовать_действие_шага(step)
@@ -2165,7 +2168,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                     elif act == "перейти":
                         href = step.get("url") or step.get("href")
                         if not href:
-                            print(f"   ⚠️ Шаг {i + 1}: «перейти» без url/href — пропуск.")
+                            print(f"   ⚠️ Шаг {i + 1}: «перейти» без url/href – пропуск.")
                             continue
                         dest = _resolve_scenario_url(page, base_url, href)
                         print(f"   🔗 Шаг {i + 1}: переход → {dest}")
@@ -2176,7 +2179,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                         css = step.get("css") or step.get("selector")
                         if not css:
                             print(
-                                f"   ⚠️ Шаг {i + 1}: «клик» без css/selector — пропуск."
+                                f"   ⚠️ Шаг {i + 1}: «клик» без css/selector – пропуск."
                             )
                             continue
                         raw = str(css).strip()
@@ -2193,7 +2196,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                         css = step.get("css") or step.get("selector")
                         if not css:
                             print(
-                                f"   ⚠️ Шаг {i + 1}: «наведение» без css/selector — пропуск."
+                                f"   ⚠️ Шаг {i + 1}: «наведение» без css/selector – пропуск."
                             )
                             continue
                         raw = str(css).strip()
@@ -2243,7 +2246,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                         )
                         if val is None or str(val).strip() == "":
                             print(
-                                f"   ⚠️ Шаг {i + 1}: «модалка» без значения — пропуск."
+                                f"   ⚠️ Шаг {i + 1}: «модалка» без значения – пропуск."
                             )
                             continue
                         nav = step.get("url") or step.get("href")
@@ -2303,7 +2306,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                                 "код": "browser",
                             }
                         )
-                        print(f"   🔎 Шаг {i + 1}: проверка «{nm}» — {статус}")
+                        print(f"   🔎 Шаг {i + 1}: проверка «{nm}» – {статус}")
 
                     else:
                         print(
@@ -2342,11 +2345,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                             "название": cap,
                             "имя": имя_лог,
                             "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_лог,
-                            "статус": "УСПЕШНО (только клик; tel/mailto — проверьте ОС/браузер)",
+                            "статус": "УСПЕШНО (только клик; tel/mailto – проверьте ОС/браузер)",
                             "код": "click-only",
                         }
                     )
-                    print(f"   ✅ «{cap}» — строка в Excel (клик без формы)")
+                    print(f"   ✅ «{cap}» – строка в Excel (клик без формы)")
 
             finally:
                 browser.close()
@@ -2359,7 +2362,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
     print(f"📞 Телефон для отправки (цифры): {телефон_отправки or '(пусто)'}")
     if not телефон_отправки:
         print(
-            "⚠️ ВНИМАНИЕ: ТЕЛЕФОН в config пустой — поля телефона не заполняются, "
+            "⚠️ ВНИМАНИЕ: ТЕЛЕФОН в config пустой – поля телефона не заполняются, "
             "заявка часто не принимается. Укажите номер в конфиге и сохраните."
         )
     print(f"✉️ Почта: {ПОЧТА}")
@@ -2371,7 +2374,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
     print(f"💬 Комментарий: {КОММЕНТАРИЙ if КОММЕНТАРИЙ else '(имя теста)'}")
     print(
         f"📋 Формы на странице: "
-        f"{'requests (быстро, без JS)' if ФОРМЫ_ЧЕРЕЗ_REQUESTS else 'Playwright (как в браузере — заявки на почту)'}\n"
+        f"{'requests (быстро, без JS)' if ФОРМЫ_ЧЕРЕЗ_REQUESTS else 'Playwright (как в браузере – заявки на почту)'}\n"
     )
 
     for страница in СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ:
@@ -2384,7 +2387,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
 
         if not cfg_enabled(страница.get("включено", True)):
             print(f"\n{'='*50}")
-            print(f"📄 Страница: {тип_страницы} — не в прогоне (настройки сохранены, шаги не выполняются)")
+            print(f"📄 Страница: {тип_страницы} – не в прогоне (настройки сохранены, шаги не выполняются)")
             print(f"{'='*50}")
             continue
 
@@ -2414,7 +2417,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                 try:
                     run_scenario_playwright(url, steps, название_сценария=cap)
                 except Exception as _scn_err:  # noqa: BLE001
-                    # Один упавший сценарий НЕ должен ронять весь прогон —
+                    # Один упавший сценарий НЕ должен ронять весь прогон –
                     # пишем ошибку в лог и идём к следующей форме.
                     print(f"   ❌ Сценарий «{cap}» прерван ошибкой: {_scn_err}")
                     try:
@@ -2438,13 +2441,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
 
         if есть_шаги and not с_вкл:
             print(
-                "   ⏭️ Сценарий (шаги) отключён для страницы — шаги не выполняются."
+                "   ⏭️ Сценарий (шаги) отключён для страницы – шаги не выполняются."
             )
 
         if not ф_вкл:
-            print("   ⏭️ Формы для страницы отключены — блок форм пропущен.")
+            print("   ⏭️ Формы для страницы отключены – блок форм пропущен.")
         if not м_вкл:
-            print("   ⏭️ Модалки для страницы отключены — блок модалок пропущен.")
+            print("   ⏭️ Модалки для страницы отключены – блок модалок пропущен.")
 
         for форма in страница.get("формы") or []:
             if stop_flag and stop_flag():
@@ -2462,7 +2465,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None):
                 else:
                     отправить_форму_через_playwright(url, форма, форма["название"])
             except Exception as _frm_err:  # noqa: BLE001
-                # Сбой одной формы НЕ должен ронять прогон — пишем ошибку и идём дальше.
+                # Сбой одной формы НЕ должен ронять прогон – пишем ошибку и идём дальше.
                 print(f"   ❌ Форма «{форма.get('название','?')}» прервана ошибкой: {_frm_err}")
                 try:
                     записать_в_excel(

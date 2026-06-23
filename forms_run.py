@@ -1,5 +1,5 @@
 """
-forms_run.py — один фоновый процесс проверки форм для проекта.
+forms_run.py – один фоновый процесс проверки форм для проекта.
 
 Запускается страницей «Проверка форм» в фоне (как autoclick_run.py для
 кликеров). Готовит рабочую папку cache/forms/<project>/, кладёт туда
@@ -42,7 +42,7 @@ def main() -> int:
     a = ap.parse_args()
 
     name = PROJECT_NAMES[a.project]
-    _stamp(f'ПРОВЕРКА ФОРМ СТАРТ — проект {name}')
+    _stamp(f'ПРОВЕРКА ФОРМ СТАРТ – проект {name}')
 
     src_config = PROJECTS_ROOT / a.project / 'config.py'
     if not src_config.is_file():
@@ -69,7 +69,7 @@ def main() -> int:
         from form_tester.runner import run_test
         from form_tester.stop_signal import make_stop_check
 
-        stop = make_stop_check()  # отмена — через kill процесса со стороны страницы
+        stop = make_stop_check()  # отмена – через kill процесса со стороны страницы
         run_test(ОЧИСТИТЬ_EXCEL=not a.no_clear_excel, stop_flag=stop)
     except SystemExit as e:
         return int(e.code) if isinstance(e.code, int) else 1
