@@ -3,16 +3,19 @@
 
 Сделана по образцу страницы «Автокликеры»: кнопка стартует отдельный процесс
 (forms_run.py) и сразу освобождает интерфейс. Движок открывает реальный Chrome
-(Playwright), заполняет формы и отправляет, результат пишется в log_forms.xlsx.
+(Playwright, по умолчанию скрыто), заполняет формы и отправляет, результат
+пишется в log_forms.xlsx.
 
 Окружение:
   • Локально (streamlit run app.py) – работает.
-  • Облако по ссылке – недоступно (нет браузера на сервере).
+  • Облако по ссылке – недоступно (нет браузера и движка на сервере).
   • Свой сервер (в планах) – заработает так же.
 """
+import importlib.util
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -28,6 +31,14 @@ PROJECTS = {
     'imp': {'name': 'ИМП – Инметпром', 'domain': 'inmetprom.ru'},
     'mpe': {'name': 'МПЭ – Мепэн', 'domain': 'mepen.ru'},
 }
+
+# Полный текст-подсказка (раньше был большим жёлтым блоком, теперь – в «❓»).
+HELP_TEXT = (
+    'Проверка открывает реальный браузер (Playwright) на ЭТОМ компьютере: '
+    'заполняет формы на сайтах проекта и отправляет заявки. Работает, когда '
+    'приложение запущено **локально** (`streamlit run app.py`). В облаке по '
+    'ссылке недоступно. После переноса на свой сервер – заработает.'
+)
 
 
 def _read_pid():
@@ -68,12 +79,15 @@ def _kill_tree(pid):
             pass
 
 
-def _playwright_ok() -> bool:
-    try:
-        import playwright  # noqa: F401
-        return True
-    except Exception:
-        return False
+def _deps_ready() -> tuple[bool, list[str]]:
+    """Есть ли в этом окружении движок (его библиотеки + браузер). Возвращает
+    (готово, список_чего_нет). На облаке по ссылке тут будет False."""
+    missing = []
+    for mod, label in (('bs4', 'beautifulsoup4'), ('requests', 'requests'),
+                       ('openpyxl', 'openpyxl'), ('playwright', 'playwright')):
+        if importlib.util.find_spec(mod) is None:
+            missing.append(label)
+    return (not missing), missing
 
 
 def _launch_background(args: list[str], log_path: Path):
@@ -98,24 +112,69 @@ def _launch_background(args: list[str], log_path: Path):
     return proc.pid
 
 
-# ── UI ──────────────────────────────────────────────────────────────
+def _count_expected(project: str) -> int:
+    """Сколько форм ожидается проверить (для шкалы прогресса). Best-effort:
+    считаем включённые формы/модалки + шаги-формы в сценариях. Если не вышло – 0."""
+    p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
+    try:
+        spec = importlib.util.spec_from_file_location(f'cfg_count_{project}', p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+    except Exception:
+        return 0
 
-st.title('📝 Проверка форм')
+    def on(d) -> bool:
+        v = d.get('включено', d.get('enabled', True))
+        if isinstance(v, bool):
+            return v
+        return str(v).strip().lower() not in ('false', '0', 'нет', 'off', '')
 
-st.warning(
-    'Проверка открывает реальный браузер (Playwright) на ЭТОМ компьютере: '
-    'заполняет формы на сайтах проекта и отправляет заявки. Работает, когда '
-    'приложение запущено **локально** (`streamlit run app.py`). В облаке по '
-    'ссылке недоступно. После переноса на свой сервер – заработает.'
-)
+    total = 0
+    try:
+        for block in getattr(m, 'СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ', []) or []:
+            if not on(block):
+                continue
+            for key in ('формы', 'модалки'):
+                for item in block.get(key, []) or []:
+                    if on(item):
+                        total += 1
+            for sc in block.get('сценарии', []) or []:
+                if not on(sc):
+                    continue
+                for step in sc.get('шаги', []) or []:
+                    if step.get('действие') in ('форма', 'модалка', 'проверить') and on(step):
+                        total += 1
+            for step in block.get('шаги', []) or []:  # legacy
+                if step.get('действие') in ('форма', 'модалка', 'проверить') and on(step):
+                    total += 1
+    except Exception:
+        return 0
+    return total
 
-if not _playwright_ok():
-    st.error(
-        'Playwright не установлен – проверка не запустится.\n\n'
-        'Локально один раз:\n'
-        '```\npip install -r requirements-local.txt\nplaywright install chromium\n```'
-    )
 
+def _rows_done(xlsx: Path):
+    """Сколько форм уже записано в лог (строки минус шапка). None – не прочиталось."""
+    if not xlsx.exists():
+        return 0
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(xlsx, read_only=True)
+        n = (wb.active.max_row or 1) - 1
+        wb.close()
+        return max(n, 0)
+    except Exception:
+        return None
+
+
+# ── Заголовок + подсказка «❓» ───────────────────────────────────────
+_th, _qh = st.columns([0.88, 0.12], vertical_alignment='bottom')
+with _th:
+    st.title('📝 Проверка форм')
+with _qh:
+    with st.popover('❓', use_container_width=False):
+        st.markdown(HELP_TEXT)
+
+# ── Выбор проекта ────────────────────────────────────────────────────
 pid_key = st.selectbox('Проект', list(PROJECTS.keys()),
                        format_func=lambda k: PROJECTS[k]['name'])
 proj = PROJECTS[pid_key]
@@ -146,20 +205,29 @@ _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
     if st.button('▶ Запустить проверку', use_container_width=True,
                  disabled=_alive):
-        args = ['forms_run.py', '--project', pid_key]
-        if not clear_log:
-            args.append('--no-clear-excel')
-        if show_browser:
-            args.append('--show-browser')
-        try:
-            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            LOG_FILE.write_text('', encoding='utf-8')
-        except Exception:
-            pass
-        _launch_background(args, LOG_FILE)
-        st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
-        st.session_state['forms_project'] = pid_key
-        st.rerun()
+        ready, _missing = _deps_ready()
+        if not ready:
+            # Движка нет в этом окружении (типично для облака по ссылке) –
+            # не запускаем, показываем понятную инструкцию ниже.
+            st.session_state['forms_dep_error'] = _missing
+            st.rerun()
+        else:
+            st.session_state.pop('forms_dep_error', None)
+            args = ['forms_run.py', '--project', pid_key]
+            if not clear_log:
+                args.append('--no-clear-excel')
+            if show_browser:
+                args.append('--show-browser')
+            try:
+                LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+                LOG_FILE.write_text('', encoding='utf-8')
+            except Exception:
+                pass
+            _launch_background(args, LOG_FILE)
+            st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
+            st.session_state['forms_started_ts'] = time.time()
+            st.session_state['forms_project'] = pid_key
+            st.rerun()
 with _cancel_col:
     if st.button('⛔ Отменить', use_container_width=True, disabled=not _alive):
         _kill_tree(_read_pid())
@@ -171,6 +239,22 @@ with _cancel_col:
             pass
         st.rerun()
 
+# ── Понятная ошибка: движок не установлен (показываем ТОЛЬКО после клика) ──
+if not _alive and st.session_state.get('forms_dep_error'):
+    st.error('Не получилось запустить проверку – в этом окружении нет браузера и нужных библиотек.')
+    st.markdown(
+        'Проверка форм работает **только локально** (на твоём компьютере) или на '
+        'своём сервере с браузером – **в облачной версии по ссылке она недоступна**.\n\n'
+        '**Чтобы запустить на своём компьютере:**\n'
+        '1. Открой терминал в папке проекта и запусти приложение локально:\n'
+        '   `streamlit run app.py`\n'
+        '2. Один раз установи движок (там же, в терминале):\n'
+        '   `pip install -r requirements-local.txt`\n'
+        '3. И браузер для него:\n'
+        '   `playwright install chromium`\n'
+        '4. Обнови страницу и снова нажми «Запустить проверку».'
+    )
+
 st.divider()
 
 # ── Прогресс ────────────────────────────────────────────────────────
@@ -178,34 +262,56 @@ st.subheader('Прогресс')
 if st.session_state.get('forms_started'):
     st.caption(f'Последний запуск: {st.session_state["forms_started"]}')
 
-st.button('🔄 Обновить лог', use_container_width=True)  # просто перерисовка
-
-if _alive:
-    st.markdown('**Статус:** ⏳ идёт…')
-elif LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
-    st.markdown('**Статус:** ✅ завершено / остановлено')
-
-if LOG_FILE.exists():
-    txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore')
-    if txt.strip():
-        st.code('\n'.join(txt.splitlines()[-300:]), language='text')
-    else:
-        st.caption('Лог пуст – проверку ещё не запускали.')
-else:
-    st.caption('Лог появится после запуска.')
-
-# ── Результат: Excel ────────────────────────────────────────────────
 _proj_for_xlsx = st.session_state.get('forms_project', pid_key)
 xlsx = ROOT / 'cache' / 'forms' / _proj_for_xlsx / 'log_forms.xlsx'
-if xlsx.exists():
-    st.divider()
-    st.subheader('Результаты (Excel)')
-    st.caption(f'Лог проекта {PROJECTS[_proj_for_xlsx]["name"]} '
-               '– колонки: дата, страница, форма, статус, код ответа и т.д.')
-    st.download_button(
-        '⬇ Скачать log_forms.xlsx',
-        data=xlsx.read_bytes(),
-        file_name=f'log_forms_{_proj_for_xlsx}.xlsx',
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        use_container_width=True,
-    )
+
+if _alive:
+    # Таймер
+    _ts = st.session_state.get('forms_started_ts')
+    _elapsed = int(time.time() - _ts) if _ts else None
+    _mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
+    # Сколько форм уже проверено / сколько ожидается
+    _done = _rows_done(xlsx)
+    _total = _count_expected(_proj_for_xlsx)
+
+    if _total and _done is not None:
+        _frac = min(_done / _total, 0.99)
+        st.progress(_frac, text=f'Проверено форм: {_done} из ~{_total}')
+    else:
+        # без точного числа – плавно растущая шкала по времени (визуальный признак работы)
+        _frac = min(0.95, (_elapsed or 0) / 90.0)
+        st.progress(_frac, text='Идёт проверка…')
+
+    st.caption(f'⏳ Идёт… {_mmss}. Обычно занимает от пары до нескольких минут '
+               '(зависит от числа форм). Страница обновляется сама – можно уйти '
+               'на другие вкладки, прогон не прервётся.')
+
+    with st.expander('Подробный лог', expanded=True):
+        _txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore') if LOG_FILE.exists() else ''
+        st.code('\n'.join(_txt.splitlines()[-300:]) or '…', language='text')
+
+    time.sleep(2)
+    st.rerun()
+else:
+    # Не идёт: показываем итог и лог последнего прогона
+    st.button('🔄 Обновить лог', use_container_width=True)  # просто перерисовка
+    if LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
+        st.markdown('**Статус:** ✅ завершено / остановлено')
+        st.code('\n'.join(LOG_FILE.read_text(encoding='utf-8', errors='ignore')
+                          .splitlines()[-300:]), language='text')
+    else:
+        st.caption('Лог появится после запуска.')
+
+    # ── Результат: Excel ────────────────────────────────────────────
+    if xlsx.exists():
+        st.divider()
+        st.subheader('Результаты (Excel)')
+        st.caption(f'Лог проекта {PROJECTS[_proj_for_xlsx]["name"]} '
+                   '– колонки: дата, страница, форма, статус, код ответа и т.д.')
+        st.download_button(
+            '⬇ Скачать log_forms.xlsx',
+            data=xlsx.read_bytes(),
+            file_name=f'log_forms_{_proj_for_xlsx}.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True,
+        )
