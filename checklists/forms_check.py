@@ -294,7 +294,6 @@ if _alive:
     st.rerun()
 else:
     # Не идёт: показываем итог и лог последнего прогона
-    st.button('🔄 Обновить лог', use_container_width=True)  # просто перерисовка
     if LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
         st.markdown('**Статус:** ✅ завершено / остановлено')
         st.code('\n'.join(LOG_FILE.read_text(encoding='utf-8', errors='ignore')
