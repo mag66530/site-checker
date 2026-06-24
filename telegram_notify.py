@@ -187,12 +187,13 @@ _CRIT_THEME_LABEL = {
     'availability': 'Сервер недоступен',
     'slow':         'Долгий ответ сервера',
     'not_found':    '404 страницы',
+    'empty':        'Пустой раздел',
     'cannot_buy':   'Нельзя купить (нет цены/кнопки)',
     'kp':           'Контакты не совпадают с КП',
     'text':         'Битые переменные в тексте',
 }
 # Порядок тем в сводке по важности (тай-брейк при равном количестве).
-_CRIT_THEME_ORDER = ['availability', 'not_found', 'slow', 'cannot_buy', 'kp', 'text']
+_CRIT_THEME_ORDER = ['availability', 'not_found', 'empty', 'slow', 'cannot_buy', 'kp', 'text']
 
 
 def format_critical_block(summary, max_items: int = 14) -> str:
