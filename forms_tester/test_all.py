@@ -1499,11 +1499,30 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         # успехе остаётся пустой – тестовый текст комментария в отчёт не пишем.)
         _clean, _reason = _status_clean_reason(str(row.get("статус", "")))
         row["статус"] = _clean
-        row["комментарий"] = _reason
+        # «комментарий_готовый» – если задан явно, пишем его как есть (этап падения
+        # сценария, «формы нет на домене» и т.п.); иначе – авто-причина по статусу.
+        row["комментарий"] = (данные.get("комментарий_готовый") or _reason)
+        row.pop("комментарий_готовый", None)
         try:
             append_log_row(EXCEL_ФАЙЛ, row)
         except Exception as e:
             print(f"   ⚠️ Ошибка Excel: {e}")
+
+    def _нет_в_текущем_городе(cfg_obj):
+        """True, если форма/сценарий помечены «нет_в_городах» и текущий город в списке."""
+        lst = (cfg_obj or {}).get("нет_в_городах")
+        return bool(lst) and (город or "").strip() in lst
+
+    def _лог_форма_отсутствует(тип_страницы, url, cfg_obj, название):
+        """Пишет строку «Нет на сайте» с понятным комментарием (форма не существует
+        в этом домене – не ошибка)."""
+        коммент = (cfg_obj or {}).get("нет_коммент") or "Данной формы нет на сайте в этом домене"
+        print(f"   ⏭️ «{название}»: {коммент}")
+        записать_в_excel({
+            "тип": "—", "страница": тип_страницы, "url": url,
+            "тип_селектора": "—", "ид": название, "название": название, "имя": название,
+            "статус": "Нет на сайте", "комментарий_готовый": коммент,
+        })
 
     def отправить_через_requests(url, форма_config, название):
         страница = определить_страницу(url)
@@ -2334,6 +2353,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             browser = p.chromium.launch(headless=headless)
             context = browser.new_context()
             page = context.new_page()
+            _тек_шаг_инфо = ""
             try:
                 _ensure_scenario_page_loaded(page, base_url)
                 _run_page_prep(page, страница)
@@ -2350,6 +2370,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         continue
 
                     act = _нормализовать_действие_шага(step)
+                    # Запоминаем текущий шаг — чтобы при падении сказать, на чём встали.
+                    _шаг_цель = (step.get("css") or step.get("selector")
+                                 or step.get("url") or step.get("href") or "")
+                    _тек_шаг_инфо = f"шаг {i + 1} «{act}»" + (f" {_шаг_цель}" if _шаг_цель else "")
 
                     if act == "пауза":
                         try:
@@ -2545,6 +2569,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     )
                     print(f"   ✅ «{cap}» – строка в Excel (клик без формы)")
 
+            except Exception as _e_step:  # noqa: BLE001
+                # Прокидываем наверх с указанием, на каком шаге упали.
+                where = _тек_шаг_инфо or "одном из шагов"
+                raise RuntimeError(f"прервался на {where}") from _e_step
             finally:
                 browser.close()
 
@@ -2617,6 +2645,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     )
                     continue
                 cap = str(sc.get("название") or "").strip() or название_сценария
+                if _нет_в_текущем_городе(sc):
+                    _лог_форма_отсутствует(тип_страницы, url, sc, cap)
+                    continue
                 try:
                     run_scenario_playwright(url, steps, название_сценария=cap)
                 except Exception as _scn_err:  # noqa: BLE001
@@ -2634,6 +2665,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 "название": cap,
                                 "имя": cap,
                                 "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else cap,
+                                "комментарий_готовый": f"Сценарий {str(_scn_err)[:200]}"
+                                if str(_scn_err).strip() else "Сценарий прервался на одном из шагов",
                                 "статус": "ОШИБКА (сценарий прерван)",
                                 "код": str(_scn_err)[:300],
                             }
@@ -2661,6 +2694,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             if not cfg_enabled(форма.get("включено", True)):
                 nm = форма.get("название", "")
                 print(f"   ⏭️ Форма пропущена (отключена в конфиге): {nm!r}")
+                continue
+            if _нет_в_текущем_городе(форма):
+                _лог_форма_отсутствует(тип_страницы, url, форма, форма.get("название", "?"))
                 continue
             try:
                 if ФОРМЫ_ЧЕРЕЗ_REQUESTS:

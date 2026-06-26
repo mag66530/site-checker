@@ -11,6 +11,9 @@
 # (#txt-back-footer) – проверяем один раз (шапка). «Быстрый заказ» (quick_order--form)
 # одинаков в каталоге и листинге – один раз (каталог).
 
+# Города СНГ (отдельные домены). Используется для гейтинга региональных форм.
+СНГ_ГОРОДА = ["Алматы", "Минск", "Бишкек", "Ош", "Ташкент", "Баку", "Ереван"]
+
 ТОВАР = "https://stalmetural.ru/catalog/truba-profilnaya/2972110-truba-profilnaya-100kh10-mm-gost-8639-82-kvadratnaya/"
 # Товарная/листинг «Изготовление пружин» – на них живут формы fast-buy / discount / консультация.
 ТОВАР_ПРУЖИНЫ = "https://stalmetural.ru/catalog/izgotovlenie-pruzhin/1285453-izgotovlenie-pruzhin-rastyazheniya/"
@@ -40,8 +43,9 @@ URL_ПО_ГОРОДУ = {
     "Алматы": {  # stalmetural.kz
         "Листинг":         "https://stalmetural.kz/catalog/zhidkaya-teploizolyatsiya/",
         "Листинг_пружины": "https://stalmetural.kz/catalog/zhidkaya-teploizolyatsiya/",
-        "Товар_пружины":   "https://stalmetural.kz/catalog/zhidkaya-teploizolyatsiya/1265256-zhidkaya-teploizolyatsiya-aerodor-50/",
-        "Оформление":      "https://stalmetural.kz/catalog/zhidkaya-teploizolyatsiya/1265256-zhidkaya-teploizolyatsiya-aerodor-50/",
+        # Консультация/Нашли дешевле/Купить в один клик живут на этой товарной:
+        "Товар_пружины":   "https://stalmetural.kz/catalog/truba-elektrosvarnaya/1691014-truba-elektrosvarnaya-89-3-5-12-gost-10704-91-pryamoshovnaya/",
+        "Оформление":      "https://stalmetural.kz/catalog/truba-elektrosvarnaya/1691014-truba-elektrosvarnaya-89-3-5-12-gost-10704-91-pryamoshovnaya/",
     },
     "Бишкек": {  # stalmetural.kg
         "Листинг":         "https://stalmetural.kg/catalog/tokarnye-raboty/",
@@ -124,6 +128,8 @@ URL_ПО_ГОРОДУ = {
         "формы": [
             {"css": "form.calculation-order:has-text('Заказать обратный звонок') >> visible=true",
              "название": "Заказать обратный звонок", "включено": True,
+             "нет_в_городах": СНГ_ГОРОДА,
+             "нет_коммент": "На СНГ-домене этой формы нет — там это кнопка «Связаться с менеджером» (проверяется отдельно)",
              "поля": {"fio": "ИМЯ", "phone": "ТЕЛЕФОН"}},
             {"css": "form.calculation-order:has-text('Заказ расчета') >> visible=true",
              "название": "Расчёт стоимости (Заказ расчёта)", "включено": True,
@@ -135,6 +141,8 @@ URL_ПО_ГОРОДУ = {
         "включено": True,
         "формы": [
             {"class": "quick_order--form", "индекс": 0, "название": "Быстрый заказ", "включено": True,
+             "нет_в_городах": СНГ_ГОРОДА,
+             "нет_коммент": "Данной формы нет на сайте в этом домене",
              "поля": {"phone": "ТЕЛЕФОН"}},
         ],
     },
@@ -208,7 +216,9 @@ URL_ПО_ГОРОДУ = {
             {"действие": "пауза", "мс": 1500, "включено": True},
         ],
         "сценарии": [
-            {"название": "Вакансии (отклик)", "включено": True, "шаги": [
+            {"название": "Вакансии (отклик)", "включено": True,
+             "нет_в_городах": СНГ_ГОРОДА,
+             "нет_коммент": "Данной формы нет на сайте в этом домене", "шаги": [
                 {"действие": "пауза", "мс": 1000, "включено": True},
                 {"действие": "клик", "css": "#txt-back-form-vacancy >> visible=true", "включено": True},
                 {"действие": "пауза", "мс": 1300, "включено": True},
@@ -256,7 +266,7 @@ URL_ПО_ГОРОДУ = {
         "тип": "Менеджер_СНГ",
         "включено": True,
         # «Связаться с менеджером» есть только на СНГ-доменах — гоняем лишь для этих городов.
-        "только_города": ["Алматы", "Минск", "Бишкек", "Ош", "Ташкент", "Баку", "Ереван"],
+        "только_города": СНГ_ГОРОДА,
         "подготовка": [
             {"действие": "пауза", "мс": 1500, "включено": True},
         ],
