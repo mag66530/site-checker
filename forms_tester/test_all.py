@@ -1975,12 +1975,23 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     f"{'да' if форма_config.get('дозаполнить_по_признакам') else 'нет'})"
                 )
                 for _aname, _tok in _ffmap.items():
-                    # «Ссылка на товар»: сайт её не заполняет — берём URL текущей
-                    # (товарной) страницы. Заполняется строго в поле name="product-link".
-                    if _aname == "product-link" and str(_tok).strip() in ("URL_ТОВАРА", "URL", "page_url"):
+                    # «Ссылка на товар» (product-link) — СКРЫТОЕ поле. Заполняем его
+                    # напрямую через JS строго по name, иначе обычный fill из-за
+                    # одинаковых id у fio/e-mail/phone «протекал» URL-ом в телефон.
+                    if _aname == "product-link":
                         _val = page.url or base_url
-                    else:
-                        _val = _resolve_form_field_token(_tok, **_ctx_ff)
+                        if str(_tok).strip() not in ("URL_ТОВАРА", "URL", "page_url", ""):
+                            _val = _resolve_form_field_token(_tok, **_ctx_ff)
+                        try:
+                            form.evaluate(
+                                "(f, v) => { const el = f.querySelector('[name=product-link]');"
+                                " if (el) { el.value = v; el.dispatchEvent(new Event('input', {bubbles:true})); } }",
+                                _val,
+                            )
+                        except Exception as _e:  # noqa: BLE001
+                            print(f"      ⚠️ product-link: {_e}")
+                        continue
+                    _val = _resolve_form_field_token(_tok, **_ctx_ff)
                     if _val:
                         _pw_fill_named_field(form, _aname, _val)
 

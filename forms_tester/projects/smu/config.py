@@ -52,16 +52,16 @@ URL_ПО_ГОРОДУ = {
         "Товар_пружины":   "https://stalmetural.kz/catalog/truba-elektrosvarnaya/1691014-truba-elektrosvarnaya-89-3-5-12-gost-10704-91-pryamoshovnaya/",
     },
     "Бишкек": {  # stalmetural.kg
-        "Листинг":         "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
-        "Листинг_пружины": "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
+        # «Купить в один клик (листинг)» — на valtsovka (там карточки с этой кнопкой):
+        "Листинг":         "https://stalmetural.kg/catalog/valtsovka/",
+        "Листинг_пружины": "https://stalmetural.kg/catalog/valtsovka/",
+        # Купить-в-1-клик(товарная)/Консультация/Нашли дешевле — на товарной нержавейке:
         "Товар_пружины":   "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
-        "Оформление":      "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
     "Ош": {  # osh.stalmetural.kg
-        "Листинг":         "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
-        "Листинг_пружины": "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
+        "Листинг":         "https://osh.stalmetural.kg/catalog/valtsovka/",
+        "Листинг_пружины": "https://osh.stalmetural.kg/catalog/valtsovka/",
         "Товар_пружины":   "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
-        "Оформление":      "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
     "Ташкент": {  # stalmetural.uz
         "Листинг":         "https://stalmetural.uz/catalog/krug-bronzovyy/",
