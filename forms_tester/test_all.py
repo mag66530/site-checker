@@ -1975,7 +1975,12 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     f"{'да' if форма_config.get('дозаполнить_по_признакам') else 'нет'})"
                 )
                 for _aname, _tok in _ffmap.items():
-                    _val = _resolve_form_field_token(_tok, **_ctx_ff)
+                    # «Ссылка на товар»: сайт её не заполняет — берём URL текущей
+                    # (товарной) страницы. Заполняется строго в поле name="product-link".
+                    if _aname == "product-link" and str(_tok).strip() in ("URL_ТОВАРА", "URL", "page_url"):
+                        _val = page.url or base_url
+                    else:
+                        _val = _resolve_form_field_token(_tok, **_ctx_ff)
                     if _val:
                         _pw_fill_named_field(form, _aname, _val)
 
@@ -2664,9 +2669,19 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 if _нет_в_текущем_городе(sc):
                     _лог_форма_отсутствует(тип_страницы, url, sc, cap)
                     continue
-                try:
-                    run_scenario_playwright(url, steps, название_сценария=cap)
-                except Exception as _scn_err:  # noqa: BLE001
+                # До 2 попыток: СНГ-домены часто рвут соединение (анти-бот),
+                # повтор обычно проходит.
+                _scn_err = None
+                for _попытка in (1, 2):
+                    try:
+                        run_scenario_playwright(url, steps, название_сценария=cap)
+                        _scn_err = None
+                        break
+                    except Exception as _e:  # noqa: BLE001
+                        _scn_err = _e
+                        if _попытка == 1:
+                            print(f"   ↻ Сценарий «{cap}» упал ({str(_e)[:80]}), повтор…")
+                if _scn_err is not None:
                     # Один упавший сценарий НЕ должен ронять весь прогон –
                     # пишем ошибку в лог и идём к следующей форме.
                     print(f"   ❌ Сценарий «{cap}» прерван ошибкой: {_scn_err}")
