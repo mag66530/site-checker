@@ -40,50 +40,50 @@
 # Для этих городов подменяем ссылки листинга/товара/оформления на реальные.
 # Применяется в run_test после подмены домена (ключ — название города из cities.csv).
 URL_ПО_ГОРОДУ = {
-    # ВАЖНО: берём ТОВАРНЫЕ категории, где реально есть все 3 формы
-    # (Купить в один клик / Консультация / Нашли дешевле). Категории-услуги
-    # (tokarnye-raboty, valtsovka и т.п.) имеют только «Купить в один клик» —
-    # их не используем. Все ссылки проверены: товар отдаёт 200 и содержит формы.
+    # Для каждого СНГ-города (другой каталог): листинг find-form / fast-buy /
+    # товарная (3 формы) / оформление (товар с «Добавить в корзину»).
+    # Все ссылки проверены curl: 200 + наличие нужных форм/кнопок.
     "Алматы": {  # stalmetural.kz
-        # «Купить в один клик (листинг)» проверяем на izgotovlenie-detaley:
-        "Листинг":         "https://stalmetural.kz/catalog/izgotovlenie-detaley/",
+        "Листинг":         "https://stalmetural.kz/catalog/truba-elektrosvarnaya/",
         "Листинг_пружины": "https://stalmetural.kz/catalog/izgotovlenie-detaley/",
-        # Купить в 1 клик (товарная)/Консультация/Нашли дешевле — на truba-elektrosvarnaya:
         "Товар_пружины":   "https://stalmetural.kz/catalog/truba-elektrosvarnaya/1691014-truba-elektrosvarnaya-89-3-5-12-gost-10704-91-pryamoshovnaya/",
+        "Оформление":      "https://stalmetural.kz/catalog/truba-elektrosvarnaya/1691014-truba-elektrosvarnaya-89-3-5-12-gost-10704-91-pryamoshovnaya/",
+    },
+    "Минск": {  # stalmetural.by
+        "Листинг":         "https://stalmetural.by/catalog/truba-nerzhaveyushchaya/",
+        "Листинг_пружины": "https://stalmetural.by/catalog/valtsovka/",
+        "Товар_пружины":   "https://stalmetural.by/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
+        "Оформление":      "https://stalmetural.by/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
     "Бишкек": {  # stalmetural.kg
-        # «Купить в один клик (листинг)» — на valtsovka (там карточки с этой кнопкой):
-        "Листинг":         "https://stalmetural.kg/catalog/valtsovka/",
+        "Листинг":         "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
         "Листинг_пружины": "https://stalmetural.kg/catalog/valtsovka/",
-        # Купить-в-1-клик(товарная)/Консультация/Нашли дешевле — на товарной нержавейке:
         "Товар_пружины":   "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
+        "Оформление":      "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
     "Ош": {  # osh.stalmetural.kg
-        "Листинг":         "https://osh.stalmetural.kg/catalog/valtsovka/",
+        "Листинг":         "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
         "Листинг_пружины": "https://osh.stalmetural.kg/catalog/valtsovka/",
         "Товар_пружины":   "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
+        "Оформление":      "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
     "Ташкент": {  # stalmetural.uz
         "Листинг":         "https://stalmetural.uz/catalog/krug-bronzovyy/",
-        "Листинг_пружины": "https://stalmetural.uz/catalog/krug-bronzovyy/",
+        "Листинг_пружины": "https://stalmetural.uz/catalog/valtsovka/",
         "Товар_пружины":   "https://stalmetural.uz/catalog/krug-bronzovyy/1319818-krug-bronzovyy-brazh9-4-d40/",
         "Оформление":      "https://stalmetural.uz/catalog/krug-bronzovyy/1319818-krug-bronzovyy-brazh9-4-d40/",
     },
     "Баку": {  # smg.az
         "Листинг":         "https://smg.az/catalog/truba-nerzhaveyushchaya/",
-        "Листинг_пружины": "https://smg.az/catalog/truba-nerzhaveyushchaya/",
+        "Листинг_пружины": "https://smg.az/catalog/valtsovka/",
         "Товар_пружины":   "https://smg.az/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
         "Оформление":      "https://smg.az/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
     "Ереван": {  # stalmetural.am
         "Листинг":         "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/",
-        "Листинг_пружины": "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/",
+        "Листинг_пружины": "https://stalmetural.am/catalog/valtsovka/",
         "Товар_пружины":   "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
-    },
-    "Минск": {  # stalmetural.by
-        "Листинг":         "https://stalmetural.by/catalog/zakladnye-detali/",
-        "Листинг_пружины": "https://stalmetural.by/catalog/zakladnye-detali/",
-        "Товар_пружины":   "https://stalmetural.by/catalog/zakladnye-detali/1277914-zakladnye-detali-1-400-15-mn-102-60/",
+        "Оформление":      "https://stalmetural.am/catalog/truba-kholodnodeformirovannaya/1677253-truba-kholodnodeformirovannaya-besshovnaya-25-3-20-8734-75/",
     },
 }
 
@@ -246,11 +246,11 @@ URL_ПО_ГОРОДУ = {
             {"действие": "пауза", "мс": 2000, "включено": True},
         ],
         "сценарии": [
-            {"название": "Расчёт стоимости доставки", "включено": True, "шаги": [
+            {"название": "Расчет стоимости доставки", "включено": True, "шаги": [
                 {"действие": "пауза", "мс": 1500, "включено": True},
                 {"действие": "клик", "css": "#call-back-form-delivery >> visible=true", "включено": True},
                 {"действие": "пауза", "мс": 1500, "включено": True},
-                {"действие": "форма", "css": "#call-delivery form >> visible=true", "название": "Расчёт стоимости доставки", "включено": True,
+                {"действие": "форма", "css": "#call-delivery form >> visible=true", "название": "Расчет стоимости доставки", "включено": True,
                  "поля": {"fio": "ИМЯ", "city": "ГОРОД"}},
             ]},
         ],
@@ -281,7 +281,7 @@ URL_ПО_ГОРОДУ = {
             {"действие": "пауза", "мс": 1500, "включено": True},
         ],
         "сценарии": [
-            {"название": "Связаться с менеджером (СНГ)", "включено": True, "шаги": [
+            {"название": "Связаться с менеджером", "включено": True, "шаги": [
                 {"действие": "пауза", "мс": 1000, "включено": True},
                 {"действие": "клик", "css": "#call-back-form-main >> visible=true", "включено": True},
                 {"действие": "пауза", "мс": 1300, "включено": True},
@@ -297,10 +297,6 @@ URL_ПО_ГОРОДУ = {
             {
                 "название": "Оформление заказа",
                 "включено": True,
-                # На СНГ-доменах корзина/оформление недоступны для авто-проверки
-                # (сайт сбрасывает соединение) — помечаем, не гоняем.
-                "нет_в_городах": СНГ_ГОРОДА,
-                "нет_коммент": "На этом домене этой формы нет",
                 "шаги": [
                     {"действие": "пауза", "мс": 1500, "включено": True},
                     {"действие": "клик", "css": 'text="Добавить в корзину" >> visible=true', "включено": True},
