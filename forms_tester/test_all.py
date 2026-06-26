@@ -2274,7 +2274,15 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         """
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=headless)
-            context = browser.new_context()
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1366, "height": 768},
+                locale="ru-RU",
+            )
             page = context.new_page()
             try:
                 return callback(page)
@@ -2351,7 +2359,15 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=headless)
-            context = browser.new_context()
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1366, "height": 768},
+                locale="ru-RU",
+            )
             page = context.new_page()
             _тек_шаг_инфо = ""
             try:
