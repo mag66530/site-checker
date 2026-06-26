@@ -1270,7 +1270,9 @@ def append_log_row(path: str, row: dict) -> None:
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
     wb = load_workbook(path)
-    ws = wb.active
+    # Пишем строго в лист «Логи» (а не в активный): рядом может появиться
+    # лист «Сводка», и wb.active мог бы указывать на него.
+    ws = wb["Логи"] if "Логи" in wb.sheetnames else wb.active
     r = ws.max_row + 1
     for col, key in enumerate(LOG_KEYS_ORDER, 1):
         val = row.get(key, "")
@@ -1288,6 +1290,100 @@ def append_log_row(path: str, row: dict) -> None:
             ws.cell(r, si).font = Font(color="C62828", bold=True)   # красный
     except Exception:
         pass
+    wb.save(path)
+
+
+def write_summary_sheet(path: str) -> None:
+    """Пересобирает лист «Сводка» в логе: готовое сообщение (сколько форм
+    отправлено и на какие домены) + таблица «Домен → Города → Почта для
+    проверки заявок». Идемпотентно: читает все строки листа «Логи».
+
+    Вызывается в конце каждого прогона run_test; при прогоне по нескольким
+    городам каждый раз пересобирается заново, поэтому после последнего города
+    сводка отражает весь прогон целиком.
+    """
+    from urllib.parse import urlparse
+    from openpyxl.styles import Font, Alignment, PatternFill
+
+    try:
+        wb = load_workbook(path)
+    except Exception:
+        return
+    ws = wb["Логи"] if "Логи" in wb.sheetnames else wb.worksheets[0]
+    headers = [str(c.value or "").strip() for c in ws[1]]
+
+    def idx(name: str) -> int:
+        for i, h in enumerate(headers):
+            if h.lower() == name.lower():
+                return i
+        return -1
+
+    i_url, i_st = idx("URL"), idx("Статус")
+    i_mail, i_city = idx("Почта получателя"), idx("Город")
+
+    sent = errors = 0
+    domains: list[str] = []                 # в порядке появления
+    dom_mails: dict[str, set] = {}
+    dom_cities: dict[str, set] = {}
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or all(v in (None, "") for v in row):
+            continue
+        url = str(row[i_url] or "").strip() if i_url >= 0 else ""
+        st = str(row[i_st] or "").strip().lower() if i_st >= 0 else ""
+        mail = str(row[i_mail] or "").strip() if i_mail >= 0 else ""
+        city = str(row[i_city] or "").strip() if i_city >= 0 else ""
+        if st == "успешно":
+            sent += 1
+        elif st.startswith("ошибк"):
+            errors += 1
+        if url:
+            p = urlparse(url)
+            dom = f"{p.scheme}://{p.netloc}" if p.netloc else url
+            if dom not in dom_mails:
+                domains.append(dom)
+                dom_mails[dom] = set()
+                dom_cities[dom] = set()
+            if mail:
+                dom_mails[dom].add(mail)
+            if city:
+                dom_cities[dom].add(city)
+
+    lines = [f"Отправлено форм: {sent}"]
+    if errors:
+        lines.append(f"Не отправлено (ошибки): {errors}")
+    lines.append("")
+    lines.append("Формы отправлены на:")
+    lines.extend(domains)
+    message = "\n".join(lines)
+
+    if "Сводка" in wb.sheetnames:
+        del wb["Сводка"]
+    sm = wb.create_sheet("Сводка", 0)       # первым листом – чтобы сразу видеть
+
+    sm["A1"] = "Готовое сообщение (скопировать и вставить)"
+    sm["A1"].font = Font(bold=True, size=12)
+    sm["A2"] = message
+    sm["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    sm.row_dimensions[2].height = 15 * (len(lines) + 1)
+    sm.column_dimensions["A"].width = 50
+
+    # Таблица: домен → города → почта для проверки заявок (справа от сообщения)
+    hdr_fill = PatternFill("solid", fgColor="EEF3FB")
+    for col, title in ((3, "Домен"), (4, "Город(а)"), (5, "Почта для проверки заявок")):
+        c = sm.cell(1, col, title)
+        c.font = Font(bold=True)
+        c.fill = hdr_fill
+    rr = 2
+    for dom in domains:
+        sm.cell(rr, 3, dom)
+        sm.cell(rr, 4, ", ".join(sorted(dom_cities[dom])))
+        sm.cell(rr, 5, ", ".join(sorted(dom_mails[dom])))
+        rr += 1
+    sm.column_dimensions["C"].width = 34
+    sm.column_dimensions["D"].width = 30
+    sm.column_dimensions["E"].width = 46
+
+    wb.active = wb.sheetnames.index("Сводка")
     wb.save(path)
 
 
@@ -2584,6 +2680,12 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             проверить_кнопку_через_playwright(
                 url, модалка["значение"], модалка["название_теста"]
             )
+
+    try:
+        write_summary_sheet(EXCEL_ФАЙЛ)
+        print("   🧾 Сводка собрана (лист «Сводка»)")
+    except Exception as _e:  # noqa: BLE001
+        print(f"   ⚠️ Не удалось собрать сводку: {_e}")
 
     print(f"\n✅ Готово. Результаты в {EXCEL_ФАЙЛ}")
 
