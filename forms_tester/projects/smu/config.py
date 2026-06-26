@@ -40,42 +40,45 @@
 # Для этих городов подменяем ссылки листинга/товара/оформления на реальные.
 # Применяется в run_test после подмены домена (ключ — название города из cities.csv).
 URL_ПО_ГОРОДУ = {
+    # ВАЖНО: берём ТОВАРНЫЕ категории, где реально есть все 3 формы
+    # (Купить в один клик / Консультация / Нашли дешевле). Категории-услуги
+    # (tokarnye-raboty, valtsovka и т.п.) имеют только «Купить в один клик» —
+    # их не используем. Все ссылки проверены: товар отдаёт 200 и содержит формы.
     "Алматы": {  # stalmetural.kz
-        "Листинг":         "https://stalmetural.kz/catalog/zhidkaya-teploizolyatsiya/",
-        "Листинг_пружины": "https://stalmetural.kz/catalog/zhidkaya-teploizolyatsiya/",
-        # Консультация/Нашли дешевле/Купить в один клик живут на этой товарной:
+        "Листинг":         "https://stalmetural.kz/catalog/truba-elektrosvarnaya/",
+        "Листинг_пружины": "https://stalmetural.kz/catalog/truba-elektrosvarnaya/",
         "Товар_пружины":   "https://stalmetural.kz/catalog/truba-elektrosvarnaya/1691014-truba-elektrosvarnaya-89-3-5-12-gost-10704-91-pryamoshovnaya/",
         "Оформление":      "https://stalmetural.kz/catalog/truba-elektrosvarnaya/1691014-truba-elektrosvarnaya-89-3-5-12-gost-10704-91-pryamoshovnaya/",
     },
     "Бишкек": {  # stalmetural.kg
-        "Листинг":         "https://stalmetural.kg/catalog/tokarnye-raboty/",
-        "Листинг_пружины": "https://stalmetural.kg/catalog/tokarnye-raboty/",
-        "Товар_пружины":   "https://stalmetural.kg/catalog/tokarnye-raboty/1577115-tokarnye-raboty-rastachivanie/",
-        "Оформление":      "https://stalmetural.kg/catalog/tokarnye-raboty/1577115-tokarnye-raboty-rastachivanie/",
+        "Листинг":         "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
+        "Листинг_пружины": "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
+        "Товар_пружины":   "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
+        "Оформление":      "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
-    "Ош": {  # osh.stalmetural.kg (тот же каталог, что у Бишкека — поддомен Ош)
-        "Листинг":         "https://osh.stalmetural.kg/catalog/tokarnye-raboty/",
-        "Листинг_пружины": "https://osh.stalmetural.kg/catalog/tokarnye-raboty/",
-        "Товар_пружины":   "https://osh.stalmetural.kg/catalog/tokarnye-raboty/1577115-tokarnye-raboty-rastachivanie/",
-        "Оформление":      "https://osh.stalmetural.kg/catalog/tokarnye-raboty/1577115-tokarnye-raboty-rastachivanie/",
+    "Ош": {  # osh.stalmetural.kg
+        "Листинг":         "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
+        "Листинг_пружины": "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
+        "Товар_пружины":   "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
+        "Оформление":      "https://osh.stalmetural.kg/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
     "Ташкент": {  # stalmetural.uz
-        "Листинг":         "https://stalmetural.uz/catalog/sverlenie-metalla/",
-        "Листинг_пружины": "https://stalmetural.uz/catalog/sverlenie-metalla/",
-        "Товар_пружины":   "https://stalmetural.uz/catalog/sverlenie-metalla/1542445-sverlenie-metalla-zhest/",
-        "Оформление":      "https://stalmetural.uz/catalog/sverlenie-metalla/1542445-sverlenie-metalla-zhest/",
+        "Листинг":         "https://stalmetural.uz/catalog/krug-bronzovyy/",
+        "Листинг_пружины": "https://stalmetural.uz/catalog/krug-bronzovyy/",
+        "Товар_пружины":   "https://stalmetural.uz/catalog/krug-bronzovyy/1319818-krug-bronzovyy-brazh9-4-d40/",
+        "Оформление":      "https://stalmetural.uz/catalog/krug-bronzovyy/1319818-krug-bronzovyy-brazh9-4-d40/",
     },
     "Баку": {  # smg.az
-        "Листинг":         "https://smg.az/catalog/tokarnye-raboty/",
-        "Листинг_пружины": "https://smg.az/catalog/tokarnye-raboty/",
-        "Товар_пружины":   "https://smg.az/catalog/tokarnye-raboty/1577102-tokarnye-raboty-narezka-rezby/",
-        "Оформление":      "https://smg.az/catalog/tokarnye-raboty/1577102-tokarnye-raboty-narezka-rezby/",
+        "Листинг":         "https://smg.az/catalog/truba-nerzhaveyushchaya/",
+        "Листинг_пружины": "https://smg.az/catalog/truba-nerzhaveyushchaya/",
+        "Товар_пружины":   "https://smg.az/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
+        "Оформление":      "https://smg.az/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
     "Ереван": {  # stalmetural.am
-        "Листинг":         "https://stalmetural.am/catalog/valtsovka/",
-        "Листинг_пружины": "https://stalmetural.am/catalog/valtsovka/",
-        "Товар_пружины":   "https://stalmetural.am/catalog/valtsovka/1219929-valtsovka-truba-vodogazoprovodnaya-gost-3262-75/",
-        "Оформление":      "https://stalmetural.am/catalog/valtsovka/1219929-valtsovka-truba-vodogazoprovodnaya-gost-3262-75/",
+        "Листинг":         "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/",
+        "Листинг_пружины": "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/",
+        "Товар_пружины":   "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
+        "Оформление":      "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
     },
 }
 
