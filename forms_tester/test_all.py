@@ -1414,6 +1414,18 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     importlib.reload(config)
     from config import ТЕЛЕФОН, ПОЧТА, ИМЯ, КОММЕНТАРИЙ, СТРАНИЦЫ, СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ
 
+    # Переопределение ссылок под конкретный город (СНГ-домены: другой каталог).
+    try:
+        from config import URL_ПО_ГОРОДУ as _URL_OVERRIDES
+    except ImportError:
+        _URL_OVERRIDES = {}
+    _city_ov = (_URL_OVERRIDES or {}).get((город or "").strip(), {})
+    for _t, _u in _city_ov.items():
+        if _t in СТРАНИЦЫ:
+            СТРАНИЦЫ[_t] = _u
+    if _city_ov:
+        print(f"🔁 {город}: переопределены ссылки → {', '.join(_city_ov)}")
+
     try:
         from config import ФОРМЫ_ЧЕРЕЗ_REQUESTS
     except ImportError:
