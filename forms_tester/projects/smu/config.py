@@ -45,10 +45,11 @@ URL_ПО_ГОРОДУ = {
     # (tokarnye-raboty, valtsovka и т.п.) имеют только «Купить в один клик» —
     # их не используем. Все ссылки проверены: товар отдаёт 200 и содержит формы.
     "Алматы": {  # stalmetural.kz
-        "Листинг":         "https://stalmetural.kz/catalog/truba-elektrosvarnaya/",
-        "Листинг_пружины": "https://stalmetural.kz/catalog/truba-elektrosvarnaya/",
+        # «Купить в один клик (листинг)» проверяем на izgotovlenie-detaley:
+        "Листинг":         "https://stalmetural.kz/catalog/izgotovlenie-detaley/",
+        "Листинг_пружины": "https://stalmetural.kz/catalog/izgotovlenie-detaley/",
+        # Купить в 1 клик (товарная)/Консультация/Нашли дешевле — на truba-elektrosvarnaya:
         "Товар_пружины":   "https://stalmetural.kz/catalog/truba-elektrosvarnaya/1691014-truba-elektrosvarnaya-89-3-5-12-gost-10704-91-pryamoshovnaya/",
-        "Оформление":      "https://stalmetural.kz/catalog/truba-elektrosvarnaya/1691014-truba-elektrosvarnaya-89-3-5-12-gost-10704-91-pryamoshovnaya/",
     },
     "Бишкек": {  # stalmetural.kg
         "Листинг":         "https://stalmetural.kg/catalog/truba-nerzhaveyushchaya/",
@@ -78,7 +79,11 @@ URL_ПО_ГОРОДУ = {
         "Листинг":         "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/",
         "Листинг_пружины": "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/",
         "Товар_пружины":   "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
-        "Оформление":      "https://stalmetural.am/catalog/truba-nerzhaveyushchaya/1618488-truba-nerzhaveyushchaya-kholodnokatanaya-12kh18n10t-14-2-9941-81/",
+    },
+    "Минск": {  # stalmetural.by
+        "Листинг":         "https://stalmetural.by/catalog/zakladnye-detali/",
+        "Листинг_пружины": "https://stalmetural.by/catalog/zakladnye-detali/",
+        "Товар_пружины":   "https://stalmetural.by/catalog/zakladnye-detali/1277914-zakladnye-detali-1-400-15-mn-102-60/",
     },
 }
 
@@ -145,7 +150,7 @@ URL_ПО_ГОРОДУ = {
         "формы": [
             {"class": "quick_order--form", "индекс": 0, "название": "Быстрый заказ", "включено": True,
              "нет_в_городах": СНГ_ГОРОДА,
-             "нет_коммент": "Данной формы нет на сайте в этом домене",
+             "нет_коммент": "На этом домене этой формы нет",
              "поля": {"phone": "ТЕЛЕФОН"}},
         ],
     },
@@ -221,7 +226,7 @@ URL_ПО_ГОРОДУ = {
         "сценарии": [
             {"название": "Вакансии (отклик)", "включено": True,
              "нет_в_городах": СНГ_ГОРОДА,
-             "нет_коммент": "Данной формы нет на сайте в этом домене", "шаги": [
+             "нет_коммент": "На этом домене этой формы нет", "шаги": [
                 {"действие": "пауза", "мс": 1000, "включено": True},
                 {"действие": "клик", "css": "#txt-back-form-vacancy >> visible=true", "включено": True},
                 {"действие": "пауза", "мс": 1300, "включено": True},
@@ -231,20 +236,22 @@ URL_ПО_ГОРОДУ = {
         ],
     },
     {
-        # Страница доставки: кнопка «Рассчитать доставку» (id=call-back-form-delivery)
-        # открывает модалку типа call-back (fio + phone).
+        # Страница доставки: кнопка «Рассчитать доставку» (#call-back-form-delivery)
+        # открывает модалку #call-delivery «Расчет стоимости доставки» — тип
+        # call-back-cons, поля: Габариты (fio) + Город доставки (city, обязательное).
+        # Телефона в этой форме НЕТ.
         "тип": "Доставка",
         "включено": True,
         "подготовка": [
-            {"действие": "пауза", "мс": 1500, "включено": True},
+            {"действие": "пауза", "мс": 2000, "включено": True},
         ],
         "сценарии": [
             {"название": "Расчёт стоимости доставки", "включено": True, "шаги": [
-                {"действие": "пауза", "мс": 1000, "включено": True},
+                {"действие": "пауза", "мс": 1500, "включено": True},
                 {"действие": "клик", "css": "#call-back-form-delivery >> visible=true", "включено": True},
-                {"действие": "пауза", "мс": 1300, "включено": True},
-                {"действие": "форма", "css": "form:has(input[name='type'][value='call-back']) >> visible=true", "название": "Расчёт стоимости доставки", "включено": True,
-                 "поля": {"fio": "ИМЯ", "phone": "ТЕЛЕФОН"}},
+                {"действие": "пауза", "мс": 1500, "включено": True},
+                {"действие": "форма", "css": "#call-delivery form >> visible=true", "название": "Расчёт стоимости доставки", "включено": True,
+                 "поля": {"fio": "ИМЯ", "city": "ГОРОД"}},
             ]},
         ],
     },
@@ -290,6 +297,10 @@ URL_ПО_ГОРОДУ = {
             {
                 "название": "Оформление заказа через корзину",
                 "включено": True,
+                # На СНГ-доменах корзина/оформление недоступны для авто-проверки
+                # (сайт сбрасывает соединение) — помечаем, не гоняем.
+                "нет_в_городах": СНГ_ГОРОДА,
+                "нет_коммент": "На этом домене этой формы нет",
                 "шаги": [
                     {"действие": "пауза", "мс": 1500, "включено": True},
                     {"действие": "клик", "css": 'text="Добавить в корзину" >> visible=true', "включено": True},
