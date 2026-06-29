@@ -11,8 +11,10 @@
   • Облако по ссылке – недоступно (нет браузера и движка на сервере).
   • Свой сервер (в планах) – заработает так же.
 """
+import csv
 import importlib.util
 import os
+import random
 import subprocess
 import sys
 import time
@@ -25,6 +27,35 @@ ROOT = Path(__file__).parent.parent
 PY = sys.executable
 LOG_FILE = ROOT / 'cache' / 'forms.log'
 PID_FILE = ROOT / 'cache' / 'forms.pid'
+
+
+def _load_cities(project: str):
+    """Справочник городов проекта: список dict {country, city, url, mail}.
+    Пусто, если файла нет. Первый город – основной сайт (Москва)."""
+    f = ROOT / 'forms_tester' / 'projects' / project / 'cities.csv'
+    if not f.exists():
+        return []
+    out = []
+    try:
+        with open(f, encoding='utf-8', newline='') as fh:
+            for row in csv.DictReader(fh):
+                city = (row.get('город') or '').strip()
+                if city:
+                    out.append({
+                        'country': (row.get('страна') or 'Россия').strip(),
+                        'city': city,
+                        'url': (row.get('url') or '').strip(),
+                        'mail': (row.get('почта') or '').strip(),
+                    })
+    except Exception:
+        return []
+    return out
+
+
+_COUNTRY_FLAG = {
+    'Россия': '🇷🇺', 'Казахстан': '🇰🇿', 'Беларусь': '🇧🇾', 'Кыргызстан': '🇰🇬',
+    'Узбекистан': '🇺🇿', 'Азербайджан': '🇦🇿', 'Армения': '🇦🇲',
+}
 
 PROJECTS = {
     'smu': {'name': 'СМУ – Сталметурал', 'domain': 'stalmetural.ru'},
@@ -202,6 +233,71 @@ st.markdown(
 
 st.divider()
 
+# ── Города / поддомены ───────────────────────────────────────────────
+# Если у проекта есть справочник городов (cities.csv) – даём выбрать, какие
+# поддомены проверять. Иначе – только основной сайт.
+_cities = _load_cities(pid_key)
+_chosen_cities = []          # список названий городов для прогона ([] = основной сайт)
+if _cities:
+    _main_city = _cities[0]['city']                  # Москва (основной)
+    _all_names = [c['city'] for c in _cities]
+    _others = _all_names[1:]
+    # группировка по странам (с сохранением порядка)
+    _groups = {}
+    for c in _cities:
+        _groups.setdefault(c['country'], []).append(c['city'])
+
+    st.subheader('Города (поддомены)')
+    _mode = st.radio(
+        'Что проверяем',
+        ['Только Москва (основной сайт)', 'Выбрать города', 'Случайные города'],
+        horizontal=True, label_visibility='collapsed',
+    )
+
+    if _mode == 'Только Москва (основной сайт)':
+        _chosen_cities = [_main_city]
+
+    elif _mode == 'Случайные города':
+        _n = st.number_input(f'Сколько случайных поддоменов (плюс {_main_city})',
+                             min_value=1, max_value=len(_others),
+                             value=min(3, len(_others)), step=1)
+        _rnd = random.sample(_others, int(_n)) if _others else []
+        _chosen_cities = [_main_city] + _rnd
+        st.caption('Случайные выбираются заново при каждом запуске: ' + ', '.join(_chosen_cities))
+
+    else:  # Выбрать города – СЕТКА ЧЕКБОКСОВ по странам
+        def _ck(city):
+            return f'fc_cb_{pid_key}_{city}'
+        # один раз ставим дефолт: отмечена только Москва
+        if not st.session_state.get(f'fc_init_{pid_key}'):
+            for nm in _all_names:
+                st.session_state[_ck(nm)] = (nm == _main_city)
+            st.session_state[f'fc_init_{pid_key}'] = True
+
+        _b1, _b2, _ = st.columns([1, 1, 4])
+        if _b1.button('Выбрать все', use_container_width=True):
+            for nm in _all_names:
+                st.session_state[_ck(nm)] = True
+            st.rerun()
+        if _b2.button('Снять все', use_container_width=True):
+            for nm in _all_names:
+                st.session_state[_ck(nm)] = False
+            st.rerun()
+
+        _sel = []
+        for _country, _names in _groups.items():
+            st.markdown(f"**{_COUNTRY_FLAG.get(_country, '🏳')} {_country}**  ·  {len(_names)}")
+            _cols = st.columns(6)
+            for _i, _nm in enumerate(_names):
+                if _cols[_i % 6].checkbox(_nm, key=_ck(_nm)):
+                    _sel.append(_nm)
+        _chosen_cities = _sel
+        st.caption(f'Выбрано: **{len(_sel)} / {len(_all_names)}** городов.')
+
+    if _mode != 'Выбрать города' and _chosen_cities:
+        st.caption(f'Будет проверено городов: {len(_chosen_cities)}.')
+    st.divider()
+
 # ── Запуск ──────────────────────────────────────────────────────────
 st.subheader('Запуск проверки')
 
@@ -241,6 +337,8 @@ with _run_col:
                 args.append('--no-clear-excel')
             if show_browser:
                 args.append('--show-browser')
+            if _chosen_cities:
+                args += ['--cities', ','.join(_chosen_cities)]
             try:
                 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
                 LOG_FILE.write_text('', encoding='utf-8')
@@ -250,6 +348,7 @@ with _run_col:
             st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key
+            st.session_state['forms_cities_n'] = max(1, len(_chosen_cities))
             st.rerun()
 with _cancel_col:
     if st.button('⛔ Отменить', use_container_width=True, disabled=not _alive):
@@ -299,7 +398,7 @@ if _alive and _this:
     _elapsed = int(time.time() - _ts) if _ts else None
     _mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
     _done = _rows_done(xlsx)
-    _total = _count_expected(_sel)
+    _total = _count_expected(_sel) * st.session_state.get('forms_cities_n', 1)
 
     if _total and _done is not None:
         st.progress(min(_done / _total, 0.99), text=f'Проверено форм: {_done} из ~{_total}')

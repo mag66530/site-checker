@@ -43,11 +43,7 @@ from product_links import load_product_links
 from http_checker import run_batch
 from reporter import build_report, make_report_filename
 from telegram_notify import format_summary_message, send_run_notification
-from metrika_404 import (
-    MAILBOX_CONFIG,
-    fetch_incremental, get_latest_available_date,
-    load_reports_for_date, load_reports_for_period, build_metrika_only_xlsx,
-)
+from metrika_404 import MAILBOX_CONFIG
 from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG, GSC_GMAIL_CONFIG,
     YABUSINESS_YANDEX_CONFIG, TWOGIS_YANDEX_CONFIG, GOOGLE_ACCOUNTS_CONFIG,
@@ -646,7 +642,6 @@ def init_session():
         # Свой список URL
         'c30_use_custom_urls': False,
         'c30_custom_urls_text': '',
-        'c30_show_metrika': False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1151,74 +1146,6 @@ if pid:
                 _bt = ', '.join(f'{lbl}: {n}' for lbl, n
                                 in _Counter(t.type_label for t in _typed).items())
                 st.success(f'Будет добавлено {len(_typed)} URL – {_bt}')
-
-        # ── 404 из Метрики: отдельная выгрузка за день/период ──
-        st.checkbox('Выгрузить 404 из Метрики отдельно (за день или период)',
-                    key='c30_show_metrika')
-        if st.session_state.c30_show_metrika:
-            _m_email, _m_pass = get_metrika_credentials(pid)
-            if not (_m_email and _m_pass):
-                st.caption('Для этого проекта почта Метрики не настроена.')
-            else:
-                from datetime import date as _date, timedelta as _td
-                st.caption('404-адреса берём из писем Яндекс.Метрики (в почте). '
-                           'Порядок: 1) выберите период · 2) «Загрузить из почты» '
-                           '(заберём свежие письма) · 3) «Скачать xlsx».')
-                _mc1, _mc2 = st.columns([1.4, 1.2], vertical_alignment='center')
-                with _mc1:
-                    _m_mode = st.selectbox('Что выгрузить',
-                                           ['За день', 'За 7 дней', 'За 14 дней', 'За 30 дней'],
-                                           key='c30_m_mode', label_visibility='collapsed')
-                with _mc2:
-                    _m_day = (st.date_input('День', value=_date.today() - _td(days=1),
-                                            key='c30_m_day', format='DD.MM.YYYY',
-                                            label_visibility='collapsed')
-                              if _m_mode == 'За день' else None)
-                try:
-                    if _m_mode == 'За день' and _m_day:
-                        _m_reports = load_reports_for_date(pid, _m_day.strftime('%Y-%m-%d'))
-                    else:
-                        _md = {'За 7 дней': 7, 'За 14 дней': 14, 'За 30 дней': 30}.get(_m_mode, 7)
-                        _m_reports = load_reports_for_period(pid, _md)
-                except Exception:
-                    _m_reports = []
-                _m_pages = sum(getattr(r, 'total_pages', 0) for r in _m_reports) if _m_reports else 0
-                _dl_col, _rf_col = st.columns(2)
-                with _dl_col:
-                    if _m_reports:
-                        st.download_button(
-                            f'Скачать xlsx ({_m_pages} стр.)',
-                            data=build_metrika_only_xlsx(_m_reports, '404 из Метрики'),
-                            file_name=f'metrika-404-{pid}.xlsx',
-                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                            use_container_width=True, type='primary', key='c30_m_dl')
-                    else:
-                        st.button('Скачать xlsx (нет данных)', disabled=True,
-                                  use_container_width=True, key='c30_m_nodata')
-                with _rf_col:
-                    _do_refresh = st.button(
-                        'Загрузить из почты', key='c30_m_refresh',
-                        use_container_width=True,
-                        help='Зайти в почту Метрики и забрать свежие письма за 14 дней')
-                if not _m_reports:
-                    st.caption('За выбранный период данных пока нет. Нажмите '
-                               '«Загрузить из почты» – заберём письма Метрики за 14 дней, '
-                               'после чего появится кнопка «Скачать xlsx».')
-                if _do_refresh:
-                    _mp = st.progress(0, text='Подключаюсь к почте Метрики…')
-                    try:
-                        _msum = fetch_incremental(
-                            project_id=pid, email_addr=_m_email, password=_m_pass,
-                            folder=MAILBOX_CONFIG[pid]['folder'], proxy_url=get_proxy_url(),
-                            lookback_days=14, log=lambda lvl, m: None,
-                            force_refresh=False, upgrade_if_better=True)
-                        _mp.empty()
-                        st.success(f'Готово · новых: {_msum.get("fetched", 0)}, '
-                                   f'обновлено: {_msum.get("upgraded", 0)}')
-                        st.rerun()
-                    except Exception as _e:
-                        _mp.empty()
-                        st.error(f'Не удалось обновить: {_e}')
 
     # «Подпись прогона» – проект + объём выборки + что проверяем. По ней решаем,
     # показывать ли блок результатов/лог: показываем только для прогона, который
