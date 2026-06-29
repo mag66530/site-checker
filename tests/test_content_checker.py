@@ -386,6 +386,24 @@ def test_catalog_root_photos_bug_with_product_cards_shows_count():
     assert b['photos'].required and not b['photos'].present and b['photos'].count == 1
 
 
+def test_price_detected_in_cis_currencies():
+    """Цена распознаётся в валютах всех проектов СНГ, не только в рублях."""
+    from content_checker import _PRICE_RE
+    for s in ['43 465.34 UZS', '5 000 ₸', '7 000 тг', '1 200 сом', '12 000 сум',
+              '900 ₼', '900 AZN', '5 000 ֏', '5 000 AMD', '1 000 BYN', '1 200 ₽',
+              '3 686.11 c / кг', '3 686.11 с/кг']:   # киргизский сом «c/кг» (лат и кир c)
+        assert _PRICE_RE.search(s), s
+    for s in ['150x150', '200x200 2', 'Длина (м) 2', '5 шт', '5 c доставкой']:
+        assert not _PRICE_RE.search(s), s
+    # и в полной проверке листинга: цена в UZS -> «Цена (есть)» найдена
+    html = ('<header><a href="tel:1">т</a></header><div class="breadcrumb">x</div>'
+            '<h1>Категория</h1><div class="catalog-product-card-item">'
+            '<a href="/c/t/">Товар</a><img src="/i/a.jpg"><span>43 465.34 UZS</span>'
+            '<span class="an-ico-basket">В корзину</span></div>')
+    b = _by_key(check_content(html, 'category', url='https://inmetprom.uz/catalog/x/'))
+    assert b['price'].present and b['price_real'].present
+
+
 def test_tech_pages_checked_like_others():
     """Технические страницы (type 'tech') проверяются «как все»: крошки + H1.
     Нормальная страница багов не даёт."""

@@ -314,6 +314,33 @@ def _broken_links_text(r):
     return f'битые ссылки ({len(items)}): ' + ex + more
 
 
+# Человеческие формулировки багов для «Что чинить» / «Что не так». Иначе из
+# машинного названия столбца получалось коряво: «нет: Цена (есть)».
+_BUG_PHRASES = {
+    'price': 'нет цены',
+    'price_real': 'нет цены суммой',
+    'btn_order': 'нет кнопки заказа',
+    'product_cards': 'нет карточек товаров',
+    'photos': 'нет фото у части товаров',
+    'h1': 'нет заголовка H1',
+    'breadcrumbs': 'нет хлебных крошек',
+    'content_text': 'нет текста на странице',
+    'rec_price': 'нет цен в нижних блоках',
+    'form_nf': 'нет формы «Не нашли что искали»',
+    'tech_map': 'нет карты',
+    'tech_images': 'нет картинок',
+    'tech_search': 'нет строки поиска',
+    'hdr_phone': 'нет телефона в шапке',
+    'hdr_callback': 'нет «Заказать звонок» в шапке',
+    'hdr_request': 'нет «Оставить заявку» в шапке',
+    'hdr_city': 'нет выбора города в шапке',
+    'ftr_phone': 'нет телефона в подвале',
+    'ftr_email': 'нет e-mail в подвале',
+    'ftr_writeus': 'нет «Написать нам» в подвале',
+    'ftr_address': 'нет адреса в подвале',
+}
+
+
 def _problem_text(r):
     """Понятная формулировка проблемы страницы для списка «Что чинить»."""
     parts = []
@@ -327,12 +354,18 @@ def _problem_text(r):
         elif getattr(content, 'page_kind', '') == 'empty':
             parts.append('раздел пуст – нет ни товаров, ни подразделов')
         else:
-            # У бага может быть пояснение (напр. «в коде есть, но покупатель не
-            # видит») – показываем его рядом с названием блока.
-            bugs = [f'{b.label} – {b.note}' if getattr(b, 'note', '') else b.label
-                    for b in content.bugs]
+            # Человеческая фраза по каждому багу (+ число для фото, + пояснение,
+            # напр. «в коде есть, но покупатель не видит»).
+            bugs = []
+            for b in content.bugs:
+                phrase = _BUG_PHRASES.get(b.key, b.label)
+                if b.key == 'photos' and getattr(b, 'count', None):
+                    phrase += f' ({b.count})'
+                if getattr(b, 'note', ''):
+                    phrase += f' ({b.note})'
+                bugs.append(phrase)
             if bugs:
-                parts.append('нет: ' + ', '.join(bugs))
+                parts.append(', '.join(bugs))
     _bl = _broken_links_text(r)
     if _bl:
         parts.append(_bl)

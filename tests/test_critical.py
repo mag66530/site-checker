@@ -55,9 +55,13 @@ def test_kp_mismatch_only_bug_fields():
     assert 'Телефон' in s.others['kp'][0].detail and 'Адрес' not in s.others['kp'][0].detail
 
 
-def test_cannot_buy_empty_section():
+def test_empty_section_separate_category():
+    """Пустой раздел – отдельная тема «Пустой раздел», а не «Нельзя купить»."""
     s = analyze([_r(content=_content(page_kind='empty'))])
-    assert any('пустой' in it.detail for it in s.others['cannot_buy'])
+    assert any('пустой' in it.detail for it in s.others['empty'])
+    assert not s.others['cannot_buy']          # в «нельзя купить» его нет
+    from telegram_notify import format_critical_block
+    assert 'Пустой раздел: <b>1</b>' in format_critical_block(s)
 
 
 def test_cannot_buy_no_price_or_button():

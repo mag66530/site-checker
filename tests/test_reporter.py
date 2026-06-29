@@ -306,6 +306,22 @@ def test_cell_state_bug_shows_count():
     print('✓ Ячейка «БАГ (N)» показывает число, где оно есть')
 
 
+def test_problem_text_human_phrases():
+    """«Что чинить» пишет по-человечески: «нет цены», а не «нет: Цена (есть)»."""
+    from reporter import _problem_text
+    from content_checker import check_content
+    from types import SimpleNamespace as NS
+    html = ('<header><a href="tel:1">т</a></header><div class="breadcrumb">x</div>'
+            '<h1>Категория</h1><div class="catalog-product-card-item">'
+            '<a href="/c/t/">Товар</a><img src="/i/a.jpg"></div>')
+    content = check_content(html, 'category', url='https://x.ru/catalog/c/')
+    txt = _problem_text(NS(content=content, broken_links=None, contacts_addr=None,
+                           page_phone=None, kp_result=None))
+    assert 'нет цены' in txt and 'нет кнопки заказа' in txt
+    assert 'Цена (есть)' not in txt and 'нет:' not in txt
+    print('✓ «Что чинить»: человеческие формулировки')
+
+
 if __name__ == '__main__':
     test_basic_report_creation()
     test_report_with_text_issues()
