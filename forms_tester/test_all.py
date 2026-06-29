@@ -1445,7 +1445,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     )
 
     телефон_отправки = normalize_phone_for_submit(ТЕЛЕФОН)
-    ГОРОД = getattr(config, "ГОРОД", "") or ""
+    # Город прогона (из forms_run, напр. «Бишкек») имеет приоритет; токен «ГОРОД»/«city»
+    # в полях форм (Город доставки и т.п.) берёт именно его. Фоллбэк — config.ГОРОД.
+    ГОРОД = (город or "").strip() or (getattr(config, "ГОРОД", "") or "")
 
     print("=" * 60)
     print("ПРОВЕРКА ФОРМ НА САЙТЕ")
@@ -2282,15 +2284,19 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             )
             return False
 
-    def _with_browser_page(callback):
-        """Один сеанс Chromium: launch → new_context → new_page → callback(page) → close.
+    # ── Пул браузера: ОДИН Chromium/контекст на весь прогон (переиспользуется) ──
+    # Раньше браузер запускался на каждую форму/сценарий — очень медленно. Теперь
+    # запускаем один раз, на каждую форму открываем новую вкладку. При сбое контекста
+    # (обрыв соединения и т.п.) — пересоздаём и повторяем.
+    _pw = {"play": None, "browser": None, "context": None}
 
-        Единая точка запуска браузера (раньше блок дублировался в каждой функции).
-        Здесь же в дальнейшем включается headless / переиспользование контекста.
-        """
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless)
-            context = browser.new_context(
+    def _shared_context():
+        h = _pw
+        if h["context"] is None:
+            if h["play"] is None:
+                h["play"] = sync_playwright().start()
+            h["browser"] = h["play"].chromium.launch(headless=headless)
+            h["context"] = h["browser"].new_context(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -2299,11 +2305,44 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 viewport={"width": 1366, "height": 768},
                 locale="ru-RU",
             )
-            page = context.new_page()
+        return h["context"]
+
+    def _drop_browser():
+        h = _pw
+        try:
+            if h["browser"]:
+                h["browser"].close()
+        except Exception:
+            pass
+        h["browser"] = None
+        h["context"] = None
+
+    def _close_browser_pool():
+        _drop_browser()
+        try:
+            if _pw["play"]:
+                _pw["play"].stop()
+        except Exception:
+            pass
+        _pw["play"] = None
+
+    def _open_page():
+        """Новая вкладка в общем контексте; если контекст умер — пересоздать и повторить."""
+        try:
+            return _shared_context().new_page()
+        except Exception:
+            _drop_browser()
+            return _shared_context().new_page()
+
+    def _with_browser_page(callback):
+        page = _open_page()
+        try:
+            return callback(page)
+        finally:
             try:
-                return callback(page)
-            finally:
-                browser.close()
+                page.close()
+            except Exception:
+                pass
 
     def отправить_форму_через_playwright(url, форма_config, название):
         """
@@ -2373,18 +2412,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         else:
             print(f"   📜 Сценарий: {len(шаги)} шаг(ов), базовый URL: {base_url}")
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless)
-            context = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1366, "height": 768},
-                locale="ru-RU",
-            )
-            page = context.new_page()
+        if True:  # общий браузер (пул): новая вкладка вместо запуска нового Chromium
+            page = _open_page()
             _тек_шаг_инфо = ""
             try:
                 _ensure_scenario_page_loaded(page, base_url)
@@ -2606,7 +2635,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 where = _тек_шаг_инфо or "одном из шагов"
                 raise RuntimeError(f"прервался на {where}") from _e_step
             finally:
-                browser.close()
+                try:
+                    page.close()
+                except Exception:
+                    pass
 
     инициализировать_excel()
 
@@ -2794,6 +2826,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             проверить_кнопку_через_playwright(
                 url, модалка["значение"], модалка["название_теста"]
             )
+
+    # Закрываем общий браузер прогона (пул).
+    _close_browser_pool()
 
     try:
         write_summary_sheet(EXCEL_ФАЙЛ)
