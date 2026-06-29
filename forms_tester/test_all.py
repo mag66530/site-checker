@@ -1293,7 +1293,7 @@ def append_log_row(path: str, row: dict) -> None:
     wb.save(path)
 
 
-def write_summary_sheet(path: str) -> None:
+def write_summary_sheet(path: str, время_прогона: str = "") -> None:
     """Пересобирает лист «Сводка» в логе: готовое сообщение (сколько форм
     отправлено и на какие домены) + таблица «Домен → Города → Почта для
     проверки заявок». Идемпотентно: читает все строки листа «Логи».
@@ -1351,6 +1351,8 @@ def write_summary_sheet(path: str) -> None:
     lines = [f"Отправлено форм: {sent}"]
     if errors:
         lines.append(f"Не отправлено (ошибки): {errors}")
+    if время_прогона:
+        lines.append(f"Время прогона: {время_прогона} (мин:сек)")
     lines.append("")
     lines.append("Формы отправлены на:")
     lines.extend(domains)
@@ -1408,9 +1410,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     # и почта, на которую должна прийти заявка (пишутся в одноимённые колонки лога).
     # Всегда читаем актуальный config.py с диска (после «Сохранить» в редакторе иначе остаётся кэш).
     import importlib
+    import time as _time
 
     import config
 
+    _run_t0 = _time.time()
     importlib.reload(config)
     from config import ТЕЛЕФОН, ПОЧТА, ИМЯ, КОММЕНТАРИЙ, СТРАНИЦЫ, СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ
 
@@ -1728,12 +1732,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             )
             return False
 
-    def _goto_with_retry(page, url, *, attempts=3, wait_ms=3000):
-        """Переход с повтором при обрыве соединения (антибот/лимит сайта)."""
+    def _goto_with_retry(page, url, *, attempts=2, wait_ms=1500):
+        """Переход с повтором при обрыве соединения (антибот/лимит сайта).
+        Меньше попыток/паузы + умеренный таймаут — прогон быстрее; сценарий/форма
+        ещё раз повторятся на верхнем уровне, так что попыток суммарно хватает."""
         last = None
         for i in range(attempts):
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 return
             except Exception as e:  # noqa: BLE001
                 last = e
@@ -2830,13 +2836,16 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     # Закрываем общий браузер прогона (пул).
     _close_browser_pool()
 
+    _spent = int(_time.time() - _run_t0)
+    _spent_mmss = f"{_spent // 60}:{_spent % 60:02d}"
+
     try:
-        write_summary_sheet(EXCEL_ФАЙЛ)
+        write_summary_sheet(EXCEL_ФАЙЛ, время_прогона=_spent_mmss)
         print("   🧾 Сводка собрана (лист «Сводка»)")
     except Exception as _e:  # noqa: BLE001
         print(f"   ⚠️ Не удалось собрать сводку: {_e}")
 
-    print(f"\n✅ Готово. Результаты в {EXCEL_ФАЙЛ}")
+    print(f"\n✅ Готово за {_spent_mmss} (мин:сек). Результаты в {EXCEL_ФАЙЛ}")
 
     # Файл НЕ открываем автоматически: открытый в Excel лог блокируется,
     # и следующий прогон не может его перезаписать (а ещё не даёт скачать копию).

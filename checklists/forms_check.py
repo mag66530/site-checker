@@ -425,10 +425,22 @@ else:
     # Ничего не идёт. Лог/статус показываем только для прогона ВЫБРАННОГО проекта.
     if _this and st.session_state.get('forms_started') and \
             LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
-        st.markdown('**Статус:** ✅ завершено / остановлено')
+        # Итоговое время прогона = последняя запись лога минус старт.
+        _st_ts = st.session_state.get('forms_started_ts')
+        _fin_ts = LOG_FILE.stat().st_mtime
+        _spent = int(_fin_ts - _st_ts) if _st_ts else None
+        _spent_txt = f' · ⏱ заняло {_spent // 60}:{_spent % 60:02d}' if _spent and _spent > 0 else ''
+        st.markdown(f'**Статус:** ✅ завершено / остановлено{_spent_txt}')
         with st.expander('Подробный лог', expanded=False):
             st.code('\n'.join(LOG_FILE.read_text(encoding='utf-8', errors='ignore')
                               .splitlines()[-300:]), language='text')
+        st.download_button(
+            '⬇ Скачать лог (txt)',
+            data=LOG_FILE.read_bytes(),
+            file_name=f'{_sel}-log.txt',
+            mime='text/plain',
+            use_container_width=True,
+        )
     else:
         st.caption('Лог появится после запуска.')
 
