@@ -182,9 +182,22 @@ def _pw_fill_named_field(scope, name_attr: str, value: str) -> bool:
     v = value.strip()
     esc = name_attr.replace("\\", "\\\\").replace('"', '\\"')
     loc = scope.locator(f'[name="{esc}"]')
-    if loc.count() == 0:
+    n = loc.count()
+    if n == 0:
         return False
-    el = loc.first
+    # bx-soa (и др.) держат СКРЫТЫЕ копии полей с тем же name (шаблоны). Берём
+    # ВИДИМУЮ копию, иначе заполняли скрытую — на экране поле оставалось пустым.
+    el = None
+    for _j in range(min(n, 12)):
+        cand = loc.nth(_j)
+        try:
+            if cand.is_visible():
+                el = cand
+                break
+        except Exception:
+            continue
+    if el is None:
+        el = loc.first
     try:
         el.wait_for(state="visible", timeout=12000)
     except Exception:
