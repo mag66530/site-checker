@@ -2334,7 +2334,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         if h["context"] is None:
             if h["play"] is None:
                 h["play"] = sync_playwright().start()
-            h["browser"] = h["play"].chromium.launch(headless=headless)
+            # Маскируем автоматизацию: иначе часть сайтов (Bitrix) не навешивает свой
+            # JS-обработчик отправки на «робота», форма уходит обычным POST и сервер
+            # отвечает «Доступ запрещён». Флаг + init-скрипт убирают признак webdriver.
+            h["browser"] = h["play"].chromium.launch(
+                headless=headless,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
             h["context"] = h["browser"].new_context(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -2344,6 +2350,12 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 viewport={"width": 1366, "height": 768},
                 locale="ru-RU",
             )
+            try:
+                h["context"].add_init_script(
+                    "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+                )
+            except Exception:
+                pass
         return h["context"]
 
     def _drop_browser():
