@@ -2541,6 +2541,39 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         loc.hover(timeout=15000)
                         page.wait_for_timeout(400)
 
+                    elif act in ("заполнить_по_метке", "fill_by_label", "поле_по_метке"):
+                        # Заполнение поля по ВИДИМОЙ подписи (label) — для форм, где
+                        # имена полей рисуются в JS (bx-soa): get_by_label, затем
+                        # запасной вариант по placeholder. Не падаем, если поля нет.
+                        метка = str(step.get("метка") or step.get("label") or "").strip()
+                        _tok = step.get("значение") or step.get("value") or ""
+                        _val = _resolve_form_field_token(
+                            _tok, имя_теста="", телефон=телефон_отправки,
+                            почта=ПОЧТА, имя=ИМЯ, комментарий=КОММЕНТАРИЙ, город=ГОРОД,
+                        )
+                        if not метка or not str(_val).strip():
+                            print(f"   ⚠️ Шаг {i + 1}: «заполнить_по_метке» без метки/значения – пропуск.")
+                            continue
+                        _filled = False
+                        _esc = метка.replace('"', '\\"')
+                        for _getter in (
+                            lambda: page.get_by_label(метка, exact=False),
+                            lambda: page.locator(f'input[placeholder*="{_esc}"], textarea[placeholder*="{_esc}"]'),
+                        ):
+                            try:
+                                _loc = _getter().first
+                                _loc.wait_for(state="visible", timeout=7000)
+                                _loc.scroll_into_view_if_needed()
+                                _loc.fill(str(_val), force=True)
+                                _filled = True
+                                break
+                            except Exception:  # noqa: BLE001
+                                continue
+                        print(
+                            f"   ✏️ Шаг {i + 1}: поле по метке «{метка}» — "
+                            f"{'заполнено' if _filled else 'НЕ найдено'}"
+                        )
+
                     elif act == "форма":
                         form_cfg = {
                             k: v
@@ -2718,7 +2751,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     return isinstance(s, dict) and cfg_enabled(s.get("включено", True))
 
                 had_form_or_modal = any(
-                    _нормализовать_действие_шага(s) in ("форма", "модалка")
+                    _нормализовать_действие_шага(s)
+                    in ("форма", "модалка", "проверить", "итог", "check",
+                        "заполнить_по_метке", "fill_by_label", "поле_по_метке")
                     for s in шаги
                     if _step_scenario_enabled(s)
                 )
