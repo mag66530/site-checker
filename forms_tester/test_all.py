@@ -2518,8 +2518,23 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             print(
                                 f"   ↪ Шаг {i + 1}: уточнён селектор клика {raw!r} → {css_norm!r}"
                             )
-                        print(f"   🖱️ Шаг {i + 1}: клик {css_norm!r}")
-                        page.locator(css_norm).first.click(timeout=15000)
+                        _необяз = bool(
+                            step.get("необязательно") or step.get("optional")
+                        )
+                        print(
+                            f"   🖱️ Шаг {i + 1}: клик {css_norm!r}"
+                            + (" (необязательный)" if _необяз else "")
+                        )
+                        try:
+                            _to = 6000 if _необяз else 15000
+                            page.locator(css_norm).first.click(timeout=_to)
+                        except Exception as _e_click:  # noqa: BLE001
+                            if _необяз:
+                                print(
+                                    f"   ↳ необязательный клик пропущен (элемент не найден): {css_norm!r}"
+                                )
+                            else:
+                                raise
                         page.wait_for_timeout(400)
 
                     elif act == "наведение":
