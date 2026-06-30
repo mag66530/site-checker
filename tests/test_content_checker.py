@@ -361,6 +361,25 @@ def test_cards_without_photo_is_bug():
     assert ok['photos'].present
 
 
+def test_product_photos_ignore_recommendations():
+    """На карточке товара заглушка «нет фото» у товара из НИЖНИХ блоков
+    («с этим покупают» / «похожие») не считается багом основного товара."""
+    main = (COMMON + SMU_MARKER + '<h1>Товар</h1><img src="/upload/real.jpg">'
+            '<div class="cost-val">100 ₽</div>'
+            '<button class="add-to-cart-btn">В корзину</button>')
+    recs = ('<div>С этим товаром покупают</div>'
+            '<div class="catalog-product-card-item"><a href="/c/t2/">Другой</a>'
+            '<img src="/local/no-image.jpg"><span>50 ₽</span></div>')
+    r = _by_key(check_content(main + recs, 'product'))
+    assert r['photos'].present     # фото самого товара есть; заглушка снизу не в счёт
+    # контроль: заглушка у САМОГО товара (без рекомендаций) – по-прежнему баг
+    bad = (COMMON + SMU_MARKER + '<h1>Товар</h1><img src="/local/no-image.jpg">'
+           '<div class="cost-val">100 ₽</div>'
+           '<button class="add-to-cart-btn">В корзину</button>')
+    rb = _by_key(check_content(bad, 'product'))
+    assert not rb['photos'].present and rb['photos'].count == 1
+
+
 def test_catalog_root_photos_not_bug_without_product_cards():
     """Корень каталога: заглушки picture.missing у плиток РАЗДЕЛОВ (карточек
     товаров нет) НЕ считаются багом «Фото товаров» – пункт необязателен («–»).

@@ -467,6 +467,11 @@ class _Ctx:
     rec_html_lower: str = ''
     rec_html_full: str = ''
     rec_text_lower: str = ''
+    # Область поиска фото товаров: на КАРТОЧКЕ ТОВАРА – только сам товар (до
+    # блоков рекомендаций), чтобы заглушка «нет фото» у чужой карточки в «похожие
+    # / с этим покупают» не считалась багом этого товара. На листинге/каталоге =
+    # весь HTML.
+    cards_html_lower: str = ''
 
 
 # ── Детекторы. Возвращают (present: bool, count: Optional[int]) ──────
@@ -825,7 +830,9 @@ _NO_PHOTO_RE = re.compile(
 def _d_cards_photos(c: _Ctx):
     # У карточек товаров есть фото: ищем заглушку «нет фото» в картинках.
     # Нашли хоть одну – у части товаров фото нет (баг с пустыми фото).
-    n = len(_NO_PHOTO_RE.findall(c.html_lower))
+    # На карточке товара берём область ДО рекомендаций (cards_html_lower),
+    # чтобы заглушка у чужого товара в «похожие/с этим покупают» не считалась.
+    n = len(_NO_PHOTO_RE.findall(c.cards_html_lower or c.html_lower))
     return (n == 0), (n or None)
 
 
@@ -1280,6 +1287,7 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
     # самого товара, на product берём текст ДО первого блока рекомендаций.
     ctx.price_text = visible_text
     ctx.price_text_lower = ctx.vis_text_lower
+    ctx.cards_html_lower = ctx.html_lower   # по умолчанию – весь HTML (листинг/каталог)
     if type_code == 'product':
         _related = (
             'с этим товаром', 'с этими товарами', 'с этим покупают',
@@ -1313,6 +1321,8 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
             if 0 <= j < hcut_f:
                 hcut_f = j
         ctx.rec_html_full = ctx.html_lower[hcut_f:] if hcut_f < len(ctx.html_lower) else ''
+        # Фото проверяем только у самого товара (до рекомендаций).
+        ctx.cards_html_lower = ctx.html_lower[:hcut_f]
 
     # Подтип страницы-списка (категория / тег) – определяем по вёрстке:
     #   listing – есть карточки товаров (catalog-product-card-item) → строгая
