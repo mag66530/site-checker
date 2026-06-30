@@ -7,6 +7,15 @@
   "subdomains_csv": "catalogs/smu-subdomains.csv",
   "catalog_csv": "catalogs/smu-catalog.csv",
   "categories_csv": "catalogs/smu-categories.csv",
+  "host_catalogs": {
+    "smg.az": "catalogs/smu-cat-smg.csv",
+    "steelgroup.az": "catalogs/smu-cat-steelgroup.csv",
+    "stalmetural.by": "catalogs/smu-cat-by.csv",
+    "stalmetural.am": "catalogs/smu-cat-am.csv",
+    "stalmetural.kg": "catalogs/smu-cat-kg.csv",
+    "osh.stalmetural.kg": "catalogs/smu-cat-kg.csv",
+    "stalmetural.uz": "catalogs/smu-cat-uz.csv"
+  },
   "mandatory_city": "Москва",
   "mandatory_hosts": ["smg.az"],
   "has_filters": true,

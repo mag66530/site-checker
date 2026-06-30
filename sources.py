@@ -38,9 +38,11 @@ class Subdomain:
 class Sources:
     """Загруженные данные проекта."""
     subdomains: list[Subdomain]
-    categories: list[str]          # pathname'ы категорий
-    filters: list[str]             # pathname'ы фильтров
+    categories: list[str]          # pathname'ы категорий (общий каталог – РФ)
+    filters: list[str]             # pathname'ы фильтров (общий каталог – РФ)
     products: list[str] = field(default_factory=list)  # из sitemap, добавится потом
+    # Отдельные каталоги для части доменов (у СНГ свой каталог): host → (категории, фильтры)
+    host_catalogs: dict = field(default_factory=dict)
 
     @property
     def stats(self) -> dict:
@@ -164,10 +166,18 @@ def load_sources(project: dict) -> Sources:
         if categories_extra_path.exists():
             categories = parse_categories_file(categories_extra_path)
 
+    # Отдельные каталоги для конкретных доменов (у СНГ свои категории/фильтры).
+    host_catalogs = {}
+    for host, rel in (project.get('host_catalogs') or {}).items():
+        p = PROJECT_ROOT / rel
+        if p.exists():
+            host_catalogs[host] = parse_catalog(p)   # (категории, фильтры)
+
     return Sources(
         subdomains=subdomains,
         categories=categories,
         filters=filters,
+        host_catalogs=host_catalogs,
     )
 
 
@@ -368,6 +378,16 @@ def build_plan(
     for sub in selected:
         base = sub.url.rstrip('/')
 
+        # Каталог домена: у части доменов (СНГ) свой набор категорий/фильтров;
+        # у остальных (РФ) – общий каталог проекта. Товары у СНГ пока не проверяем
+        # (своей базы товаров нет, а товары РФ на их доменах дали бы ложные 404).
+        if sub.host in sources.host_catalogs:
+            sub_categories, sub_filters = sources.host_catalogs[sub.host]
+            sub_products = []
+        else:
+            sub_categories, sub_filters = sources.categories, sources.filters
+            sub_products = sources.products
+
         if check_main:
             tasks.append(CheckTask(
                 url=sub.url, city=sub.city, subdomain=sub.host,
@@ -378,20 +398,20 @@ def build_plan(
                 url=f'{base}/catalog/', city=sub.city, subdomain=sub.host,
                 type_code='catalog', type_label=TYPE_LABELS['catalog'],
             ))
-        if check_categories and sources.categories:
-            for path in pick(sources.categories, categories_per_subdomain):
+        if check_categories and sub_categories:
+            for path in pick(sub_categories, categories_per_subdomain):
                 tasks.append(CheckTask(
                     url=f'{base}{path}', city=sub.city, subdomain=sub.host,
                     type_code='category', type_label=TYPE_LABELS['category'],
                 ))
-        if check_filters and sources.filters:
-            for path in pick(sources.filters, filters_per_subdomain):
+        if check_filters and sub_filters:
+            for path in pick(sub_filters, filters_per_subdomain):
                 tasks.append(CheckTask(
                     url=f'{base}{path}', city=sub.city, subdomain=sub.host,
                     type_code='filter', type_label=TYPE_LABELS['filter'],
                 ))
-        if check_products and sources.products:
-            for path in pick(sources.products, products_per_subdomain):
+        if check_products and sub_products:
+            for path in pick(sub_products, products_per_subdomain):
                 tasks.append(CheckTask(
                     url=f'{base}{path}', city=sub.city, subdomain=sub.host,
                     type_code='product', type_label=TYPE_LABELS['product'],

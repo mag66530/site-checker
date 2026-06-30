@@ -75,6 +75,29 @@ def test_build_plan_smu():
           f'{len(plan.selected_subdomains)} городов')
 
 
+def test_smu_per_domain_catalogs():
+    """У СНГ-доменов СМУ свой каталог (категории своего домена), у РФ – общий;
+    товары на СНГ-доменах не проверяются (своей базы товаров пока нет)."""
+    cfg = load_project_config('smu')
+    src = load_sources(cfg)
+    assert {'smg.az', 'steelgroup.az', 'stalmetural.by'} <= set(src.host_catalogs)
+    plan = build_plan(
+        src, random_subdomains_count=0, mandatory_city='Москва',
+        mandatory_hosts=['smg.az', 'steelgroup.az'],
+        categories_per_subdomain=3, filters_per_subdomain=2, products_per_subdomain=3,
+        seed=0)
+    cat_url = {}
+    for t in plan.tasks:
+        if t.type_code == 'category':
+            cat_url.setdefault(t.subdomain, t.url)
+    assert cat_url['stalmetural.ru'].startswith('https://stalmetural.ru/catalog/')
+    assert cat_url['smg.az'].startswith('https://smg.az/catalog/')
+    assert cat_url['steelgroup.az'].startswith('https://steelgroup.az/catalog/')
+    # на СНГ-доменах товары не проверяются
+    for h in ('smg.az', 'steelgroup.az'):
+        assert not [t for t in plan.tasks if t.subdomain == h and t.type_code == 'product']
+
+
 def test_build_plan_mpe_no_filters():
     """МПЭ – нет фильтров, поле filters_per_subdomain должно игнорироваться."""
     cfg = load_project_config('mpe')
