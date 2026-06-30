@@ -30,6 +30,7 @@
     "Листинг_листовой": "https://inmetprom.ru/catalog/listovoj-prokat/",
     "Товар_балка": "https://inmetprom.ru/catalog/sortovoj-prokat/balka-metallicheskaya-dvutavrovaya/",
     "Товар": "https://inmetprom.ru/alyuminievaya-profilnaya-truba-20h20h1h6000-mm-ad31t1-kvadratnaya/",
+    "Вакансии": "https://inmetprom.ru/vakansii/",
     "Оформление": "https://inmetprom.ru/alyuminievaya-profilnaya-truba-20h20h1h6000-mm-ad31t1-kvadratnaya/",
 }
 
@@ -94,6 +95,19 @@
         ],
     },
     {
+        # /vakansii/: на странице ДВЕ карточки вакансий, у каждой инлайн-форма
+        # «Интересует вакансия?» (id form-send-question--vakansii-1, name/telephone/comment).
+        "тип": "Вакансии",
+        "включено": True,
+        "подготовка": [{"действие": "пауза", "мс": 2000, "включено": True}],
+        "формы": [
+            {"css": ".consultation__body_b >> nth=0", "название": "Интересует вакансия?", "включено": True,
+             "поля": {"name": "ИМЯ", "telephone": "ТЕЛЕФОН", "comment": "КОММЕНТАРИЙ"}},
+            {"css": ".consultation__body_b >> nth=1", "название": "Интересует вакансия?", "включено": True,
+             "поля": {"name": "ИМЯ", "telephone": "ТЕЛЕФОН", "comment": "КОММЕНТАРИЙ"}},
+        ],
+    },
+    {
         "тип": "Оформление",
         "включено": True,
         "подготовка": [
@@ -113,12 +127,13 @@
                  "признак_товар_css": 'text=Оформить >> visible=true', "ожидание_мс": 6000,
                  "комментарий_провал": "Кнопка «В корзину» не работает (товар не кладётся в корзину)",
                  "включено": True},
-                {"действие": "клик", "css": 'text=Оформить >> visible=true', "включено": True},
+                # «Оформить» открывает модалку #modal-making-order с формой заказа.
+                {"действие": "клик", "css": '.oformlenie >> visible=true', "включено": True},
                 {"действие": "пауза", "мс": 2500, "включено": True},
-                {"действие": "форма", "css": ".basket-modal", "название": "Оформление – данные покупателя", "включено": True, "отправлять": False,
-                 "поля": {"name": "ИМЯ", "telephone": "ТЕЛЕФОН", "email": "ПОЧТА", "comment": "КОММЕНТАРИЙ"}},
+                {"действие": "форма", "css": "#form-modal-making-order >> visible=true", "название": "Оформление – данные покупателя", "включено": True, "отправлять": False,
+                 "поля": {"name": "ИМЯ", "telephone": "ТЕЛЕФОН", "email": "ПОЧТА", "address": "Москва", "comment": "КОММЕНТАРИЙ"}},
                 {"действие": "пауза", "мс": 1500, "включено": True},
-                {"действие": "клик", "css": 'text=Заказать >> visible=true', "включено": True},
+                {"действие": "клик", "css": '#form-modal-making-order button[type="submit"] >> visible=true', "включено": True},
                 {"действие": "пауза", "мс": 3000, "включено": True},
                 {"действие": "проверить", "название": "Оформление заказа ИМП", "успех_текст": "ВАШ ЗАКАЗ ПРИНЯТ", "включено": True},
             ]},
