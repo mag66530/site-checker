@@ -95,6 +95,16 @@ def main() -> int:
     work.mkdir(parents=True, exist_ok=True)
     base_config = src_config.read_text(encoding='utf-8')
 
+    # Базовый домен для подмены берём НЕ из первой строки cities.csv, а из самого
+    # конфига: тот город-домен, что реально встречается в URL-ах СТРАНИЦ. Иначе если
+    # первый город в справочнике — поддомен (напр. abakan.mepen.ru), а конфиг на
+    # mepen.ru, замена не находила совпадения и все города шли на основной сайт (МПЭ).
+    for _c in cities_all:
+        _h = urlparse(_c[1]).netloc
+        if _h and f'//{_h}' in base_config:
+            main_host = _h
+            break
+
     sys.path.insert(0, str(ENGINE))
     sys.path.insert(0, str(work))
     prev = os.getcwd()
