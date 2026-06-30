@@ -191,6 +191,8 @@ def run_check(pid, params, creds, log, progress):
             check_filters=params['check_filters'],
             check_products=params['check_products'],
             mandatory_city=cfg.get('mandatory_city', 'Москва'),
+            mandatory_hosts=cfg.get('mandatory_hosts'),
+            cis_extra_subdomains=int(params.get('cis_extra', 0)),
             rotation_history=recent,
         )
         # Свой список URL – добавляем к выборке проекта (тип по адресу).

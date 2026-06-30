@@ -90,6 +90,7 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
             'products': p['products_per_subdomain'],
         },
         'random_cities': p['random_subdomains_count'],
+        'cis_extra': p.get('cis_extra_subdomains', 0),   # доп. СНГ-домены по пресету
         'custom_urls': [],
         'check_main': True, 'check_catalog': True, 'check_categories': True,
         'check_filters': has_filters, 'check_products': True, 'check_text': True,

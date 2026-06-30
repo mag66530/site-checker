@@ -18,6 +18,7 @@ PROFILES = {
         'categories_per_subdomain': 3,
         'filters_per_subdomain': 3,
         'products_per_subdomain': 2,
+        'cis_extra_subdomains': 0,   # быстрая: хватает обязательного smg.az
     },
     'standard': {
         'label': 'Стандартная',
@@ -26,6 +27,7 @@ PROFILES = {
         'categories_per_subdomain': 5,
         'filters_per_subdomain': 5,
         'products_per_subdomain': 3,
+        'cis_extra_subdomains': 1,   # + 1 случайный СНГ помимо smg.az
     },
     'full': {
         'label': 'Полная',
@@ -34,6 +36,7 @@ PROFILES = {
         'categories_per_subdomain': 10,
         'filters_per_subdomain': 10,
         'products_per_subdomain': 5,
+        'cis_extra_subdomains': 1,   # + 1 случайный СНГ помимо smg.az
     },
 }
 
@@ -48,4 +51,5 @@ def get_profile_kwargs(profile_id: str) -> dict:
         'categories_per_subdomain': p['categories_per_subdomain'],
         'filters_per_subdomain': p['filters_per_subdomain'],
         'products_per_subdomain': p['products_per_subdomain'],
+        'cis_extra_subdomains': p.get('cis_extra_subdomains', 0),
     }

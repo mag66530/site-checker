@@ -31,6 +31,7 @@ class Subdomain:
     url: str
     city: str
     host: str
+    country: str = ''        # «Россия» / «Казахстан» / … (для правила выборки СНГ)
 
 
 @dataclass
@@ -86,6 +87,7 @@ def parse_subdomains(csv_path: Path) -> list[Subdomain]:
     for r in rows:
         url = (r.get('url') or '').strip()
         city = (r.get('city') or '').strip() or '(без названия)'
+        country = (r.get('country') or r.get('Страна') or '').strip()
         if not url.startswith('http'):
             continue
         try:
@@ -95,7 +97,7 @@ def parse_subdomains(csv_path: Path) -> list[Subdomain]:
         if not host or host in seen:
             continue
         seen.add(host)
-        result.append(Subdomain(url=url, city=city, host=host))
+        result.append(Subdomain(url=url, city=city, host=host, country=country))
     return result
 
 
@@ -311,22 +313,47 @@ def build_plan(
     check_filters: bool = True,
     check_products: bool = True,
     mandatory_city: str = 'Москва',
+    mandatory_hosts: Optional[list[str]] = None,  # домены, всегда в выборке (напр. smg.az)
+    cis_extra_subdomains: int = 0,      # сколько доп. СНГ-доменов помимо mandatory_hosts
     seed: Optional[int] = None,
     rotation_history: Optional[set[str]] = None,  # pathname'ы проверенные за 7 дней
 ) -> Plan:
     """
-    Построить план проверки: Москва + N случайных городов × M страниц.
-    
+    Построить план проверки: Москва + обязательные домены + доп. СНГ + N случайных.
+
+    mandatory_hosts – хосты, которые включаем ВСЕГДА (напр. ['smg.az'] для СМУ).
+    cis_extra_subdomains – сколько ещё СНГ-доменов (country != «Россия») гарантированно
+        добавить помимо mandatory_hosts (0 для быстрой, 1 для стандартной/полной).
+
     Если передана rotation_history – pathname'ы из неё получают меньший
     вес (в 3 раза реже попадают в выборку), но не исключаются полностью.
     """
     rng = random.Random(seed)
 
-    # Главный город всегда + N случайных
+    # 1) Главный город (Москва) – всегда.
     mandatory = next((s for s in sources.subdomains if s.city == mandatory_city), None)
-    others = [s for s in sources.subdomains if s.city != mandatory_city]
-    random_subs = _pick_random(others, random_subdomains_count, rng)
-    selected = ([mandatory] if mandatory else []) + random_subs
+    selected = [mandatory] if mandatory else []
+    chosen_hosts = {s.host for s in selected}
+
+    # 2) Обязательные домены (напр. smg.az) – всегда, помимо города.
+    for h in (mandatory_hosts or []):
+        if h in chosen_hosts:
+            continue
+        sub = next((s for s in sources.subdomains if s.host == h), None)
+        if sub:
+            selected.append(sub); chosen_hosts.add(sub.host)
+
+    # 3) Доп. СНГ-домены (country != «Россия»), помимо уже выбранных.
+    if cis_extra_subdomains > 0:
+        cis_pool = [s for s in sources.subdomains
+                    if s.host not in chosen_hosts
+                    and s.country and s.country.strip().lower() != 'россия']
+        for s in _pick_random(cis_pool, cis_extra_subdomains, rng):
+            selected.append(s); chosen_hosts.add(s.host)
+
+    # 4) Остальные – случайные из оставшихся (steelgroup.az и пр. могут попасть сюда).
+    rest = [s for s in sources.subdomains if s.host not in chosen_hosts]
+    selected += _pick_random(rest, random_subdomains_count, rng)
 
     # Если есть история ротации – используем weighted_sample вместо обычного _pick_random
     from history import weighted_sample

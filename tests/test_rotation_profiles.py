@@ -141,20 +141,41 @@ def test_profile_applied_to_build_plan():
     cfg = load_project_config('smu')
     src = load_sources(cfg)
     
-    # Быстрая
+    # Быстрая: cis_extra_subdomains=0 -> Москва + 2 случайных = 3 города,
+    # по 1 main + 1 catalog + 3 cat + 3 filter + 0 products = 8 проверок × 3 = 24
     quick_plan = build_plan(src, **get_profile_kwargs('quick'), seed=42)
-    # Москва + 2 = 3 города, по 1 main + 1 catalog + 3 cat + 3 filter + 0 products
-    # (товаров 0 потому что sources.products пустой без sitemap) = 8 проверок × 3 = 24
     assert len(quick_plan.selected_subdomains) == 3
     assert len(quick_plan.tasks) == 3 * 8
-    
-    # Полная
+
+    # Полная: cis_extra_subdomains=1 -> Москва + 1 СНГ-домен + 10 случайных = 12
+    # городов, по 1+1+10+10+0 = 22 проверки × 12 = 264
     full_plan = build_plan(src, **get_profile_kwargs('full'), seed=42)
-    # Москва + 10 = 11 городов, по 1+1+10+10+0 = 22 проверки × 11 = 242
-    assert len(full_plan.selected_subdomains) == 11
-    assert len(full_plan.tasks) == 11 * 22
+    assert len(full_plan.selected_subdomains) == 12
+    assert len(full_plan.tasks) == 12 * 22
     
     print(f'✓ Профили работают: quick={len(quick_plan.tasks)}, full={len(full_plan.tasks)}')
+
+
+def test_smu_cis_selection_rule():
+    """СМУ: Москва + smg.az всегда; стандарт/полная (cis_extra=1) добавляют ещё
+    хотя бы 1 СНГ-домен помимо smg.az."""
+    cfg = load_project_config('smu')
+    src = load_sources(cfg)
+    by_host = {s.host: s for s in src.subdomains}
+    for seed in range(5):
+        # быстрая: smg.az обязателен, доп. СНГ не требуется
+        q = build_plan(src, random_subdomains_count=2, mandatory_city='Москва',
+                       mandatory_hosts=['smg.az'], cis_extra_subdomains=0, seed=seed)
+        hq = [s.host for s in q.selected_subdomains]
+        assert 'stalmetural.ru' in hq and 'smg.az' in hq
+        # стандарт/полная: smg.az + ещё минимум 1 СНГ-домен
+        f = build_plan(src, random_subdomains_count=5, mandatory_city='Москва',
+                       mandatory_hosts=['smg.az'], cis_extra_subdomains=1, seed=seed)
+        hf = [s.host for s in f.selected_subdomains]
+        assert 'stalmetural.ru' in hf and 'smg.az' in hf
+        cis = [h for h in hf if by_host[h].country and by_host[h].country != 'Россия']
+        assert len(cis) >= 2, f'seed={seed}: ожидалось >=2 СНГ, получили {cis}'
+    print('✓ СМУ: правило выборки (Москва + smg.az + СНГ) работает')
 
 
 # ── Тесты ротации в build_plan ─────────────────────────────────────

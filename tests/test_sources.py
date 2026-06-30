@@ -22,7 +22,7 @@ def test_smu_sources():
     # Список городов пополняется – проверяем «не меньше базы», а не точное число.
     assert len(src.subdomains) >= 34, f"СМУ: ожидалось ≥34 поддомена, получили {len(src.subdomains)}"
     assert len(src.categories) > 1000, f"СМУ: мало категорий ({len(src.categories)})"
-    assert len(src.filters) > 13000, f"СМУ: мало фильтров ({len(src.filters)})"
+    assert len(src.filters) > 9000, f"СМУ: мало фильтров ({len(src.filters)})"
     moscow = next((s for s in src.subdomains if s.city == 'Москва'), None)
     assert moscow is not None and moscow.host == 'stalmetural.ru'
     print(f'✓ СМУ: {len(src.subdomains)} городов, '

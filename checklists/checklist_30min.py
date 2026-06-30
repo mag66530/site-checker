@@ -415,6 +415,8 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             check_filters=flags['check_filters'],
             check_products=flags['check_products'],
             mandatory_city=cfg.get('mandatory_city', 'Москва'),
+            mandatory_hosts=cfg.get('mandatory_hosts'),
+            cis_extra_subdomains=int(flags.get('cis_extra', 0)),
             rotation_history=recent,
         )
         append_log(f'Города: {", ".join(s.city for s in plan.selected_subdomains)}')
@@ -1237,8 +1239,12 @@ if pid:
                 'webmaster_keys_hint': _wm_hint,
                 'secret_keys_hint': _sk_hint,
             }
+            # Доп. СНГ-домены по пресету (быстрая 0, стандарт/полная 1) – помимо
+            # обязательного smg.az (см. mandatory_hosts в smu.json).
+            _cis_extra = get_profile_kwargs(
+                st.session_state.get('c30_preset', 'standard')).get('cis_extra_subdomains', 0)
             params = {'budget': budget, 'random_cities': int(random_cities),
-                      'custom_urls': _custom_urls, **flags}
+                      'custom_urls': _custom_urls, 'cis_extra': _cis_extra, **flags}
             st.session_state.c30_results = None
             st.session_state.c30_report_path = None
             st.session_state.c30_last_error = None
