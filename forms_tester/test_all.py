@@ -1348,42 +1348,26 @@ def write_summary_sheet(path: str, время_прогона: str = "") -> None:
             if city:
                 dom_cities[dom].add(city)
 
-    lines = [f"Отправлено форм: {sent}"]
-    if errors:
-        lines.append(f"Не отправлено (ошибки): {errors}")
-    if время_прогона:
-        lines.append(f"Время прогона: {время_прогона} (мин:сек)")
-    lines.append("")
-    lines.append("Формы отправлены на:")
-    lines.extend(domains)
-    message = "\n".join(lines)
-
+    # Лист «Сводка»: ТОЛЬКО таблица (Домен · Город(а) · Почта для проверки заявок).
+    # Готовое сообщение/счётчики/время — по просьбе убраны из отчёта.
     if "Сводка" in wb.sheetnames:
         del wb["Сводка"]
     sm = wb.create_sheet("Сводка", 0)       # первым листом – чтобы сразу видеть
 
-    sm["A1"] = "Готовое сообщение (скопировать и вставить)"
-    sm["A1"].font = Font(bold=True, size=12)
-    sm["A2"] = message
-    sm["A2"].alignment = Alignment(wrap_text=True, vertical="top")
-    sm.row_dimensions[2].height = 15 * (len(lines) + 1)
-    sm.column_dimensions["A"].width = 50
-
-    # Таблица: домен → города → почта для проверки заявок (справа от сообщения)
     hdr_fill = PatternFill("solid", fgColor="EEF3FB")
-    for col, title in ((3, "Домен"), (4, "Город(а)"), (5, "Почта для проверки заявок")):
+    for col, title in ((1, "Домен"), (2, "Город(а)"), (3, "Почта для проверки заявок")):
         c = sm.cell(1, col, title)
         c.font = Font(bold=True)
         c.fill = hdr_fill
     rr = 2
     for dom in domains:
-        sm.cell(rr, 3, dom)
-        sm.cell(rr, 4, ", ".join(sorted(dom_cities[dom])))
-        sm.cell(rr, 5, ", ".join(sorted(dom_mails[dom])))
+        sm.cell(rr, 1, dom)
+        sm.cell(rr, 2, ", ".join(sorted(dom_cities[dom])))
+        sm.cell(rr, 3, ", ".join(sorted(dom_mails[dom])))
         rr += 1
-    sm.column_dimensions["C"].width = 34
-    sm.column_dimensions["D"].width = 30
-    sm.column_dimensions["E"].width = 46
+    sm.column_dimensions["A"].width = 34
+    sm.column_dimensions["B"].width = 30
+    sm.column_dimensions["C"].width = 46
 
     wb.active = wb.sheetnames.index("Сводка")
     wb.save(path)
