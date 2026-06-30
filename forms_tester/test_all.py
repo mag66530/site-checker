@@ -68,6 +68,27 @@ def response_indicates_captcha_block(text: str) -> bool:
     )
 
 
+def response_indicates_form_error(text: str) -> str:
+    """Если страница ПОСЛЕ отправки/оформления показывает явную ошибку — возвращает
+    её краткое описание, иначе пустую строку. Фразы специфичны (не подсказки полей),
+    чтобы не было ложных срабатываний.
+    """
+    low = (text or "").lower()
+    маркеры = [
+        ("доступ запрещ", "Сайт отклонил отправку: «Доступ запрещён» (часто истёкший токен сессии/анти-бот)"),
+        ("access denied", "Сайт отклонил отправку: access denied"),
+        ("при расчете заказа произошла ошибка", "Оформление: при расчёте заказа произошла ошибка"),
+        ("при расчёте заказа произошла ошибка", "Оформление: при расчёте заказа произошла ошибка"),
+        ("не выбран тип плательщик", "Оформление: не выбран тип плательщика"),
+        ("нет платежных систем", "Оформление: нет платёжных систем для оплаты"),
+        ("нет платёжных систем", "Оформление: нет платёжных систем для оплаты"),
+    ]
+    for needle, reason in маркеры:
+        if needle in low:
+            return reason
+    return ""
+
+
 def _form_field_map_from_config(форма_config: dict) -> dict | None:
     """Явная карта полей: HTML name → токен источника (ПОЧТА, ТЕЛЕФОН, …) или буквальная строка."""
     raw = форма_config.get("поля") or форма_config.get("fields")
@@ -1369,6 +1390,28 @@ def write_summary_sheet(path: str, время_прогона: str = "") -> None:
     sm.column_dimensions["B"].width = 30
     sm.column_dimensions["C"].width = 46
 
+    # --- Лист «Логи»: жирная шапка (закреплена) + визуальное разделение городов ---
+    from openpyxl.styles import Border, Side
+    ncol = max(1, len(headers))
+    for c in range(1, ncol + 1):
+        hc = ws.cell(1, c)
+        hc.font = Font(bold=True)
+        hc.fill = hdr_fill
+    try:
+        ws.freeze_panes = "A2"
+    except Exception:
+        pass
+    thick = Side(style="medium", color="7F7F7F")
+    prev_city = None
+    for r in range(2, ws.max_row + 1):
+        cur = str(ws.cell(r, i_city + 1).value or "").strip() if i_city >= 0 else ""
+        if prev_city is not None and cur != prev_city:
+            for c in range(1, ncol + 1):
+                cell = ws.cell(r, c)
+                b = cell.border
+                cell.border = Border(left=b.left, right=b.right, bottom=b.bottom, top=thick)
+        prev_city = cur
+
     wb.active = wb.sheetnames.index("Сводка")
     wb.save(path)
 
@@ -2120,8 +2163,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             page.wait_for_timeout(2500)
 
             html = page.content()
+            _form_err = response_indicates_form_error(html)
+            _коммент_готовый = None
             if response_indicates_captcha_block(html):
                 статус = "ОШИБКА: КАПЧА"
+            elif _form_err:
+                статус = "ОШИБКА"
+                _коммент_готовый = _form_err
             elif "ошибк" in html.lower() and any(
                 x in html.lower()
                 for x in ("не удалось", "не отправлен", "отклонен", "invalid")
@@ -2140,6 +2188,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     "название": название,
                     "имя": имя_теста,
                     "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_теста,
+                    "комментарий_готовый": _коммент_готовый,
                     "статус": статус,
                     "код": "browser",
                 }
@@ -2548,8 +2597,16 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         html = page.content()
                         low = html.lower()
                         log_url = page.url or base_url
+                        _chk_err = response_indicates_form_error(html)
+                        _коммент_готовый = None
                         if response_indicates_captcha_block(html):
                             статус = "ОШИБКА: КАПЧА"
+                        elif _chk_err:
+                            # Явная ошибка на странице важнее «признака успеха»: на bx-soa
+                            # текст «Заказ сформирован» бывает в скрытом шаблоне и даёт
+                            # ложный успех, хотя заказ не оформлен.
+                            статус = "ОШИБКА"
+                            _коммент_готовый = _chk_err
                         elif ошибка and ошибка.lower() in low:
                             статус = "ОШИБКА (сообщение на странице)"
                         elif успех and успех.lower() in low:
@@ -2571,6 +2628,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 "название": nm,
                                 "имя": имя_лог,
                                 "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_лог,
+                                "комментарий_готовый": _коммент_готовый,
                                 "статус": статус,
                                 "код": "browser",
                             }
