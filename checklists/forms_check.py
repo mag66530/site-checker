@@ -32,6 +32,7 @@ PID_FILE = ROOT / 'cache' / 'forms.pid'
 def _load_cities(project: str):
     """Справочник городов проекта: список dict {country, city, url, mail}.
     Пусто, если файла нет. Первый город – основной сайт (Москва)."""
+    project = CITIES_FROM.get(project, project)
     f = ROOT / 'forms_tester' / 'projects' / project / 'cities.csv'
     if not f.exists():
         return []
@@ -61,6 +62,14 @@ PROJECTS = {
     'smu': {'name': 'СМУ – Сталметурал', 'domain': 'stalmetural.ru'},
     'imp': {'name': 'ИМП – Инметпром', 'domain': 'inmetprom.ru'},
     'mpe': {'name': 'МПЭ – Мепэн', 'domain': 'mepen.ru'},
+    # Быстрая проверка ТОЛЬКО оформления заказа через корзину (Мепэн).
+    'mpe_cart': {'name': 'МПЭ – Корзина', 'domain': 'mepen.ru'},
+}
+
+# Проекты-варианты берут справочник городов у «родителя» (свой config.py,
+# общий cities.csv). Держим в синхроне с CITIES_FROM в forms_run.py.
+CITIES_FROM = {
+    'mpe_cart': 'mpe',
 }
 
 # Полный текст-подсказка (раньше был большим жёлтым блоком, теперь – в «❓»).

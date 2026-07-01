@@ -157,7 +157,13 @@ st.markdown(
     .stSelectbox label, .stCheckbox label, [data-testid="stWidgetLabel"] p {
         font-size: 14px !important; color: #5B5853 !important;
     }
-    .stApp { -webkit-font-smoothing: antialiased; }
+    /* Чёткий текст: НЕ используем grayscale-сглаживание (antialiased), от него
+       на Windows/Chrome буквы становятся тоньше и «размытыми». Оставляем
+       субпиксельное сглаживание браузера + оптимизацию читаемости. */
+    .stApp, .stApp * {
+        -webkit-font-smoothing: subpixel-antialiased;
+        text-rendering: optimizeLegibility;
+    }
 
     /* ── Боковая панель ── */
     [data-testid="stSidebar"] {
