@@ -247,9 +247,10 @@ def _cell_state(col, by_key):
     b = by_key.get(col['key'])
     if b is None:
         return ('', 'absent')
+    # Жёлтое предупреждение (не красный баг), напр. «Фото товаров»: стоит заглушка.
+    if getattr(b, 'warn', False):
+        return (f'Заглушка ({b.count})' if b.count else 'Заглушка', 'warn')
     if b.required and not b.present:
-        # Если у блока есть число (напр. «Фото товаров» – сколько без фото) –
-        # показываем его прямо в баге: «БАГ (23)», как обещает подсказка столбца.
         if b.count:
             return (f'БАГ ({b.count})', 'bug')
         return ('БАГ', 'bug')
@@ -264,6 +265,8 @@ def _style_cell(cell, value, state):
     cell.value = value
     if state == 'bug':
         cell.font = _font(size=10, bold=True, color=C.err); cell.fill = _fill(C.err_soft)
+    elif state == 'warn':          # жёлтое предупреждение (заглушка фото и т.п.)
+        cell.font = _font(size=10, bold=True, color=C.warn); cell.fill = _fill(C.warn_soft)
     elif state == 'ok':
         cell.font = _font(size=10, bold=True, color=C.ok); cell.fill = _fill(C.ok_soft)
     elif state == 'okinfo':       # значение-текст (по запросу / в корзину…)
@@ -605,6 +608,13 @@ def _build_structure_sheet(wb, results):
                 _style_cell(cell, value, state)
                 if state in ('absent', 'count', 'okinfo'):
                     cell.fill = _fill(band)
+                # У заглушки фото – всплывающая подсказка с названиями товаров.
+                if state == 'warn' and col.get('kind') == 'block':
+                    _b = by_key.get(col.get('key'))
+                    _nm = getattr(_b, 'note', '') if _b else ''
+                    if _nm:
+                        cell.comment = Comment('Стоит заглушка «нет фото» у товаров: '
+                                               + _nm, 'Site Checker', height=120, width=300)
             row += 1
         row += 2  # пробел между секциями
 

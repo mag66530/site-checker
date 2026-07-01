@@ -350,15 +350,18 @@ def test_bottom_block_one_card_without_price_is_bug():
     assert b2['rec_price'].present
 
 
-def test_cards_without_photo_is_bug():
-    """Заглушка «нет фото» (picture.missing и т.п.) в карточке → баг «Фото товаров»."""
+def test_cards_stub_photo_is_warning_with_name():
+    """Заглушка «нет фото» – жёлтое ПРЕДУПРЕЖДЕНИЕ (warn), не красный баг; в note
+    попадает название товара из alt картинки."""
     main = (COMMON + SMU_MARKER + '<div class="cost-val">100 ₽</div>'
             '<button class="add-to-cart-btn">В корзину</button>')
-    bad = _by_key(check_content(main + '<img src="/local/img/picture.missing.webp">', 'product'))
-    assert not bad['photos'].present and bad['photos'].required   # → БАГ
+    bad = _by_key(check_content(
+        main + '<img src="/local/img/no-image.jpg" alt="Круг алюминиевый 1.6 мм">', 'product'))
+    assert bad['photos'].warn and not bad['photos'].required   # предупреждение, не баг
     assert bad['photos'].count == 1
+    assert 'Круг алюминиевый' in bad['photos'].note            # название из alt
     ok = _by_key(check_content(main + '<img src="/upload/real-photo.jpg">', 'product'))
-    assert ok['photos'].present
+    assert ok['photos'].present and not ok['photos'].warn
 
 
 def test_catalog_root_photos_not_bug_without_product_cards():
@@ -373,9 +376,9 @@ def test_catalog_root_photos_not_bug_without_product_cards():
     assert not b['photos'].required                # фото не обязательно → не баг
 
 
-def test_catalog_root_photos_bug_with_product_cards_shows_count():
-    """Если на корне каталога ЕСТЬ карточки товаров и у части нет фото – это баг
-    с числом (сколько без фото)."""
+def test_catalog_root_photos_warn_with_product_cards():
+    """Если на корне каталога ЕСТЬ карточки товаров и у части заглушка – это
+    жёлтое предупреждение с числом (не красный баг)."""
     cards = ('<div class="catalog-product-card-item"><a href="/c/t1/">Т1</a>'
              '<img src="/img/picture.missing.webp"><span>100 ₽</span></div>'
              '<div class="catalog-product-card-item"><a href="/c/t2/">Т2</a>'
@@ -383,7 +386,7 @@ def test_catalog_root_photos_bug_with_product_cards_shows_count():
     tiles = ''.join(f'<a href="/catalog/razdel-{i}/">Раздел {i}</a>' for i in range(5))
     html = COMMON + SMU_MARKER + '<h1>Каталог</h1>' + tiles + cards
     b = _by_key(check_content(html, 'catalog', url='https://stalmetural.ru/catalog/'))
-    assert b['photos'].required and not b['photos'].present and b['photos'].count == 1
+    assert b['photos'].warn and not b['photos'].required and b['photos'].count == 1
 
 
 def test_price_detected_in_cis_currencies():
