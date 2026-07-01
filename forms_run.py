@@ -77,6 +77,9 @@ def main() -> int:
                     help='Показывать окно браузера (по умолчанию скрыто, headless)')
     ap.add_argument('--cities', default='',
                     help='Список городов через запятую (из cities.csv). Пусто = основной сайт.')
+    ap.add_argument('--forms-file', default='',
+                    help='Путь к JSON-файлу со списком выбранных форм (имена). '
+                         'Пусто = проверять все формы проекта.')
     a = ap.parse_args()
 
     name = PROJECT_NAMES[a.project]
@@ -104,6 +107,20 @@ def main() -> int:
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
     base_config = src_config.read_text(encoding='utf-8')
+
+    # Выбор форм из интерфейса: дописываем в конфиг список ТОЛЬКО_ФОРМЫ (движок
+    # прогонит только формы с этими именами). Пустой/отсутствующий файл — гоним всё.
+    forms_filter = []
+    if a.forms_file:
+        try:
+            import json
+            forms_filter = json.loads(Path(a.forms_file).read_text(encoding='utf-8')) or []
+        except Exception as e:  # noqa: BLE001
+            _stamp(f'⚠️ Не удалось прочитать список форм ({a.forms_file}): {e}')
+            forms_filter = []
+    if forms_filter:
+        base_config = base_config.rstrip() + '\n\nТОЛЬКО_ФОРМЫ = ' + repr(list(forms_filter)) + '\n'
+        _stamp(f'Выбрано форм: {len(forms_filter)} (остальные пропускаем).')
 
     # Базовый домен для подмены берём НЕ из первой строки cities.csv, а из самого
     # конфига: тот город-домен, что реально встречается в URL-ах СТРАНИЦ. Иначе если

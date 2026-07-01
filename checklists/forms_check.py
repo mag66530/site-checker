@@ -192,6 +192,64 @@ def _count_expected(project: str) -> int:
     return total
 
 
+def _flag_on(v) -> bool:
+    """Значение флага «включено» → bool (терпимо к строкам «нет»/«off»/…)."""
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return True
+    return str(v).strip().lower() not in ('false', '0', 'нет', 'off', '')
+
+
+def _list_forms(project: str):
+    """Список форм проекта В ПОРЯДКЕ ПРОГОНА: [{'page','name'}, ...].
+    Имена = ровно те «названия», что движок пишет в отчёт (сценарии/формы/модалки).
+    Учитываем только ВКЛЮЧЁННЫЕ страницы/формы, чтобы не показывать то, что не гоняется."""
+    p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
+    try:
+        spec = importlib.util.spec_from_file_location(f'cfg_forms_{project}', p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+    except Exception:
+        return []
+
+    out, seen = [], set()
+
+    def add(page, name):
+        name = (name or '').strip()
+        if name and name not in seen:
+            seen.add(name)
+            out.append({'page': page, 'name': name})
+
+    try:
+        for block in getattr(m, 'СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ', []) or []:
+            if not _flag_on(block.get('включено', True)):
+                continue
+            page = str(block.get('тип') or '').strip()
+            # Сценарии (клик → форма). Имя = «название» сценария.
+            if _flag_on(block.get('сценарий_включен', True)):
+                сцены = block.get('сценарии') or []
+                for sc in сцены:
+                    if _flag_on(sc.get('включено', True)):
+                        add(page, sc.get('название') or block.get('название_сценария') or page)
+                # legacy: шаги прямо в блоке (без «сценарии»)
+                if not сцены and (block.get('шаги')):
+                    add(page, block.get('название_сценария') or page)
+            # Отдельные формы на странице
+            if _flag_on(block.get('формы_включены', True)):
+                for f in block.get('формы') or []:
+                    if _flag_on(f.get('включено', True)):
+                        add(page, f.get('название'))
+            # Модалки (кнопка открывает окно)
+            if _flag_on(block.get('модалки_включены', True)):
+                for mo in block.get('модалки') or []:
+                    if _flag_on(mo.get('включено', True)):
+                        add(page, mo.get('название_теста'))
+    except Exception:
+        return out
+    return out
+
+
 def _rows_done(xlsx: Path):
     """Сколько форм уже записано в лог (строки минус шапка). None – не прочиталось."""
     if not xlsx.exists():
@@ -307,6 +365,59 @@ if _cities:
         st.caption(f'Будет проверено городов: {len(_chosen_cities)}.')
     st.divider()
 
+# ── Формы ────────────────────────────────────────────────────────────
+# Список форм проекта (в порядке прогона). По умолчанию – все; можно выбрать
+# только нужные. Имена совпадают с тем, что попадает в отчёт.
+_all_forms = _list_forms(pid_key)
+_all_form_names = [f['name'] for f in _all_forms]
+_chosen_forms = list(_all_form_names)     # по умолчанию – все формы
+if _all_forms:
+    st.subheader('Формы')
+    _fmode = st.radio(
+        'Какие формы проверяем',
+        ['Все формы', 'Выбрать формы'],
+        horizontal=True, label_visibility='collapsed',
+        key=f'fc_forms_mode_{pid_key}',
+    )
+    if _fmode == 'Выбрать формы':
+        def _fk(name):
+            return f'ff_cb_{pid_key}_{name}'
+        # дефолт – все отмечены (один раз на проект)
+        if not st.session_state.get(f'ff_init_{pid_key}'):
+            for nm in _all_form_names:
+                st.session_state[_fk(nm)] = True
+            st.session_state[f'ff_init_{pid_key}'] = True
+
+        _fb1, _fb2, _ = st.columns([1, 1, 4])
+        if _fb1.button('Выбрать все', use_container_width=True, key=f'ff_all_{pid_key}'):
+            for nm in _all_form_names:
+                st.session_state[_fk(nm)] = True
+            st.rerun()
+        if _fb2.button('Снять все', use_container_width=True, key=f'ff_none_{pid_key}'):
+            for nm in _all_form_names:
+                st.session_state[_fk(nm)] = False
+            st.rerun()
+
+        # группировка по странице (в порядке прогона)
+        _by_page = {}
+        for f in _all_forms:
+            _by_page.setdefault(f['page'], []).append(f['name'])
+        _sel_f = []
+        for _pg, _names in _by_page.items():
+            st.markdown(f"**{_pg}**  ·  {len(_names)}")
+            _fcols = st.columns(2)
+            for _i, _nm in enumerate(_names):
+                if _fcols[_i % 2].checkbox(_nm, key=_fk(_nm)):
+                    _sel_f.append(_nm)
+        _chosen_forms = _sel_f
+        st.caption(f'Выбрано форм: **{len(_chosen_forms)} / {len(_all_forms)}**.')
+    else:
+        st.caption(f'Будут проверены все формы проекта: {len(_all_forms)}.')
+    st.divider()
+
+_forms_all_selected = (len(_chosen_forms) == len(_all_form_names))
+_forms_none = bool(_all_forms) and len(_chosen_forms) == 0
+
 # ── Запуск ──────────────────────────────────────────────────────────
 st.subheader('Запуск проверки')
 
@@ -322,10 +433,13 @@ st.caption('Запуск фоновый – интерфейс сразу сво
 
 _alive = _pid_alive(_read_pid())
 
+if _forms_none:
+    st.warning('Не выбрано ни одной формы — отметь хотя бы одну, чтобы запустить.')
+
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
     if st.button('▶ Запустить проверку', use_container_width=True,
-                 disabled=_alive):
+                 disabled=_alive or _forms_none):
         ready, _missing = _deps_ready()
         if not ready:
             # Движка нет в этом окружении (типично для облака по ссылке) –
@@ -348,6 +462,14 @@ with _run_col:
                 args.append('--show-browser')
             if _chosen_cities:
                 args += ['--cities', ','.join(_chosen_cities)]
+            # Фильтр форм: передаём только если выбрано подмножество (не все).
+            if _all_forms and not _forms_all_selected and _chosen_forms:
+                import json
+                _ff = ROOT / 'cache' / 'forms' / pid_key / '_forms_filter.json'
+                _ff.parent.mkdir(parents=True, exist_ok=True)
+                _ff.write_text(json.dumps(_chosen_forms, ensure_ascii=False),
+                               encoding='utf-8')
+                args += ['--forms-file', str(_ff)]
             try:
                 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
                 LOG_FILE.write_text('', encoding='utf-8')
@@ -358,6 +480,10 @@ with _run_col:
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key
             st.session_state['forms_cities_n'] = max(1, len(_chosen_cities))
+            # Ожидаемое число форм для шкалы прогресса (учитывает выбор форм).
+            _per_city = (len(_chosen_forms) if (_all_forms and not _forms_all_selected)
+                         else _count_expected(pid_key))
+            st.session_state['forms_expected_total'] = _per_city * max(1, len(_chosen_cities))
             st.rerun()
 with _cancel_col:
     if st.button('⛔ Отменить', use_container_width=True, disabled=not _alive):
@@ -407,7 +533,9 @@ if _alive and _this:
     _elapsed = int(time.time() - _ts) if _ts else None
     _mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
     _done = _rows_done(xlsx)
-    _total = _count_expected(_sel) * st.session_state.get('forms_cities_n', 1)
+    # Если при запуске сохранили ожидаемое число форм (учитывает выбор форм) – берём его.
+    _total = st.session_state.get('forms_expected_total') \
+        or _count_expected(_sel) * st.session_state.get('forms_cities_n', 1)
 
     if _total and _done is not None:
         st.progress(min(_done / _total, 0.99), text=f'Проверено форм: {_done} из ~{_total}')

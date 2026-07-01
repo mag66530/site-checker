@@ -1475,6 +1475,20 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     except ImportError:
         ФОРМЫ_ЧЕРЕЗ_REQUESTS = False
 
+    # Выбор форм из интерфейса: если задан список ТОЛЬКО_ФОРМЫ (имена сценариев/
+    # форм/модалок), гоняем ТОЛЬКО их. Пусто/не задано — гоняем все формы, как раньше.
+    try:
+        from config import ТОЛЬКО_ФОРМЫ as _ТОЛЬКО_ФОРМЫ
+    except ImportError:
+        _ТОЛЬКО_ФОРМЫ = None
+    _только_формы = {str(x).strip() for x in (_ТОЛЬКО_ФОРМЫ or []) if str(x).strip()}
+
+    def _форма_выбрана(название) -> bool:
+        """True, если форму нужно гнать. Если фильтр не задан — гоним всё."""
+        if not _только_формы:
+            return True
+        return str(название or "").strip() in _только_формы
+
     try:
         from config import ФОРМАТ_ИМЕНИ_ТЕСТА as _FMT_TEST
     except ImportError:
@@ -2898,6 +2912,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     )
                     continue
                 cap = str(sc.get("название") or "").strip() or название_сценария
+                if not _форма_выбрана(cap):
+                    continue
                 if _нет_в_текущем_городе(sc):
                     _лог_форма_отсутствует(тип_страницы, url, sc, cap)
                     continue
@@ -2958,6 +2974,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 nm = форма.get("название", "")
                 print(f"   ⏭️ Форма пропущена (отключена в конфиге): {nm!r}")
                 continue
+            if not _форма_выбрана(форма.get("название", "")):
+                continue
             if _нет_в_текущем_городе(форма):
                 _лог_форма_отсутствует(тип_страницы, url, форма, форма.get("название", "?"))
                 continue
@@ -3006,6 +3024,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             if not cfg_enabled(модалка.get("включено", True)):
                 nm = модалка.get("название_теста", "")
                 print(f"   ⏭️ Модалка пропущена (отключена в конфиге): {nm!r}")
+                continue
+            if not _форма_выбрана(модалка.get("название_теста", "")):
                 continue
             проверить_кнопку_через_playwright(
                 url, модалка["значение"], модалка["название_теста"]
