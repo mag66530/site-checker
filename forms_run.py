@@ -31,7 +31,7 @@ PROJECTS_ROOT = ENGINE / 'projects'             # forms_tester/projects/<id>/con
 WORK_ROOT = ROOT / 'cache' / 'forms'            # рабочие папки прогонов (в .gitignore)
 
 PROJECT_NAMES = {
-    'smu': 'СМУ – Сталметурал',
+    'smu': 'СМУ – Стальметурал',
     'imp': 'ИМП – Инметпром',
     'mpe': 'МПЭ – Мепэн',
 }

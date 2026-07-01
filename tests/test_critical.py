@@ -90,7 +90,7 @@ def test_total_and_formatters():
     ]
     s = analyze(rs)
     assert s.total == 4 and s.has_availability
-    alert = format_critical_alert('СМУ – Сталметурал', s.availability)
+    alert = format_critical_alert('СМУ – Стальметурал', s.availability)
     # без эмодзи и длинных тире, группировка по городу, конкретная ошибка
     assert '🔴' not in alert and '—' not in alert
     assert 'Упала доступность' in alert and 'СМУ' in alert

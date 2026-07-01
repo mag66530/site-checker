@@ -58,7 +58,7 @@ _COUNTRY_FLAG = {
 }
 
 PROJECTS = {
-    'smu': {'name': 'СМУ – Сталметурал', 'domain': 'stalmetural.ru'},
+    'smu': {'name': 'СМУ – Стальметурал', 'domain': 'stalmetural.ru'},
     'imp': {'name': 'ИМП – Инметпром', 'domain': 'inmetprom.ru'},
     'mpe': {'name': 'МПЭ – Мепэн', 'domain': 'mepen.ru'},
 }

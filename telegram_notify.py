@@ -85,7 +85,7 @@ def format_summary_message(
         or bool(critical_block)
     )
 
-    # Короткое имя проекта: "СМУ – Сталметурал" → "СМУ".
+    # Короткое имя проекта: "СМУ – Стальметурал" → "СМУ".
     # Терпимо к любому тире (– / – / -), т.к. в именах перешли на короткое.
     short_name = escape_html(
         re.split(r'\s[––-]\s', project_name or '', maxsplit=1)[0].strip()
@@ -150,7 +150,7 @@ def escape_html(text: str) -> str:
 
 
 def _short_project_name(project_name: str) -> str:
-    """«СМУ – Сталметурал» → «СМУ» (терпимо к любому тире)."""
+    """«СМУ – Стальметурал» → «СМУ» (терпимо к любому тире)."""
     return re.split(r'\s[––-]\s', project_name or '', maxsplit=1)[0].strip()
 
 
