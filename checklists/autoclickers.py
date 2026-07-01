@@ -64,7 +64,7 @@ def _kill_tree(pid):
             pass
 
 PROJECTS = {
-    'smu': {'name': 'СМУ – Сталметурал', 'google': 'stalmeturalru@gmail.com',
+    'smu': {'name': 'СМУ – Стальметурал', 'google': 'stalmeturalru@gmail.com',
             'yandex': 'stalmetural19@yandex.ru', 'domain': 'stalmetural.ru'},
     'mpe': {'name': 'МПЭ – Mepen', 'google': 'mepen888@gmail.com',
             'yandex': 'mepen88@yandex.ru', 'domain': 'mepen.ru'},

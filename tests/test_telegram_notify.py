@@ -17,7 +17,7 @@ def test_escape_html():
 def test_format_success():
     """Прогон без проблем – зелёная плашка."""
     msg = format_summary_message(
-        project_name='СМУ – Сталметурал',
+        project_name='СМУ – Стальметурал',
         started_at='26.05.2026 19:43',
         duration_sec=14,
         total_checks=30,
@@ -35,7 +35,7 @@ def test_format_success():
 def test_format_critical():
     """Прогон с ошибками – без эмодзи, блок срочных убран."""
     msg = format_summary_message(
-        project_name='СМУ – Сталметурал',
+        project_name='СМУ – Стальметурал',
         started_at='26.05.2026 19:43',
         duration_sec=14,
         total_checks=30,
