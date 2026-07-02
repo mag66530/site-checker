@@ -13,8 +13,10 @@
 """
 import csv
 import importlib.util
+import json
 import os
 import random
+import re
 import subprocess
 import sys
 import time
@@ -364,30 +366,180 @@ st.markdown(
 
 st.divider()
 
-# ── Домены и поддомены ───────────────────────────────────────────────
-# Если у проекта есть справочник городов (cities.csv) – даём выбрать, что
-# проверять. Домен = основной сайт страны (mepen.ru, mepen.kz…); поддомен =
-# город на этом домене (spb.mepen.ru). Иначе – только основной сайт.
+# ── Данные проекта (нужны сценариям, доменам и формам ниже) ──────────
 _cities = _load_cities(pid_key)
 _chosen_cities = []          # список названий городов для прогона ([] = основной сайт)
-if _cities:
-    _all_names = [c['city'] for c in _cities]
-    _mains = _main_domains(_cities)                  # основной домен каждой страны
-    _main_by_country = {c['country']: c for c in _mains}
-    # группировка по странам (с сохранением порядка)
-    _groups = {}
-    for c in _cities:
-        _groups.setdefault(c['country'], []).append(c['city'])
+_all_names = [c['city'] for c in _cities]
+_mains = _main_domains(_cities) if _cities else []   # основной домен каждой страны
+_main_by_country = {c['country']: c for c in _mains}
+_groups = {}                                         # страны в порядке справочника
+for c in _cities:
+    _groups.setdefault(c['country'], []).append(c['city'])
+_all_forms = _list_forms(pid_key)
+_all_form_names = [f['name'] for f in _all_forms]
 
-    # Подсказки «?» на этой странице нужны (в app.py они выключены глобально).
-    # Английскую техподсказку «Press Enter to apply» у числовых полей прячем –
-    # значение и так применяется по Enter или клику мимо поля.
-    st.markdown(
-        '<style>[data-testid="stTooltipIcon"], [data-testid="stTooltipHoverTarget"] '
-        '{ display: inline-flex !important; }\n'
-        '[data-testid="InputInstructions"] { display: none !important; }</style>',
-        unsafe_allow_html=True,
-    )
+_MODE_OPTIONS = ['Основные домены (по странам)', 'Выбрать города', 'Случайные города']
+_FORMS_MODE_OPTIONS = ['Все формы', 'Выбрать формы']
+_SETTINGS_FILE = ROOT / 'cache' / 'forms' / pid_key / 'ui_settings.json'
+
+
+def _round_robin(total):
+    """Раздаёт total по странам по кругу (начиная с России), не больше,
+    чем городов в стране."""
+    _counts = {k: 0 for k in _groups}
+    _left = int(total)
+    while _left > 0:
+        _gave = False
+        for k in _groups:
+            if _left <= 0:
+                break
+            if _counts[k] < len(_groups[k]):
+                _counts[k] += 1
+                _left -= 1
+                _gave = True
+        if not _gave:
+            break
+    return _counts
+
+
+def _apply_recommended():
+    """Рекомендованный сценарий: основные домены всех стран + все формы.
+    Для МПЭ дополнительно видимый браузер (без него формы не отправляются,
+    reCAPTCHA)."""
+    s = st.session_state
+    s[f'fc_mode_{pid_key}'] = _MODE_OPTIONS[0]
+    for c in _mains:
+        s[f'fc_main_{pid_key}_{c["country"]}'] = True
+    _mc = {c['city'] for c in _mains}
+    for nm in _all_names:
+        s[f'fc_cb_{pid_key}_{nm}'] = (nm in _mc)
+    s[f'fc_init_mains_{pid_key}'] = True
+    if _all_names:
+        s[f'fc_rnd_total_{pid_key}'] = min(7, len(_all_names))
+        for k, v in _round_robin(s[f'fc_rnd_total_{pid_key}']).items():
+            s[f'fc_rnd_{pid_key}_{k}'] = v
+    s[f'fc_forms_mode_{pid_key}'] = _FORMS_MODE_OPTIONS[0]
+    for nm in _all_form_names:
+        s[f'ff_cb_{pid_key}_{nm}'] = True
+    s[f'ff_init_{pid_key}'] = True
+    s[f'fc_clear_{pid_key}'] = True
+    s[f'fc_show_{pid_key}'] = pid_key in ('mpe', 'mpe_cart')
+
+
+def _collect_settings():
+    """Текущие галочки страницы – в словарь для сохранения на диск."""
+    s = st.session_state
+    return {
+        'режим_доменов': s.get(f'fc_mode_{pid_key}', _MODE_OPTIONS[0]),
+        'страны': {c['country']: bool(s.get(f'fc_main_{pid_key}_{c["country"]}', True))
+                   for c in _mains},
+        'города': [nm for nm in _all_names if s.get(f'fc_cb_{pid_key}_{nm}')],
+        'случайные_по_странам': {k: int(s.get(f'fc_rnd_{pid_key}_{k}', 0) or 0)
+                                 for k in _groups},
+        'режим_форм': s.get(f'fc_forms_mode_{pid_key}', _FORMS_MODE_OPTIONS[0]),
+        'формы': [nm for nm in _all_form_names if s.get(f'ff_cb_{pid_key}_{nm}', True)],
+        'очищать_лог': bool(s.get(f'fc_clear_{pid_key}', True)),
+        'показывать_браузер': bool(s.get(f'fc_show_{pid_key}', False)),
+        'сохранено': datetime.now().strftime('%d.%m.%Y %H:%M'),
+    }
+
+
+def _apply_saved(data):
+    """Подставляет сохранённые настройки в галочки. Терпимо к устаревшим
+    данным: чужие/пропавшие города и формы просто игнорируются."""
+    s = st.session_state
+    if data.get('режим_доменов') in _MODE_OPTIONS:
+        s[f'fc_mode_{pid_key}'] = data['режим_доменов']
+    _saved_countries = data.get('страны') or {}
+    for c in _mains:
+        if c['country'] in _saved_countries:
+            s[f'fc_main_{pid_key}_{c["country"]}'] = bool(_saved_countries[c['country']])
+    if isinstance(data.get('города'), list):
+        _chosen = set(data['города'])
+        for nm in _all_names:
+            s[f'fc_cb_{pid_key}_{nm}'] = nm in _chosen
+        s[f'fc_init_mains_{pid_key}'] = True
+    _rnd = data.get('случайные_по_странам') or {}
+    if _rnd:
+        for k in _groups:
+            s[f'fc_rnd_{pid_key}_{k}'] = max(0, min(int(_rnd.get(k, 0) or 0),
+                                                    len(_groups[k])))
+        s[f'fc_rnd_total_{pid_key}'] = min(
+            sum(int(s[f'fc_rnd_{pid_key}_{k}']) for k in _groups), len(_all_names))
+    if data.get('режим_форм') in _FORMS_MODE_OPTIONS:
+        s[f'fc_forms_mode_{pid_key}'] = data['режим_форм']
+    if isinstance(data.get('формы'), list):
+        _fs = set(data['формы'])
+        for nm in _all_form_names:
+            s[f'ff_cb_{pid_key}_{nm}'] = nm in _fs
+        s[f'ff_init_{pid_key}'] = True
+    if 'очищать_лог' in data:
+        s[f'fc_clear_{pid_key}'] = bool(data['очищать_лог'])
+    if 'показывать_браузер' in data:
+        s[f'fc_show_{pid_key}'] = bool(data['показывать_браузер'])
+
+
+# Сохранённые настройки подхватываем сами (один раз за сессию на проект).
+if not st.session_state.get(f'fc_settings_loaded_{pid_key}'):
+    st.session_state[f'fc_settings_loaded_{pid_key}'] = True
+    if _SETTINGS_FILE.exists():
+        try:
+            _apply_saved(json.loads(_SETTINGS_FILE.read_text(encoding='utf-8')))
+        except Exception:
+            pass
+
+# Подсказки «?» на этой странице нужны (в app.py они выключены глобально).
+# Английскую техподсказку «Press Enter to apply» у числовых полей прячем –
+# значение и так применяется по Enter или клику мимо поля.
+st.markdown(
+    '<style>[data-testid="stTooltipIcon"], [data-testid="stTooltipHoverTarget"] '
+    '{ display: inline-flex !important; }\n'
+    '[data-testid="InputInstructions"] { display: none !important; }</style>',
+    unsafe_allow_html=True,
+)
+
+# ── Сценарий: рекомендованный / мои настройки ────────────────────────
+with st.container(border=True):
+    _sc1, _sc2, _sc3 = st.columns([1.7, 1.7, 2.6], vertical_alignment='center')
+    _rec_help = ('Наши стандартные настройки: основные домены всех стран и все формы.'
+                 + (' Плюс видимый браузер: на Мепэн без него формы не отправляются.'
+                    if pid_key in ('mpe', 'mpe_cart') else ''))
+    if _sc1.button('⭐ Рекомендованный сценарий', use_container_width=True,
+                   help=_rec_help):
+        _apply_recommended()
+        st.rerun()
+    if _sc2.button('💾 Сохранить мои настройки', use_container_width=True,
+                   help='Запомнить текущие галочки для этого проекта: при следующем '
+                        'заходе они подставятся сами.'):
+        try:
+            _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _SETTINGS_FILE.write_text(
+                json.dumps(_collect_settings(), ensure_ascii=False, indent=1),
+                encoding='utf-8')
+            st.toast('Настройки сохранены')
+        except Exception as _e:
+            st.toast(f'Не удалось сохранить: {_e}')
+    with _sc3:
+        _saved_ts = ''
+        if _SETTINGS_FILE.exists():
+            try:
+                _saved_ts = (json.loads(_SETTINGS_FILE.read_text(encoding='utf-8'))
+                             .get('сохранено') or '')
+            except Exception:
+                _saved_ts = ''
+        if _saved_ts:
+            st.caption(f'💾 Твои настройки сохранены {_saved_ts} и подставляются '
+                       'при заходе на проект.')
+        else:
+            st.caption('Настрой галочки ниже и нажми «Сохранить», чтобы они '
+                       'запомнились для этого проекта.')
+
+st.divider()
+
+# ── Домены и поддомены ───────────────────────────────────────────────
+# Домен = основной сайт страны (mepen.ru, mepen.kz…); поддомен = город на
+# этом домене (spb.mepen.ru). Без справочника городов – только основной сайт.
+if _cities:
     _example_sub = _host(_cities[1]['url']) if len(_cities) > 1 else ''
     st.subheader(
         'Домены и поддомены',
@@ -395,29 +547,12 @@ if _cities:
              'Поддомен – город на этом домене (например ' + _example_sub + '). '
              'Заявка с каждого выбранного сайта должна прийти на свою почту из справочника.',
     )
+    st.session_state.setdefault(f'fc_mode_{pid_key}', _MODE_OPTIONS[0])
     _mode = st.radio(
-        'Что проверяем',
-        ['Основные домены (по странам)', 'Выбрать города', 'Случайные города'],
+        'Что проверяем', _MODE_OPTIONS,
         horizontal=True, label_visibility='collapsed',
+        key=f'fc_mode_{pid_key}',
     )
-
-    def _round_robin(total):
-        """Раздаёт total по странам по кругу (начиная с России), не больше,
-        чем городов в стране."""
-        _counts = {k: 0 for k in _groups}
-        _left = int(total)
-        while _left > 0:
-            _gave = False
-            for k in _groups:
-                if _left <= 0:
-                    break
-                if _counts[k] < len(_groups[k]):
-                    _counts[k] += 1
-                    _left -= 1
-                    _gave = True
-            if not _gave:
-                break
-        return _counts
 
     if _mode == 'Основные домены (по странам)':
         # Одна строка на страну: галочка «Страна – домен». Галочки уже стоят.
@@ -463,12 +598,13 @@ if _cities:
         _tc, _ = st.columns([2.2, 3.8])
         with _tc:
             st.number_input(
-                'Всего проверок (распределится автоматически)',
+                'Сколько всего доменов/поддоменов проверить',
                 min_value=0, max_value=len(_all_names), step=1,
                 key=_tkey, on_change=_apply_total,
-                help='Введи общее число – оно само распределится по странам ниже '
-                     '(по кругу, начиная с России). Можно поправить число любой '
-                     'страны вручную – общее пересчитается.')
+                help='Введи число и нажми Enter (или кликни по пустому месту) – '
+                     'оно применится и само распределится по странам ниже, начиная '
+                     'с России. Число любой страны можно поправить вручную – общее '
+                     'пересчитается.')
 
         _counts = {}
         for _country, _names in _groups.items():
@@ -544,10 +680,8 @@ if _cities:
 _cities_none = bool(_cities) and not _chosen_cities
 
 # ── Формы ────────────────────────────────────────────────────────────
-# Список форм проекта (в порядке прогона). По умолчанию – все; можно выбрать
-# только нужные. Имена совпадают с тем, что попадает в отчёт.
-_all_forms = _list_forms(pid_key)
-_all_form_names = [f['name'] for f in _all_forms]
+# Список форм проекта (в порядке прогона) уже собран выше (_all_forms).
+# По умолчанию – все; можно выбрать только нужные. Имена совпадают с отчётом.
 _chosen_forms = list(_all_form_names)     # по умолчанию – все формы
 if _all_forms:
     st.subheader('Формы')
@@ -583,6 +717,13 @@ if _all_forms:
         def _pg_group(page):
             return (page or '').split('_')[0] or 'Прочее'
 
+        def _disp_name(nm):
+            """Имя формы для показа: без уточнения в скобках на конце
+            («Обратная связь (Контакты)» – показываем «Обратная связь»,
+            уточнение живёт в подсказке «?»). В отчёт и фильтр идёт полное имя."""
+            _b = re.sub(r'\s*\([^()]*\)\s*$', '', nm).strip()
+            return _b or nm
+
         _by_group = {}
         for f in _all_forms:
             _by_group.setdefault(_pg_group(f['page']), []).append(f)
@@ -591,16 +732,20 @@ if _all_forms:
             for _gi, (_grp, _items) in enumerate(_by_group.items()):
                 if _gi:
                     st.markdown(
-                        '<hr style="margin:2px 0 12px 0; border:none; '
+                        '<hr style="margin:4px 0 10px 0; border:none; '
                         'border-top:1px solid #ECEAE4">',
                         unsafe_allow_html=True)
                 _gcol, _ccol = st.columns([1.1, 4.9], vertical_alignment='top')
-                _gcol.markdown(f"**{_grp}**")
+                # небольшой отступ сверху, чтобы название страницы стояло
+                # ровно по первой строке галочек
+                _gcol.markdown(
+                    f"<div style='padding-top:.4rem;font-weight:600'>{_grp}</div>",
+                    unsafe_allow_html=True)
                 _fcols = _ccol.columns(3)
                 for _i, _f in enumerate(_items):
                     _hint = _FORM_WHERE.get(_f['name'])
                     if _fcols[_i % 3].checkbox(
-                            _f['name'], key=_fk(_f['name']),
+                            _disp_name(_f['name']), key=_fk(_f['name']),
                             help=_hint):
                         _sel_f.append(_f['name'])
         _chosen_forms = _sel_f
@@ -615,8 +760,10 @@ _forms_none = bool(_all_forms) and len(_chosen_forms) == 0
 # ── Запуск ──────────────────────────────────────────────────────────
 st.subheader('Запуск проверки')
 
-clear_log = st.checkbox('Очищать лог Excel перед прогоном', value=True)
-show_browser = st.checkbox('Показывать окно браузера', value=False)
+st.session_state.setdefault(f'fc_clear_{pid_key}', True)
+st.session_state.setdefault(f'fc_show_{pid_key}', False)
+clear_log = st.checkbox('Очищать лог Excel перед прогоном', key=f'fc_clear_{pid_key}')
+show_browser = st.checkbox('Показывать окно браузера', key=f'fc_show_{pid_key}')
 st.caption('По умолчанию браузер работает скрыто (headless) – окно не '
            'показывается, отчёт всё равно формируется. Включи галочку выше, '
            'если хочешь видеть, как он заполняет формы.')
