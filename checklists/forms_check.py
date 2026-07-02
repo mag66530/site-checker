@@ -339,22 +339,45 @@ if _cities:
     for c in _cities:
         _groups.setdefault(c['country'], []).append(c['city'])
 
-    st.subheader('Домены и поддомены')
-    st.caption('**Домен** – основной сайт страны (например `' + _host(_mains[0]['url']) +
-               '`). **Поддомен** – город на этом домене (например `' +
-               (_host(_cities[1]['url']) if len(_cities) > 1 else '') + '`). '
-               'Заявка с каждого домена/поддомена должна прийти на свою почту из справочника.')
+    # Подсказки «?» на этой странице нужны (в app.py они выключены глобально).
+    st.markdown(
+        '<style>[data-testid="stTooltipIcon"], [data-testid="stTooltipHoverTarget"] '
+        '{ display: inline-flex !important; }</style>',
+        unsafe_allow_html=True,
+    )
+    _example_sub = _host(_cities[1]['url']) if len(_cities) > 1 else ''
+    st.subheader(
+        'Домены и поддомены',
+        help='Домен – основной сайт страны (например ' + _host(_mains[0]['url']) + '). '
+             'Поддомен – город на этом домене (например ' + _example_sub + '). '
+             'Заявка с каждого выбранного сайта должна прийти на свою почту из справочника.',
+    )
     _mode = st.radio(
         'Что проверяем',
         ['Основные домены (по странам)', 'Выбрать города', 'Случайные города'],
         horizontal=True, label_visibility='collapsed',
     )
 
-    if _mode == 'Основные домены (по странам)':
-        # Главный домен каждой страны. Галочки уже стоят – можно снять лишние.
-        st.caption('Проверяются главные сайты каждой страны. Галочки уже стоят – '
-                   'сними те страны, которые проверять не нужно.')
+    def _round_robin(total):
+        """Раздаёт total по странам по кругу (начиная с России), не больше,
+        чем городов в стране."""
+        _counts = {k: 0 for k in _groups}
+        _left = int(total)
+        while _left > 0:
+            _gave = False
+            for k in _groups:
+                if _left <= 0:
+                    break
+                if _counts[k] < len(_groups[k]):
+                    _counts[k] += 1
+                    _left -= 1
+                    _gave = True
+            if not _gave:
+                break
+        return _counts
 
+    if _mode == 'Основные домены (по странам)':
+        # Одна строка на страну: галочка «Страна – домен». Галочки уже стоят.
         def _mk(country):
             return f'fc_main_{pid_key}_{country}'
         for c in _mains:                       # дефолт: все страны включены
@@ -362,65 +385,64 @@ if _cities:
                 st.session_state[_mk(c['country'])] = True
 
         _sel = []
-        _cols = st.columns(3)
-        for _i, c in enumerate(_mains):
-            with _cols[_i % 3]:
-                _lbl = f"{_COUNTRY_FLAG.get(c['country'], '🏳')} **{c['country']}** – {c['city']}"
-                if st.checkbox(_lbl, key=_mk(c['country'])):
-                    _sel.append(c['city'])
-                st.caption(f"`{_host(c['url'])}`")
+        for c in _mains:
+            _lbl = (f"{_COUNTRY_FLAG.get(c['country'], '🏳')} **{c['country']}** – "
+                    f"`{_host(c['url'])}`")
+            _hlp = f"Главный сайт страны, город: {c['city']}."
+            if c.get('mail'):
+                _hlp += f" Заявка должна прийти на {c['mail']}."
+            if st.checkbox(_lbl, key=_mk(c['country']), help=_hlp):
+                _sel.append(c['city'])
         _chosen_cities = _sel
         st.caption(f'Выбрано доменов: **{len(_sel)} / {len(_mains)}**.')
 
     elif _mode == 'Случайные города':
-        st.caption('Для каждой страны берётся её основной домен + случайные '
-                   'поддомены-города. Состав меняется при каждом запуске.')
-        _dist = st.radio(
-            'Как задать количество',
-            ['Общее число (распределить по странам автоматически)', 'Число по каждой стране'],
-            horizontal=True, key=f'fc_rnd_mode_{pid_key}',
-        )
+        # Один экран: сверху общее число (само распределяется по странам),
+        # ниже строки стран с числом справа. Правишь число у страны – общее
+        # пересчитывается. Основной домен страны всегда идёт первым.
+        _tkey = f'fc_rnd_total_{pid_key}'
+
+        def _ckey(country):
+            return f'fc_rnd_{pid_key}_{country}'
+
+        def _apply_total():
+            for k, v in _round_robin(st.session_state[_tkey]).items():
+                st.session_state[_ckey(k)] = v
+
+        def _apply_country():
+            st.session_state[_tkey] = sum(
+                int(st.session_state.get(_ckey(k), 0) or 0) for k in _groups)
+
+        if _tkey not in st.session_state:      # первичная инициализация
+            st.session_state[_tkey] = min(7, len(_all_names))
+            _apply_total()
+
+        _tc, _ = st.columns([2.2, 3.8])
+        with _tc:
+            st.number_input(
+                'Всего проверок (распределится автоматически)',
+                min_value=0, max_value=len(_all_names), step=1,
+                key=_tkey, on_change=_apply_total,
+                help='Введи общее число – оно само распределится по странам ниже '
+                     '(по кругу, начиная с России). Можно поправить число любой '
+                     'страны вручную – общее пересчитается.')
 
         _counts = {}
-        if _dist.startswith('Общее'):
-            _total_max = len(_all_names)
-            _total = st.number_input('Сколько всего доменов/поддоменов проверить',
-                                     min_value=1, max_value=_total_max,
-                                     value=min(7, _total_max), step=1,
-                                     key=f'fc_rnd_total_{pid_key}')
-            # Распределение по кругу: каждая страна получает по 1, потом снова по
-            # кругу (начиная с России), пока не раздадим всё. Больше городов, чем
-            # есть в стране, не даём.
-            _order = list(_groups.keys())
-            _counts = {k: 0 for k in _order}
-            _left = int(_total)
-            while _left > 0:
-                _gave = False
-                for k in _order:
-                    if _left <= 0:
-                        break
-                    if _counts[k] < len(_groups[k]):
-                        _counts[k] += 1
-                        _left -= 1
-                        _gave = True
-                if not _gave:
-                    break
-            st.caption('Распределение: ' + ' · '.join(
-                f"{_COUNTRY_FLAG.get(k, '🏳')} {k} – **{v}**"
-                for k, v in _counts.items() if v))
-        else:
-            st.caption('Укажи, сколько доменов/поддоменов проверить в каждой стране '
-                       '(0 – страну не проверяем).')
-            _cols = st.columns(min(4, max(1, len(_groups))))
-            for _i, (_country, _names) in enumerate(_groups.items()):
-                with _cols[_i % min(4, max(1, len(_groups)))]:
-                    _counts[_country] = int(st.number_input(
-                        f"{_COUNTRY_FLAG.get(_country, '🏳')} {_country} (из {len(_names)})",
-                        min_value=0, max_value=len(_names),
-                        value=min((2 if _country == 'Россия' else 1), len(_names)),
-                        step=1, key=f'fc_rnd_{pid_key}_{_country}'))
+        for _country, _names in _groups.items():
+            _row_l, _row_n, _row_c = st.columns([3, 1, 0.9], vertical_alignment='center')
+            _dom = _host(_main_by_country.get(_country, {}).get('url', ''))
+            _row_l.markdown(
+                f"{_COUNTRY_FLAG.get(_country, '🏳')} **{_country}** – `{_dom}`")
+            if _ckey(_country) not in st.session_state:
+                st.session_state[_ckey(_country)] = 0
+            _counts[_country] = int(_row_n.number_input(
+                _country, min_value=0, max_value=len(_names), step=1,
+                key=_ckey(_country), on_change=_apply_country,
+                label_visibility='collapsed'))
+            _row_c.caption(f'из {len(_names)}')
 
-        # Сборка списка: основной домен страны идёт первым, остальное – случайно.
+        # Сборка списка: основной домен страны первым, остальное – случайно.
+        _parts = []
         for _country, _names in _groups.items():
             _k = int(_counts.get(_country, 0) or 0)
             if _k <= 0:
@@ -431,18 +453,23 @@ if _cities:
             _extra = min(max(_k - len(_pick), 0), len(_pool))
             if _extra:
                 _pick += random.sample(_pool, _extra)
-            _chosen_cities += _pick[:_k]
+            _pick = _pick[:_k]
+            _chosen_cities += _pick
+            _parts.append(f"**{_country}**: {', '.join(_pick)}")
         if _chosen_cities:
-            st.caption('Сейчас выпало (пересоберётся при запуске): ' + ', '.join(_chosen_cities))
+            st.caption(f'Выбрано {len(_chosen_cities)} – ' + ' · '.join(_parts) +
+                       '. Случайные города пересоберутся при запуске.')
 
     else:  # Выбрать города – СЕТКА ЧЕКБОКСОВ по странам
+        _main_cities = {c['city'] for c in _mains}
+
         def _ck(city):
             return f'fc_cb_{pid_key}_{city}'
-        # один раз ставим дефолт: отмечены ВСЕ домены/поддомены
-        if not st.session_state.get(f'fc_init_all_{pid_key}'):
+        # один раз ставим дефолт: отмечены только ОСНОВНЫЕ домены стран
+        if not st.session_state.get(f'fc_init_mains_{pid_key}'):
             for nm in _all_names:
-                st.session_state[_ck(nm)] = True
-            st.session_state[f'fc_init_all_{pid_key}'] = True
+                st.session_state[_ck(nm)] = (nm in _main_cities)
+            st.session_state[f'fc_init_mains_{pid_key}'] = True
 
         _b1, _b2, _ = st.columns([1, 1, 4])
         if _b1.button('Выбрать все', use_container_width=True):
@@ -457,8 +484,11 @@ if _cities:
         _sel = []
         for _country, _names in _groups.items():
             _dom = _host(_main_by_country.get(_country, {}).get('url', ''))
-            st.markdown(f"**{_COUNTRY_FLAG.get(_country, '🏳')} {_country}**  ·  {len(_names)}"
-                        + (f"  ·  `{_dom}`" if _dom else ''))
+            st.markdown(
+                f"**{_COUNTRY_FLAG.get(_country, '🏳')} {_country}**  ·  {len(_names)} "
+                f"<span title='Основной домен: {_dom}' "
+                f"style='color:#8A8782;cursor:help;font-size:.85em'>?</span>",
+                unsafe_allow_html=True)
             _cols = st.columns(6)
             for _i, _nm in enumerate(_names):
                 if _cols[_i % 6].checkbox(_nm, key=_ck(_nm)):
@@ -466,8 +496,6 @@ if _cities:
         _chosen_cities = _sel
         st.caption(f'Выбрано: **{len(_sel)} / {len(_all_names)}** городов.')
 
-    if _mode not in ('Выбрать города', 'Основные домены (по странам)') and _chosen_cities:
-        st.caption(f'Будет проверено доменов/поддоменов: {len(_chosen_cities)}.')
     st.divider()
 
 _cities_none = bool(_cities) and not _chosen_cities
@@ -505,17 +533,26 @@ if _all_forms:
                 st.session_state[_fk(nm)] = False
             st.rerun()
 
-        # группировка по странице (в порядке прогона)
-        _by_page = {}
+        # Группировка по СТРАНИЦЕ сайта (без техназваний: Главная_расчёты и
+        # Главная – это одна «Главная»). Компактно: слева название страницы,
+        # справа галочки в 3 колонки. Подсказка «?» говорит, где искать форму.
+        def _pg_group(page):
+            return (page or '').split('_')[0] or 'Прочее'
+
+        _by_group = {}
         for f in _all_forms:
-            _by_page.setdefault(f['page'], []).append(f['name'])
+            _by_group.setdefault(_pg_group(f['page']), []).append(f)
         _sel_f = []
-        for _pg, _names in _by_page.items():
-            st.markdown(f"**{_pg}**  ·  {len(_names)}")
-            _fcols = st.columns(2)
-            for _i, _nm in enumerate(_names):
-                if _fcols[_i % 2].checkbox(_nm, key=_fk(_nm)):
-                    _sel_f.append(_nm)
+        for _grp, _items in _by_group.items():
+            _gcol, _ccol = st.columns([1.1, 4.9], vertical_alignment='top')
+            _gcol.markdown(f"**{_grp}**")
+            _fcols = _ccol.columns(3)
+            for _i, _f in enumerate(_items):
+                _hint = _f['page'].replace('_', ', ')
+                if _fcols[_i % 3].checkbox(
+                        _f['name'], key=_fk(_f['name']),
+                        help=f'Где искать: {_hint}'):
+                    _sel_f.append(_f['name'])
         _chosen_forms = _sel_f
         st.caption(f'Выбрано форм: **{len(_chosen_forms)} / {len(_all_forms)}**.')
     else:
@@ -541,9 +578,9 @@ st.caption('Запуск фоновый – интерфейс сразу сво
 _alive = _pid_alive(_read_pid())
 
 if _forms_none:
-    st.warning('Не выбрано ни одной формы — отметь хотя бы одну, чтобы запустить.')
+    st.warning('Не выбрано ни одной формы – отметь хотя бы одну, чтобы запустить.')
 if _cities_none:
-    st.warning('Не выбрано ни одного домена/города — отметь хотя бы один, чтобы запустить.')
+    st.warning('Не выбрано ни одного домена/города – отметь хотя бы один, чтобы запустить.')
 
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
