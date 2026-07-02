@@ -2694,10 +2694,27 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         )
                         успех = str(step.get("успех_текст") or step.get("success_text") or "")
                         ошибка = str(step.get("ошибка_текст") or step.get("error_text") or "")
-                        html = page.content()
-                        low = html.lower()
+                        # Подтверждение приходит ajax-ом с разной скоростью
+                        # (на части доменов дольше): опрашиваем страницу, пока
+                        # не появится признак успеха/ошибки или не выйдет время.
+                        try:
+                            _ждать_мс = int(step.get("ожидание_мс") or 12000)
+                        except (TypeError, ValueError):
+                            _ждать_мс = 12000
+                        _t0 = _time.time()
+                        while True:
+                            html = page.content()
+                            low = html.lower()
+                            _chk_err = response_indicates_form_error(html)
+                            if (not успех
+                                    or response_indicates_captcha_block(html)
+                                    or _chk_err
+                                    or (ошибка and ошибка.lower() in low)
+                                    or успех.lower() in low
+                                    or (_time.time() - _t0) * 1000 >= _ждать_мс):
+                                break
+                            page.wait_for_timeout(700)
                         log_url = page.url or base_url
-                        _chk_err = response_indicates_form_error(html)
                         _коммент_готовый = None
                         if response_indicates_captcha_block(html):
                             статус = "ОШИБКА: КАПЧА"

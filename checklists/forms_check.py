@@ -521,9 +521,28 @@ if _cities:
                 int(st.session_state.get(_ckey(k), 0) or 0) for k in _groups)
             _rnd_save()
 
+        def _apply_recommended_rnd():
+            """Рекомендованный сценарий случайной проверки: Россия – 2 (Москва +
+            случайный поддомен), остальные страны – по 1 (их основные домены)."""
+            for k in _groups:
+                st.session_state[_ckey(k)] = min(2 if k == 'Россия' else 1,
+                                                 len(_groups[k]))
+            st.session_state[_tkey] = sum(
+                int(st.session_state.get(_ckey(k), 0) or 0) for k in _groups)
+            _rnd_save()
+
         if _tkey not in st.session_state:      # первичная инициализация
             st.session_state[_tkey] = min(7, len(_all_names))
             _apply_total()
+
+        _, _rec = st.columns([4.4, 1.6])
+        if _rec.button('⭐ Рекомендованный сценарий', use_container_width=True,
+                       key=f'fc_rnd_rec_{pid_key}',
+                       help='Поставит рекомендованные числа: Россия – 2, остальные '
+                            'страны – по 1 (основной домен каждой страны + случайный '
+                            'поддомен России).'):
+            _apply_recommended_rnd()
+            st.rerun()
 
         _tc, _ = st.columns([2.2, 3.8])
         with _tc:
@@ -572,13 +591,16 @@ if _cities:
                    'следующем заходе.')
 
     else:  # Выбрать города – СЕТКА ЧЕКБОКСОВ по странам
+        _main_cities = {c['city'] for c in _mains}
+
         def _ck(city):
             return f'fc_cb_{pid_key}_{city}'
-        # один раз ставим дефолт: отмечены ВСЕ домены/поддомены
-        if not st.session_state.get(f'fc_init_vse_{pid_key}'):
+        # один раз ставим дефолт: отмечены ОСНОВНЫЕ домены каждой страны
+        # (Москва, aviastal.kz, Минск…), остальные города добираются вручную.
+        if not st.session_state.get(f'fc_init_osn_{pid_key}'):
             for nm in _all_names:
-                st.session_state[_ck(nm)] = True
-            st.session_state[f'fc_init_vse_{pid_key}'] = True
+                st.session_state[_ck(nm)] = (nm in _main_cities)
+            st.session_state[f'fc_init_osn_{pid_key}'] = True
 
         _b1, _b2, _ = st.columns([1, 1, 4])
         if _b1.button('Выбрать все', use_container_width=True):
