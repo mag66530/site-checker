@@ -2189,7 +2189,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _btn_css or "button[type='submit'], input[type='submit'], button.btn"
             ).first
             sub.scroll_into_view_if_needed()
-            sub.click(timeout=5000)
+            try:
+                sub.click(timeout=5000)
+            except Exception:
+                # Кнопку видно, но её перекрывает другой элемент (баг вёрстки
+                # на части доменов): кликаем принудительно – обработчик сайта
+                # срабатывает так же, как при обычном клике.
+                print("      ↻ Обычный клик по кнопке перекрыт – кликаем принудительно (force)")
+                sub.click(timeout=5000, force=True)
             page.wait_for_timeout(2500)
 
             html = page.content()
@@ -2377,7 +2384,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/124.0.0.0 Safari/537.36"
                 ),
-                viewport={"width": 1366, "height": 768},
+                # Полноразмерное окно: на узких вьюпортах у части сайтов
+                # (Авиапромсталь, СНГ-домены) элементы страницы наезжают на
+                # кнопки модалок и перехватывают клики.
+                viewport={"width": 1920, "height": 1080},
                 locale="ru-RU",
             )
             try:
