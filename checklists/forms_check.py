@@ -386,7 +386,9 @@ _all_form_names = [f['name'] for f in _all_forms]
 
 _MODE_OPTIONS = ['Основные домены (по странам)', 'Выбрать города', 'Случайные города']
 _FORMS_MODE_OPTIONS = ['Все формы', 'Выбрать формы']
-_SETTINGS_FILE = ROOT / 'cache' / 'forms' / pid_key / 'ui_settings.json'
+# Запоминаются ТОЛЬКО настройки «Случайных городов» (числа по странам).
+# Остальные галочки каждый заход начинаются с дефолта – так предсказуемее.
+_RND_FILE = ROOT / 'cache' / 'forms' / pid_key / 'random_cities.json'
 
 
 def _round_robin(total):
@@ -408,89 +410,37 @@ def _round_robin(total):
     return _counts
 
 
-def _apply_recommended():
-    """Рекомендованный сценарий: основные домены всех стран + все формы.
-    Для МПЭ дополнительно видимый браузер (без него формы не отправляются,
-    reCAPTCHA)."""
-    s = st.session_state
-    s[f'fc_mode_{pid_key}'] = _MODE_OPTIONS[0]
-    for c in _mains:
-        s[f'fc_main_{pid_key}_{c["country"]}'] = True
-    _mc = {c['city'] for c in _mains}
-    for nm in _all_names:
-        s[f'fc_cb_{pid_key}_{nm}'] = (nm in _mc)
-    s[f'fc_init_mains_{pid_key}'] = True
-    if _all_names:
-        s[f'fc_rnd_total_{pid_key}'] = min(7, len(_all_names))
-        for k, v in _round_robin(s[f'fc_rnd_total_{pid_key}']).items():
-            s[f'fc_rnd_{pid_key}_{k}'] = v
-    s[f'fc_forms_mode_{pid_key}'] = _FORMS_MODE_OPTIONS[0]
-    for nm in _all_form_names:
-        s[f'ff_cb_{pid_key}_{nm}'] = True
-    s[f'ff_init_{pid_key}'] = True
-    s[f'fc_clear_{pid_key}'] = True
-    s[f'fc_show_{pid_key}'] = pid_key in ('mpe', 'mpe_cart')
+def _rnd_save():
+    """Автосохранение чисел «Случайных городов» для проекта: сколько всего и
+    по каждой стране. Подхватываются при следующем заходе."""
+    try:
+        data = {
+            'всего': int(st.session_state.get(f'fc_rnd_total_{pid_key}', 0) or 0),
+            'по_странам': {k: int(st.session_state.get(f'fc_rnd_{pid_key}_{k}', 0) or 0)
+                           for k in _groups},
+        }
+        _RND_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _RND_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+    except Exception:
+        pass
 
 
-def _collect_settings():
-    """Текущие галочки страницы – в словарь для сохранения на диск."""
-    s = st.session_state
-    return {
-        'режим_доменов': s.get(f'fc_mode_{pid_key}', _MODE_OPTIONS[0]),
-        'страны': {c['country']: bool(s.get(f'fc_main_{pid_key}_{c["country"]}', True))
-                   for c in _mains},
-        'города': [nm for nm in _all_names if s.get(f'fc_cb_{pid_key}_{nm}')],
-        'случайные_по_странам': {k: int(s.get(f'fc_rnd_{pid_key}_{k}', 0) or 0)
-                                 for k in _groups},
-        'режим_форм': s.get(f'fc_forms_mode_{pid_key}', _FORMS_MODE_OPTIONS[0]),
-        'формы': [nm for nm in _all_form_names if s.get(f'ff_cb_{pid_key}_{nm}', True)],
-        'очищать_лог': bool(s.get(f'fc_clear_{pid_key}', True)),
-        'показывать_браузер': bool(s.get(f'fc_show_{pid_key}', False)),
-        'сохранено': datetime.now().strftime('%d.%m.%Y %H:%M'),
-    }
-
-
-def _apply_saved(data):
-    """Подставляет сохранённые настройки в галочки. Терпимо к устаревшим
-    данным: чужие/пропавшие города и формы просто игнорируются."""
-    s = st.session_state
-    if data.get('режим_доменов') in _MODE_OPTIONS:
-        s[f'fc_mode_{pid_key}'] = data['режим_доменов']
-    _saved_countries = data.get('страны') or {}
-    for c in _mains:
-        if c['country'] in _saved_countries:
-            s[f'fc_main_{pid_key}_{c["country"]}'] = bool(_saved_countries[c['country']])
-    if isinstance(data.get('города'), list):
-        _chosen = set(data['города'])
-        for nm in _all_names:
-            s[f'fc_cb_{pid_key}_{nm}'] = nm in _chosen
-        s[f'fc_init_mains_{pid_key}'] = True
-    _rnd = data.get('случайные_по_странам') or {}
-    if _rnd:
-        for k in _groups:
-            s[f'fc_rnd_{pid_key}_{k}'] = max(0, min(int(_rnd.get(k, 0) or 0),
-                                                    len(_groups[k])))
-        s[f'fc_rnd_total_{pid_key}'] = min(
-            sum(int(s[f'fc_rnd_{pid_key}_{k}']) for k in _groups), len(_all_names))
-    if data.get('режим_форм') in _FORMS_MODE_OPTIONS:
-        s[f'fc_forms_mode_{pid_key}'] = data['режим_форм']
-    if isinstance(data.get('формы'), list):
-        _fs = set(data['формы'])
-        for nm in _all_form_names:
-            s[f'ff_cb_{pid_key}_{nm}'] = nm in _fs
-        s[f'ff_init_{pid_key}'] = True
-    if 'очищать_лог' in data:
-        s[f'fc_clear_{pid_key}'] = bool(data['очищать_лог'])
-    if 'показывать_браузер' in data:
-        s[f'fc_show_{pid_key}'] = bool(data['показывать_браузер'])
-
-
-# Сохранённые настройки подхватываем сами (один раз за сессию на проект).
-if not st.session_state.get(f'fc_settings_loaded_{pid_key}'):
-    st.session_state[f'fc_settings_loaded_{pid_key}'] = True
-    if _SETTINGS_FILE.exists():
+# Сохранённые числа «Случайных городов» подхватываем сами (раз за сессию).
+if not st.session_state.get(f'fc_rnd_loaded_{pid_key}'):
+    st.session_state[f'fc_rnd_loaded_{pid_key}'] = True
+    if _RND_FILE.exists():
         try:
-            _apply_saved(json.loads(_SETTINGS_FILE.read_text(encoding='utf-8')))
+            _d = json.loads(_RND_FILE.read_text(encoding='utf-8'))
+            _by = _d.get('по_странам') or {}
+            if _by:
+                for k in _groups:
+                    if k in _by:
+                        st.session_state[f'fc_rnd_{pid_key}_{k}'] = max(
+                            0, min(int(_by[k] or 0), len(_groups[k])))
+                st.session_state[f'fc_rnd_total_{pid_key}'] = min(
+                    sum(int(st.session_state.get(f'fc_rnd_{pid_key}_{k}', 0) or 0)
+                        for k in _groups),
+                    len(_all_names))
         except Exception:
             pass
 
@@ -503,44 +453,6 @@ st.markdown(
     '[data-testid="InputInstructions"] { display: none !important; }</style>',
     unsafe_allow_html=True,
 )
-
-# ── Сценарий: рекомендованный / мои настройки ────────────────────────
-with st.container(border=True):
-    _sc1, _sc2, _sc3 = st.columns([1.7, 1.7, 2.6], vertical_alignment='center')
-    _rec_help = ('Наши стандартные настройки: основные домены всех стран и все формы.'
-                 + (' Плюс видимый браузер: на Мепэн без него формы не отправляются.'
-                    if pid_key in ('mpe', 'mpe_cart') else ''))
-    if _sc1.button('⭐ Рекомендованный сценарий', use_container_width=True,
-                   help=_rec_help):
-        _apply_recommended()
-        st.rerun()
-    if _sc2.button('💾 Сохранить мои настройки', use_container_width=True,
-                   help='Запомнить текущие галочки для этого проекта: при следующем '
-                        'заходе они подставятся сами.'):
-        try:
-            _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            _SETTINGS_FILE.write_text(
-                json.dumps(_collect_settings(), ensure_ascii=False, indent=1),
-                encoding='utf-8')
-            st.toast('Настройки сохранены')
-        except Exception as _e:
-            st.toast(f'Не удалось сохранить: {_e}')
-    with _sc3:
-        _saved_ts = ''
-        if _SETTINGS_FILE.exists():
-            try:
-                _saved_ts = (json.loads(_SETTINGS_FILE.read_text(encoding='utf-8'))
-                             .get('сохранено') or '')
-            except Exception:
-                _saved_ts = ''
-        if _saved_ts:
-            st.caption(f'💾 Твои настройки сохранены {_saved_ts} и подставляются '
-                       'при заходе на проект.')
-        else:
-            st.caption('Настрой галочки ниже и нажми «Сохранить», чтобы они '
-                       'запомнились для этого проекта.')
-
-st.divider()
 
 # ── Домены и поддомены ───────────────────────────────────────────────
 # Домен = основной сайт страны (mepen.ru, mepen.kz…); поддомен = город на
@@ -568,6 +480,16 @@ if _cities:
             if _mk(c['country']) not in st.session_state:
                 st.session_state[_mk(c['country'])] = True
 
+        # Одна кнопка-переключатель: если всё отмечено – «Снять все», иначе
+        # «Выбрать все» (как на других страницах панели).
+        _all_on = all(st.session_state.get(_mk(c['country']), True) for c in _mains)
+        _, _tgl = st.columns([4.4, 1.6])
+        if _tgl.button('Снять все' if _all_on else 'Выбрать все',
+                       use_container_width=True, key=f'fc_main_toggle_{pid_key}'):
+            for c in _mains:
+                st.session_state[_mk(c['country'])] = not _all_on
+            st.rerun()
+
         _sel = []
         for c in _mains:
             _lbl = (f"{_COUNTRY_FLAG.get(c['country'], '🏳')} **{c['country']}** – "
@@ -592,10 +514,12 @@ if _cities:
         def _apply_total():
             for k, v in _round_robin(st.session_state[_tkey]).items():
                 st.session_state[_ckey(k)] = v
+            _rnd_save()
 
         def _apply_country():
             st.session_state[_tkey] = sum(
                 int(st.session_state.get(_ckey(k), 0) or 0) for k in _groups)
+            _rnd_save()
 
         if _tkey not in st.session_state:      # первичная инициализация
             st.session_state[_tkey] = min(7, len(_all_names))
@@ -644,17 +568,17 @@ if _cities:
         if _chosen_cities:
             st.caption(f'Выбрано {len(_chosen_cities)} – ' + ' · '.join(_parts) +
                        '. Случайные города пересоберутся при запуске.')
+        st.caption('Числа запоминаются для этого проекта и подставятся при '
+                   'следующем заходе.')
 
     else:  # Выбрать города – СЕТКА ЧЕКБОКСОВ по странам
-        _main_cities = {c['city'] for c in _mains}
-
         def _ck(city):
             return f'fc_cb_{pid_key}_{city}'
-        # один раз ставим дефолт: отмечены только ОСНОВНЫЕ домены стран
-        if not st.session_state.get(f'fc_init_mains_{pid_key}'):
+        # один раз ставим дефолт: отмечены ВСЕ домены/поддомены
+        if not st.session_state.get(f'fc_init_vse_{pid_key}'):
             for nm in _all_names:
-                st.session_state[_ck(nm)] = (nm in _main_cities)
-            st.session_state[f'fc_init_mains_{pid_key}'] = True
+                st.session_state[_ck(nm)] = True
+            st.session_state[f'fc_init_vse_{pid_key}'] = True
 
         _b1, _b2, _ = st.columns([1, 1, 4])
         if _b1.button('Выбрать все', use_container_width=True):
