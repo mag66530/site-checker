@@ -97,6 +97,9 @@ st.markdown(
        размазанно, а подписи полей и так понятны. Если где-то нужна подсказка –
        вынесем текстом, а не иконкой. */
     [data-testid="stTooltipIcon"] { display: none !important; }
+    /* Английская техподсказка «Press Enter to apply» у полей ввода – прячем,
+       значение применяется по Enter или клику мимо поля. */
+    [data-testid="InputInstructions"] { display: none !important; }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
     /* Карточки-контейнеры (с рамкой) – белые, чтобы блоки не сливались с фоном */
