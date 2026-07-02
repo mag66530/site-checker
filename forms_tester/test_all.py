@@ -2182,8 +2182,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 )
                 return True
 
+            # Кнопка отправки: по умолчанию стандартные submit-кнопки; если у сайта
+            # своя (например button.send у Авиапромсталь) – задаётся ключом «кнопка_css».
+            _btn_css = str(форма_config.get("кнопка_css") or "").strip()
             sub = form.locator(
-                "button[type='submit'], input[type='submit'], button.btn"
+                _btn_css or "button[type='submit'], input[type='submit'], button.btn"
             ).first
             sub.scroll_into_view_if_needed()
             sub.click(timeout=5000)
