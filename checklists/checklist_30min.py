@@ -1014,14 +1014,24 @@ if pid:
                      'c30_check_products', 'c30_check_text']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
+        # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
+        # прогоне session_state консистентен (галочки покажут ровно эти значения),
+        # поэтому подпись всегда совпадает. Обычную кнопку (не в st.empty) – иначе
+        # плейсхолдер «залипал» со старой подписью после клика.
+        _all_on = all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
+
+        def _c30_toggle_all():
+            # всё включено → снять всё, иначе → выбрать всё
+            _target = not all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
+            for _k in _CHK_KEYS:
+                st.session_state[_k] = _target
         _hc1, _hc2 = st.columns([3, 1])
         with _hc1:
             st.markdown('### Что проверять на страницах')
-        # Кнопку «Выбрать/Снять все» рисуем в плейсхолдере, а заполняем ПОСЛЕ
-        # галочек – тогда её подпись всегда совпадает с фактическим состоянием
-        # (был баг: висело «Снять все», хотя не выбрано ничего).
         with _hc2:
-            _toggle_ph = st.empty()
+            st.button('Снять все' if _all_on else 'Выбрать все',
+                      key='c30_select_all', on_click=_c30_toggle_all,
+                      use_container_width=True)
         _cb_col1, _cb_col2 = st.columns(2)
         with _cb_col1:
             st.checkbox('1.1  Главная', key='c30_check_main')
@@ -1036,16 +1046,6 @@ if pid:
             st.checkbox('1.5  Товары', key='c30_check_products')
             st.checkbox('1.6  Текстовые блоки категорий/фильтров/товаров и переменные',
                         key='c30_check_text')
-        _all_on = all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
-
-        def _c30_toggle_all():
-            # всё включено → снять всё, иначе → выбрать всё
-            _target = not all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
-            for _k in _CHK_KEYS:
-                st.session_state[_k] = _target
-        _toggle_ph.button('Снять все' if _all_on else 'Выбрать все',
-                          key='c30_select_all', on_click=_c30_toggle_all,
-                          use_container_width=True)
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
