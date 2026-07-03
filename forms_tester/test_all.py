@@ -4,7 +4,7 @@
 """
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, unquote
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
 import os
@@ -2189,6 +2189,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _btn_css or "button[type='submit'], input[type='submit'], button.btn"
             ).first
             sub.scroll_into_view_if_needed()
+            _t_отправки = _time.time()   # цели Метрики считаем с момента отправки
             try:
                 sub.click(timeout=5000)
             except Exception:
@@ -2231,6 +2232,43 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 }
             )
             print(f"   ✅ {название} - {статус}")
+
+            # Опционально: проверка цели Метрики после отправки (ключ «цель» у
+            # формы). Отдельная строка отчёта «ЦЕЛЬ (Метрика)».
+            _цель_имя = str(форма_config.get("цель") or "").strip()
+            if _цель_имя:
+                _t0g = _time.time()
+                _найдена = False
+                while True:
+                    _найдена = any(g["цель"] == _цель_имя for g in _цели_с(_t_отправки))
+                    if _найдена or (_time.time() - _t0g) * 1000 >= 10000:
+                        break
+                    page.wait_for_timeout(500)
+                _nm = str(форма_config.get("цель_название") or f"Цель: {название}")
+                _г_коммент = None
+                if _найдена:
+                    _г_статус = "УСПЕШНО (цель зафиксирована Метрикой)"
+                else:
+                    _г_статус = "ОШИБКА"
+                    _г_коммент = (f"Цель «{_цель_имя}» не сработала: Метрика не "
+                                  "получила reachGoal")
+                записать_в_excel(
+                    {
+                        "тип": "ЦЕЛЬ (Метрика)",
+                        "страница": страница,
+                        "url": page.url or log_url,
+                        "тип_селектора": "цель",
+                        "ид": _цель_имя,
+                        "название": _nm,
+                        "имя": имя_теста_из_конфига(страница, "цель", _nm,
+                                                    название_контекста=_nm),
+                        "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else _nm,
+                        "комментарий_готовый": _г_коммент,
+                        "статус": _г_статус,
+                        "код": "ym",
+                    }
+                )
+                print(f"   🎯 Цель «{_цель_имя}» – {_г_статус}")
             return True
 
         except Exception as e:
@@ -2364,7 +2402,24 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     # Раньше браузер запускался на каждую форму/сценарий – очень медленно. Теперь
     # запускаем один раз, на каждую форму открываем новую вкладку. При сбое контекста
     # (обрыв соединения и т.п.) – пересоздаём и повторяем.
-    _pw = {"play": None, "browser": None, "context": None}
+    # goals – пойманные цели Яндекс.Метрики за прогон: [{"цель", "время"}].
+    # Каждый reachGoal уходит запросом на mc.yandex.* с page-url=goal://домен/цель –
+    # перехватываем эти запросы, шаг «проверить_цель» ищет цель в списке.
+    _pw = {"play": None, "browser": None, "context": None, "goals": []}
+
+    def _поймать_цель(request):
+        try:
+            u = request.url
+            if ("mc.yandex" in u or "mc.webvisor" in u) and "goal" in u:
+                for t in re.findall(r"goal://[^/]+/([^&\s\"?#]+)", unquote(u)):
+                    _pw["goals"].append({"цель": t, "время": _time.time()})
+                    print(f"      🎯 Метрика: зафиксирована цель «{t}»")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _цели_с(ts):
+        """Цели, пойманные начиная с момента ts."""
+        return [g for g in _pw["goals"] if g["время"] >= ts]
 
     def _shared_context():
         h = _pw
@@ -2394,6 +2449,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 h["context"].add_init_script(
                     "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
                 )
+            except Exception:
+                pass
+            try:
+                h["context"].on("request", _поймать_цель)
             except Exception:
                 pass
         return h["context"]
@@ -2506,6 +2565,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         if True:  # общий браузер (пул): новая вкладка вместо запуска нового Chromium
             page = _open_page()
             _тек_шаг_инфо = ""
+            _scn_t0 = _time.time()   # цели Метрики считаем с начала сценария
             try:
                 _ensure_scenario_page_loaded(page, base_url)
                 _run_page_prep(page, страница)
@@ -2752,6 +2812,57 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         )
                         print(f"   🔎 Шаг {i + 1}: проверка «{nm}» – {статус}")
 
+                    elif act in ("проверить_цель", "check_goal"):
+                        # Проверка цели Яндекс.Метрики: ждём, пока перехватчик
+                        # поймает reachGoal с нужным именем (цели уходят ajax-ом,
+                        # поэтому опрашиваем список до «ожидание_мс»).
+                        nm = (
+                            step.get("название")
+                            or step.get("название_теста")
+                            or f"цель шаг {i + 1}"
+                        )
+                        цель = str(step.get("цель") or step.get("goal") or "").strip()
+                        try:
+                            _ждать_мс = int(step.get("ожидание_мс") or 10000)
+                        except (TypeError, ValueError):
+                            _ждать_мс = 10000
+                        _t0g = _time.time()
+                        _найдена = False
+                        while цель:
+                            _найдена = any(g["цель"] == цель for g in _цели_с(_scn_t0))
+                            if _найдена or (_time.time() - _t0g) * 1000 >= _ждать_мс:
+                                break
+                            page.wait_for_timeout(500)
+                        _коммент_готовый = None
+                        if not цель:
+                            статус = "ОШИБКА"
+                            _коммент_готовый = "В шаге «проверить_цель» не задано имя цели"
+                        elif _найдена:
+                            статус = "УСПЕШНО (цель зафиксирована Метрикой)"
+                        else:
+                            статус = "ОШИБКА"
+                            _коммент_готовый = (f"Цель «{цель}» не сработала: Метрика не "
+                                                "получила reachGoal")
+                        имя_лог = имя_теста_из_конфига(
+                            страница, "цель", nm, название_контекста=nm
+                        )
+                        записать_в_excel(
+                            {
+                                "тип": "ЦЕЛЬ (Метрика)",
+                                "страница": страница,
+                                "url": page.url or base_url,
+                                "тип_селектора": "цель",
+                                "ид": цель,
+                                "название": nm,
+                                "имя": имя_лог,
+                                "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_лог,
+                                "комментарий_готовый": _коммент_готовый,
+                                "статус": статус,
+                                "код": "ym",
+                            }
+                        )
+                        print(f"   🎯 Шаг {i + 1}: цель «{цель}» – {статус}")
+
                     elif act in ("проверить_корзину", "check_cart"):
                         # Проверка: реально ли товар попал в корзину. На СНГ-доменах
                         # кнопка «Добавить в корзину» – баг разработчиков: клик ничего
@@ -2825,6 +2936,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 had_form_or_modal = any(
                     _нормализовать_действие_шага(s)
                     in ("форма", "модалка", "проверить", "итог", "check",
+                        "проверить_цель", "check_goal",
                         "заполнить_по_метке", "fill_by_label", "поле_по_метке")
                     for s in шаги
                     if _step_scenario_enabled(s)

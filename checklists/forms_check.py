@@ -210,10 +210,12 @@ def _count_expected(project: str) -> int:
                 if not on(sc):
                     continue
                 for step in sc.get('шаги', []) or []:
-                    if step.get('действие') in ('форма', 'модалка', 'проверить') and on(step):
+                    if step.get('действие') in ('форма', 'модалка', 'проверить',
+                                                'проверить_цель') and on(step):
                         total += 1
             for step in block.get('шаги', []) or []:  # legacy
-                if step.get('действие') in ('форма', 'модалка', 'проверить') and on(step):
+                if step.get('действие') in ('форма', 'модалка', 'проверить',
+                                            'проверить_цель') and on(step):
                     total += 1
     except Exception:
         return 0
@@ -535,16 +537,10 @@ if _cities:
             st.session_state[_tkey] = min(7, len(_all_names))
             _apply_total()
 
-        _, _rec = st.columns([4.4, 1.6])
-        if _rec.button('⭐ Рекомендованный сценарий', use_container_width=True,
-                       key=f'fc_rnd_rec_{pid_key}',
-                       help='Поставит рекомендованные числа: Россия – 2, остальные '
-                            'страны – по 1 (основной домен каждой страны + случайный '
-                            'поддомен России).'):
-            _apply_recommended_rnd()
-            st.rerun()
-
-        _tc, _ = st.columns([2.2, 3.8])
+        # Поле «сколько всего» и кнопка рекомендованного – в одной строке,
+        # кнопка выровнена по нижнему краю поля. Звезда ★ текстовая – рисуется
+        # цветом текста сайта (эмодзи ⭐ всегда жёлтая).
+        _tc, _, _rec = st.columns([2.2, 1.7, 2.1], vertical_alignment='bottom')
         with _tc:
             st.number_input(
                 'Сколько всего доменов/поддоменов проверить',
@@ -554,6 +550,13 @@ if _cities:
                      'оно применится и само распределится по странам ниже, начиная '
                      'с России. Число любой страны можно поправить вручную – общее '
                      'пересчитается.')
+        if _rec.button('★ Рекомендованный сценарий', use_container_width=True,
+                       key=f'fc_rnd_rec_{pid_key}',
+                       help='Поставит рекомендованные числа: Россия – 2, остальные '
+                            'страны – по 1 (основной домен каждой страны + случайный '
+                            'поддомен России).'):
+            _apply_recommended_rnd()
+            st.rerun()
 
         _counts = {}
         for _country, _names in _groups.items():
