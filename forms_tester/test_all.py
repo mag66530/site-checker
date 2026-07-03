@@ -1219,6 +1219,22 @@ LOG_KEYS_ORDER = [
     "название", "имя", "телефон", "почта", "почта_получателя", "статус", "комментарий",
 ]
 
+# Отдельный лист «Цели» (Яндекс.Метрика): свои колонки – форма/кнопка + идентификатор цели.
+GOAL_HEADERS = [
+    "Дата", "Время", "Город", "Страница", "Форма / кнопка",
+    "Цель (идентификатор)", "URL", "Статус", "Комментарий",
+]
+GOAL_KEYS_ORDER = [
+    "дата", "время", "город", "страница", "название",
+    "ид", "url", "статус", "комментарий",
+]
+
+
+def _строка_это_цель(row: dict) -> bool:
+    """Строка относится к целям Метрики (идёт на отдельный лист «Цели»)."""
+    return (str(row.get("тип", "")).upper().startswith("ЦЕЛЬ")
+            or str(row.get("код", "")).startswith("ym"))
+
 
 def _status_clean_reason(raw: str):
     """Из «сырого» статуса делает (короткое_слово, причина).
@@ -1299,26 +1315,41 @@ def init_excel_log(path: str, очистить: bool = True) -> None:
 
 
 def append_log_row(path: str, row: dict) -> None:
-    """Добавляет строку лога в конец файла по порядку колонок LOG_KEYS_ORDER.
-    Колонку «Статус» подкрашивает: зелёный – Успешно/Заполнено, красный – Ошибка."""
+    """Добавляет строку в конец файла. Строки форм/сценариев идут на лист «Логи»,
+    строки целей Метрики – на отдельный лист «Цели». Колонку «Статус» красит:
+    зелёный – Успешно/Заполнено/Зафиксирована, красный – Ошибка."""
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
     wb = load_workbook(path)
-    # Пишем строго в лист «Логи» (а не в активный): рядом может появиться
-    # лист «Сводка», и wb.active мог бы указывать на него.
-    ws = wb["Логи"] if "Логи" in wb.sheetnames else wb.active
+
+    цель_строка = _строка_это_цель(row)
+    if цель_строка:
+        # лист «Цели» создаём при первой цели
+        if "Цели" in wb.sheetnames:
+            ws = wb["Цели"]
+        else:
+            ws = wb.create_sheet("Цели")
+            for col, val in enumerate(GOAL_HEADERS, 1):
+                ws.cell(1, col, val)
+                ws.column_dimensions[get_column_letter(col)].width = len(str(val)) + 3
+        keys, headers = GOAL_KEYS_ORDER, GOAL_HEADERS
+    else:
+        # Пишем строго в лист «Логи» (а не в активный): рядом есть «Сводка»/«Цели».
+        ws = wb["Логи"] if "Логи" in wb.sheetnames else wb.active
+        keys, headers = LOG_KEYS_ORDER, LOG_HEADERS
+
     r = ws.max_row + 1
-    for col, key in enumerate(LOG_KEYS_ORDER, 1):
+    for col, key in enumerate(keys, 1):
         val = row.get(key, "")
         ws.cell(r, col, val)
         # авто-ширина: растим колонку под содержимое (с разумным потолком)
         letter = get_column_letter(col)
-        cur = ws.column_dimensions[letter].width or (len(LOG_HEADERS[col - 1]) + 3)
+        cur = ws.column_dimensions[letter].width or (len(headers[col - 1]) + 3)
         ws.column_dimensions[letter].width = min(max(cur, len(str(val)) + 3), 70)
     try:
-        si = LOG_KEYS_ORDER.index("статус") + 1
+        si = keys.index("статус") + 1
         sval = str(row.get("статус", "")).strip().lower()
-        if sval in ("успешно", "заполнено"):
+        if sval in ("успешно", "заполнено", "зафиксирована"):
             ws.cell(r, si).font = Font(color="1E8E3E", bold=True)   # зелёный
         elif sval.startswith("ошибк"):
             ws.cell(r, si).font = Font(color="C62828", bold=True)   # красный
@@ -1424,6 +1455,31 @@ def write_summary_sheet(path: str, время_прогона: str = "") -> None:
                 b = cell.border
                 cell.border = Border(left=b.left, right=b.right, bottom=b.bottom, top=thick)
         prev_city = cur
+
+    # --- Лист «Цели»: та же жирная шапка (фиолетовая, под «метку цели») ---
+    if "Цели" in wb.sheetnames:
+        gw = wb["Цели"]
+        g_fill = PatternFill("solid", fgColor="EDE7F6")   # мягкий сиреневый
+        gcol = max(1, len(GOAL_HEADERS))
+        for c in range(1, gcol + 1):
+            gc = gw.cell(1, c)
+            gc.font = Font(bold=True)
+            gc.fill = g_fill
+        try:
+            gw.freeze_panes = "A2"
+        except Exception:
+            pass
+        # разделение по городам – как в «Логах» (город в колонке 3)
+        prev = None
+        for r in range(2, gw.max_row + 1):
+            cur = str(gw.cell(r, 3).value or "").strip()
+            if prev is not None and cur != prev:
+                for c in range(1, gcol + 1):
+                    cell = gw.cell(r, c)
+                    b = cell.border
+                    cell.border = Border(left=b.left, right=b.right,
+                                         bottom=b.bottom, top=thick)
+            prev = cur
 
     wb.active = wb.sheetnames.index("Сводка")
     wb.save(path)

@@ -210,12 +210,12 @@ def _count_expected(project: str) -> int:
                 if not on(sc):
                     continue
                 for step in sc.get('шаги', []) or []:
-                    if step.get('действие') in ('форма', 'модалка', 'проверить',
-                                                'проверить_цель') and on(step):
+                    # проверить_цель НЕ считаем: строки целей идут на отдельный
+                    # лист «Цели», а прогресс считает строки основного лога.
+                    if step.get('действие') in ('форма', 'модалка', 'проверить') and on(step):
                         total += 1
             for step in block.get('шаги', []) or []:  # legacy
-                if step.get('действие') in ('форма', 'модалка', 'проверить',
-                                            'проверить_цель') and on(step):
+                if step.get('действие') in ('форма', 'модалка', 'проверить') and on(step):
                     total += 1
     except Exception:
         return 0
@@ -331,7 +331,10 @@ def _rows_done(xlsx: Path):
     try:
         from openpyxl import load_workbook
         wb = load_workbook(xlsx, read_only=True)
-        n = (wb.active.max_row or 1) - 1
+        # Считаем строки ИМЕННО листа «Логи» (не активного и не «Цели»):
+        # строки целей на отдельном листе не должны раздувать прогресс.
+        ws = wb["Логи"] if "Логи" in wb.sheetnames else wb.active
+        n = (ws.max_row or 1) - 1
         wb.close()
         return max(n, 0)
     except Exception:
