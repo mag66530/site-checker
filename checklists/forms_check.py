@@ -485,25 +485,27 @@ if _cities:
             if _mk(c['country']) not in st.session_state:
                 st.session_state[_mk(c['country'])] = True
 
-        # Одна кнопка-переключатель СПРАВА (как «Снять все» в разделе «Формы»):
-        # если всё отмечено – «Снять все», иначе «Выбрать все».
+        # Список доменов СЛЕВА, кнопка-переключатель СПРАВА (в той же строке –
+        # без пустого пространства над списком). «Снять все», если всё отмечено,
+        # иначе «Выбрать все».
         _all_on = all(st.session_state.get(_mk(c['country']), True) for c in _mains)
-        _, _tgl = st.columns([4.0, 1.3])
-        if _tgl.button('Снять все' if _all_on else 'Выбрать все',
-                       use_container_width=True, key=f'fc_main_toggle_{pid_key}'):
-            for c in _mains:
-                st.session_state[_mk(c['country'])] = not _all_on
-            st.rerun()
-
+        _left, _right = st.columns([4.2, 1.3], vertical_alignment='top')
+        with _right:
+            if st.button('Снять все' if _all_on else 'Выбрать все',
+                         use_container_width=True, key=f'fc_main_toggle_{pid_key}'):
+                for c in _mains:
+                    st.session_state[_mk(c['country'])] = not _all_on
+                st.rerun()
         _sel = []
-        for c in _mains:
-            _lbl = (f"{_COUNTRY_FLAG.get(c['country'], '🏳')} **{c['country']}** – "
-                    f"`{_host(c['url'])}`")
-            _hlp = f"Главный сайт страны, город: {c['city']}."
-            if c.get('mail'):
-                _hlp += f" Заявка должна прийти на {c['mail']}."
-            if st.checkbox(_lbl, key=_mk(c['country']), help=_hlp):
-                _sel.append(c['city'])
+        with _left:
+            for c in _mains:
+                _lbl = (f"{_COUNTRY_FLAG.get(c['country'], '🏳')} **{c['country']}** – "
+                        f"`{_host(c['url'])}`")
+                _hlp = f"Главный сайт страны, город: {c['city']}."
+                if c.get('mail'):
+                    _hlp += f" Заявка должна прийти на {c['mail']}."
+                if st.checkbox(_lbl, key=_mk(c['country']), help=_hlp):
+                    _sel.append(c['city'])
         _chosen_cities = _sel
         st.caption(f'Выбрано доменов: **{len(_sel)} / {len(_mains)}**.')
 
