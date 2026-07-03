@@ -485,10 +485,10 @@ if _cities:
             if _mk(c['country']) not in st.session_state:
                 st.session_state[_mk(c['country'])] = True
 
-        # Одна кнопка-переключатель СЛЕВА: если всё отмечено – «Снять все»,
-        # иначе «Выбрать все» (как кнопки в режиме «Выбрать города»).
+        # Одна кнопка-переключатель СПРАВА (как «Снять все» в разделе «Формы»):
+        # если всё отмечено – «Снять все», иначе «Выбрать все».
         _all_on = all(st.session_state.get(_mk(c['country']), True) for c in _mains)
-        _tgl, _ = st.columns([1.5, 4.5])
+        _, _tgl = st.columns([4.0, 1.3])
         if _tgl.button('Снять все' if _all_on else 'Выбрать все',
                        use_container_width=True, key=f'fc_main_toggle_{pid_key}'):
             for c in _mains:
@@ -633,11 +633,6 @@ if _cities:
         _chosen_cities = _sel
         st.caption(f'Выбрано: **{len(_sel)} / {len(_all_names)}** городов.')
 
-    # Итог: что реально уйдёт в прогон – по АКТИВНОЙ вкладке (переключатель выше).
-    # Проверяется всегда выбранная вкладка, а не «случайные вообще».
-    if _chosen_cities:
-        st.info(f'▶ Запуск по режиму «{_mode}»: будет проверено '
-                f'**{len(_chosen_cities)}** доменов/городов.')
     st.divider()
 
 _cities_none = bool(_cities) and not _chosen_cities
