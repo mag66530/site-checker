@@ -485,10 +485,10 @@ if _cities:
             if _mk(c['country']) not in st.session_state:
                 st.session_state[_mk(c['country'])] = True
 
-        # Одна кнопка-переключатель: если всё отмечено – «Снять все», иначе
-        # «Выбрать все» (как на других страницах панели).
+        # Одна кнопка-переключатель СЛЕВА: если всё отмечено – «Снять все»,
+        # иначе «Выбрать все» (как кнопки в режиме «Выбрать города»).
         _all_on = all(st.session_state.get(_mk(c['country']), True) for c in _mains)
-        _, _tgl = st.columns([4.4, 1.6])
+        _tgl, _ = st.columns([1.5, 4.5])
         if _tgl.button('Снять все' if _all_on else 'Выбрать все',
                        use_container_width=True, key=f'fc_main_toggle_{pid_key}'):
             for c in _mains:
@@ -540,10 +540,12 @@ if _cities:
             st.session_state[_tkey] = min(7, len(_all_names))
             _apply_total()
 
-        # Поле «сколько всего» и кнопка рекомендованного – в одной строке,
+        # Поле «сколько всего» и кнопка рекомендованного – в одной строке рядом,
         # кнопка выровнена по нижнему краю поля. Звезда ★ текстовая – рисуется
         # цветом текста сайта (эмодзи ⭐ всегда жёлтая).
-        _tc, _, _rec = st.columns([2.2, 1.7, 2.1], vertical_alignment='bottom')
+        # ВАЖНО: значение поля _tkey нельзя менять после его отрисовки, поэтому
+        # кнопка работает через колбэк on_click (он выполняется ДО отрисовки полей).
+        _tc, _rec, _ = st.columns([2.2, 2.3, 1.5], vertical_alignment='bottom')
         with _tc:
             st.number_input(
                 'Сколько всего доменов/поддоменов проверить',
@@ -553,13 +555,11 @@ if _cities:
                      'оно применится и само распределится по странам ниже, начиная '
                      'с России. Число любой страны можно поправить вручную – общее '
                      'пересчитается.')
-        if _rec.button('★ Рекомендованный сценарий', use_container_width=True,
-                       key=f'fc_rnd_rec_{pid_key}',
-                       help='Поставит рекомендованные числа: Россия – 2, остальные '
-                            'страны – по 1 (основной домен каждой страны + случайный '
-                            'поддомен России).'):
-            _apply_recommended_rnd()
-            st.rerun()
+        _rec.button('★ Рекомендованный сценарий', use_container_width=True,
+                    key=f'fc_rnd_rec_{pid_key}', on_click=_apply_recommended_rnd,
+                    help='Поставит рекомендованные числа: Россия – 2, остальные '
+                         'страны – по 1 (основной домен каждой страны + случайный '
+                         'поддомен России).')
 
         _counts = {}
         for _country, _names in _groups.items():
@@ -633,6 +633,11 @@ if _cities:
         _chosen_cities = _sel
         st.caption(f'Выбрано: **{len(_sel)} / {len(_all_names)}** городов.')
 
+    # Итог: что реально уйдёт в прогон – по АКТИВНОЙ вкладке (переключатель выше).
+    # Проверяется всегда выбранная вкладка, а не «случайные вообще».
+    if _chosen_cities:
+        st.info(f'▶ Запуск по режиму «{_mode}»: будет проверено '
+                f'**{len(_chosen_cities)}** доменов/городов.')
     st.divider()
 
 _cities_none = bool(_cities) and not _chosen_cities
