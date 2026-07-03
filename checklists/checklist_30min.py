@@ -864,6 +864,12 @@ with st.container(border=True):
         # Поля выборки перечитаются под новый проект (свои лимиты городов).
         for _k in ('c30_in_cities', 'c30_in_cats', 'c30_in_filters', 'c30_in_products'):
             st.session_state.pop(_k, None)
+        # Галочки «Что проверять» при заходе на проект – все включены (дефолт).
+        # Ставим ЯВНО здесь (до отрисовки чекбоксов), иначе значение из init_session
+        # не подхватывалось виджетом и галочки выходили пустыми, а кнопка врала.
+        for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
+                   'c30_check_filters', 'c30_check_products', 'c30_check_text'):
+            st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
 
