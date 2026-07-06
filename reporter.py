@@ -1516,7 +1516,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     ws.row_dimensions[row].height = 30
     row += 2
 
-    # ── Секция 1: закрытые страницы выборки ──
+    # ── Секция 1: закрытые страницы выборки (сгруппированы по проблеме) ──
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
     c.value = f'Страницы, закрытые от индексации  ({len(bad)})'
@@ -1533,38 +1533,12 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         c.font = _font(size=10, color=C.ok)
         c.alignment = _align(indent=1)
         ws.row_dimensions[row].height = 22
-        row += 1
+        row += 2
     else:
-        for ci, h in enumerate(['Город', 'Тип', 'URL', 'Что не так'], 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = h
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
-            cell.fill = _fill(C.surface)
-            cell.alignment = _align()
-            cell.border = _border()
-        ws.row_dimensions[row].height = 20
-        row += 1
-        for r in bad:
-            ws.row_dimensions[row].height = 30
-            vals = [
-                (r.city or '–', {'size': 10, 'color': C.text}),
-                (r.type_label, {'size': 9, 'color': C.text_muted}),
-                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
-                ('; '.join(r.indexing.get('issues') or []),
-                 {'size': 10, 'color': C.err}),
-            ]
-            for ci, (val, kw) in enumerate(vals, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 4:
-                    cell.hyperlink = r.url
-            row += 1
-    row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(bad, 'indexing', 'issues'), C.err)
 
-    # ── Секция 2: предупреждения (canonical на другой URL и т.п.) ──
+    # ── Секция 2: предупреждения (сгруппированы по замечанию) ──
     if warned:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
@@ -1574,34 +1548,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         c.alignment = _align(indent=1)
         ws.row_dimensions[row].height = 24
         row += 1
-        for ci, h in enumerate(['Город', 'Тип', 'URL', 'Замечание'], 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = h
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
-            cell.fill = _fill(C.surface)
-            cell.alignment = _align()
-            cell.border = _border()
-        ws.row_dimensions[row].height = 20
-        row += 1
-        for r in warned:
-            ws.row_dimensions[row].height = 30
-            vals = [
-                (r.city or '–', {'size': 10, 'color': C.text}),
-                (r.type_label, {'size': 9, 'color': C.text_muted}),
-                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
-                ('; '.join(r.indexing.get('warnings') or []),
-                 {'size': 10, 'color': C.warn}),
-            ]
-            for ci, (val, kw) in enumerate(vals, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 4:
-                    cell.hyperlink = r.url
-            row += 1
-        row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(warned, 'indexing', 'warnings'), C.warn)
 
     # ── Секция 3: sitemap ↔ robots противоречия ──
     if indexing_summary:
@@ -1659,6 +1607,62 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                     cell.alignment = _align(wrap=True, vertical='top')
                     cell.border = _border(color=C.border_light)
                 row += 1
+
+
+# ── Группировка «одна проблема – одна строка + список URL» ─────────
+# Как на листе «Уведомления»: не плодим милион одинаковых строк, а
+# группируем страницы по тексту проблемы.
+
+
+def _issue_groups(pages, attr, key):
+    """[(текст проблемы, [CheckResult])] по убыванию количества страниц."""
+    groups = {}
+    for r in pages:
+        data = getattr(r, attr, None) or {}
+        for t in (data.get(key) or []):
+            groups.setdefault(t, []).append(r)
+    return sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+
+
+def _render_issue_groups(ws, row, groups, color, max_urls=100):
+    """Строка-проблема (текст + сколько страниц), под ней – город/тип/URL."""
+    for text, rs in groups:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = f'{text}  —  {len(rs)} {_plural_pages(len(rs))}'
+        c.font = _font(size=10, bold=True, color=color)
+        c.fill = _fill(C.surface)
+        c.alignment = _align(wrap=True, indent=1)
+        c.border = _border()
+        ws.row_dimensions[row].height = 22
+        row += 1
+        for r in rs[:max_urls]:
+            ws.row_dimensions[row].height = 18
+            for ci, (val, kw) in enumerate([
+                (r.city or '–', {'size': 9, 'color': C.text_muted}),
+                (r.type_label, {'size': 9, 'color': C.text_muted}),
+                (r.url, {'size': 9, 'color': C.accent, 'underline': 'single'}),
+                ('', {}),
+            ], 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = val
+                if kw:
+                    cell.font = _font(**kw)
+                cell.alignment = _align(vertical='top')
+                cell.border = _border(color=C.border_light)
+                if ci == 4 and val:
+                    cell.hyperlink = val
+            row += 1
+        if len(rs) > max_urls:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = f'… и ещё {len(rs) - max_urls} {_plural_pages(len(rs) - max_urls)}'
+            c.font = _font(size=9, italic=True, color=C.text_muted)
+            c.alignment = _align(indent=2)
+            ws.row_dimensions[row].height = 16
+            row += 1
+        row += 1
+    return row
 
 
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
@@ -1758,70 +1762,23 @@ def _build_meta_sheet(wb, results, meta_summary):
     ws.row_dimensions[row].height = 30
     row += 2
 
-    # ── Секция 1: проблемы на страницах ──
+    # ── Секция 1: проблемы на страницах (сгруппированы по проблеме) ──
     _meta_section_title(ws, row, f'Проблемы метаданных на страницах  ({len(bad)})',
                         C.err if bad else C.ok)
     row += 1
     if not bad:
         _meta_ok_line(ws, row, '✅ У всех проверенных страниц метаданные в порядке.')
-        row += 1
+        row += 2
     else:
-        _meta_table_header(ws, row, ['Город', 'Тип', 'URL', 'Что не так'])
-        row += 1
-        for r in bad:
-            ws.row_dimensions[row].height = 30
-            vals = [
-                (r.city or '–', {'size': 10, 'color': C.text}),
-                (r.type_label, {'size': 9, 'color': C.text_muted}),
-                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
-                ('; '.join(r.meta.get('issues') or []), {'size': 10, 'color': C.err}),
-            ]
-            for ci, (val, kw) in enumerate(vals, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 4:
-                    cell.hyperlink = r.url
-            row += 1
-    row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(bad, 'meta', 'issues'), C.err)
 
-    # ── Секция 2: предупреждения (длины) ──
-    # Кап на 150 строк: длинные title/description бывают системно по всему
-    # сайту – без капа секция раздувает файл, а сигнал тот же.
-    _WARN_CAP = 150
+    # ── Секция 2: предупреждения (длины; сгруппированы по замечанию) ──
     if warned:
         _meta_section_title(ws, row, f'Предупреждения (длины)  ({len(warned)})', C.warn)
         row += 1
-        _meta_table_header(ws, row, ['Город', 'Тип', 'URL', 'Замечание'])
-        row += 1
-        for r in warned[:_WARN_CAP]:
-            ws.row_dimensions[row].height = 30
-            vals = [
-                (r.city or '–', {'size': 10, 'color': C.text}),
-                (r.type_label, {'size': 9, 'color': C.text_muted}),
-                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
-                ('; '.join(r.meta.get('warnings') or []), {'size': 10, 'color': C.warn}),
-            ]
-            for ci, (val, kw) in enumerate(vals, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 4:
-                    cell.hyperlink = r.url
-            row += 1
-        if len(warned) > _WARN_CAP:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = f'… и ещё {len(warned) - _WARN_CAP} страниц с такими же замечаниями'
-            c.font = _font(size=9, italic=True, color=C.text_muted)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 18
-            row += 1
-        row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn)
 
     # ── Секции 3–4: дубли метаданных ──
     for title_text, groups, note in (

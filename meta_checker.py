@@ -123,24 +123,26 @@ def check_meta(meta: dict, city: str, type_code: str) -> dict:
         # проверке для остальных) – здесь фиксируем для полноты картины.
         issues.append('нет заголовка H1')
 
-    # Город в title/description – только для SEO-типов
+    # Город в title/description – только для SEO-типов.
+    # Тексты замечаний – БЕЗ подстановок (города/длины): по одинаковому
+    # тексту отчёт группирует страницы в одну строку-проблему.
     if type_code in _CITY_TYPES and city:
         if title and city_in_text(city, title) is False:
-            issues.append(f'в title нет города «{city}»')
+            issues.append('в title нет города')
         if desc and city_in_text(city, desc) is False:
-            issues.append(f'в description нет города «{city}»')
+            issues.append('в description нет города')
 
     # Длины – мягкие пороги, предупреждения
     if title:
         if len(title) < TITLE_MIN:
-            warnings.append(f'title слишком короткий ({len(title)} символов)')
+            warnings.append('title короткий')
         elif len(title) > TITLE_MAX:
-            warnings.append(f'title длинный ({len(title)} симв., рек. до {TITLE_MAX})')
+            warnings.append('title длинный')
     if desc:
         if len(desc) < DESC_MIN:
-            warnings.append(f'description короткий ({len(desc)} символов)')
+            warnings.append('description короткий')
         elif len(desc) > DESC_MAX:
-            warnings.append(f'description длинный ({len(desc)} симв., рек. до {DESC_MAX})')
+            warnings.append('description длинный')
 
     return {'title': title, 'description': desc, 'h1': h1,
             'issues': issues, 'warnings': warnings}

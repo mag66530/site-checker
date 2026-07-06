@@ -564,7 +564,8 @@ async def check_one(
                 host = urlsplit(task.url).netloc
                 robots = await get_robots(host)
             indexing = analyze_page_indexing(
-                a['body_text'], a.get('headers'), task.url, robots)
+                a['body_text'], a.get('headers'), task.url, robots,
+                page_type=task.type_code)
         except Exception:
             indexing = None
 
