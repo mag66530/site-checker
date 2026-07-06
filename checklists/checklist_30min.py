@@ -22,7 +22,6 @@ import os
 import pickle
 import subprocess
 import sys
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -48,10 +47,9 @@ from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG, GSC_GMAIL_CONFIG,
     YABUSINESS_YANDEX_CONFIG, TWOGIS_YANDEX_CONFIG, GOOGLE_ACCOUNTS_CONFIG,
     GOOGLE_FOLDER_YANDEX_CONFIG,
-    PRIORITY_LABELS, PRIORITY_ORDER, CATEGORY_LABELS,
     fetch_webmaster_yandex, fetch_gsc_gmail,
     fetch_yandex_folder_simple, fetch_google_accounts,
-    load_notifications, group_by_priority,
+    load_notifications,
 )
 
 PROJECT_ROOT = Path(__file__).parent.parent
