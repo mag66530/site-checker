@@ -22,7 +22,6 @@ import os
 import pickle
 import subprocess
 import sys
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -48,10 +47,9 @@ from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG, GSC_GMAIL_CONFIG,
     YABUSINESS_YANDEX_CONFIG, TWOGIS_YANDEX_CONFIG, GOOGLE_ACCOUNTS_CONFIG,
     GOOGLE_FOLDER_YANDEX_CONFIG,
-    PRIORITY_LABELS, PRIORITY_ORDER, CATEGORY_LABELS,
     fetch_webmaster_yandex, fetch_gsc_gmail,
     fetch_yandex_folder_simple, fetch_google_accounts,
-    load_notifications, group_by_priority,
+    load_notifications,
 )
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -1082,6 +1080,8 @@ if pid:
                              'страницы с robots: noindex на открытой в robots '
                              'странице или canonical на закрытый URL. Закрыта в '
                              'robots и noindex - так задумано, не показываем. '
+                             'Плюс «верно настроен canonical»: ровно один тег, '
+                             'на себя, не на чужой домен. '
                              'Плюс сверка всех путей каталога (sitemap) с robots.txt.')
             st.checkbox('1.8  Корректность вывода и дубли (заголовки, метаданные, урлы)',
                         key='c30_check_meta',
