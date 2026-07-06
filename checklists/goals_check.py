@@ -129,9 +129,25 @@ if LOG_FILE.is_file():
         log_txt = LOG_FILE.read_text(encoding='utf-8')
     except Exception:
         log_txt = ''
-if _alive:
+# Готово определяем ПО ЛОГУ, а не только по процессу: даже если PID ещё «висит»
+# (бывает в облаке), финальная строка лога = завершено.
+_done = ('ВСЁ ГОТОВО' in log_txt) or ('✗' in log_txt and 'СТАРТ' in log_txt)
+_running = _alive and not _done
+
+# Прогресс-бар: движок пишет «ПРОГРЕСС i/N» и «цель: X».
+import re as _re
+_pm = _re.findall(r'ПРОГРЕСС\s+(\d+)\s*/\s*(\d+)', log_txt)
+_goals_hit = len(_re.findall(r'цель:\s', log_txt))
+if _running:
+    if _pm:
+        _i, _n = int(_pm[-1][0]), int(_pm[-1][1])
+        st.progress(min(_i / max(_n, 1), 1.0),
+                    text=f'Страница {_i} из {_n} · целей поймано: {_goals_hit}')
+    else:
+        st.progress(0.02, text='Запуск браузера…')
     st.markdown('**Статус:** ⏳ идёт проверка… (страница обновляется сама)')
 elif 'ВСЁ ГОТОВО' in log_txt:
+    st.progress(1.0, text=f'Готово · целей поймано: {_goals_hit}')
     st.markdown('**Статус:** ✅ завершено')
 elif log_txt:
     st.markdown('**Статус:** ⛔ остановлено / прервано')
@@ -142,7 +158,7 @@ if log_txt:
     tail = '\n'.join(log_txt.splitlines()[-25:])
     st.code(tail or ' ', language=None)
 
-if REPORT.is_file() and not _alive:
+if REPORT.is_file() and not _running:
     st.subheader('Результаты (Excel)')
     st.caption('Листы: «Сводка» (что открывали, что сработало) и «Цели Метрики» - '
                'по строке на каждую цель со статусом и пояснением.')
@@ -153,6 +169,6 @@ if REPORT.is_file() and not _alive:
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
 
-if _alive:
+if _running:
     time.sleep(3)
     st.rerun()

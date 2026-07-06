@@ -60,15 +60,25 @@ ACTIONS = {
     'smu': {
         'страницы': [
             ('Главная',   'https://stalmetural.ru/',
-             ['#call-back-form', '#txt-back-form', '#txt-back-form-footer']),
+             ['#call-back-form', '#txt-back-form', '#txt-back-form-footer',
+              '#call-back-form-main, [class*="manager-connect"], a:has-text("Связаться с менеджером")',
+              'button:has-text("Показать больше"), a:has-text("Показать больше")',
+              'a:has-text("ко всем категориям"), a:has-text("всем категориям")']),
             ('Контакты',  'https://stalmetural.ru/contacts/', []),
             # breadcrumbphone - клик по номеру в «хлебных крошках» каталога
             ('Каталог',   'https://stalmetural.ru/catalog/',
-             ['.breadcrumbs a[href^="tel:"], [class*="breadcrumb"] a[href^="tel:"]']),
+             ['.breadcrumbs a[href^="tel:"], [class*="breadcrumb"] a[href^="tel:"]',
+              'button:has-text("Показать больше"), a:has-text("Показать больше")',
+              'a:has-text("ко всем категориям"), a:has-text("всем категориям")']),
             ('Товар',     'https://stalmetural.ru/catalog/izgotovlenie-pruzhin/1285453-izgotovlenie-pruzhin-rastyazheniya/',
              ['.one-click-to-buy', '#call-back-form-product',
-              '.copy-btn:has(.an-ico-link-price)']),
+              '.copy-btn:has(.an-ico-link-price)',
+              '[class*="favorite"], [class*="favourite"], [class*="to-fav"], button:has(.an-ico-heart)',
+              '[class*="share"], .an-ico-share, button:has-text("Поделиться")',
+              'text=Добавить в корзину']),
             ('Доставка',  'https://stalmetural.ru/delivery/', ['#call-back-form-delivery']),
+            # 404: несуществующий адрес - должна сработать цель 404error
+            ('Страница 404', 'https://stalmetural.ru/nesuschestvuyushaya-404-xyz/', []),
         ],
         'ожидаемые': [
             'tel', 'email', 'clickwapp', 'clicktg', 'clickvk', 'clickmax',
@@ -76,6 +86,9 @@ ACTIONS = {
             'click_dzen_podval', 'click_rutube_podval', 'click_max_podval',
             'click_yandexorg_podval', 'breadcrumbphone',
             'callorderclick', 'zayavkaclick', 'svyazclick', 'oneclickbuy',
+            'managerclick', 'morecatalog', 'gotomorecatalog', 'moreuslugi',
+            'moreproizvodstvo', 'click_favorites', 'click_share', 'addocart',
+            'tocart', '404error',
         ],
     },
     'imp': {
@@ -236,17 +249,19 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                         pass
             ctx.route('**/*', _route)
 
-        for название, url, клики in план['страницы']:
+        _всего = len(план['страницы'])
+        for _idx, (название, url, клики) in enumerate(план['страницы'], 1):
             if stop and stop():
                 log('⛔ Остановлено')
                 break
+            log(f"ПРОГРЕСС {_idx}/{_всего}")
             log(f"- Страница: {название}  {url}")
             текущий_url['u'] = url
             код = 0
             try:
                 resp = page.goto(url, wait_until='domcontentloaded', timeout=45000)
                 код = resp.status if resp else 0
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(1500)
             except Exception as e:
                 log(f"   ⚠️ не открылась: {e}")
                 страницы_инфо.append({'название': название, 'url': url, 'код': код,
@@ -287,43 +302,50 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                 except Exception:
                     continue
 
-            # подвал: кликаем все внешние ссылки (соцсети *_podval и т.п.)
+            # подвал: кликаем ТОЛЬКО соцсети/мессенджеры (открываются новой
+            # вкладкой - её закрываем; на текущей странице ничего не ломается).
+            # Внутренние ссылки не трогаем, чтобы не уходить со страницы.
+            _soc = ("vk.com", "vk.me", "ok.ru", "t.me", "dzen.ru", "rutube.ru",
+                    "max.ru", "wa.me", "whatsapp", "yandex.ru/maps",
+                    "yandex.ru/profile")
             try:
-                foot = page.locator("footer a[target='_blank'], footer a[href*='//']")
-                for i in range(min(foot.count(), 14)):
+                foot = page.locator("footer a[href], .footer a[href]")
+                for i in range(min(foot.count(), 25)):
                     try:
                         el = foot.nth(i)
-                        el.scroll_into_view_if_needed(timeout=1500)
-                        el.click(timeout=2000, no_wait_after=True)
-                        page.wait_for_timeout(250)
-                        if page.url != url:
-                            page.go_back(wait_until='domcontentloaded', timeout=15000)
-                            page.wait_for_timeout(600)
+                        href = (el.get_attribute("href") or "").lower()
+                        if not any(s in href for s in _soc):
+                            continue
+                        el.scroll_into_view_if_needed(timeout=1200)
+                        el.click(timeout=1800, no_wait_after=True)
+                        page.wait_for_timeout(200)
                     except Exception:
                         continue
             except Exception:
                 pass
 
-            # клики проекта (кнопки модалок форм). Перед каждым (кроме первого)
-            # перезагружаем страницу: открытая модалка прошлого клика иначе
-            # перекрывает следующую кнопку и цель срабатывает через раз.
-            for k, sel in enumerate(клики):
+            # клики проекта (кнопки модалок форм и т.п.). Escape ДО клика снимает
+            # модалку прошлого клика (перекрытие - главная причина «через раз»),
+            # Escape ПОСЛЕ закрывает открытую. Без перезагрузок - быстро; если
+            # элемента нет или клик не прошёл, просто идём дальше.
+            for sel in клики:
                 try:
-                    if k > 0:
-                        page.goto(url, wait_until='domcontentloaded', timeout=45000)
-                        page.wait_for_timeout(1500)
-                    el = page.locator(sel).first
-                    el.scroll_into_view_if_needed(timeout=2500)
-                    try:
-                        el.click(timeout=3500)
-                    except Exception:
-                        el.click(timeout=3500, force=True)
-                    page.wait_for_timeout(900)
                     page.keyboard.press('Escape')
-                    page.wait_for_timeout(400)
+                    page.wait_for_timeout(150)
+                    el = page.locator(sel).first
+                    if el.count() == 0:
+                        continue
+                    el.scroll_into_view_if_needed(timeout=1500)
+                    try:
+                        el.click(timeout=2000)
+                    except Exception:
+                        el.click(timeout=2000, force=True)
+                    page.wait_for_timeout(600)
+                    page.keyboard.press('Escape')
+                    page.wait_for_timeout(200)
                 except Exception:
-                    log(f"   ⚠️ клик «{sel}» не удался")
-            page.wait_for_timeout(800)
+                    pass
+            page.wait_for_timeout(300)
 
             страницы_инфо.append({'название': название, 'url': url, 'код': код,
                                   'счётчик': есть_счётчик,
@@ -392,7 +414,7 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
     ws.freeze_panes = 'A2'
 
     GREEN, RED, GREY, BLUE = '1E8E3E', 'C62828', '757575', '1565C0'
-    счёт = {'ok': 0, 'bad': 0, 'forms': 0, 'manual': 0, 'info': 0}
+    счёт = {'ok': 0, 'bad': 0, 'no_code': 0, 'forms': 0, 'manual': 0, 'info': 0}
     r = 2
     for g in каталог.get('цели', []):
         t = g['тип']
@@ -418,17 +440,23 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
                     статус, цвет = 'Прогоном форм', BLUE
                     детали = 'цель отправки формы - проверяется страницей «Проверка форм»'
                     счёт['forms'] += 1
+            elif _привязана(g) == 'не найдена':
+                # цель есть в Метрике, но САЙТ её не отправляет (нет reachGoal в коде).
+                # Это важнее «не сработала»: сколько ни кликай, она не сработает.
+                способ, статус, цвет = 'проверка кода', 'Нет в коде сайта', RED
+                детали = ('reachGoal этой цели НЕ найден в коде сайта - цель создана '
+                          'в Метрике, но сайт её никогда не отправит (к разработчикам)')
+                счёт['no_code'] += 1
             elif any(gid.lower() in ожидаемые for gid in (g.get('идентификаторы') or [])):
                 способ, статус, цвет = 'клики автотеста', 'НЕ сработала', RED
-                детали = ('действие выполнялось (клик по телефону/почте/соцсети/'
-                          'кнопке), но цель не зафиксирована; '
-                          f'привязка reachGoal в коде сайта: {_привязана(g)}')
+                детали = ('действие выполнялось (клик по телефону/почте/кнопке), '
+                          'но цель не зафиксирована - проверьте её настройку/привязку')
                 счёт['bad'] += 1
             else:
-                способ, статус, цвет = '-', 'Нет автодействия', GREY
-                детали = ('нужно специальное действие (вход, скачивание, избранное '
-                          'и т.п.) - вручную; '
-                          f'привязка reachGoal в коде сайта: {_привязана(g)}')
+                способ, статус, цвет = 'вручную', 'Нужно спец-действие', GREY
+                детали = ('reachGoal в коде есть, но нужно особое действие (вход, '
+                          'скачивание, избранное, купон, оформление заказа) - '
+                          'проверяется вручную; можно добавить автодействие')
                 счёт['manual'] += 1
         elif t in ('url', 'url_re'):
             способ = 'визит страницы'
@@ -470,9 +498,10 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
     sm = wb.create_sheet('Сводка', 0)
     sm['A1'] = f"Проверка целей Метрики - {каталог.get('проект','')} (счётчик {каталог.get('счётчик','')})"
     sm['A1'].font = Font(bold=True, size=13)
-    sm['A3'] = (f"Всего целей: {len(каталог.get('цели', []))} · сработало/ОК: {счёт['ok']} · "
-                f"НЕ сработало: {счёт['bad']} · через формы: {счёт['forms']} · "
-                f"вручную/нет действия: {счёт['manual']} · авто/составные: {счёт['info']}")
+    sm['A3'] = (f"Всего целей: {len(каталог.get('цели', []))} · сработало: {счёт['ok']} · "
+                f"НЕ сработало: {счёт['bad']} · нет в коде сайта: {счёт['no_code']} · "
+                f"через формы: {счёт['forms']} · нужно спец-действие/вручную: {счёт['manual']} · "
+                f"авто/составные: {счёт['info']}")
     sm['A5'] = f"Дата прогона: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     sm['A7'] = 'Страницы прогона:'
     rr = 8
