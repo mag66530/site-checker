@@ -158,12 +158,16 @@ def _deps_ready() -> tuple[bool, list[str]]:
     return (not missing), missing
 
 
-def _launch_background(args: list[str], log_path: Path):
-    """Запустить процесс в фоне, вывод – в файл. UI не блокируется."""
+def _launch_background(args: list[str], log_path: Path, extra_env: dict | None = None):
+    """Запустить процесс в фоне, вывод – в файл. UI не блокируется.
+    extra_env – доп. переменные окружения (например, логин/пароль админки);
+    они передаются только дочернему процессу и на диск не пишутся."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env['PYTHONIOENCODING'] = 'utf-8'
     env['PYTHONUNBUFFERED'] = '1'
+    if extra_env:
+        env.update({k: v for k, v in extra_env.items() if v})
     creationflags = 0
     if os.name == 'nt':
         creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -178,6 +182,19 @@ def _launch_background(args: list[str], log_path: Path):
     except Exception:
         pass
     return proc.pid
+
+
+def _project_has_admin(project: str) -> bool:
+    """True, если у проекта настроены АДМИН_ЗОНЫ (есть проверка админки). Пока
+    это только СМУ; ИМП/МПЭ устроены иначе — для них раздел не показываем."""
+    p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
+    try:
+        spec = importlib.util.spec_from_file_location(f'cfg_adm_{project}', p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return bool(getattr(m, 'АДМИН_ЗОНЫ', None))
+    except Exception:
+        return False
 
 
 def _count_expected(project: str) -> int:
@@ -718,6 +735,30 @@ _forms_all_selected = (len(_chosen_forms) == len(_all_form_names))
 _forms_none = bool(_all_forms) and len(_chosen_forms) == 0
 
 # ── Запуск ──────────────────────────────────────────────────────────
+# ── Проверка админки: отдельный блок, как у форм (проверять/не проверять) ──
+# Логин/пароль вводятся здесь и передаются проверке через окружение — на диск
+# ничего не пишется и никуда не отправляется.
+_admin_env: dict[str, str] = {}
+_admin_on = True
+if _project_has_admin(pid_key):
+    st.subheader('Проверка админки')
+    st.session_state.setdefault(f'fc_admin_on_{pid_key}', True)
+    _admin_on = st.checkbox('Проверять, что заявки попали в админку',
+                            key=f'fc_admin_on_{pid_key}')
+    if _admin_on:
+        st.caption(
+            'После прогона тест зайдёт в «Уведомления с форм» и в отчёте (лист '
+            '«Логи», колонка «Статус в админке») отметит, какие заявки реально '
+            'долетели. Логин/пароль нужны только для входа — нигде не сохраняются '
+            'и никуда не отправляются.')
+        _al = st.text_input('Логин админки', key=f'fc_admin_login_{pid_key}')
+        _ap = st.text_input('Пароль админки', type='password',
+                            key=f'fc_admin_pass_{pid_key}')
+        if _al.strip() and _ap:
+            _admin_env = {'ADMIN_LOGIN': _al.strip(), 'ADMIN_PASSWORD': _ap}
+        else:
+            st.caption('⚠️ Введите логин и пароль — без них админка не проверится.')
+
 st.subheader('Запуск проверки')
 
 st.session_state.setdefault(f'fc_clear_{pid_key}', True)
@@ -763,6 +804,8 @@ with _run_col:
                 args.append('--no-clear-excel')
             if show_browser:
                 args.append('--show-browser')
+            if _project_has_admin(pid_key) and not _admin_on:
+                args.append('--no-admin')      # админку явно отключили галочкой
             if _chosen_cities:
                 args += ['--cities', ','.join(_chosen_cities)]
             # Фильтр форм: передаём только если выбрано подмножество (не все).
@@ -778,7 +821,7 @@ with _run_col:
                 LOG_FILE.write_text('', encoding='utf-8')
             except Exception:
                 pass
-            _launch_background(args, LOG_FILE)
+            _launch_background(args, LOG_FILE, extra_env=_admin_env)
             st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key

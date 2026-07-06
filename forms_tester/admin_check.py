@@ -257,56 +257,79 @@ def _выбрать(кандидаты: list, o: dict):
     return sorted(похожие, key=dist)[0]
 
 
-def записать_лист_админка(excel_path: str, результаты: list, дата_str: str) -> None:
-    """Пишет/пересоздаёт лист «Админка» в log_forms.xlsx: по строке на каждую
-    отправленную форму — есть ли она в «Уведомлениях с форм» админки."""
+def записать_в_логи(excel_path: str, результаты: list) -> None:
+    """Дописывает результат проверки админки ПРЯМО в лист «Логи»: добавляет колонку
+    «Статус в админке» и заполняет её у соответствующих строк форм (сопоставление
+    по городу + названию формы). Детали (номер заявки / причина) дописывает в
+    «Комментарий». Отдельный лист не создаём — вся инфо в одном месте."""
     from openpyxl import load_workbook
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     wb = load_workbook(excel_path)
-    if "Админка" in wb.sheetnames:
-        del wb["Админка"]
-    # Ставим сразу после «Сводки» (если она есть) — Уровень 1 должен быть на виду.
-    поз = (wb.sheetnames.index("Сводка") + 1) if "Сводка" in wb.sheetnames else 0
-    ws = wb.create_sheet("Админка", поз)
+    if "Логи" not in wb.sheetnames:
+        return
+    ws = wb["Логи"]
+    headers = [str(c.value or "").strip() for c in ws[1]]
 
-    headers = ["Дата", "Время отправки", "Город", "Форма (наш тест)",
-               "Статус", "Заявка в админке", "Имя / Почта в заявке",
-               "Админка", "Примечание"]
-    fill = PatternFill("solid", fgColor="E3F2FD")   # мягкий голубой – «Уровень 1»
-    for c, h in enumerate(headers, 1):
-        cell = ws.cell(1, c, h)
-        cell.font = Font(bold=True)
-        cell.fill = fill
-        ws.column_dimensions[get_column_letter(c)].width = len(h) + 4
+    def col(name):
+        for i, h in enumerate(headers):
+            if h.lower() == name.lower():
+                return i + 1
+        return -1
 
-    r = 2
+    i_city, i_name = col("Город"), col("Название")
+    i_comment = col("Комментарий")
+    if i_city == -1 or i_name == -1:
+        return
+
+    # Колонку «Статус в админке» ставим сразу после «Статус» (или в конец).
+    i_adm = col("Статус в админке")
+    if i_adm == -1:
+        i_st = col("Статус")
+        i_adm = (i_st + 1) if i_st != -1 else len(headers) + 1
+        ws.insert_cols(i_adm)
+        # заголовок в стиле остальной шапки «Логов»
+        hc = ws.cell(1, i_adm, "Статус в админке")
+        hc.font = Font(bold=True)
+        hc.fill = PatternFill("solid", fgColor="EEF3FB")
+        ws.column_dimensions[get_column_letter(i_adm)].width = 22
+        # пересчитать сдвинувшиеся индексы комментария
+        headers = [str(c.value or "").strip() for c in ws[1]]
+        i_comment = col("Комментарий")
+
+    def norm(v):
+        return _norm(str(v or ""))
+
+    # индекс строк по (город, название) — берём каждую строку один раз
+    строки = {}
+    for r in range(2, ws.max_row + 1):
+        key = (norm(ws.cell(r, i_city).value), norm(ws.cell(r, i_name).value))
+        строки.setdefault(key, []).append(r)
+    занято = set()
+
     for res in результаты:
+        key = (norm(res.get("город", "")), norm(res.get("название", "")))
+        rows = [r for r in строки.get(key, []) if r not in занято]
+        if not rows:
+            continue
+        r = rows[0]
+        занято.add(r)
         z = res.get("заявка")
-        заявка_txt = (f"#{z['id']} · {z['тип_формы']} · {z['время']}" if z else "—")
-        имяпочта = (f"{z.get('имя','')} / {z.get('email','')}".strip(" /") if z else "")
-        vals = [дата_str, _hhmmss(res.get("ts", "")),
-                res.get("город", "") or "(основной)",
-                res.get("название", ""), res.get("статус", ""),
-                заявка_txt, имяпочта, res.get("домен_кратко", ""),
-                res.get("примечание", "")]
-        for c, v in enumerate(vals, 1):
-            ws.cell(r, c, v)
-            L = get_column_letter(c)
-            cur = ws.column_dimensions[L].width or 10
-            ws.column_dimensions[L].width = min(max(cur, len(str(v)) + 3), 70)
-        st = ws.cell(r, 5)
-        if res.get("статус", "").startswith("Есть"):
-            st.font = Font(color="1E8E3E", bold=True)   # зелёный
-        else:
-            st.font = Font(color="C62828", bold=True)   # красный
-        r += 1
+        есть = str(res.get("статус", "")).startswith("Есть")
+        cell = ws.cell(r, i_adm, "Есть в админке" if есть else "НЕ найдено")
+        cell.font = Font(color="1E8E3E" if есть else "C62828", bold=True)
+        # детали → в «Комментарий» (объединяем с тем, что уже есть)
+        if i_comment != -1:
+            если_есть = (f"заявка #{z['id']} в админке "
+                         f"({z.get('время','')}, {res.get('домен_кратко','')})") if z else ""
+            деталь = если_есть if есть else (res.get("примечание", "")
+                                             or "в админке не найдена")
+            if деталь:
+                prev = str(ws.cell(r, i_comment).value or "").strip()
+                ws.cell(r, i_comment,
+                        (prev + "; " if prev else "") + деталь)
 
-    try:
-        ws.freeze_panes = "A2"
-    except Exception:
-        pass
     wb.save(excel_path)
 
 
@@ -341,8 +364,8 @@ def выполнить_проверку(проект_дир, зоны, excel_pat
     """
     creds = загрузить_креды(проект_дир)
     if not creds:
-        log("ℹ️ Проверка админки пропущена: нет файла admin.local.json "
-            "(логин/пароль не заданы).")
+        log("ℹ️ Проверка админки пропущена: не заданы логин/пароль "
+            "(введите их на странице проверки форм).")
         return False
 
     p = Path(submitted_path)
@@ -437,16 +460,25 @@ def выполнить_проверку(проект_дир, зоны, excel_pat
                 итог_нет += len(результаты) - е
                 log(f"   [{кратко}] заявок в админке: {len(заявки)}; "
                     f"найдено {е} из {len(результаты)}.")
+                # Предупреждаем только про НЕОЖИДАННЫЕ свободные заявки — тип
+                # которых мы вообще не отправляли (возможный пропуск в маппинге).
+                # Лишние копии наших же типов (от прошлых прогонов за сегодня) — не шум.
                 if свободные:
-                    типы = sorted({zz.get("тип_формы", "") for zz in свободные})
-                    log(f"   ⚠️ [{кратко}] наши заявки без пары (типы): "
-                        + ", ".join(f"«{t}»" for t in типы if t))
+                    ожид = [(o.get("админ_тип") or o.get("название") or "")
+                            for o in з_отправки]
+                    неожид = sorted({zz.get("тип_формы", "") for zz in свободные
+                                     if not any(_тип_похож(zz.get("тип_формы", ""), e)
+                                                for e in ожид)})
+                    if неожид:
+                        log(f"   ⚠️ [{кратко}] в админке есть наши тест-заявки типов, "
+                            f"которых мы не отправляли: "
+                            + ", ".join(f"«{t}»" for t in неожид if t))
         finally:
             b.close()
 
-    записать_лист_админка(excel_path, все_результаты, дата.strftime("%d.%m.%Y"))
-    log(f"✅ Админка (Уровень 1): найдено {итог_есть}, НЕ найдено {итог_нет}. "
-        f"Подробности — на листе «Админка».")
+    записать_в_логи(excel_path, все_результаты)
+    log(f"✅ Проверка админки: найдено {итог_есть}, НЕ найдено {итог_нет}. "
+        f"Смотри колонку «Статус в админке» на листе «Логи».")
     return True
 
 
@@ -477,15 +509,25 @@ def найти_заявку(заявки: list, тип_формы_админ: st
     return кандидаты[0] if кандидаты else None
 
 
-def загрузить_креды(проект_дир: Path):
-    """Читает admin.local.json проекта: {login, password}. None, если файла нет."""
+def загрузить_креды(проект_дир):
+    """Логин/пароль админки. Приоритет — переменные окружения ADMIN_LOGIN /
+    ADMIN_PASSWORD (их передаёт страница Streamlit, на диск ничего не пишется).
+    Фолбэк — локальный файл admin.local.json. None, если нигде нет."""
+    import os
+    l = (os.environ.get("ADMIN_LOGIN") or "").strip()
+    p = os.environ.get("ADMIN_PASSWORD") or ""
+    if l and p:
+        return {"login": l, "password": p}
     f = Path(проект_дир) / "admin.local.json"
     if not f.is_file():
         return None
     try:
         d = json.loads(f.read_text(encoding="utf-8"))
-        if d.get("login") and d.get("password"):
-            return d
+        login = str(d.get("login") or "")
+        # Игнорируем незаполненный шаблон (ВПИШИ_СЮДА… / ВАШ_ЛОГИН…).
+        if login and d.get("password") and "ВПИШИ" not in login.upper() \
+                and "ВАШ_" not in login.upper():
+            return {"login": login, "password": d.get("password")}
     except Exception:
         return None
     return None

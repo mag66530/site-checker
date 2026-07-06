@@ -50,12 +50,11 @@ def _stamp(msg):
     print(f'[{datetime.now().strftime("%H:%M:%S")}] {msg}', flush=True)
 
 
-def _load_admin_zones(src_config: Path, main_host: str, cities_all: list):
+def _load_admin_zones(src_config: Path):
     """Читает АДМИН_ЗОНЫ из ИСХОДНОГО config.py проекта (не из рабочей копии, где
-    домены уже подменены под город). Если ключа нет — одна зона на основной домен.
-    Зона = {домен, города}; города=[] — «все остальные» (обычно РФ)."""
-    домен_осн = f'https://{main_host}' if main_host else (
-        cities_all[0][1] if cities_all else '')
+    домены уже подменены под город). Возвращает список зон {домен, города} или
+    None, если у проекта админ-зоны не настроены (тогда проверку админки не
+    делаем — например, ИМП/МПЭ, где админка устроена иначе)."""
     try:
         import importlib.util
         spec = importlib.util.spec_from_file_location('_orig_cfg_zones', str(src_config))
@@ -66,7 +65,7 @@ def _load_admin_zones(src_config: Path, main_host: str, cities_all: list):
             return [dict(z) for z in зоны]
     except Exception as e:  # noqa: BLE001
         _stamp(f'⚠️ Не удалось прочитать АДМИН_ЗОНЫ из конфига: {e}')
-    return [{'домен': домен_осн, 'города': []}]
+    return None
 
 
 def _load_cities(project: str):
@@ -200,8 +199,11 @@ def main() -> int:
             try:
                 import admin_check
                 проект_дир = PROJECTS_ROOT / a.project
-                if (проект_дир / 'admin.local.json').is_file():
-                    зоны = _load_admin_zones(src_config, main_host, cities_all)
+                зоны = _load_admin_zones(src_config)   # None → у проекта нет админ-зон
+                if зоны:
+                    # Логин/пароль приходят из окружения (введены на странице) или
+                    # из admin.local.json; если нигде нет — выполнить_проверку тихо
+                    # пропустит проверку.
                     admin_check.выполнить_проверку(
                         str(проект_дир), зоны,
                         excel_path='log_forms.xlsx',
