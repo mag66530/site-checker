@@ -97,6 +97,9 @@ st.markdown(
        размазанно, а подписи полей и так понятны. Если где-то нужна подсказка –
        вынесем текстом, а не иконкой. */
     [data-testid="stTooltipIcon"] { display: none !important; }
+    /* Английская техподсказка «Press Enter to apply» у полей ввода – прячем,
+       значение применяется по Enter или клику мимо поля. */
+    [data-testid="InputInstructions"] { display: none !important; }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
     /* Карточки-контейнеры (с рамкой) – белые, чтобы блоки не сливались с фоном */
@@ -157,7 +160,13 @@ st.markdown(
     .stSelectbox label, .stCheckbox label, [data-testid="stWidgetLabel"] p {
         font-size: 14px !important; color: #5B5853 !important;
     }
-    .stApp { -webkit-font-smoothing: antialiased; }
+    /* Чёткий текст: НЕ используем grayscale-сглаживание (antialiased), от него
+       на Windows/Chrome буквы становятся тоньше и «размытыми». Оставляем
+       субпиксельное сглаживание браузера + оптимизацию читаемости. */
+    .stApp, .stApp * {
+        -webkit-font-smoothing: subpixel-antialiased;
+        text-rendering: optimizeLegibility;
+    }
 
     /* ── Боковая панель ── */
     [data-testid="stSidebar"] {

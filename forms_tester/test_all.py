@@ -4,7 +4,7 @@
 """
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, unquote
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
 import os
@@ -66,6 +66,27 @@ def response_indicates_captcha_block(text: str) -> bool:
             "captcha_error",
         )
     )
+
+
+def response_indicates_form_error(text: str) -> str:
+    """Если страница ПОСЛЕ отправки/оформления показывает явную ошибку – возвращает
+    её краткое описание, иначе пустую строку. Фразы специфичны (не подсказки полей),
+    чтобы не было ложных срабатываний.
+    """
+    low = (text or "").lower()
+    маркеры = [
+        ("доступ запрещ", "Форма защищена reCAPTCHA (доступ запрещен)"),
+        ("access denied", "Форма защищена reCAPTCHA (доступ запрещен)"),
+        ("при расчете заказа произошла ошибка", "Оформление: при расчёте заказа произошла ошибка"),
+        ("при расчёте заказа произошла ошибка", "Оформление: при расчёте заказа произошла ошибка"),
+        ("не выбран тип плательщик", "Оформление: не выбран тип плательщика"),
+        ("нет платежных систем", "Оформление: нет платёжных систем для оплаты"),
+        ("нет платёжных систем", "Оформление: нет платёжных систем для оплаты"),
+    ]
+    for needle, reason in маркеры:
+        if needle in low:
+            return reason
+    return ""
 
 
 def _form_field_map_from_config(форма_config: dict) -> dict | None:
@@ -161,9 +182,22 @@ def _pw_fill_named_field(scope, name_attr: str, value: str) -> bool:
     v = value.strip()
     esc = name_attr.replace("\\", "\\\\").replace('"', '\\"')
     loc = scope.locator(f'[name="{esc}"]')
-    if loc.count() == 0:
+    n = loc.count()
+    if n == 0:
         return False
-    el = loc.first
+    # bx-soa (и др.) держат СКРЫТЫЕ копии полей с тем же name (шаблоны). Берём
+    # ВИДИМУЮ копию, иначе заполняли скрытую – на экране поле оставалось пустым.
+    el = None
+    for _j in range(min(n, 12)):
+        cand = loc.nth(_j)
+        try:
+            if cand.is_visible():
+                el = cand
+                break
+        except Exception:
+            continue
+    if el is None:
+        el = loc.first
     try:
         el.wait_for(state="visible", timeout=12000)
     except Exception:
@@ -1185,6 +1219,22 @@ LOG_KEYS_ORDER = [
     "название", "имя", "телефон", "почта", "почта_получателя", "статус", "комментарий",
 ]
 
+# Отдельный лист «Цели» (Яндекс.Метрика): свои колонки – форма/кнопка + идентификатор цели.
+GOAL_HEADERS = [
+    "Дата", "Время", "Город", "Страница", "Форма / кнопка",
+    "Цель (идентификатор)", "URL", "Статус", "Комментарий",
+]
+GOAL_KEYS_ORDER = [
+    "дата", "время", "город", "страница", "название",
+    "ид", "url", "статус", "комментарий",
+]
+
+
+def _строка_это_цель(row: dict) -> bool:
+    """Строка относится к целям Метрики (идёт на отдельный лист «Цели»)."""
+    return (str(row.get("тип", "")).upper().startswith("ЦЕЛЬ")
+            or str(row.get("код", "")).startswith("ym"))
+
 
 def _status_clean_reason(raw: str):
     """Из «сырого» статуса делает (короткое_слово, причина).
@@ -1207,6 +1257,10 @@ def _status_clean_reason(raw: str):
         return "Успешно", ""
     if up.startswith("ЗАПОЛНЕНО"):
         return "Заполнено", ""
+    if up.startswith("СРАБОТАЛА"):
+        return "Сработала", ""
+    if up.startswith("НЕ СРАБОТАЛА"):
+        return "Не сработала", detail
     if up.startswith("ФОРМА НЕ НАЙДЕНА"):
         return "Ошибка", "Форма не найдена на странице – изменился селектор или она не загрузилась"
     if up.startswith("НЕТ СЕЛЕКТОРА ФОРМЫ"):
@@ -1265,29 +1319,209 @@ def init_excel_log(path: str, очистить: bool = True) -> None:
 
 
 def append_log_row(path: str, row: dict) -> None:
-    """Добавляет строку лога в конец файла по порядку колонок LOG_KEYS_ORDER.
-    Колонку «Статус» подкрашивает: зелёный – Успешно/Заполнено, красный – Ошибка."""
+    """Добавляет строку в конец файла. Строки форм/сценариев идут на лист «Логи»,
+    строки целей Метрики – на отдельный лист «Цели». Колонку «Статус» красит:
+    зелёный – Успешно/Заполнено/Зафиксирована, красный – Ошибка."""
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
     wb = load_workbook(path)
-    ws = wb.active
+
+    цель_строка = _строка_это_цель(row)
+    if цель_строка:
+        # лист «Цели» создаём при первой цели
+        if "Цели" in wb.sheetnames:
+            ws = wb["Цели"]
+        else:
+            ws = wb.create_sheet("Цели")
+            for col, val in enumerate(GOAL_HEADERS, 1):
+                ws.cell(1, col, val)
+                ws.column_dimensions[get_column_letter(col)].width = len(str(val)) + 3
+        keys, headers = GOAL_KEYS_ORDER, GOAL_HEADERS
+    else:
+        # Пишем строго в лист «Логи» (а не в активный): рядом есть «Сводка»/«Цели».
+        ws = wb["Логи"] if "Логи" in wb.sheetnames else wb.active
+        keys, headers = LOG_KEYS_ORDER, LOG_HEADERS
+
     r = ws.max_row + 1
-    for col, key in enumerate(LOG_KEYS_ORDER, 1):
+    for col, key in enumerate(keys, 1):
         val = row.get(key, "")
         ws.cell(r, col, val)
         # авто-ширина: растим колонку под содержимое (с разумным потолком)
         letter = get_column_letter(col)
-        cur = ws.column_dimensions[letter].width or (len(LOG_HEADERS[col - 1]) + 3)
+        cur = ws.column_dimensions[letter].width or (len(headers[col - 1]) + 3)
         ws.column_dimensions[letter].width = min(max(cur, len(str(val)) + 3), 70)
     try:
-        si = LOG_KEYS_ORDER.index("статус") + 1
+        si = keys.index("статус") + 1
         sval = str(row.get("статус", "")).strip().lower()
-        if sval in ("успешно", "заполнено"):
+        if sval in ("успешно", "заполнено", "зафиксирована", "сработала"):
             ws.cell(r, si).font = Font(color="1E8E3E", bold=True)   # зелёный
-        elif sval.startswith("ошибк"):
+        elif sval.startswith("ошибк") or sval.startswith("не сработала"):
             ws.cell(r, si).font = Font(color="C62828", bold=True)   # красный
     except Exception:
         pass
+    wb.save(path)
+
+
+# --- Уровень 1 (админка): запись реально отправленных форм для сверки ---
+# После прогона forms_run сверяет этот список с «Уведомлениями с форм» в админке
+# (admin_check.выполнить_проверку). Пишем только реальные отправки форм — без
+# целей Метрики и без проверок корзины/оформления заказа.
+SUBMITTED_FORMS_FILE = "submitted_forms.json"
+
+
+def reset_submitted_forms() -> None:
+    """Удаляет файл отправок (в начале свежего прогона, вместе с очисткой Excel)."""
+    try:
+        if os.path.exists(SUBMITTED_FORMS_FILE):
+            os.remove(SUBMITTED_FORMS_FILE)
+    except Exception:
+        pass
+
+
+def record_submitted_form(rec: dict) -> None:
+    """Дописывает одну отправленную форму в submitted_forms.json (список)."""
+    import json as _json
+    data = []
+    try:
+        if os.path.exists(SUBMITTED_FORMS_FILE):
+            with open(SUBMITTED_FORMS_FILE, encoding="utf-8") as fh:
+                data = _json.load(fh)
+            if not isinstance(data, list):
+                data = []
+    except Exception:
+        data = []
+    data.append(rec)
+    try:
+        with open(SUBMITTED_FORMS_FILE, "w", encoding="utf-8") as fh:
+            _json.dump(data, fh, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def write_summary_sheet(path: str, время_прогона: str = "") -> None:
+    """Пересобирает лист «Сводка» в логе: готовое сообщение (сколько форм
+    отправлено и на какие домены) + таблица «Домен → Города → Почта для
+    проверки заявок». Идемпотентно: читает все строки листа «Логи».
+
+    Вызывается в конце каждого прогона run_test; при прогоне по нескольким
+    городам каждый раз пересобирается заново, поэтому после последнего города
+    сводка отражает весь прогон целиком.
+    """
+    from urllib.parse import urlparse
+    from openpyxl.styles import Font, Alignment, PatternFill
+
+    try:
+        wb = load_workbook(path)
+    except Exception:
+        return
+    ws = wb["Логи"] if "Логи" in wb.sheetnames else wb.worksheets[0]
+    headers = [str(c.value or "").strip() for c in ws[1]]
+
+    def idx(name: str) -> int:
+        for i, h in enumerate(headers):
+            if h.lower() == name.lower():
+                return i
+        return -1
+
+    i_url, i_st = idx("URL"), idx("Статус")
+    i_mail, i_city = idx("Почта получателя"), idx("Город")
+
+    sent = errors = 0
+    domains: list[str] = []                 # в порядке появления
+    dom_mails: dict[str, set] = {}
+    dom_cities: dict[str, set] = {}
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or all(v in (None, "") for v in row):
+            continue
+        url = str(row[i_url] or "").strip() if i_url >= 0 else ""
+        st = str(row[i_st] or "").strip().lower() if i_st >= 0 else ""
+        mail = str(row[i_mail] or "").strip() if i_mail >= 0 else ""
+        city = str(row[i_city] or "").strip() if i_city >= 0 else ""
+        if st == "успешно":
+            sent += 1
+        elif st.startswith("ошибк"):
+            errors += 1
+        if url:
+            p = urlparse(url)
+            dom = f"{p.scheme}://{p.netloc}" if p.netloc else url
+            if dom not in dom_mails:
+                domains.append(dom)
+                dom_mails[dom] = set()
+                dom_cities[dom] = set()
+            if mail:
+                dom_mails[dom].add(mail)
+            if city:
+                dom_cities[dom].add(city)
+
+    # Лист «Сводка»: ТОЛЬКО таблица (Домен · Город(а) · Почта для проверки заявок).
+    # Готовое сообщение/счётчики/время – по просьбе убраны из отчёта.
+    if "Сводка" in wb.sheetnames:
+        del wb["Сводка"]
+    sm = wb.create_sheet("Сводка", 0)       # первым листом – чтобы сразу видеть
+
+    hdr_fill = PatternFill("solid", fgColor="EEF3FB")
+    for col, title in ((1, "Домен"), (2, "Город(а)"), (3, "Почта для проверки заявок")):
+        c = sm.cell(1, col, title)
+        c.font = Font(bold=True)
+        c.fill = hdr_fill
+    rr = 2
+    for dom in domains:
+        sm.cell(rr, 1, dom)
+        sm.cell(rr, 2, ", ".join(sorted(dom_cities[dom])))
+        sm.cell(rr, 3, ", ".join(sorted(dom_mails[dom])))
+        rr += 1
+    sm.column_dimensions["A"].width = 34
+    sm.column_dimensions["B"].width = 30
+    sm.column_dimensions["C"].width = 46
+
+    # --- Лист «Логи»: жирная шапка (закреплена) + визуальное разделение городов ---
+    from openpyxl.styles import Border, Side
+    ncol = max(1, len(headers))
+    for c in range(1, ncol + 1):
+        hc = ws.cell(1, c)
+        hc.font = Font(bold=True)
+        hc.fill = hdr_fill
+    try:
+        ws.freeze_panes = "A2"
+    except Exception:
+        pass
+    thick = Side(style="medium", color="7F7F7F")
+    prev_city = None
+    for r in range(2, ws.max_row + 1):
+        cur = str(ws.cell(r, i_city + 1).value or "").strip() if i_city >= 0 else ""
+        if prev_city is not None and cur != prev_city:
+            for c in range(1, ncol + 1):
+                cell = ws.cell(r, c)
+                b = cell.border
+                cell.border = Border(left=b.left, right=b.right, bottom=b.bottom, top=thick)
+        prev_city = cur
+
+    # --- Лист «Цели»: та же жирная шапка (фиолетовая, под «метку цели») ---
+    if "Цели" in wb.sheetnames:
+        gw = wb["Цели"]
+        g_fill = PatternFill("solid", fgColor="EDE7F6")   # мягкий сиреневый
+        gcol = max(1, len(GOAL_HEADERS))
+        for c in range(1, gcol + 1):
+            gc = gw.cell(1, c)
+            gc.font = Font(bold=True)
+            gc.fill = g_fill
+        try:
+            gw.freeze_panes = "A2"
+        except Exception:
+            pass
+        # разделение по городам – как в «Логах» (город в колонке 3)
+        prev = None
+        for r in range(2, gw.max_row + 1):
+            cur = str(gw.cell(r, 3).value or "").strip()
+            if prev is not None and cur != prev:
+                for c in range(1, gcol + 1):
+                    cell = gw.cell(r, c)
+                    b = cell.border
+                    cell.border = Border(left=b.left, right=b.right,
+                                         bottom=b.bottom, top=thick)
+            prev = cur
+
+    wb.active = wb.sheetnames.index("Сводка")
     wb.save(path)
 
 
@@ -1312,16 +1546,52 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     # и почта, на которую должна прийти заявка (пишутся в одноимённые колонки лога).
     # Всегда читаем актуальный config.py с диска (после «Сохранить» в редакторе иначе остаётся кэш).
     import importlib
+    import time as _time
 
     import config
 
+    _run_t0 = _time.time()
     importlib.reload(config)
     from config import ТЕЛЕФОН, ПОЧТА, ИМЯ, КОММЕНТАРИЙ, СТРАНИЦЫ, СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ
+
+    # Переопределение ссылок под конкретный город (СНГ-домены: другой каталог).
+    try:
+        from config import URL_ПО_ГОРОДУ as _URL_OVERRIDES
+    except ImportError:
+        _URL_OVERRIDES = {}
+    _city_ov = (_URL_OVERRIDES or {}).get((город or "").strip(), {})
+    for _t, _u in _city_ov.items():
+        if _t in СТРАНИЦЫ:
+            СТРАНИЦЫ[_t] = _u
+    if _city_ov:
+        print(f"🔁 {город}: переопределены ссылки → {', '.join(_city_ov)}")
 
     try:
         from config import ФОРМЫ_ЧЕРЕЗ_REQUESTS
     except ImportError:
         ФОРМЫ_ЧЕРЕЗ_REQUESTS = False
+
+    # Сопоставление наших названий форм с типом в админке (Уровень 1). Может
+    # отсутствовать — тогда сверка идёт по совпадению названия.
+    try:
+        from config import АДМИН_ТИПЫ as _АДМИН_ТИПЫ
+    except ImportError:
+        _АДМИН_ТИПЫ = {}
+    _АДМИН_ТИПЫ = _АДМИН_ТИПЫ or {}
+
+    # Выбор форм из интерфейса: если задан список ТОЛЬКО_ФОРМЫ (имена сценариев/
+    # форм/модалок), гоняем ТОЛЬКО их. Пусто/не задано – гоняем все формы, как раньше.
+    try:
+        from config import ТОЛЬКО_ФОРМЫ as _ТОЛЬКО_ФОРМЫ
+    except ImportError:
+        _ТОЛЬКО_ФОРМЫ = None
+    _только_формы = {str(x).strip() for x in (_ТОЛЬКО_ФОРМЫ or []) if str(x).strip()}
+
+    def _форма_выбрана(название) -> bool:
+        """True, если форму нужно гнать. Если фильтр не задан – гоним всё."""
+        if not _только_формы:
+            return True
+        return str(название or "").strip() in _только_формы
 
     try:
         from config import ФОРМАТ_ИМЕНИ_ТЕСТА as _FMT_TEST
@@ -1337,7 +1607,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     )
 
     телефон_отправки = normalize_phone_for_submit(ТЕЛЕФОН)
-    ГОРОД = getattr(config, "ГОРОД", "") or ""
+    # Город прогона (из forms_run, напр. «Бишкек») имеет приоритет; токен «ГОРОД»/«city»
+    # в полях форм (Город доставки и т.п.) берёт именно его. Фоллбэк – config.ГОРОД.
+    ГОРОД = (город or "").strip() or (getattr(config, "ГОРОД", "") or "")
 
     print("=" * 60)
     print("ПРОВЕРКА ФОРМ НА САЙТЕ")
@@ -1375,6 +1647,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
     def инициализировать_excel():
         init_excel_log(EXCEL_ФАЙЛ, ОЧИСТИТЬ_EXCEL)
+        if ОЧИСТИТЬ_EXCEL:
+            reset_submitted_forms()
 
     def записать_в_excel(данные):
         # Постоянные колонки (дата/время/телефон/почта) подставляются здесь,
@@ -1391,11 +1665,51 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         # успехе остаётся пустой – тестовый текст комментария в отчёт не пишем.)
         _clean, _reason = _status_clean_reason(str(row.get("статус", "")))
         row["статус"] = _clean
-        row["комментарий"] = _reason
+        # «комментарий_готовый» – если задан явно, пишем его как есть (этап падения
+        # сценария, «формы нет на домене» и т.п.); иначе – авто-причина по статусу.
+        row["комментарий"] = (данные.get("комментарий_готовый") or _reason)
+        row.pop("комментарий_готовый", None)
+        # Уровень 1 (админка): запоминаем реально отправленные формы. Берём только
+        # успешные отправки форм/модалок — не цели Метрики (тип «ЦЕЛЬ», тип_селектора
+        # «цель») и не проверки корзины/оформления (тип_селектора «сценарий»).
+        try:
+            if (row.get("статус") == "Успешно"
+                    and str(данные.get("тип_селектора", "")) not in ("сценарий", "цель")
+                    and not str(данные.get("тип", "")).upper().startswith("ЦЕЛЬ")):
+                _назв = данные.get("название", "")
+                record_submitted_form({
+                    "город": город,
+                    "название": _назв,
+                    "админ_тип": _АДМИН_ТИПЫ.get(_назв, ""),
+                    "имя": row.get("имя", ""),
+                    "почта": ПОЧТА,
+                    "телефон": телефон_отправки,
+                    "страница": данные.get("страница", ""),
+                    "url": данные.get("url", ""),
+                    "ts": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+        except Exception:
+            pass
         try:
             append_log_row(EXCEL_ФАЙЛ, row)
         except Exception as e:
             print(f"   ⚠️ Ошибка Excel: {e}")
+
+    def _нет_в_текущем_городе(cfg_obj):
+        """True, если форма/сценарий помечены «нет_в_городах» и текущий город в списке."""
+        lst = (cfg_obj or {}).get("нет_в_городах")
+        return bool(lst) and (город or "").strip() in lst
+
+    def _лог_форма_отсутствует(тип_страницы, url, cfg_obj, название):
+        """Пишет строку «Нет на сайте» с понятным комментарием (форма не существует
+        в этом домене – не ошибка)."""
+        коммент = (cfg_obj or {}).get("нет_коммент") or "Данной формы нет на сайте в этом домене"
+        print(f"   ⏭️ «{название}»: {коммент}")
+        записать_в_excel({
+            "тип": "–", "страница": тип_страницы, "url": url,
+            "тип_селектора": "–", "ид": название, "название": название, "имя": название,
+            "статус": "Нет на сайте", "комментарий_готовый": коммент,
+        })
 
     def отправить_через_requests(url, форма_config, название):
         страница = определить_страницу(url)
@@ -1599,12 +1913,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             )
             return False
 
-    def _goto_with_retry(page, url, *, attempts=3, wait_ms=3000):
-        """Переход с повтором при обрыве соединения (антибот/лимит сайта)."""
+    def _goto_with_retry(page, url, *, attempts=3, wait_ms=2500):
+        """Переход с повтором при обрыве соединения (антибот/лимит сайта).
+        Меньше попыток/паузы + умеренный таймаут – прогон быстрее; сценарий/форма
+        ещё раз повторятся на верхнем уровне, так что попыток суммарно хватает."""
         last = None
         for i in range(attempts):
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 return
             except Exception as e:  # noqa: BLE001
                 last = e
@@ -1720,6 +2036,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         *,
         initial_url=None,
         название_контекста=None,
+        цели_seen=None,
     ):
         """
         Заполнение и отправка формы на уже открытой странице.
@@ -1848,6 +2165,22 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     f"{'да' if форма_config.get('дозаполнить_по_признакам') else 'нет'})"
                 )
                 for _aname, _tok in _ffmap.items():
+                    # «Ссылка на товар» (product-link) – СКРЫТОЕ поле. Заполняем его
+                    # напрямую через JS строго по name, иначе обычный fill из-за
+                    # одинаковых id у fio/e-mail/phone «протекал» URL-ом в телефон.
+                    if _aname == "product-link":
+                        _val = page.url or base_url
+                        if str(_tok).strip() not in ("URL_ТОВАРА", "URL", "page_url", ""):
+                            _val = _resolve_form_field_token(_tok, **_ctx_ff)
+                        try:
+                            form.evaluate(
+                                "(f, v) => { const el = f.querySelector('[name=product-link]');"
+                                " if (el) { el.value = v; el.dispatchEvent(new Event('input', {bubbles:true})); } }",
+                                _val,
+                            )
+                        except Exception as _e:  # noqa: BLE001
+                            print(f"      ⚠️ product-link: {_e}")
+                        continue
                     _val = _resolve_form_field_token(_tok, **_ctx_ff)
                     if _val:
                         _pw_fill_named_field(form, _aname, _val)
@@ -1977,16 +2310,32 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 )
                 return True
 
+            # Кнопка отправки: по умолчанию стандартные submit-кнопки; если у сайта
+            # своя (например button.send у Авиапромсталь) – задаётся ключом «кнопка_css».
+            _btn_css = str(форма_config.get("кнопка_css") or "").strip()
             sub = form.locator(
-                "button[type='submit'], input[type='submit'], button.btn"
+                _btn_css or "button[type='submit'], input[type='submit'], button.btn"
             ).first
             sub.scroll_into_view_if_needed()
-            sub.click(timeout=5000)
+            _t_отправки = _time.time()   # цели Метрики считаем с момента отправки
+            try:
+                sub.click(timeout=5000)
+            except Exception:
+                # Кнопку видно, но её перекрывает другой элемент (баг вёрстки
+                # на части доменов): кликаем принудительно – обработчик сайта
+                # срабатывает так же, как при обычном клике.
+                print("      ↻ Обычный клик по кнопке перекрыт – кликаем принудительно (force)")
+                sub.click(timeout=5000, force=True)
             page.wait_for_timeout(2500)
 
             html = page.content()
+            _form_err = response_indicates_form_error(html)
+            _коммент_готовый = None
             if response_indicates_captcha_block(html):
                 статус = "ОШИБКА: КАПЧА"
+            elif _form_err:
+                статус = "ОШИБКА"
+                _коммент_готовый = _form_err
             elif "ошибк" in html.lower() and any(
                 x in html.lower()
                 for x in ("не удалось", "не отправлен", "отклонен", "invalid")
@@ -2005,11 +2354,45 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     "название": название,
                     "имя": имя_теста,
                     "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_теста,
+                    "комментарий_готовый": _коммент_готовый,
                     "статус": статус,
                     "код": "browser",
                 }
             )
             print(f"   ✅ {название} - {статус}")
+
+            # Цель Метрики этой формы (ключ «цель»): ждём немного (летит ajax-ом)
+            # и пишем в отчёт «сработала / НЕ сработала». Причину показываем,
+            # только если задана в конфиге («цель_причина»).
+            _цель_имя = str(форма_config.get("цель") or "").strip()
+            if _цель_имя:
+                _t0g = _time.time()
+                _найдена = False
+                while True:
+                    _найдена = any(g["цель"] == _цель_имя for g in _цели_с(_t_отправки))
+                    if _найдена or (_time.time() - _t0g) * 1000 >= 8000:
+                        break
+                    page.wait_for_timeout(500)
+                _nm = str(форма_config.get("цель_название") or f"Цель: {название}")
+                if _найдена:
+                    _г_статус, _г_коммент = "СРАБОТАЛА", None
+                else:
+                    _г_статус = "НЕ СРАБОТАЛА"
+                    _г_коммент = (str(форма_config.get("цель_причина") or "").strip()
+                                  or f"Цель «{_цель_имя}» не зафиксирована Метрикой")
+                записать_в_excel(
+                    {
+                        "тип": "ЦЕЛЬ (Метрика)", "страница": страница,
+                        "url": page.url or log_url, "тип_селектора": "цель",
+                        "ид": _цель_имя, "название": _nm,
+                        "имя": имя_теста_из_конфига(страница, "цель", _nm,
+                                                    название_контекста=_nm),
+                        "комментарий": _г_коммент or "",
+                        "комментарий_готовый": _г_коммент,
+                        "статус": _г_статус, "код": "ym",
+                    }
+                )
+                print(f"   🎯 Цель «{_цель_имя}» – {_г_статус}")
             return True
 
         except Exception as e:
@@ -2139,20 +2522,132 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             )
             return False
 
-    def _with_browser_page(callback):
-        """Один сеанс Chromium: launch → new_context → new_page → callback(page) → close.
+    # ── Пул браузера: ОДИН Chromium/контекст на весь прогон (переиспользуется) ──
+    # Раньше браузер запускался на каждую форму/сценарий – очень медленно. Теперь
+    # запускаем один раз, на каждую форму открываем новую вкладку. При сбое контекста
+    # (обрыв соединения и т.п.) – пересоздаём и повторяем.
+    # goals – пойманные цели Яндекс.Метрики за прогон: [{"цель", "время"}].
+    # Каждый reachGoal уходит запросом на mc.yandex.* с page-url=goal://домен/цель –
+    # перехватываем эти запросы, шаг «проверить_цель» ищет цель в списке.
+    _pw = {"play": None, "browser": None, "context": None, "goals": []}
 
-        Единая точка запуска браузера (раньше блок дублировался в каждой функции).
-        Здесь же в дальнейшем включается headless / переиспользование контекста.
-        """
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless)
-            context = browser.new_context()
-            page = context.new_page()
+    def _поймать_цель(request):
+        try:
+            u = request.url
+            if ("mc.yandex" in u or "mc.webvisor" in u) and "goal" in u:
+                for t in re.findall(r"goal://[^/]+/([^&\s\"?#]+)", unquote(u)):
+                    _pw["goals"].append({"цель": t, "время": _time.time()})
+                    print(f"      🎯 Метрика: зафиксирована цель «{t}»")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _цели_с(ts):
+        """Цели, пойманные начиная с момента ts."""
+        return [g for g in _pw["goals"] if g["время"] >= ts]
+
+    def _отчёт_сработавших_целей(ts, страница, log_url, seen, контекст=""):
+        """АВТООПРЕДЕЛЕНИЕ: пишет в отчёт строку по КАЖДОЙ цели Метрики,
+        сработавшей с момента ts (кроме уже записанных – через seen). Так видно,
+        какая цель реально фиксируется на форме/кнопке, даже если в конфиге цель
+        не задана. Не нужно знать имена целей заранее – прогон их показывает."""
+        _есть = False
+        for g in _цели_с(ts):
+            gнэйм = g["цель"]
+            if gнэйм in seen:
+                continue
+            seen.add(gнэйм)
+            _есть = True
+            _подпись = f"Сработала цель: {gнэйм}" + (f" — {контекст}" if контекст else "")
+            записать_в_excel(
+                {
+                    "тип": "ЦЕЛЬ (Метрика)",
+                    "страница": страница,
+                    "url": log_url,
+                    "тип_селектора": "цель",
+                    "ид": gнэйм,
+                    "название": _подпись,
+                    "имя": имя_теста_из_конфига(страница, "цель", _подпись,
+                                                название_контекста=_подпись),
+                    "комментарий": gнэйм,
+                    "статус": "ЗАФИКСИРОВАНА (Метрика)",
+                    "код": "ym-auto",
+                }
+            )
+            print(f"   🎯 Сработала цель: {gнэйм}" + (f" — {контекст}" if контекст else ""))
+        return _есть
+
+    def _shared_context():
+        h = _pw
+        if h["context"] is None:
+            if h["play"] is None:
+                h["play"] = sync_playwright().start()
+            # Маскируем автоматизацию: иначе часть сайтов (Bitrix) не навешивает свой
+            # JS-обработчик отправки на «робота», форма уходит обычным POST и сервер
+            # отвечает «Доступ запрещён». Флаг + init-скрипт убирают признак webdriver.
+            h["browser"] = h["play"].chromium.launch(
+                headless=headless,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
+            h["context"] = h["browser"].new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                # Обычное окно. Перекрытые кнопки (баг вёрстки на части
+                # СНГ-доменов) решает принудительный клик в отправке формы,
+                # огромное окно для этого не нужно.
+                viewport={"width": 1366, "height": 768},
+                locale="ru-RU",
+            )
             try:
-                return callback(page)
-            finally:
-                browser.close()
+                h["context"].add_init_script(
+                    "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+                )
+            except Exception:
+                pass
+            try:
+                h["context"].on("request", _поймать_цель)
+            except Exception:
+                pass
+        return h["context"]
+
+    def _drop_browser():
+        h = _pw
+        try:
+            if h["browser"]:
+                h["browser"].close()
+        except Exception:
+            pass
+        h["browser"] = None
+        h["context"] = None
+
+    def _close_browser_pool():
+        _drop_browser()
+        try:
+            if _pw["play"]:
+                _pw["play"].stop()
+        except Exception:
+            pass
+        _pw["play"] = None
+
+    def _open_page():
+        """Новая вкладка в общем контексте; если контекст умер – пересоздать и повторить."""
+        try:
+            return _shared_context().new_page()
+        except Exception:
+            _drop_browser()
+            return _shared_context().new_page()
+
+    def _with_browser_page(callback):
+        page = _open_page()
+        try:
+            return callback(page)
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
 
     def отправить_форму_через_playwright(url, форма_config, название):
         """
@@ -2222,10 +2717,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         else:
             print(f"   📜 Сценарий: {len(шаги)} шаг(ов), базовый URL: {base_url}")
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless)
-            context = browser.new_context()
-            page = context.new_page()
+        if True:  # общий браузер (пул): новая вкладка вместо запуска нового Chromium
+            page = _open_page()
+            _тек_шаг_инфо = ""
+            _scn_t0 = _time.time()   # цели Метрики считаем с начала сценария
+            _scn_цели_seen = set()   # уже записанные цели этого сценария (без дублей)
             try:
                 _ensure_scenario_page_loaded(page, base_url)
                 _run_page_prep(page, страница)
@@ -2242,6 +2738,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         continue
 
                     act = _нормализовать_действие_шага(step)
+                    # Запоминаем текущий шаг – чтобы при падении сказать, на чём встали.
+                    _шаг_цель = (step.get("css") or step.get("selector")
+                                 or step.get("url") or step.get("href") or "")
+                    _тек_шаг_инфо = f"шаг {i + 1} «{act}»" + (f" {_шаг_цель}" if _шаг_цель else "")
 
                     if act == "пауза":
                         try:
@@ -2274,8 +2774,23 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             print(
                                 f"   ↪ Шаг {i + 1}: уточнён селектор клика {raw!r} → {css_norm!r}"
                             )
-                        print(f"   🖱️ Шаг {i + 1}: клик {css_norm!r}")
-                        page.locator(css_norm).first.click(timeout=15000)
+                        _необяз = bool(
+                            step.get("необязательно") or step.get("optional")
+                        )
+                        print(
+                            f"   🖱️ Шаг {i + 1}: клик {css_norm!r}"
+                            + (" (необязательный)" if _необяз else "")
+                        )
+                        try:
+                            _to = 6000 if _необяз else 15000
+                            page.locator(css_norm).first.click(timeout=_to)
+                        except Exception as _e_click:  # noqa: BLE001
+                            if _необяз:
+                                print(
+                                    f"   ↳ необязательный клик пропущен (элемент не найден): {css_norm!r}"
+                                )
+                            else:
+                                raise
                         page.wait_for_timeout(400)
 
                     elif act == "наведение":
@@ -2296,6 +2811,39 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         print(f"   ↗ Шаг {i + 1}: наведение {css_norm!r}")
                         loc.hover(timeout=15000)
                         page.wait_for_timeout(400)
+
+                    elif act in ("заполнить_по_метке", "fill_by_label", "поле_по_метке"):
+                        # Заполнение поля по ВИДИМОЙ подписи (label) – для форм, где
+                        # имена полей рисуются в JS (bx-soa): get_by_label, затем
+                        # запасной вариант по placeholder. Не падаем, если поля нет.
+                        метка = str(step.get("метка") or step.get("label") or "").strip()
+                        _tok = step.get("значение") or step.get("value") or ""
+                        _val = _resolve_form_field_token(
+                            _tok, имя_теста="", телефон=телефон_отправки,
+                            почта=ПОЧТА, имя=ИМЯ, комментарий=КОММЕНТАРИЙ, город=ГОРОД,
+                        )
+                        if not метка or not str(_val).strip():
+                            print(f"   ⚠️ Шаг {i + 1}: «заполнить_по_метке» без метки/значения – пропуск.")
+                            continue
+                        _filled = False
+                        _esc = метка.replace('"', '\\"')
+                        for _getter in (
+                            lambda: page.get_by_label(метка, exact=False),
+                            lambda: page.locator(f'input[placeholder*="{_esc}"], textarea[placeholder*="{_esc}"]'),
+                        ):
+                            try:
+                                _loc = _getter().first
+                                _loc.wait_for(state="visible", timeout=7000)
+                                _loc.scroll_into_view_if_needed()
+                                _loc.fill(str(_val), force=True)
+                                _filled = True
+                                break
+                            except Exception:  # noqa: BLE001
+                                continue
+                        print(
+                            f"   ✏️ Шаг {i + 1}: поле по метке «{метка}» – "
+                            f"{'заполнено' if _filled else 'НЕ найдено'}"
+                        )
 
                     elif act == "форма":
                         form_cfg = {
@@ -2321,6 +2869,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             название_контекста=_scenario_placeholder_title(
                                 step, cap
                             ),
+                            цели_seen=_scn_цели_seen,
                         )
 
                     elif act == "модалка":
@@ -2362,11 +2911,36 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         )
                         успех = str(step.get("успех_текст") or step.get("success_text") or "")
                         ошибка = str(step.get("ошибка_текст") or step.get("error_text") or "")
-                        html = page.content()
-                        low = html.lower()
+                        # Подтверждение приходит ajax-ом с разной скоростью
+                        # (на части доменов дольше): опрашиваем страницу, пока
+                        # не появится признак успеха/ошибки или не выйдет время.
+                        try:
+                            _ждать_мс = int(step.get("ожидание_мс") or 12000)
+                        except (TypeError, ValueError):
+                            _ждать_мс = 12000
+                        _t0 = _time.time()
+                        while True:
+                            html = page.content()
+                            low = html.lower()
+                            _chk_err = response_indicates_form_error(html)
+                            if (not успех
+                                    or response_indicates_captcha_block(html)
+                                    or _chk_err
+                                    or (ошибка and ошибка.lower() in low)
+                                    or успех.lower() in low
+                                    or (_time.time() - _t0) * 1000 >= _ждать_мс):
+                                break
+                            page.wait_for_timeout(700)
                         log_url = page.url or base_url
+                        _коммент_готовый = None
                         if response_indicates_captcha_block(html):
                             статус = "ОШИБКА: КАПЧА"
+                        elif _chk_err:
+                            # Явная ошибка на странице важнее «признака успеха»: на bx-soa
+                            # текст «Заказ сформирован» бывает в скрытом шаблоне и даёт
+                            # ложный успех, хотя заказ не оформлен.
+                            статус = "ОШИБКА"
+                            _коммент_готовый = _chk_err
                         elif ошибка and ошибка.lower() in low:
                             статус = "ОШИБКА (сообщение на странице)"
                         elif успех and успех.lower() in low:
@@ -2388,23 +2962,139 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 "название": nm,
                                 "имя": имя_лог,
                                 "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_лог,
+                                "комментарий_готовый": _коммент_готовый,
                                 "статус": статус,
                                 "код": "browser",
                             }
                         )
                         print(f"   🔎 Шаг {i + 1}: проверка «{nm}» – {статус}")
 
+                    elif act in ("проверить_цель", "check_goal"):
+                        # Проверка цели Яндекс.Метрики: ждём, пока перехватчик
+                        # поймает reachGoal с нужным именем (цели уходят ajax-ом,
+                        # поэтому опрашиваем список до «ожидание_мс»).
+                        nm = (
+                            step.get("название")
+                            or step.get("название_теста")
+                            or f"цель шаг {i + 1}"
+                        )
+                        цель = str(step.get("цель") or step.get("goal") or "").strip()
+                        try:
+                            _ждать_мс = int(step.get("ожидание_мс") or 10000)
+                        except (TypeError, ValueError):
+                            _ждать_мс = 10000
+                        _t0g = _time.time()
+                        _найдена = False
+                        while цель:
+                            _найдена = any(g["цель"] == цель for g in _цели_с(_scn_t0))
+                            if _найдена or (_time.time() - _t0g) * 1000 >= _ждать_мс:
+                                break
+                            page.wait_for_timeout(500)
+                        _коммент_готовый = None
+                        if not цель:
+                            статус = "НЕ СРАБОТАЛА"
+                            _коммент_готовый = "В шаге «проверить_цель» не задано имя цели"
+                        elif _найдена:
+                            статус = "СРАБОТАЛА"
+                        else:
+                            статус = "НЕ СРАБОТАЛА"
+                            _коммент_готовый = (str(step.get("цель_причина") or "").strip()
+                                                or f"Цель «{цель}» не зафиксирована Метрикой")
+                        имя_лог = имя_теста_из_конфига(
+                            страница, "цель", nm, название_контекста=nm
+                        )
+                        записать_в_excel(
+                            {
+                                "тип": "ЦЕЛЬ (Метрика)",
+                                "страница": страница,
+                                "url": page.url or base_url,
+                                "тип_селектора": "цель",
+                                "ид": цель,
+                                "название": nm,
+                                "имя": имя_лог,
+                                "комментарий": _коммент_готовый or "",
+                                "комментарий_готовый": _коммент_готовый,
+                                "статус": статус,
+                                "код": "ym",
+                            }
+                        )
+                        print(f"   🎯 Шаг {i + 1}: цель «{цель}» – {статус}")
+
+                    elif act in ("проверить_корзину", "check_cart"):
+                        # Проверка: реально ли товар попал в корзину. На СНГ-доменах
+                        # кнопка «Добавить в корзину» – баг разработчиков: клик ничего
+                        # не делает, корзина остаётся пустой. Признак «товар в корзине» –
+                        # наличие кнопки оформления (Bitrix рисует её только при товаре).
+                        # Если корзина пуста – пишем понятный комментарий и МЯГКО
+                        # завершаем сценарий (без «прервался на шаг…»).
+                        nm = (
+                            step.get("название")
+                            or step.get("название_теста")
+                            or cap
+                            or f"корзина шаг {i + 1}"
+                        )
+                        товар_css = step.get("признак_товар_css") or step.get("css")
+                        коммент = str(
+                            step.get("комментарий_провал")
+                            or "Кнопка «Добавить в корзину» не работает "
+                               "(товар не кладётся в корзину)"
+                        )
+                        try:
+                            ms_wait = int(step.get("ожидание_мс") or step.get("мс") or 6000)
+                        except (TypeError, ValueError):
+                            ms_wait = 6000
+                        есть_товар = True
+                        if товар_css:
+                            sel = _normalize_scenario_click_css_selector(
+                                str(товар_css).strip()
+                            )
+                            try:
+                                page.locator(sel).first.wait_for(
+                                    state="visible", timeout=ms_wait
+                                )
+                                есть_товар = True
+                            except Exception:  # noqa: BLE001
+                                есть_товар = False
+                        if есть_товар:
+                            print(
+                                f"   🛒 Шаг {i + 1}: корзина не пуста – продолжаем оформление."
+                            )
+                        else:
+                            log_url = page.url or base_url
+                            имя_лог = имя_теста_из_конфига(
+                                страница, "корзина", nm, название_контекста=nm
+                            )
+                            записать_в_excel(
+                                {
+                                    "тип": "PLAYWRIGHT",
+                                    "страница": страница,
+                                    "url": log_url,
+                                    "тип_селектора": "сценарий",
+                                    "ид": nm,
+                                    "название": nm,
+                                    "имя": имя_лог,
+                                    "комментарий_готовый": коммент,
+                                    "статус": "ОШИБКА (кнопка корзины не работает)",
+                                    "код": "cart-broken",
+                                }
+                            )
+                            print(f"   🛒 Шаг {i + 1}: корзина пуста – {коммент}")
+                            return
+
                     else:
                         print(
                             f"   ⚠️ Шаг {i + 1}: неизвестное действие {act!r} "
-                            f"(ожидалось: пауза, перейти, клик, наведение, форма, модалка, проверить)."
+                            f"(ожидалось: пауза, перейти, клик, наведение, форма, модалка, проверить, проверить_корзину)."
                         )
 
                 def _step_scenario_enabled(s):
                     return isinstance(s, dict) and cfg_enabled(s.get("включено", True))
 
                 had_form_or_modal = any(
-                    _нормализовать_действие_шага(s) in ("форма", "модалка")
+                    _нормализовать_действие_шага(s)
+                    in ("форма", "модалка", "проверить", "итог", "check",
+                        "проверить_цель", "check_goal",
+                        "заполнить_по_метке", "fill_by_label", "поле_по_метке")
                     for s in шаги
                     if _step_scenario_enabled(s)
                 )
@@ -2437,8 +3127,15 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     )
                     print(f"   ✅ «{cap}» – строка в Excel (клик без формы)")
 
+            except Exception as _e_step:  # noqa: BLE001
+                # Прокидываем наверх с указанием, на каком шаге упали.
+                where = _тек_шаг_инфо or "одном из шагов"
+                raise RuntimeError(f"прервался на {where}") from _e_step
             finally:
-                browser.close()
+                try:
+                    page.close()
+                except Exception:
+                    pass
 
     инициализировать_excel()
 
@@ -2471,6 +3168,20 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         тип_страницы = страница["тип"]
         url = СТРАНИЦЫ[тип_страницы]
 
+        # Региональные страницы (форма есть только в конкретном городе/стране):
+        # «только_города» ограничивает прогон списком городов. Если идёт прогон по
+        # городу не из списка – страницу пропускаем (иначе она тянулась бы в КАЖДЫЙ
+        # город: Хабаровск/СНГ попадали в отчёт там, где их не выбирали).
+        только = страница.get("только_города")
+        if только and (город or "").strip() not in только:
+            print(f"\n📄 Страница: {тип_страницы} – пропущена (только для: {', '.join(только)})")
+            continue
+
+        кроме = страница.get("кроме_городов")
+        if кроме and (город or "").strip() in кроме:
+            print(f"\n📄 Страница: {тип_страницы} – пропущена для города {город} (есть отдельный блок)")
+            continue
+
         if not cfg_enabled(страница.get("включено", True)):
             print(f"\n{'='*50}")
             print(f"📄 Страница: {тип_страницы} – не в прогоне (настройки сохранены, шаги не выполняются)")
@@ -2500,9 +3211,24 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     )
                     continue
                 cap = str(sc.get("название") or "").strip() or название_сценария
-                try:
-                    run_scenario_playwright(url, steps, название_сценария=cap)
-                except Exception as _scn_err:  # noqa: BLE001
+                if not _форма_выбрана(cap):
+                    continue
+                if _нет_в_текущем_городе(sc):
+                    _лог_форма_отсутствует(тип_страницы, url, sc, cap)
+                    continue
+                # До 2 попыток: СНГ-домены часто рвут соединение (анти-бот),
+                # повтор обычно проходит.
+                _scn_err = None
+                for _попытка in (1, 2):
+                    try:
+                        run_scenario_playwright(url, steps, название_сценария=cap)
+                        _scn_err = None
+                        break
+                    except Exception as _e:  # noqa: BLE001
+                        _scn_err = _e
+                        if _попытка == 1:
+                            print(f"   ↻ Сценарий «{cap}» упал ({str(_e)[:80]}), повтор…")
+                if _scn_err is not None:
                     # Один упавший сценарий НЕ должен ронять весь прогон –
                     # пишем ошибку в лог и идём к следующей форме.
                     print(f"   ❌ Сценарий «{cap}» прерван ошибкой: {_scn_err}")
@@ -2517,6 +3243,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 "название": cap,
                                 "имя": cap,
                                 "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else cap,
+                                "комментарий_готовый": f"Сценарий {str(_scn_err)[:200]}"
+                                if str(_scn_err).strip() else "Сценарий прервался на одном из шагов",
                                 "статус": "ОШИБКА (сценарий прерван)",
                                 "код": str(_scn_err)[:300],
                             }
@@ -2545,12 +3273,27 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 nm = форма.get("название", "")
                 print(f"   ⏭️ Форма пропущена (отключена в конфиге): {nm!r}")
                 continue
-            try:
-                if ФОРМЫ_ЧЕРЕЗ_REQUESTS:
-                    отправить_через_requests(url, форма, форма["название"])
-                else:
-                    отправить_форму_через_playwright(url, форма, форма["название"])
-            except Exception as _frm_err:  # noqa: BLE001
+            if not _форма_выбрана(форма.get("название", "")):
+                continue
+            if _нет_в_текущем_городе(форма):
+                _лог_форма_отсутствует(тип_страницы, url, форма, форма.get("название", "?"))
+                continue
+            # До 2 попыток: страница/форма иногда не доходит из-за обрыва соединения
+            # (анти-бот СНГ) – повтор обычно проходит.
+            _frm_err = None
+            for _попытка in (1, 2):
+                try:
+                    if ФОРМЫ_ЧЕРЕЗ_REQUESTS:
+                        отправить_через_requests(url, форма, форма["название"])
+                    else:
+                        отправить_форму_через_playwright(url, форма, форма["название"])
+                    _frm_err = None
+                    break
+                except Exception as _e:  # noqa: BLE001
+                    _frm_err = _e
+                    if _попытка == 1:
+                        print(f"   ↻ Форма «{форма.get('название','?')}» упала ({str(_e)[:70]}), повтор…")
+            if _frm_err is not None:
                 # Сбой одной формы НЕ должен ронять прогон – пишем ошибку и идём дальше.
                 print(f"   ❌ Форма «{форма.get('название','?')}» прервана ошибкой: {_frm_err}")
                 try:
@@ -2581,11 +3324,25 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 nm = модалка.get("название_теста", "")
                 print(f"   ⏭️ Модалка пропущена (отключена в конфиге): {nm!r}")
                 continue
+            if not _форма_выбрана(модалка.get("название_теста", "")):
+                continue
             проверить_кнопку_через_playwright(
                 url, модалка["значение"], модалка["название_теста"]
             )
 
-    print(f"\n✅ Готово. Результаты в {EXCEL_ФАЙЛ}")
+    # Закрываем общий браузер прогона (пул).
+    _close_browser_pool()
+
+    _spent = int(_time.time() - _run_t0)
+    _spent_mmss = f"{_spent // 60}:{_spent % 60:02d}"
+
+    try:
+        write_summary_sheet(EXCEL_ФАЙЛ, время_прогона=_spent_mmss)
+        print("   🧾 Сводка собрана (лист «Сводка»)")
+    except Exception as _e:  # noqa: BLE001
+        print(f"   ⚠️ Не удалось собрать сводку: {_e}")
+
+    print(f"\n✅ Готово за {_spent_mmss} (мин:сек). Результаты в {EXCEL_ФАЙЛ}")
 
     # Файл НЕ открываем автоматически: открытый в Excel лог блокируется,
     # и следующий прогон не может его перезаписать (а ещё не даёт скачать копию).

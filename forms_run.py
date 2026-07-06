@@ -34,6 +34,15 @@ PROJECT_NAMES = {
     'smu': 'СМУ – Стальметурал',
     'imp': 'ИМП – Инметпром',
     'mpe': 'МПЭ – Мепэн',
+    'mpe_cart': 'МПЭ – Корзина',
+    'avia': 'АПС – Авиапромсталь',
+}
+
+# Проекты-варианты со своим config.py, но БЕЗ своего cities.csv – берут
+# справочник городов у «родителя». Так «МПЭ – Корзина» гоняет те же города,
+# что и Мепэн, без дублирования файла на 160 строк.
+CITIES_FROM = {
+    'mpe_cart': 'mpe',
 }
 
 
@@ -41,8 +50,29 @@ def _stamp(msg):
     print(f'[{datetime.now().strftime("%H:%M:%S")}] {msg}', flush=True)
 
 
+def _load_admin_zones(src_config: Path, main_host: str, cities_all: list):
+    """Читает АДМИН_ЗОНЫ из ИСХОДНОГО config.py проекта (не из рабочей копии, где
+    домены уже подменены под город). Если ключа нет — одна зона на основной домен.
+    Зона = {домен, города}; города=[] — «все остальные» (обычно РФ)."""
+    домен_осн = f'https://{main_host}' if main_host else (
+        cities_all[0][1] if cities_all else '')
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('_orig_cfg_zones', str(src_config))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        зоны = getattr(mod, 'АДМИН_ЗОНЫ', None)
+        if зоны:
+            return [dict(z) for z in зоны]
+    except Exception as e:  # noqa: BLE001
+        _stamp(f'⚠️ Не удалось прочитать АДМИН_ЗОНЫ из конфига: {e}')
+    return [{'домен': домен_осн, 'города': []}]
+
+
 def _load_cities(project: str):
-    """Справочник городов проекта: [(город, url, почта), ...]. Пусто, если файла нет."""
+    """Справочник городов проекта: [(город, url, почта), ...]. Пусто, если файла нет.
+    Для проектов-вариантов (CITIES_FROM) берём справочник у родителя."""
+    project = CITIES_FROM.get(project, project)
     f = PROJECTS_ROOT / project / 'cities.csv'
     if not f.is_file():
         return []
@@ -67,6 +97,11 @@ def main() -> int:
                     help='Показывать окно браузера (по умолчанию скрыто, headless)')
     ap.add_argument('--cities', default='',
                     help='Список городов через запятую (из cities.csv). Пусто = основной сайт.')
+    ap.add_argument('--forms-file', default='',
+                    help='Путь к JSON-файлу со списком выбранных форм (имена). '
+                         'Пусто = проверять все формы проекта.')
+    ap.add_argument('--no-admin', action='store_true',
+                    help='Не проверять админку (Уровень 1) после прогона.')
     a = ap.parse_args()
 
     name = PROJECT_NAMES[a.project]
@@ -94,6 +129,30 @@ def main() -> int:
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
     base_config = src_config.read_text(encoding='utf-8')
+
+    # Выбор форм из интерфейса: дописываем в конфиг список ТОЛЬКО_ФОРМЫ (движок
+    # прогонит только формы с этими именами). Пустой/отсутствующий файл – гоним всё.
+    forms_filter = []
+    if a.forms_file:
+        try:
+            import json
+            forms_filter = json.loads(Path(a.forms_file).read_text(encoding='utf-8')) or []
+        except Exception as e:  # noqa: BLE001
+            _stamp(f'⚠️ Не удалось прочитать список форм ({a.forms_file}): {e}')
+            forms_filter = []
+    if forms_filter:
+        base_config = base_config.rstrip() + '\n\nТОЛЬКО_ФОРМЫ = ' + repr(list(forms_filter)) + '\n'
+        _stamp(f'Выбрано форм: {len(forms_filter)} (остальные пропускаем).')
+
+    # Базовый домен для подмены берём НЕ из первой строки cities.csv, а из самого
+    # конфига: тот город-домен, что реально встречается в URL-ах СТРАНИЦ. Иначе если
+    # первый город в справочнике – поддомен (напр. abakan.mepen.ru), а конфиг на
+    # mepen.ru, замена не находила совпадения и все города шли на основной сайт (МПЭ).
+    for _c in cities_all:
+        _h = urlparse(_c[1]).netloc
+        if _h and f'//{_h}' in base_config:
+            main_host = _h
+            break
 
     sys.path.insert(0, str(ENGINE))
     sys.path.insert(0, str(work))
@@ -132,6 +191,25 @@ def main() -> int:
                 город=city,
                 почта_получателя=city_mail,
             )
+
+        # ── Уровень 1: проверка админки (если заданы креды admin.local.json) ──
+        # У СМУ разные админки для РФ / СНГ / Steelgroup (АДМИН_ЗОНЫ в конфиге), но
+        # логин/пароль общие. Логинимся в каждую нужную зону, читаем «Уведомления
+        # с форм» за сегодня и сверяем с отправками. Пропускается без admin.local.json.
+        if not a.no_admin and not (stop and stop()):
+            try:
+                import admin_check
+                проект_дир = PROJECTS_ROOT / a.project
+                if (проект_дир / 'admin.local.json').is_file():
+                    зоны = _load_admin_zones(src_config, main_host, cities_all)
+                    admin_check.выполнить_проверку(
+                        str(проект_дир), зоны,
+                        excel_path='log_forms.xlsx',
+                        submitted_path='submitted_forms.json',
+                        show=a.show_browser, log=_stamp,
+                    )
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠️ Проверка админки не выполнена: {e}')
     except SystemExit as e:
         rc = int(e.code) if isinstance(e.code, int) else 1
     except Exception as e:
