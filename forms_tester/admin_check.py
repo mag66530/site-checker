@@ -341,8 +341,8 @@ def выполнить_проверку(проект_дир, зоны, excel_pat
     """
     creds = загрузить_креды(проект_дир)
     if not creds:
-        log("ℹ️ Проверка админки пропущена: нет файла admin.local.json "
-            "(логин/пароль не заданы).")
+        log("ℹ️ Проверка админки пропущена: не заданы логин/пароль "
+            "(введите их на странице проверки форм).")
         return False
 
     p = Path(submitted_path)
@@ -437,10 +437,19 @@ def выполнить_проверку(проект_дир, зоны, excel_pat
                 итог_нет += len(результаты) - е
                 log(f"   [{кратко}] заявок в админке: {len(заявки)}; "
                     f"найдено {е} из {len(результаты)}.")
+                # Предупреждаем только про НЕОЖИДАННЫЕ свободные заявки — тип
+                # которых мы вообще не отправляли (возможный пропуск в маппинге).
+                # Лишние копии наших же типов (от прошлых прогонов за сегодня) — не шум.
                 if свободные:
-                    типы = sorted({zz.get("тип_формы", "") for zz in свободные})
-                    log(f"   ⚠️ [{кратко}] наши заявки без пары (типы): "
-                        + ", ".join(f"«{t}»" for t in типы if t))
+                    ожид = [(o.get("админ_тип") or o.get("название") or "")
+                            for o in з_отправки]
+                    неожид = sorted({zz.get("тип_формы", "") for zz in свободные
+                                     if not any(_тип_похож(zz.get("тип_формы", ""), e)
+                                                for e in ожид)})
+                    if неожид:
+                        log(f"   ⚠️ [{кратко}] в админке есть наши тест-заявки типов, "
+                            f"которых мы не отправляли: "
+                            + ", ".join(f"«{t}»" for t in неожид if t))
         finally:
             b.close()
 
@@ -477,15 +486,25 @@ def найти_заявку(заявки: list, тип_формы_админ: st
     return кандидаты[0] if кандидаты else None
 
 
-def загрузить_креды(проект_дир: Path):
-    """Читает admin.local.json проекта: {login, password}. None, если файла нет."""
+def загрузить_креды(проект_дир):
+    """Логин/пароль админки. Приоритет — переменные окружения ADMIN_LOGIN /
+    ADMIN_PASSWORD (их передаёт страница Streamlit, на диск ничего не пишется).
+    Фолбэк — локальный файл admin.local.json. None, если нигде нет."""
+    import os
+    l = (os.environ.get("ADMIN_LOGIN") or "").strip()
+    p = os.environ.get("ADMIN_PASSWORD") or ""
+    if l and p:
+        return {"login": l, "password": p}
     f = Path(проект_дир) / "admin.local.json"
     if not f.is_file():
         return None
     try:
         d = json.loads(f.read_text(encoding="utf-8"))
-        if d.get("login") and d.get("password"):
-            return d
+        login = str(d.get("login") or "")
+        # Игнорируем незаполненный шаблон (ВПИШИ_СЮДА… / ВАШ_ЛОГИН…).
+        if login and d.get("password") and "ВПИШИ" not in login.upper() \
+                and "ВАШ_" not in login.upper():
+            return {"login": login, "password": d.get("password")}
     except Exception:
         return None
     return None

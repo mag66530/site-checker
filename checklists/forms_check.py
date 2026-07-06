@@ -158,12 +158,16 @@ def _deps_ready() -> tuple[bool, list[str]]:
     return (not missing), missing
 
 
-def _launch_background(args: list[str], log_path: Path):
-    """Запустить процесс в фоне, вывод – в файл. UI не блокируется."""
+def _launch_background(args: list[str], log_path: Path, extra_env: dict | None = None):
+    """Запустить процесс в фоне, вывод – в файл. UI не блокируется.
+    extra_env – доп. переменные окружения (например, логин/пароль админки);
+    они передаются только дочернему процессу и на диск не пишутся."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env['PYTHONIOENCODING'] = 'utf-8'
     env['PYTHONUNBUFFERED'] = '1'
+    if extra_env:
+        env.update({k: v for k, v in extra_env.items() if v})
     creationflags = 0
     if os.name == 'nt':
         creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -178,6 +182,19 @@ def _launch_background(args: list[str], log_path: Path):
     except Exception:
         pass
     return proc.pid
+
+
+def _project_has_admin(project: str) -> bool:
+    """True, если у проекта настроены АДМИН_ЗОНЫ (есть проверка админки). Пока
+    это только СМУ; ИМП/МПЭ устроены иначе — для них раздел не показываем."""
+    p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
+    try:
+        spec = importlib.util.spec_from_file_location(f'cfg_adm_{project}', p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return bool(getattr(m, 'АДМИН_ЗОНЫ', None))
+    except Exception:
+        return False
 
 
 def _count_expected(project: str) -> int:
@@ -718,6 +735,27 @@ _forms_all_selected = (len(_chosen_forms) == len(_all_form_names))
 _forms_none = bool(_all_forms) and len(_chosen_forms) == 0
 
 # ── Запуск ──────────────────────────────────────────────────────────
+# ── Проверка админки (Уровень 1): логин/пароль прямо здесь ────────────
+# Данные вводятся на странице и передаются проверке через окружение — на диск
+# ничего не пишется и никуда не отправляется. Пусто — проверка админки не идёт.
+_admin_env: dict[str, str] = {}
+if _project_has_admin(pid_key):
+    with st.expander('🔐 Проверка админки (Уровень 1) — необязательно'):
+        st.caption(
+            'Если ввести логин и пароль от админки, после прогона тест сам зайдёт '
+            'в «Уведомления с форм» и сверит, что заявки реально долетели (лист '
+            '«Админка» в отчёте). Данные используются только для этого входа, '
+            'нигде не сохраняются и не отправляются. Оставишь пустыми — проверка '
+            'админки просто не выполнится.')
+        _al = st.text_input('Логин админки', key=f'fc_admin_login_{pid_key}')
+        _ap = st.text_input('Пароль админки', type='password',
+                            key=f'fc_admin_pass_{pid_key}')
+        if _al.strip() and _ap:
+            _admin_env = {'ADMIN_LOGIN': _al.strip(), 'ADMIN_PASSWORD': _ap}
+            st.caption('✅ Логин/пароль заданы — админка будет проверена после прогона.')
+        else:
+            st.caption('⏭️ Пока пусто — админка проверяться не будет.')
+
 st.subheader('Запуск проверки')
 
 st.session_state.setdefault(f'fc_clear_{pid_key}', True)
@@ -778,7 +816,7 @@ with _run_col:
                 LOG_FILE.write_text('', encoding='utf-8')
             except Exception:
                 pass
-            _launch_background(args, LOG_FILE)
+            _launch_background(args, LOG_FILE, extra_env=_admin_env)
             st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key
