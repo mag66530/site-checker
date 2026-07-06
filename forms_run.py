@@ -81,6 +81,8 @@ def main() -> int:
     ap.add_argument('--forms-file', default='',
                     help='Путь к JSON-файлу со списком выбранных форм (имена). '
                          'Пусто = проверять все формы проекта.')
+    ap.add_argument('--no-admin', action='store_true',
+                    help='Не проверять админку (Уровень 1) после прогона.')
     a = ap.parse_args()
 
     name = PROJECT_NAMES[a.project]
@@ -170,6 +172,26 @@ def main() -> int:
                 город=city,
                 почта_получателя=city_mail,
             )
+
+        # ── Уровень 1: проверка админки (если заданы креды admin.local.json) ──
+        # Логинимся в общую админку основного домена, читаем «Уведомления с форм»
+        # за сегодня и сверяем с отправленными формами (submitted_forms.json).
+        # Тихо пропускается, если файла с логином/паролем нет.
+        if not a.no_admin and not (stop and stop()):
+            try:
+                import admin_check
+                проект_дир = PROJECTS_ROOT / a.project
+                домен = f'https://{main_host}' if main_host else (
+                    cities_all[0][1] if cities_all else '')
+                if домен and (проект_дир / 'admin.local.json').is_file():
+                    admin_check.выполнить_проверку(
+                        str(проект_дир), домен,
+                        excel_path='log_forms.xlsx',
+                        submitted_path='submitted_forms.json',
+                        show=a.show_browser, log=_stamp,
+                    )
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠️ Проверка админки не выполнена: {e}')
     except SystemExit as e:
         rc = int(e.code) if isinstance(e.code, int) else 1
     except Exception as e:

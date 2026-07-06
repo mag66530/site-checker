@@ -1362,6 +1362,42 @@ def append_log_row(path: str, row: dict) -> None:
     wb.save(path)
 
 
+# --- Уровень 1 (админка): запись реально отправленных форм для сверки ---
+# После прогона forms_run сверяет этот список с «Уведомлениями с форм» в админке
+# (admin_check.выполнить_проверку). Пишем только реальные отправки форм — без
+# целей Метрики и без проверок корзины/оформления заказа.
+SUBMITTED_FORMS_FILE = "submitted_forms.json"
+
+
+def reset_submitted_forms() -> None:
+    """Удаляет файл отправок (в начале свежего прогона, вместе с очисткой Excel)."""
+    try:
+        if os.path.exists(SUBMITTED_FORMS_FILE):
+            os.remove(SUBMITTED_FORMS_FILE)
+    except Exception:
+        pass
+
+
+def record_submitted_form(rec: dict) -> None:
+    """Дописывает одну отправленную форму в submitted_forms.json (список)."""
+    import json as _json
+    data = []
+    try:
+        if os.path.exists(SUBMITTED_FORMS_FILE):
+            with open(SUBMITTED_FORMS_FILE, encoding="utf-8") as fh:
+                data = _json.load(fh)
+            if not isinstance(data, list):
+                data = []
+    except Exception:
+        data = []
+    data.append(rec)
+    try:
+        with open(SUBMITTED_FORMS_FILE, "w", encoding="utf-8") as fh:
+            _json.dump(data, fh, ensure_ascii=False)
+    except Exception:
+        pass
+
+
 def write_summary_sheet(path: str, время_прогона: str = "") -> None:
     """Пересобирает лист «Сводка» в логе: готовое сообщение (сколько форм
     отправлено и на какие домены) + таблица «Домен → Города → Почта для
@@ -1535,6 +1571,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     except ImportError:
         ФОРМЫ_ЧЕРЕЗ_REQUESTS = False
 
+    # Сопоставление наших названий форм с типом в админке (Уровень 1). Может
+    # отсутствовать — тогда сверка идёт по совпадению названия.
+    try:
+        from config import АДМИН_ТИПЫ as _АДМИН_ТИПЫ
+    except ImportError:
+        _АДМИН_ТИПЫ = {}
+    _АДМИН_ТИПЫ = _АДМИН_ТИПЫ or {}
+
     # Выбор форм из интерфейса: если задан список ТОЛЬКО_ФОРМЫ (имена сценариев/
     # форм/модалок), гоняем ТОЛЬКО их. Пусто/не задано – гоняем все формы, как раньше.
     try:
@@ -1603,6 +1647,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
     def инициализировать_excel():
         init_excel_log(EXCEL_ФАЙЛ, ОЧИСТИТЬ_EXCEL)
+        if ОЧИСТИТЬ_EXCEL:
+            reset_submitted_forms()
 
     def записать_в_excel(данные):
         # Постоянные колонки (дата/время/телефон/почта) подставляются здесь,
@@ -1623,6 +1669,27 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         # сценария, «формы нет на домене» и т.п.); иначе – авто-причина по статусу.
         row["комментарий"] = (данные.get("комментарий_готовый") or _reason)
         row.pop("комментарий_готовый", None)
+        # Уровень 1 (админка): запоминаем реально отправленные формы. Берём только
+        # успешные отправки форм/модалок — не цели Метрики (тип «ЦЕЛЬ», тип_селектора
+        # «цель») и не проверки корзины/оформления (тип_селектора «сценарий»).
+        try:
+            if (row.get("статус") == "Успешно"
+                    and str(данные.get("тип_селектора", "")) not in ("сценарий", "цель")
+                    and not str(данные.get("тип", "")).upper().startswith("ЦЕЛЬ")):
+                _назв = данные.get("название", "")
+                record_submitted_form({
+                    "город": город,
+                    "название": _назв,
+                    "админ_тип": _АДМИН_ТИПЫ.get(_назв, ""),
+                    "имя": row.get("имя", ""),
+                    "почта": ПОЧТА,
+                    "телефон": телефон_отправки,
+                    "страница": данные.get("страница", ""),
+                    "url": данные.get("url", ""),
+                    "ts": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+        except Exception:
+            pass
         try:
             append_log_row(EXCEL_ФАЙЛ, row)
         except Exception as e:

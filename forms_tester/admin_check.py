@@ -66,6 +66,235 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-zа-я0-9]+", "", s)
 
 
+def _digits(s: str) -> str:
+    return re.sub(r"\D", "", s or "")
+
+
+def _тип_похож(тип_админ: str, наше_название: str) -> bool:
+    """Нестрогое совпадение «Тип формы» из админки и нашего названия формы
+    (без учёта регистра/скобок/пробелов; подстрока в любую сторону)."""
+    a, b = _norm(тип_админ), _norm(наше_название)
+    if not a or not b:
+        return False
+    return a == b or a in b or b in a
+
+
+def _это_наша_заявка(row: dict, почта: str, телефон: str, имя: str) -> bool:
+    """True, если строка админки похожа на НАШУ тестовую заявку (по почте /
+    телефону / имени) — так отсеиваем реальные клиентские заявки."""
+    if почта and _norm(row.get("email", "")) == _norm(почта):
+        return True
+    n = _norm(имя)
+    if n and n in _norm(row.get("имя", "")):
+        return True
+    # Телефон: сайт может переформатировать номер (сдвиг кода страны), поэтому
+    # сравниваем ХВОСТ цифр — для телефонных форм без имени/почты это единственная зацепка.
+    d, rd = _digits(телефон), _digits(row.get("телефон", ""))
+    if len(d) >= 7 and len(rd) >= 7 and rd[-7:] == d[-7:]:
+        return True
+    return False
+
+
+def _parse_iso(ts: str):
+    try:
+        return datetime.strptime((ts or "")[:19], "%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        return None
+
+
+def _parse_admin_dt(s: str):
+    try:
+        return datetime.strptime((s or "")[:19], "%d.%m.%Y %H:%M:%S")
+    except Exception:
+        return None
+
+
+def _hhmmss(ts: str) -> str:
+    d = _parse_iso(ts)
+    return d.strftime("%H:%M:%S") if d else ""
+
+
+def сопоставить(заявки: list, отправки: list) -> list:
+    """Сверяет наши отправленные формы с заявками из админки.
+
+    Для каждой отправки ищет НАШУ (тестовую) заявку в том же городе; среди
+    кандидатов предпочитает совпадение по «Тип формы», иначе — ближайшую по
+    времени. Каждая заявка админки засчитывается только одной отправке.
+    Возвращает список результатов: город/название/ts + статус + найденная заявка.
+    """
+    почта = телефон = имя = ""
+    for o in отправки:
+        почта = почта or (o.get("почта") or "")
+        телефон = телефон or (o.get("телефон") or "")
+        имя = имя or (o.get("имя") or "")
+
+    наши = [z for z in заявки if _это_наша_заявка(z, почта, телефон, имя)]
+    использованные = set()
+    результаты = []
+
+    for o in отправки:
+        gn = _norm(o.get("город", ""))
+        кандидаты = []
+        for i, z in enumerate(наши):
+            if i in использованные:
+                continue
+            if gn and _norm(z.get("город", "")) != gn:
+                continue
+            кандидаты.append((i, z))
+
+        выбор = _выбрать(кандидаты, o)
+        база = {"город": o.get("город", ""), "название": o.get("название", ""),
+                "ts": o.get("ts", ""), "страница": o.get("страница", "")}
+        if выбор is None:
+            if not наши:
+                прим = "в админке нет наших тестовых заявок за сегодня"
+            else:
+                прим = "заявка этого типа в админке не найдена"
+            результаты.append({**база, "статус": "НЕ найдено",
+                               "заявка": None, "примечание": прим})
+        else:
+            i, z = выбор
+            использованные.add(i)
+            результаты.append({**база, "статус": "Есть в админке",
+                               "заявка": z, "примечание": ""})
+
+    # Наши тестовые заявки, которые остались без пары (мы их не отправляли ИЛИ
+    # не смогли сопоставить тип) — вернём отдельно, чтобы подсказать в логе.
+    свободные = [z for i, z in enumerate(наши) if i not in использованные]
+    return результаты, свободные
+
+
+def _выбрать(кандидаты: list, o: dict):
+    """Выбирает заявку СТРОГО по совпадению типа формы (по «админ_тип» из конфига,
+    иначе по названию формы). При нескольких подходящих — ближайшую по времени.
+    Если совпадения типа нет — None (никогда не «угадываем» по одному времени,
+    иначе форма, которой в админке нет, ошибочно займёт чужую заявку)."""
+    if not кандидаты:
+        return None
+    ожид = (o.get("админ_тип") or o.get("название") or "")
+    похожие = [(i, z) for i, z in кандидаты
+               if _тип_похож(z.get("тип_формы", ""), ожид)]
+    if not похожие:
+        return None
+    ts = _parse_iso(o.get("ts", ""))
+
+    def dist(pair):
+        zt = _parse_admin_dt(pair[1].get("дата_время", ""))
+        if ts and zt:
+            return abs((zt - ts).total_seconds())
+        return 1e9
+
+    return sorted(похожие, key=dist)[0]
+
+
+def записать_лист_админка(excel_path: str, результаты: list, дата_str: str) -> None:
+    """Пишет/пересоздаёт лист «Админка» в log_forms.xlsx: по строке на каждую
+    отправленную форму — есть ли она в «Уведомлениях с форм» админки."""
+    from openpyxl import load_workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = load_workbook(excel_path)
+    if "Админка" in wb.sheetnames:
+        del wb["Админка"]
+    # Ставим сразу после «Сводки» (если она есть) — Уровень 1 должен быть на виду.
+    поз = (wb.sheetnames.index("Сводка") + 1) if "Сводка" in wb.sheetnames else 0
+    ws = wb.create_sheet("Админка", поз)
+
+    headers = ["Дата", "Время отправки", "Город", "Форма (наш тест)",
+               "Статус", "Заявка в админке", "Имя / Почта в заявке", "Примечание"]
+    fill = PatternFill("solid", fgColor="E3F2FD")   # мягкий голубой – «Уровень 1»
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(1, c, h)
+        cell.font = Font(bold=True)
+        cell.fill = fill
+        ws.column_dimensions[get_column_letter(c)].width = len(h) + 4
+
+    r = 2
+    for res in результаты:
+        z = res.get("заявка")
+        заявка_txt = (f"#{z['id']} · {z['тип_формы']} · {z['время']}" if z else "—")
+        имяпочта = (f"{z.get('имя','')} / {z.get('email','')}".strip(" /") if z else "")
+        vals = [дата_str, _hhmmss(res.get("ts", "")),
+                res.get("город", "") or "(основной)",
+                res.get("название", ""), res.get("статус", ""),
+                заявка_txt, имяпочта, res.get("примечание", "")]
+        for c, v in enumerate(vals, 1):
+            ws.cell(r, c, v)
+            L = get_column_letter(c)
+            cur = ws.column_dimensions[L].width or 10
+            ws.column_dimensions[L].width = min(max(cur, len(str(v)) + 3), 70)
+        st = ws.cell(r, 5)
+        if res.get("статус", "").startswith("Есть"):
+            st.font = Font(color="1E8E3E", bold=True)   # зелёный
+        else:
+            st.font = Font(color="C62828", bold=True)   # красный
+        r += 1
+
+    try:
+        ws.freeze_panes = "A2"
+    except Exception:
+        pass
+    wb.save(excel_path)
+
+
+def выполнить_проверку(проект_дир, домен: str, excel_path: str = "log_forms.xlsx",
+                       submitted_path: str = "submitted_forms.json",
+                       show: bool = False, log=print) -> bool:
+    """Уровень 1: логинится в админку, читает «Уведомления с форм» за сегодня и
+    сверяет их с нашими отправками (submitted_forms.json), пишет лист «Админка».
+
+    Тихо пропускается, если нет admin.local.json или нет записей об отправках."""
+    creds = загрузить_креды(проект_дир)
+    if not creds:
+        log("ℹ️ Проверка админки пропущена: нет файла admin.local.json "
+            "(логин/пароль не заданы).")
+        return False
+
+    p = Path(submitted_path)
+    отправки = []
+    if p.is_file():
+        try:
+            отправки = [o for o in (json.loads(p.read_text(encoding="utf-8")) or []) if o]
+        except Exception:
+            отправки = []
+    if not отправки:
+        log("ℹ️ Проверка админки: нет отправленных форм для сверки.")
+        return False
+
+    дата = datetime.now()
+    log(f"🔎 Уровень 1 (админка): вход и чтение заявок на {домен} …")
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        b = pw.chromium.launch(headless=not show,
+                               args=["--disable-blink-features=AutomationControlled"])
+        ctx = b.new_context(locale="ru-RU")
+        page = ctx.new_page()
+        try:
+            html = войти_и_получить(page, домен, creds["login"], creds["password"], дата)
+        finally:
+            b.close()
+
+    if "USER_LOGIN" in html and "pixana" not in html.lower():
+        log("⚠️ Проверка админки: не удалось войти — проверьте admin.local.json.")
+        return False
+
+    заявки = разобрать_заявки(html)
+    log(f"   заявок в админке за сегодня: {len(заявки)}")
+    результаты, свободные = сопоставить(заявки, отправки)
+    записать_лист_админка(excel_path, результаты, дата.strftime("%d.%m.%Y"))
+
+    есть = sum(1 for r in результаты if r["статус"].startswith("Есть"))
+    нет = len(результаты) - есть
+    log(f"✅ Админка (Уровень 1): найдено {есть}, НЕ найдено {нет}. "
+        f"Подробности — на листе «Админка».")
+    if свободные:
+        типы = sorted({z.get("тип_формы", "") for z in свободные})
+        log("   ⚠️ Наши тестовые заявки в админке без пары (типы): "
+            + ", ".join(f"«{t}»" for t in типы if t))
+    return True
+
+
 def найти_заявку(заявки: list, тип_формы_админ: str, город: str = "",
                  минут_окно: int = 8, после=None):
     """Ищет заявку по «Тип формы» (нестрогое совпадение) + опц. городу + свежести.
