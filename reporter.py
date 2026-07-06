@@ -2159,6 +2159,142 @@ def _build_autoclick_sheet(wb, autoclick):
         row += 1
 
 
+# ── Лист «Регион и СНГ» (п.1.8 верные переменные / п.1.9 СНГ-чистота) ──
+
+
+def _region_issue_rows(pages, attr):
+    """(result, issue) по каждой находке региональной проверки."""
+    out = []
+    for r in pages:
+        data = getattr(r, attr, None) or {}
+        for i in (data.get('issues') or []):
+            out.append((r, i))
+    return out
+
+
+def _build_region_sheet(wb, results):
+    """Лист региональных проверок: чужой город/телефон/почта на странице города
+    (п.1.9) и упоминания РФ/СНГ/чужих стран на СНГ-доменах (п.1.10).
+    Добавляется только если проверки выполнялись."""
+    reg_checked = [r for r in results if getattr(r, 'region', None) is not None]
+    cis_checked = [r for r in results if getattr(r, 'cis', None) is not None]
+    if not reg_checked and not cis_checked:
+        return
+
+    reg_rows = _region_issue_rows(reg_checked, 'region')
+    cis_rows = _region_issue_rows(cis_checked, 'cis')
+    has_bugs = bool(reg_rows or cis_rows)
+
+    ws = wb.create_sheet('Регион и СНГ')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 16   # Город
+    ws.column_dimensions['C'].width = 13   # Тип страницы
+    ws.column_dimensions['D'].width = 52   # URL
+    ws.column_dimensions['E'].width = 30   # Что нашли
+    ws.column_dimensions['F'].width = 44   # Пояснение
+    ws.column_dimensions['G'].width = 52   # Контекст
+    ws.column_dimensions['H'].width = 3
+
+    ws.merge_cells('B2:G2')
+    c = ws['B2']
+    c.value = 'Региональные проверки (переменные города · чистота СНГ)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:G3')
+    c = ws['B3']
+    c.value = ('П.1.9: на странице города не должно быть подстановок другого города – '
+               'чужой город в title/description/H1, телефон или почта другого города '
+               '(сверка со справочником КП). '
+               'П.1.10: на сайте страны СНГ в текстах, заголовках, метаданных и '
+               'контактах не должно быть «РФ», «Россия», «СНГ» и названий других '
+               'стран – только своя страна.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 42
+
+    row = 5
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Переменные города: страниц проверено {len(reg_checked)}, находок '
+               f'{len(reg_rows)}  ·  СНГ-чистота: страниц проверено '
+               f'{len(cis_checked)}, находок {len(cis_rows)}')
+    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 26
+    row += 2
+
+    def _section(title, rows, empty_text, color_ok=C.ok):
+        nonlocal row
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
+        c = ws.cell(row=row, column=2)
+        c.value = f'{title}  ({len(rows)})'
+        c.font = _font(size=13, bold=True, color=C.err if rows else color_ok)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        if not rows:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
+            c = ws.cell(row=row, column=2)
+            c.value = empty_text
+            c.font = _font(size=10, color=color_ok)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 22
+            row += 2
+            return
+        for ci, h in enumerate(['Город', 'Тип', 'URL', 'Что нашли',
+                                'Пояснение', 'Контекст'], 2):
+            cell = ws.cell(row=row, column=ci)
+            cell.value = h
+            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.fill = _fill(C.surface)
+            cell.alignment = _align()
+            cell.border = _border()
+        ws.row_dimensions[row].height = 20
+        row += 1
+        for r, i in rows:
+            ws.row_dimensions[row].height = 34
+            найдено = i.get('найдено', '')
+            зона = i.get('зона', '')
+            vals = [
+                (r.city or '–', {'size': 10, 'color': C.text}),
+                (r.type_label, {'size': 9, 'color': C.text_muted}),
+                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
+                (f'«{найдено}» ({зона})', {'size': 10, 'color': C.err}),
+                (i.get('пояснение', ''), {'size': 10, 'color': C.text}),
+                (i.get('контекст', ''), {'size': 9, 'color': C.text_soft}),
+            ]
+            for ci, (val, kw) in enumerate(vals, 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = val
+                cell.font = _font(**kw)
+                cell.alignment = _align(wrap=True, vertical='top')
+                cell.border = _border(color=C.border_light)
+                if ci == 4:
+                    cell.hyperlink = r.url
+            row += 1
+        row += 1
+
+    if reg_checked:
+        _section('Чужой город / телефон / почта на странице (п.1.8)', reg_rows,
+                 '✅ Подстановок другого города не найдено.')
+    if cis_checked:
+        _section('Упоминания РФ / СНГ / чужих стран на СНГ-доменах (п.1.9)', cis_rows,
+                 '✅ На проверенных СНГ-страницах упоминаний РФ/СНГ/чужих стран нет.')
+    elif reg_checked:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
+        c = ws.cell(row=row, column=2)
+        c.value = ('П.1.9 (СНГ-чистота): в этой выборке СНГ-доменов не было – '
+                   'проверка выполняется только на доменах не-РФ.')
+        c.font = _font(size=10, italic=True, color=C.text_soft)
+        c.alignment = _align(indent=1)
+
+
 # ── Главная функция ────────────────────────────────────────────────
 
 
@@ -2363,6 +2499,7 @@ def build_report(
         ('Структура страниц', 'что чинить в контенте – где нет цены, кнопок заказа, заголовка. Красное = баг.'),
         ('Индексация', 'если есть лист – что закрыто/открыто к индексации: robots.txt, meta noindex, canonical.'),
         ('Метаданные', 'если есть лист – title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
+        ('Регион и СНГ', 'если есть лист – чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист – страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист – страницы, куда заходили люди и упёрлись в 404.'),
@@ -2386,6 +2523,7 @@ def build_report(
 
     # ─── Лист индексации (п.1.7) – если проверка выполнялась ────────
     _build_indexing_sheet(wb, results, indexing_summary)
+    _build_region_sheet(wb, results)
 
     # ─── Лист метаданных (п.1.8) – если проверка выполнялась ────────
     _build_meta_sheet(wb, results, meta_summary)

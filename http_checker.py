@@ -196,6 +196,14 @@ class CheckResult:
     meta: Optional[dict] = None
     has_meta_issues: bool = False
 
+    # Региональные проверки (region_checker):
+    # п.1.4.1 – верные переменные (чужой город/телефон/почта) | None – не проверяли
+    region: Optional[dict] = None
+    has_region_issues: bool = False
+    # п.1.6 – СНГ-домен без РФ/СНГ/чужих стран | None – не проверяли / домен РФ
+    cis: Optional[dict] = None
+    has_cis_issues: bool = False
+
     checked_at: Optional[str] = None
 
 
@@ -454,6 +462,9 @@ async def check_one(
     check_links: bool = False,
     check_indexing: bool = False,
     check_meta: bool = False,
+    check_region: bool = False,
+    check_cis: bool = False,
+    region_ctx=None,            # RegionContext из region_checker.py
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
     get_css_hidden: Optional[Callable] = None,
@@ -575,6 +586,24 @@ async def check_one(
         except Exception:
             broken_links = None
 
+    # Региональные проверки (region_checker) – чистые regex по скачанному HTML.
+    # п.1.4.1: чужой город в title/description/H1, телефон/почта другого города.
+    region = None
+    if check_region and is_ok and region_ctx is not None and a['body_text']:
+        try:
+            from region_checker import check_region_vars
+            region = check_region_vars(a['body_text'], task.subdomain, region_ctx)
+        except Exception:
+            region = None
+    # п.1.6: на СНГ-домене нет РФ / СНГ / чужих стран (сам вернёт None для РФ).
+    cis = None
+    if check_cis and is_ok and region_ctx is not None and a['body_text']:
+        try:
+            from region_checker import check_cis_mentions
+            cis = check_cis_mentions(a['body_text'], task.subdomain, region_ctx)
+        except Exception:
+            cis = None
+
     return CheckResult(
         url=task.url,
         city=task.city,
@@ -607,6 +636,10 @@ async def check_one(
         has_indexing_issues=bool(indexing and indexing.get('issues')),
         meta=meta,
         has_meta_issues=bool(meta and meta.get('issues')),
+        region=region,
+        has_region_issues=bool(region and region.get('issues')),
+        cis=cis,
+        has_cis_issues=bool(cis and cis.get('issues')),
         checked_at=None,
     )
 
@@ -628,6 +661,9 @@ async def run_batch(
     check_links: bool = False,
     check_indexing: bool = False,
     check_meta: bool = False,
+    check_region: bool = False,
+    check_cis: bool = False,
+    region_ctx=None,            # RegionContext из region_checker.build_region_context
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
     proxy_url: Optional[str] = None,
@@ -713,6 +749,9 @@ async def run_batch(
                     check_links=check_links,
                     check_indexing=check_indexing,
                     check_meta=check_meta,
+                    check_region=check_region,
+                    check_cis=check_cis,
+                    region_ctx=region_ctx,
                     proxy_url=proxy_url,
                     kp_map=kp_map,
                     get_css_hidden=get_css_hidden,
