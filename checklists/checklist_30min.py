@@ -1078,9 +1078,10 @@ if pid:
                         key='c30_check_text')
             st.checkbox('1.7  Индексация страниц (robots.txt, noindex, canonical)',
                         key='c30_check_indexing',
-                        help='Эталон – robots.txt. Страницы выборки должны быть '
-                             'открыты к индексации: Disallow, meta noindex, '
-                             'X-Robots-Tag или canonical на закрытый URL – баг. '
+                        help='Эталон – robots.txt. Ошибка = расхождение сигналов '
+                             'страницы с robots: noindex на открытой в robots '
+                             'странице или canonical на закрытый URL. Закрыта в '
+                             'robots и noindex – так задумано, не показываем. '
                              'Плюс сверка всех путей каталога (sitemap) с robots.txt.')
             st.checkbox('1.8  Корректность вывода и дубли (заголовки, метаданные, урлы)',
                         key='c30_check_meta',

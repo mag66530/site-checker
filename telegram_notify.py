@@ -123,9 +123,9 @@ def format_summary_message(
     if text_issues_count > 0:
         lines.append(f'Битых переменных: <b>{text_issues_count}</b>')
 
-    # Индексация (п.1.7): закрытые от индексации SEO-страницы
+    # Индексация (п.1.7): расхождения сигналов страниц с robots.txt
     if indexing_issues_pages > 0:
-        lines.append(f'Закрыто от индексации: <b>{indexing_issues_pages}</b> страниц')
+        lines.append(f'Расхождения с robots.txt: <b>{indexing_issues_pages}</b> страниц')
 
     # Метаданные (п.1.8): title/description/H1 и дубли
     if meta_issues_pages > 0:

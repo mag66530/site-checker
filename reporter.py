@@ -1449,8 +1449,9 @@ def _idx_signals_text(ix):
 
 
 def _build_indexing_sheet(wb, results, indexing_summary):
-    """Лист проверки индексации: страницы выборки, закрытые от индексации
-    (robots/noindex/canonical), + противоречия sitemap ↔ robots.txt.
+    """Лист проверки индексации: расхождения сигналов страниц с robots.txt
+    (noindex на открытой в robots странице, canonical на закрытый URL)
+    + противоречия sitemap ↔ robots.txt.
     Добавляется только если проверка индексации выполнялась."""
     checked = [r for r in results if getattr(r, 'indexing', None)]
     if not checked and not indexing_summary:
@@ -1481,12 +1482,13 @@ def _build_indexing_sheet(wb, results, indexing_summary):
 
     ws.merge_cells('B3:E3')
     c = ws['B3']
-    c.value = ('Эталон – robots.txt сайта. Страницы выборки (главная, каталог, '
-               'категории, фильтры, товары) должны быть ОТКРЫТЫ к индексации: '
-               'Disallow в robots.txt, meta noindex, X-Robots-Tag: noindex или '
-               'canonical на закрытый URL – баг. Отдельно: пути из sitemap, '
-               'закрытые Disallow, – противоречие (sitemap говорит «в индекс», '
-               'robots – «нельзя»).')
+    c.value = ('Эталон – robots.txt сайта. Ошибка = РАСХОЖДЕНИЕ сигналов страницы '
+               'с robots: в robots страница открыта, а на ней noindex (meta или '
+               'X-Robots-Tag), либо canonical ведёт на закрытый в robots URL. '
+               'Закрыта в robots и noindex – согласовано, так задумано, не '
+               'показываем. Отдельно: пути из sitemap/каталога, закрытые '
+               'Disallow, – противоречие (sitemap говорит «в индекс», robots – '
+               '«нельзя»).')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 44
@@ -1499,7 +1501,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     _rs = (indexing_summary or {}).get('robots_status')
     _sm = (indexing_summary or {}).get('sitemaps') or []
     bits = [f'Проверено страниц: {len(checked)}',
-            f'закрыто ошибочно: {len(bad)}',
+            f'расхождений с robots: {len(bad)}',
             f'предупреждений: {len(warned)}']
     if indexing_summary:
         bits.append(f'путей каталога проверено по robots: '
@@ -1519,7 +1521,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     # ── Секция 1: закрытые страницы выборки (сгруппированы по проблеме) ──
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
-    c.value = f'Страницы, закрытые от индексации  ({len(bad)})'
+    c.value = f'Расхождения с robots.txt  ({len(bad)})'
     c.font = _font(size=13, bold=True, color=C.err if bad else C.ok)
     c.fill = _fill(C.accent_soft)
     c.alignment = _align(indent=1)
@@ -1529,7 +1531,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     if not bad:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
-        c.value = '✅ Все проверенные страницы открыты к индексации.'
+        c.value = '✅ Расхождений с robots.txt нет – сигналы страниц согласованы.'
         c.font = _font(size=10, color=C.ok)
         c.alignment = _align(indent=1)
         ws.row_dimensions[row].height = 22
@@ -2493,8 +2495,8 @@ def build_report(
     if indexing_bad_pages or indexing_sitemap_conflicts:
         _idx_bits = []
         if indexing_bad_pages:
-            _idx_bits.append(f'{len(indexing_bad_pages)} {_plural_pages(len(indexing_bad_pages))} '
-                             f'закрыто от индексации')
+            _idx_bits.append(f'расхождения с robots.txt на {len(indexing_bad_pages)} '
+                             f'{_plural_pages(len(indexing_bad_pages))}')
         if indexing_sitemap_conflicts:
             _idx_bits.append(f'{indexing_sitemap_conflicts} путей каталога под Disallow '
                              f'в robots.txt')
@@ -2556,7 +2558,7 @@ def build_report(
     nav_items = [
         ('Обзор', 'эта страница: сколько проверено, сколько работает и сколько сломано.'),
         ('Структура страниц', 'что чинить в контенте – где нет цены, кнопок заказа, заголовка. Красное = баг.'),
-        ('Индексация', 'если есть лист – что закрыто/открыто к индексации: robots.txt, meta noindex, canonical.'),
+        ('Индексация', 'если есть лист – расхождения сигналов страниц с robots.txt (noindex, canonical) и sitemap↔robots.'),
         ('Метаданные', 'если есть лист – title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
         ('Заголовки и мета', 'если есть лист – единственность title/description/H1, дубли H2 и заголовки вне текста.'),
         ('Регион и СНГ', 'если есть лист – чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),

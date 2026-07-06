@@ -221,11 +221,14 @@ def _x_robots_noindex(headers: dict):
 def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                           url: str, robots: Optional[RobotsInfo],
                           page_type: str = '') -> dict:
-    """Собрать сигналы индексации страницы и вынести вердикт.
+    """Сверить сигналы индексации страницы с robots.txt (эталоном).
 
-    Ожидание: страница из выборки ДОЛЖНА быть открыта (SEO-страница).
-    Исключение – тех. страницы (page_type='tech'): политики и т.п. нередко
-    закрывают намеренно, поэтому noindex на них – предупреждение, не баг.
+    Ошибка = РАСХОЖДЕНИЕ с robots.txt:
+      • в robots страница открыта, а на ней noindex (meta / X-Robots-Tag);
+      • canonical ведёт на URL, закрытый в robots.
+    Закрыта в robots + noindex = согласовано (так задумано) – молчим.
+    Закрыта в robots без noindex = тоже задумано (robots прав) – молчим;
+    противоречия «в sitemap, но под Disallow» ловит отдельная кросс-проверка.
     Возвращает dict для CheckResult.indexing."""
     out = {
         'checked': True,
@@ -237,48 +240,38 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         'issues': [], 'warnings': [],
     }
     issues, warnings = out['issues'], out['warnings']
-    # Тех. страницы (политики и т.п.) нередко закрывают НАМЕРЕННО:
-    # закрывающие сигналы на них – предупреждение, а не баг.
-    _is_tech = (page_type == 'tech')
 
-    def _closed(msg_seo, msg_tech):
-        (warnings if _is_tech else issues).append(msg_tech if _is_tech else msg_seo)
-
-    # 1. robots.txt
+    # 1. robots.txt – ЭТАЛОН. Disallow сам по себе не ошибка: так задумано.
+    closed_by_robots = False
     if robots is not None and robots.ok:
         dis, rule, agent = robots_verdict(robots, url)
         out['robots_disallowed'] = dis
         out['robots_rule'] = rule
         out['robots_agent'] = agent
-        if dis:
-            _a = '' if agent == '*' else f' для {agent}'
-            _closed(f'закрыта в robots.txt{_a} (Disallow: {rule}) – '
-                    f'SEO-страница выпадает из поиска',
-                    f'тех. страница закрыта в robots.txt (Disallow: {rule}) – '
-                    f'проверьте, так ли задумано')
+        closed_by_robots = dis
     elif robots is not None and robots.fetched and robots.status != 200:
         warnings.append(f'robots.txt отдаёт {robots.status} – правила не применяются')
     elif robots is not None and not robots.fetched:
         warnings.append('robots.txt не удалось скачать')
 
-    # 2. meta robots (в т.ч. name=yandex / name=googlebot)
+    # 2. meta robots (в т.ч. name=yandex / name=googlebot) – сверяем с robots:
+    # noindex на открытой в robots странице = расхождение = ошибка;
+    # noindex на закрытой в robots = согласовано, молчим.
     if html:
         meta_val, meta_noidx = _find_meta_robots(html)
         out['meta_robots'] = meta_val
         out['meta_noindex'] = meta_noidx
-        if meta_noidx:
-            _closed('закрыта тегом meta robots (noindex) – '
-                    'SEO-страница выпадает из поиска',
-                    'тех. страница закрыта noindex – проверьте, так ли задумано')
+        if meta_noidx and not closed_by_robots:
+            issues.append('расхождение с robots.txt: в robots страница открыта, '
+                          'но на ней noindex (meta robots)')
 
-    # 3. X-Robots-Tag
+    # 3. X-Robots-Tag – так же сверяем с robots
     x_val, x_noidx = _x_robots_noindex(headers)
     out['x_robots'] = x_val
     out['x_robots_noindex'] = x_noidx
-    if x_noidx:
-        _closed('закрыта заголовком X-Robots-Tag (noindex) – '
-                'SEO-страница выпадает из поиска',
-                'тех. страница закрыта X-Robots-Tag – проверьте, так ли задумано')
+    if x_noidx and not closed_by_robots:
+        issues.append('расхождение с robots.txt: в robots страница открыта, '
+                      'но на ней noindex (заголовок X-Robots-Tag)')
 
     # 4. canonical
     if html:
@@ -291,13 +284,14 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                 self_ref = None
             out['canonical_self'] = self_ref
             if self_ref is False:
-                # Каноникл на закрытый robots'ом URL – канонизируем «в никуда»
+                # Каноникл на закрытый robots'ом URL – расхождение:
+                # канонизируем «в никуда»
                 if robots is not None and robots.ok:
                     c_dis, _c_rule, _ = robots_verdict(robots, canon)
                     if c_dis:
                         out['canonical_disallowed'] = True
-                        _closed('canonical ведёт на URL, закрытый в robots.txt',
-                                'canonical ведёт на URL, закрытый в robots.txt')
+                        issues.append('расхождение с robots.txt: canonical '
+                                      'ведёт на URL, закрытый в robots')
                 if not out['canonical_disallowed']:
                     warnings.append('canonical ведёт на другой URL')
 
