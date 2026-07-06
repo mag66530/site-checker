@@ -37,6 +37,15 @@ def _текст(html: str) -> str:
     return re.sub(r"\s+", " ", html).strip()
 
 
+def _это_форма_входа(html: str) -> bool:
+    """True, если полученная страница — форма логина Bitrix (поля USER_LOGIN и
+    USER_PASSWORD, при этом таблицы списка заявок нет). По ней и определяем, что
+    вход не удался — надёжнее, чем ловить исчезновение поля пароля по таймауту."""
+    h = html or ""
+    return ("USER_PASSWORD" in h and "USER_LOGIN" in h
+            and "adm-list-table" not in h.lower())
+
+
 # Заголовки колонок админки → наши поля (нестрого, по нормализованному тексту).
 _HEADER_FIELD = {
     "id": "id", "ид": "id", "№": "id",
@@ -405,45 +414,56 @@ def выполнить_проверку(проект_дир, зоны, excel_pat
                 кратко = _домен_кратко(домен) or "(основной)"
                 log(f"🔎 Админка [{кратко}]: вход и чтение заявок ({len(з_отправки)} форм) …")
                 page = ctx.new_page()
-                вошли = False
+                html = ""
                 заявки = []
                 try:
-                    вошли = войти(page, домен, creds["login"], creds["password"])
-                    if вошли:
-                        # сперва пробуем с фильтром по дате; если пусто — без даты (SHOWALL)
-                        html = _получить_список_html(page, домен, дата)
-                        заявки = разобрать_заявки(html)
-                        if not заявки:
-                            html = _получить_список_html(page, домен, None)
-                            заявки = разобрать_заявки(html)
-                        if not заявки:
-                            # диагностика: сохраняем то, что реально прочитали
-                            dbg = f"admin_debug_{кратко}.html"
-                            try:
-                                with open(dbg, "w", encoding="utf-8") as fh:
-                                    fh.write(html)
-                                log(f"   ⚠️ [{кратко}] в админке не распознано ни одной "
-                                    f"строки — сохранил страницу в {dbg} (пришлите её мне).")
-                            except Exception:
-                                pass
+                    # Входим «как получится» (не блокируемся по факту входа — это
+                    # определим ниже по самой странице списка, без гонок таймингов).
+                    войти(page, домен, creds["login"], creds["password"])
+                    # сперва пробуем с фильтром по дате; если пусто — без даты (SHOWALL)
+                    html = _получить_список_html(page, домен, дата)
+                    заявки = разобрать_заявки(html)
+                    if not заявки:
+                        html2 = _получить_список_html(page, домен, None)
+                        з2 = разобрать_заявки(html2)
+                        заявки, html = (з2, html2) if з2 else (заявки, html2)
                 finally:
                     try:
                         page.close()
                     except Exception:
                         pass
 
-                if not вошли:
-                    log(f"⚠️ Админка [{кратко}]: не удалось войти — проверьте "
-                        f"admin.local.json (логин/пароль общие для всех зон).")
-                    причина = "не удалось войти в админку"
+                # Вход определяем ПО СТРАНИЦЕ СПИСКА: есть таблица заявок → вошли;
+                # видна форма логина (поле пароля, без таблицы) → вход не удался.
+                if not заявки and _это_форма_входа(html):
+                    log(f"⚠️ Админка [{кратко}]: не удалось войти — проверьте логин/пароль "
+                        f"(они общие для всех зон).")
+                    try:
+                        with open(f"admin_debug_{кратко}_login.html", "w",
+                                  encoding="utf-8") as fh:
+                            fh.write(html)
+                    except Exception:
+                        pass
                     for o in з_отправки:
                         все_результаты.append({
                             "город": o.get("город", ""), "название": o.get("название", ""),
                             "ts": o.get("ts", ""), "статус": "НЕ найдено", "заявка": None,
-                            "домен_кратко": кратко, "примечание": причина,
+                            "домен_кратко": кратко,
+                            "примечание": "не удалось войти в админку (логин/пароль)",
                         })
                         итог_нет += 1
                     continue
+
+                if not заявки:
+                    # вошли, но список пуст/не распознан — сохраняем страницу для диагностики
+                    dbg = f"admin_debug_{кратко}.html"
+                    try:
+                        with open(dbg, "w", encoding="utf-8") as fh:
+                            fh.write(html)
+                        log(f"   ⚠️ [{кратко}] заявок не распознано — сохранил "
+                            f"страницу в {dbg} (пришлите её мне).")
+                    except Exception:
+                        pass
 
                 # Если в зоне один город (напр. Steelgroup, а в админке он подписан
                 # «Bakı») — город не сверяем: тип формы + тест-маркеры и так однозначны.
@@ -533,9 +553,10 @@ def загрузить_креды(проект_дир):
     return None
 
 
-def войти(page, домен: str, login: str, password: str) -> bool:
-    """Логинится в админку Bitrix (поля USER_LOGIN / USER_PASSWORD). Возвращает
-    True, если вход удался (на странице больше нет поля пароля)."""
+def войти(page, домен: str, login: str, password: str) -> None:
+    """Логинится в админку Bitrix (поля USER_LOGIN / USER_PASSWORD). Факт входа
+    НЕ возвращаем — его надёжнее определить по странице списка (см. вызов);
+    здесь после отправки формы просто ждём, пока пропадёт поле пароля."""
     домен = домен.rstrip("/")
     page.goto(f"{домен}/bitrix/admin/index.php?lang=ru",
               wait_until="domcontentloaded", timeout=30000)
@@ -547,14 +568,15 @@ def войти(page, домен: str, login: str, password: str) -> bool:
             btn = page.locator("input[name='Login'], button[name='Login'], "
                                "input[type='submit'], button[type='submit']").first
             btn.click(timeout=8000)
-            page.wait_for_timeout(2000)
+            # Ждём завершения входа: либо ушли со страницы логина (поле пароля
+            # исчезло), либо просто пауза — без жёсткой привязки к 2 секундам.
+            try:
+                page.wait_for_selector("input[name='USER_PASSWORD']",
+                                       state="detached", timeout=8000)
+            except Exception:
+                page.wait_for_timeout(1500)
     except Exception:
         pass
-    # Успех входа: поля пароля на странице больше нет.
-    try:
-        return page.locator("input[name='USER_PASSWORD']").count() == 0
-    except Exception:
-        return True
 
 
 def _получить_список_html(page, домен: str, дата=None) -> str:
