@@ -254,11 +254,35 @@ def run_check(pid, params, creds, log, progress):
             kp_map = None
             log(f'⚠ Не удалось загрузить КП: {e}')
 
+        _chk_idx = bool(params.get('check_indexing', True))
         results = asyncio.run(run_batch(
             plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
             retry_delay_ms=2500, check_text=bool(params.get('check_text', True)),
             check_links=bool(params.get('check_links', False)),
+            check_indexing=_chk_idx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
+
+        # ── Индексация (п.1.7): кросс-проверка sitemap ↔ robots.txt ──
+        # Все известные пути каталога (категории/фильтры/товары) прогоняем
+        # через robots главного домена: путь в sitemap = «хочу в индекс»,
+        # Disallow на нём – противоречие.
+        _idx_summary = None
+        if _chk_idx and _main:
+            try:
+                from indexing_checker import check_paths_against_robots
+                _all_paths = (['/'] + list(src.categories or [])
+                              + list(src.filters or [])
+                              + list(src.products or []))
+                _idx_summary = asyncio.run(check_paths_against_robots(
+                    _main.host, _all_paths, proxy_url=proxy_url))
+                _n_dis = len(_idx_summary.get('disallowed') or [])
+                _pages_closed = sum(1 for r in results
+                                    if getattr(r, 'has_indexing_issues', False))
+                log(f'Индексация: страниц с проблемами {_pages_closed}, '
+                    f'путей каталога под Disallow {_n_dis} '
+                    f'(проверено {_idx_summary.get("checked", 0)})')
+            except Exception as _e:
+                log(f'⚠ Индексация (sitemap↔robots): {_e}')
 
         finished_ms = int(datetime.now().timestamp() * 1000)
         out['finished_at'] = finished_ms
@@ -408,7 +432,8 @@ def run_check(pid, params, creds, log, progress):
             metrika_reports=_metrika_reports,
             metrika_data_date=(_m404_disp if _today_404
                                else get_latest_available_date(pid)),
-            service_issues=_service_issues, autoclick=_autoclick)
+            service_issues=_service_issues, autoclick=_autoclick,
+            indexing_summary=_idx_summary)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
@@ -462,7 +487,10 @@ def run_check(pid, params, creds, log, progress):
                     content_bugs_count=sum(getattr(r, 'content_bugs', 0) or 0 for r in results),
                     content_bug_pages=sum(1 for r in results if getattr(r, 'has_content_bugs', False)),
                     empty_sections=empty_sections,
-                    critical_block=format_critical_block(crit))
+                    critical_block=format_critical_block(crit),
+                    indexing_issues_pages=sum(
+                        1 for r in results
+                        if getattr(r, 'has_indexing_issues', False)))
                 tg_result = send_run_notification(
                     bot_token=tg_token, recipients=tg_recipients,
                     project_name=cfg['name'], summary_text=summary_text,

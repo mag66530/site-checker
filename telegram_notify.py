@@ -70,6 +70,7 @@ def format_summary_message(
     content_bug_pages: int = 0,           # на скольких страницах
     empty_sections: Optional[list] = None,  # пустые разделы [{city, url}]
     critical_block: str = '',             # готовый блок «Критические» (см. format_critical_block)
+    indexing_issues_pages: int = 0,       # страниц с проблемами индексации (п.1.7)
 ) -> str:
     """
     Сформировать текст сообщения для Telegram.
@@ -82,7 +83,7 @@ def format_summary_message(
     has_problems = (
         err_count > 0 or warn_count > 0 or text_issues_count > 0
         or metrika_pages_count > 0 or content_bugs_count > 0
-        or bool(critical_block)
+        or indexing_issues_pages > 0 or bool(critical_block)
     )
 
     # Короткое имя проекта: "СМУ – Стальметурал" → "СМУ".
@@ -118,6 +119,10 @@ def format_summary_message(
     # Битые переменные
     if text_issues_count > 0:
         lines.append(f'Битых переменных: <b>{text_issues_count}</b>')
+
+    # Индексация (п.1.7): закрытые от индексации SEO-страницы
+    if indexing_issues_pages > 0:
+        lines.append(f'Закрыто от индексации: <b>{indexing_issues_pages}</b> страниц')
 
     # 404 из Метрики
     if metrika_pages_count > 0:

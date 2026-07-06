@@ -1429,6 +1429,238 @@ def _build_service_issues_sheet(wb, service_issues):
         row += 2
 
 
+# ── Лист «Индексация» (п.1.7: robots.txt / noindex / canonical) ─────
+
+
+def _idx_signals_text(ix):
+    """Краткая сводка сигналов индексации страницы для колонки «Сигналы»."""
+    parts = []
+    if ix.get('robots_disallowed'):
+        parts.append(f'robots.txt: Disallow {ix.get("robots_rule")}')
+    if ix.get('meta_noindex'):
+        parts.append(f'meta: {ix.get("meta_robots")}')
+    if ix.get('x_robots_noindex'):
+        parts.append(f'X-Robots-Tag: {ix.get("x_robots")}')
+    if ix.get('canonical_disallowed'):
+        parts.append(f'canonical → закрытый URL: {ix.get("canonical")}')
+    elif ix.get('canonical_self') is False:
+        parts.append(f'canonical → {ix.get("canonical")}')
+    return '; '.join(parts)
+
+
+def _build_indexing_sheet(wb, results, indexing_summary):
+    """Лист проверки индексации: страницы выборки, закрытые от индексации
+    (robots/noindex/canonical), + противоречия sitemap ↔ robots.txt.
+    Добавляется только если проверка индексации выполнялась."""
+    checked = [r for r in results if getattr(r, 'indexing', None)]
+    if not checked and not indexing_summary:
+        return
+
+    bad = [r for r in checked if r.indexing.get('issues')]
+    warned = [r for r in checked if (not r.indexing.get('issues')
+                                     and r.indexing.get('warnings'))]
+    sm_dis = (indexing_summary or {}).get('disallowed') or []
+    has_bugs = bool(bad or sm_dis)
+
+    ws = wb.create_sheet('Индексация')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 18   # Город
+    ws.column_dimensions['C'].width = 14   # Тип
+    ws.column_dimensions['D'].width = 62   # URL / путь
+    ws.column_dimensions['E'].width = 60   # Сигналы / правило
+    ws.column_dimensions['F'].width = 3
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Проверка индексации (п.1.7)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('Эталон – robots.txt сайта. Страницы выборки (главная, каталог, '
+               'категории, фильтры, товары) должны быть ОТКРЫТЫ к индексации: '
+               'Disallow в robots.txt, meta noindex, X-Robots-Tag: noindex или '
+               'canonical на закрытый URL – баг. Отдельно: пути из sitemap, '
+               'закрытые Disallow, – противоречие (sitemap говорит «в индекс», '
+               'robots – «нельзя»).')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 44
+
+    row = 5
+
+    # ── Сводка ──
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    _rs = (indexing_summary or {}).get('robots_status')
+    _sm = (indexing_summary or {}).get('sitemaps') or []
+    bits = [f'Проверено страниц: {len(checked)}',
+            f'закрыто ошибочно: {len(bad)}',
+            f'предупреждений: {len(warned)}']
+    if indexing_summary:
+        bits.append(f'путей каталога проверено по robots: '
+                    f'{indexing_summary.get("checked", 0)}, '
+                    f'под Disallow: {len(sm_dis)}')
+        if _rs is not None:
+            bits.append(f'robots.txt: HTTP {_rs}'
+                        + (f', Sitemap-директив: {len(_sm)}' if _rs == 200 else ''))
+    c.value = ' · '.join(bits)
+    c.font = _font(size=10, bold=True,
+                   color=C.err if has_bugs else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 30
+    row += 2
+
+    # ── Секция 1: закрытые страницы выборки ──
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = f'Страницы, закрытые от индексации  ({len(bad)})'
+    c.font = _font(size=13, bold=True, color=C.err if bad else C.ok)
+    c.fill = _fill(C.accent_soft)
+    c.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 24
+    row += 1
+
+    if not bad:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = '✅ Все проверенные страницы открыты к индексации.'
+        c.font = _font(size=10, color=C.ok)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 22
+        row += 1
+    else:
+        for ci, h in enumerate(['Город', 'Тип', 'URL', 'Что не так'], 2):
+            cell = ws.cell(row=row, column=ci)
+            cell.value = h
+            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.fill = _fill(C.surface)
+            cell.alignment = _align()
+            cell.border = _border()
+        ws.row_dimensions[row].height = 20
+        row += 1
+        for r in bad:
+            ws.row_dimensions[row].height = 30
+            vals = [
+                (r.city or '–', {'size': 10, 'color': C.text}),
+                (r.type_label, {'size': 9, 'color': C.text_muted}),
+                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
+                ('; '.join(r.indexing.get('issues') or []),
+                 {'size': 10, 'color': C.err}),
+            ]
+            for ci, (val, kw) in enumerate(vals, 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = val
+                cell.font = _font(**kw)
+                cell.alignment = _align(wrap=True, vertical='top')
+                cell.border = _border(color=C.border_light)
+                if ci == 4:
+                    cell.hyperlink = r.url
+            row += 1
+    row += 1
+
+    # ── Секция 2: предупреждения (canonical на другой URL и т.п.) ──
+    if warned:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = f'Предупреждения  ({len(warned)})'
+        c.font = _font(size=13, bold=True, color=C.warn)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        for ci, h in enumerate(['Город', 'Тип', 'URL', 'Замечание'], 2):
+            cell = ws.cell(row=row, column=ci)
+            cell.value = h
+            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.fill = _fill(C.surface)
+            cell.alignment = _align()
+            cell.border = _border()
+        ws.row_dimensions[row].height = 20
+        row += 1
+        for r in warned:
+            ws.row_dimensions[row].height = 30
+            vals = [
+                (r.city or '–', {'size': 10, 'color': C.text}),
+                (r.type_label, {'size': 9, 'color': C.text_muted}),
+                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
+                ('; '.join(r.indexing.get('warnings') or []),
+                 {'size': 10, 'color': C.warn}),
+            ]
+            for ci, (val, kw) in enumerate(vals, 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = val
+                cell.font = _font(**kw)
+                cell.alignment = _align(wrap=True, vertical='top')
+                cell.border = _border(color=C.border_light)
+                if ci == 4:
+                    cell.hyperlink = r.url
+            row += 1
+        row += 1
+
+    # ── Секция 3: sitemap ↔ robots противоречия ──
+    if indexing_summary:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = (f'Противоречия sitemap ↔ robots.txt '
+                   f'({len(sm_dis)}) – {indexing_summary.get("host", "")}')
+        c.font = _font(size=13, bold=True, color=C.err if sm_dis else C.ok)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        if indexing_summary.get('error'):
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = f'⚠ Проверка не выполнена: {indexing_summary["error"]}'
+            c.font = _font(size=10, color=C.warn)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 22
+            row += 1
+        elif not sm_dis:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = ('✅ Все пути каталога (категории, фильтры, товары) '
+                       'открыты в robots.txt.')
+            c.font = _font(size=10, color=C.ok)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 22
+            row += 1
+        else:
+            for ci, h in enumerate(['', '', 'Путь (есть в sitemap/каталоге)',
+                                    'Правило robots.txt'], 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = h
+                cell.font = _font(size=9, bold=True, color=C.text_muted)
+                cell.fill = _fill(C.surface)
+                cell.alignment = _align()
+                cell.border = _border()
+            ws.row_dimensions[row].height = 20
+            row += 1
+            for d in sm_dis:
+                ws.row_dimensions[row].height = 20
+                _agent = d.get('agent') or '*'
+                _rule = f'Disallow: {d.get("rule")}'
+                if _agent != '*':
+                    _rule += f' (User-agent: {_agent})'
+                vals = [('', {}), ('', {}),
+                        (d.get('path', ''), {'size': 10, 'color': C.text}),
+                        (_rule, {'size': 10, 'color': C.err})]
+                for ci, (val, kw) in enumerate(vals, 2):
+                    cell = ws.cell(row=row, column=ci)
+                    cell.value = val
+                    if kw:
+                        cell.font = _font(**kw)
+                    cell.alignment = _align(wrap=True, vertical='top')
+                    cell.border = _border(color=C.border_light)
+                row += 1
+
+
 # ── Лист «Контакты по городам» (сверка с КП) ───────────────────────
 
 
@@ -1697,6 +1929,7 @@ def build_report(
     notifications: list = None,    # список WebmasterNotification – добавит лист «Уведомления»
     service_issues: list = None,   # список ServiceIssue – добавит лист «Ошибки сервисов»
     autoclick: dict = None,        # итоги автокликера – добавит лист «Автокликер»
+    indexing_summary: dict = None, # sitemap↔robots (п.1.7) – в лист «Индексация»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -1717,6 +1950,10 @@ def build_report(
     pages_with_content = [r for r in results if getattr(r, 'content', None) is not None]
     pages_with_content_bugs = [r for r in pages_with_content if r.content_bugs > 0]
     total_content_bugs = sum(r.content_bugs for r in pages_with_content)
+
+    # Индексация (п.1.7): страницы выборки, закрытые от индексации
+    indexing_bad_pages = [r for r in results if getattr(r, 'has_indexing_issues', False)]
+    indexing_sitemap_conflicts = len((indexing_summary or {}).get('disallowed') or [])
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 1: Обзор
@@ -1782,7 +2019,9 @@ def build_report(
     c.border = _border()
 
     sum_body_row = sum_row + 1
-    _extra = (1 if total_text_issues > 0 else 0) + (1 if total_content_bugs > 0 else 0)
+    _extra = ((1 if total_text_issues > 0 else 0)
+              + (1 if total_content_bugs > 0 else 0)
+              + (1 if (indexing_bad_pages or indexing_sitemap_conflicts) else 0))
     ws1.row_dimensions[sum_body_row].height = 44 + _extra * 17
     ws1.merge_cells(f'B{sum_body_row}:E{sum_body_row}')
     c = ws1[f'B{sum_body_row}']
@@ -1800,6 +2039,16 @@ def build_report(
             f'\nВ контенте {total_content_bugs} проблем на {len(pages_with_content_bugs)} страницах '
             f'(нет цены, кнопок заказа или заголовка) – см. лист «Структура страниц».'
         )
+    if indexing_bad_pages or indexing_sitemap_conflicts:
+        _idx_bits = []
+        if indexing_bad_pages:
+            _idx_bits.append(f'{len(indexing_bad_pages)} {_plural_pages(len(indexing_bad_pages))} '
+                             f'закрыто от индексации')
+        if indexing_sitemap_conflicts:
+            _idx_bits.append(f'{indexing_sitemap_conflicts} путей каталога под Disallow '
+                             f'в robots.txt')
+        summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
+                         + ' – см. лист «Индексация».')
     summary_text += '\nПодробности – на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -1847,6 +2096,7 @@ def build_report(
     nav_items = [
         ('Обзор', 'эта страница: сколько проверено, сколько работает и сколько сломано.'),
         ('Структура страниц', 'что чинить в контенте – где нет цены, кнопок заказа, заголовка. Красное = баг.'),
+        ('Индексация', 'если есть лист – что закрыто/открыто к индексации: robots.txt, meta noindex, canonical.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист – страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист – страницы, куда заходили люди и упёрлись в 404.'),
@@ -1867,6 +2117,9 @@ def build_report(
 
     # ─── Лист структурной проверки (идёт сразу после «Обзора») ──────
     _build_structure_sheet(wb, results)
+
+    # ─── Лист индексации (п.1.7) – если проверка выполнялась ────────
+    _build_indexing_sheet(wb, results, indexing_summary)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
