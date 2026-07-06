@@ -387,3 +387,65 @@ def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict
         'counts': {'title': len(titles), 'description': len(descs),
                    'h1': len(h1s), 'h2': len(h2s), 'h2_dups': len(dups)},
     }
+
+
+# ═════════════════════════════════════════════════════════════════════
+# П.1.3.2 чек-листа: заголовки h2–h6 используются только в тексте.
+#
+# Заголовок — элемент СТРУКТУРЫ ТЕКСТА, а не вёрстки. h2–h6 в шапке,
+# подвале, меню или сайдбаре (семантические зоны <header>/<footer>/
+# <nav>/<aside>) — ошибка шаблона: их видят роботы и ломается иерархия
+# заголовков страницы.
+
+_PLACEMENT_ZONES = (
+    ('header', 'шапка'),
+    ('footer', 'подвал'),
+    ('nav', 'меню'),
+    ('aside', 'сайдбар'),
+)
+
+_MAX_PLACEMENT_ISSUES = 20   # кап находок на страницу (шаблонная ошибка повторяется)
+
+
+def check_headings_placement(html: str) -> dict:
+    """Проверка «текстовости» заголовков (п.1.3.2): h2–h6 не должны
+    встречаться в служебных зонах страницы (<header>/<footer>/<nav>/<aside>).
+
+    Возвращает {'issues': [{'тип','найдено','пояснение'}, …]} — тот же
+    формат, что у check_meta_uniqueness (попадает в тот же лист отчёта)."""
+    h = _clean_struct(html or '')
+    issues: list[dict] = []
+    seen: set = set()
+    for tag, label in _PLACEMENT_ZONES:
+        for zone in re.findall(rf'<{tag}\b[^>]*>.*?</{tag}>', h, re.I | re.S):
+            for m in re.finditer(r'<(h[2-6])\b[^>]*>(.*?)</\1\s*>', zone,
+                                 re.I | re.S):
+                htag = m.group(1).lower()
+                txt = _txt(m.group(2))
+                key = (htag, re.sub(r'\s+', ' ', txt.strip().lower()))
+                # вложенные зоны (nav внутри header) дают повтор — дедуп
+                if key in seen:
+                    continue
+                seen.add(key)
+                issues.append({
+                    'тип': htag, 'найдено': f'в <{tag}>',
+                    'пояснение': f'{htag.upper()} «{_short(txt, 45)}» в зоне '
+                                 f'«{label}» (<{tag}>) — заголовки h2–h6 '
+                                 f'должны быть только в тексте',
+                })
+                if len(issues) >= _MAX_PLACEMENT_ISSUES:
+                    return {'issues': issues}
+    return {'issues': issues}
+
+
+def check_tags(html: str, url: str = '', type_code: str = '') -> dict:
+    """Объединённая проверка тегов для пункта 1.8: единственность
+    title/description/H1 + дубли H2 (п.1.3.1) и «текстовость» заголовков
+    (п.1.3.2). Один dict для CheckResult.meta_unique."""
+    out = check_meta_uniqueness(html, url, type_code)
+    try:
+        out['issues'] = list(out.get('issues') or []) + \
+            (check_headings_placement(html).get('issues') or [])
+    except Exception:
+        pass
+    return out

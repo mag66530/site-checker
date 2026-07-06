@@ -2299,7 +2299,7 @@ def _build_region_sheet(wb, results):
 
 _META_LABEL = {
     'title': 'Title', 'description': 'Meta description',
-    'h1': 'H1', 'h2': 'H2 (дубль)',
+    'h1': 'H1', 'h2': 'H2', 'h3': 'H3', 'h4': 'H4', 'h5': 'H5', 'h6': 'H6',
 }
 
 
@@ -2328,7 +2328,7 @@ def _build_meta_unique_sheet(wb, results):
 
     ws.merge_cells('B2:F2')
     c = ws['B2']
-    c.value = 'Единственность H1 / Title / Description (п.1.3.1)'
+    c.value = 'Заголовки и мета: единственность и «текстовость» (часть п.1.8)'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
@@ -2336,8 +2336,9 @@ def _build_meta_unique_sheet(wb, results):
     c = ws['B3']
     c.value = ('На странице должны быть в единственном экземпляре <title>, '
                '<meta name="description"> и <h1>: если их нет или больше одного – '
-               'баг. Также ловим дубли H2 (два H2 с одинаковым текстом). '
-               'Несколько разных H2 – это норма.')
+               'баг. Также ловим дубли H2 (два H2 с одинаковым текстом; '
+               'несколько разных H2 – норма) и заголовки h2–h6 вне текста: '
+               'в шапке, подвале, меню или сайдбаре им не место.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 40
@@ -2358,7 +2359,8 @@ def _build_meta_unique_sheet(wb, results):
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
         c = ws.cell(row=row, column=2)
         c.value = ('✅ На всех проверенных страницах title, description и H1 – '
-                   'в единственном экземпляре, дублей H2 нет.')
+                   'в единственном экземпляре, дублей H2 нет, заголовки '
+                   'h2–h6 только в тексте.')
         c.font = _font(size=11, color=C.ok)
         c.alignment = _align(indent=1)
         return
@@ -2437,8 +2439,10 @@ def build_report(
     indexing_bad_pages = [r for r in results if getattr(r, 'has_indexing_issues', False)]
     indexing_sitemap_conflicts = len((indexing_summary or {}).get('disallowed') or [])
 
-    # Метаданные (п.1.8): проблемы title/description/H1 + дубли
-    meta_bad_pages = [r for r in results if getattr(r, 'has_meta_issues', False)]
+    # Метаданные (п.1.8): проблемы title/description/H1 + дубли + единственность
+    meta_bad_pages = [r for r in results
+                      if getattr(r, 'has_meta_issues', False)
+                      or getattr(r, 'has_meta_unique_issues', False)]
     _mdups = (meta_summary or {}).get('duplicates') or {}
     meta_dup_groups = (len(_mdups.get('same_city') or [])
                        + len(_mdups.get('cross_city') or [])
@@ -2597,7 +2601,7 @@ def build_report(
         ('Структура страниц', 'что чинить в контенте – где нет цены, кнопок заказа, заголовка. Красное = баг.'),
         ('Индексация', 'если есть лист – что закрыто/открыто к индексации: robots.txt, meta noindex, canonical.'),
         ('Метаданные', 'если есть лист – title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
-        ('Заголовки и мета', 'если есть лист – единственность title/description/H1 на странице и дубли H2.'),
+        ('Заголовки и мета', 'если есть лист – единственность title/description/H1, дубли H2 и заголовки вне текста.'),
         ('Регион и СНГ', 'если есть лист – чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист – страницы с незаменёнными переменными ({{city}} и т.п.).'),

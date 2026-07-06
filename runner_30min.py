@@ -278,7 +278,6 @@ def run_check(pid, params, creds, log, progress):
             check_indexing=_chk_idx, check_meta=_chk_meta,
             check_region=_chk_region and region_ctx is not None,
             check_cis=_chk_cis and region_ctx is not None,
-            check_meta_unique=bool(params.get('check_meta_unique', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
 
@@ -320,7 +319,8 @@ def run_check(pid, params, creds, log, progress):
                 _meta_summary = {'duplicates': _dups, 'url_duplicates': _url_dups,
                                  'probed_urls': len(_probe_urls)}
                 _m_pages_bad = sum(1 for r in results
-                                   if getattr(r, 'has_meta_issues', False))
+                                   if getattr(r, 'has_meta_issues', False)
+                                   or getattr(r, 'has_meta_unique_issues', False))
                 log(f'Метаданные: страниц с проблемами {_m_pages_bad}, '
                     f'дублей в городе {len(_dups["same_city"])}, '
                     f'межгородских {len(_dups["cross_city"])}, '
@@ -537,7 +537,8 @@ def run_check(pid, params, creds, log, progress):
                         if getattr(r, 'has_indexing_issues', False)),
                     meta_issues_pages=sum(
                         1 for r in results
-                        if getattr(r, 'has_meta_issues', False)),
+                        if getattr(r, 'has_meta_issues', False)
+                        or getattr(r, 'has_meta_unique_issues', False)),
                     meta_duplicates=(
                         len((_meta_summary or {}).get('duplicates', {}).get('same_city', []))
                         + len((_meta_summary or {}).get('duplicates', {}).get('cross_city', []))

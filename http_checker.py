@@ -204,7 +204,8 @@ class CheckResult:
     cis: Optional[dict] = None
     has_cis_issues: bool = False
 
-    # п.1.3.1 – единственность title/description/H1 (+ дубли H2) | None – не проверяли
+    # п.1.3.1 + 1.3.2 (часть пункта 1.8) – единственность title/description/H1,
+    # дубли H2, заголовки h2–h6 вне текста | None – не проверяли
     meta_unique: Optional[dict] = None
     has_meta_unique_issues: bool = False
 
@@ -468,7 +469,6 @@ async def check_one(
     check_meta: bool = False,
     check_region: bool = False,
     check_cis: bool = False,
-    check_meta_unique: bool = False,
     region_ctx=None,            # RegionContext из region_checker.py
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
@@ -608,12 +608,13 @@ async def check_one(
             cis = check_cis_mentions(a['body_text'], task.subdomain, region_ctx)
         except Exception:
             cis = None
-    # п.1.3.1: единственность title / description / H1 (+ дубли H2).
+    # п.1.3.1 + 1.3.2 (та же галочка 1.8): единственность title/description/H1,
+    # дубли H2 и «текстовость» заголовков (h2–h6 не в шапке/подвале/меню).
     meta_unique = None
-    if check_meta_unique and is_ok and a['body_text']:
+    if check_meta and is_ok and a['body_text']:
         try:
-            from meta_checker import check_meta_uniqueness
-            meta_unique = check_meta_uniqueness(a['body_text'], task.url, task.type_code)
+            from meta_checker import check_tags
+            meta_unique = check_tags(a['body_text'], task.url, task.type_code)
         except Exception:
             meta_unique = None
 
@@ -678,7 +679,6 @@ async def run_batch(
     check_meta: bool = False,
     check_region: bool = False,
     check_cis: bool = False,
-    check_meta_unique: bool = False,
     region_ctx=None,            # RegionContext из region_checker.build_region_context
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
@@ -767,7 +767,6 @@ async def run_batch(
                     check_meta=check_meta,
                     check_region=check_region,
                     check_cis=check_cis,
-                    check_meta_unique=check_meta_unique,
                     region_ctx=region_ctx,
                     proxy_url=proxy_url,
                     kp_map=kp_map,

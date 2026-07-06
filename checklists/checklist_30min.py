@@ -648,10 +648,9 @@ def init_session():
         'c30_check_products': True,
         'c30_check_text': True,        # пункт 1.6 – битые переменные
         'c30_check_indexing': True,    # пункт 1.7 – индексация (robots/noindex/canonical)
-        'c30_check_meta': True,        # пункт 1.8 – метаданные и дубли (title/description/URL)
+        'c30_check_meta': True,        # пункт 1.8 – метаданные, дубли, единственность тегов
         'c30_check_region': True,      # пункт 1.9 – верные переменные города (по КП)
         'c30_check_cis': True,         # пункт 1.10 – СНГ-домены без РФ/СНГ/чужих стран
-        'c30_check_meta_unique': True, # пункт 1.11 – единственные H1/title/description
         'c30_check_links': False,      # «ссылки открываются (404)» – тяжёлая, по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
@@ -892,7 +891,7 @@ with st.container(border=True):
         for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                    'c30_check_filters', 'c30_check_products', 'c30_check_text',
                    'c30_check_indexing', 'c30_check_meta',
-                   'c30_check_region', 'c30_check_cis', 'c30_check_meta_unique'):
+                   'c30_check_region', 'c30_check_cis'):
             st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
@@ -1042,8 +1041,7 @@ if pid:
         # «Выбрать/Снять все», иначе кнопка врёт).
         _CHK_KEYS = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                      'c30_check_products', 'c30_check_text', 'c30_check_indexing',
-                     'c30_check_meta', 'c30_check_region', 'c30_check_cis',
-                     'c30_check_meta_unique']
+                     'c30_check_meta', 'c30_check_region', 'c30_check_cis']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
@@ -1084,14 +1082,17 @@ if pid:
                              'открыты к индексации: Disallow, meta noindex, '
                              'X-Robots-Tag или canonical на закрытый URL – баг. '
                              'Плюс сверка всех путей каталога (sitemap) с robots.txt.')
-            st.checkbox('1.8  Метаданные и дубли (title, description, H1, урлы)',
+            st.checkbox('1.8  Корректность вывода и дубли (заголовки, метаданные, урлы)',
                         key='c30_check_meta',
                         help='Наличие и непустота title/description/H1, город '
                              'поддомена в title/description, длины. Дубли: '
                              'повторы внутри города – баг, полное совпадение '
                              'между городами – не подставился город. Дубли '
                              'урлов: варианты адреса (http, слэш, www) главной '
-                             'и каталога должны редиректить.')
+                             'и каталога должны редиректить. Плюс единственность '
+                             'тегов (ровно один title/description/H1, дубли H2) '
+                             'и «текстовость» заголовков: h2–h6 не должны быть '
+                             'в шапке/подвале/меню/сайдбаре.')
             st.checkbox('1.9  Переменные города (город, телефон, почта — по КП)',
                         key='c30_check_region',
                         help='На странице города не должно быть подстановок другого '
@@ -1103,12 +1104,6 @@ if pid:
                              'заголовках, метаданных и контактах не должно быть: '
                              '«РФ», «Россия», аббревиатуры «СНГ» и названий других '
                              'стран — только своя страна. Для доменов РФ не выполняется.')
-            st.checkbox('1.11  Единственные H1 / Title / Description (без дублей)',
-                        key='c30_check_meta_unique',
-                        help='ТЗ 1.3.1: на странице должны быть в единственном '
-                             'экземпляре <title>, <meta description> и <h1> '
-                             '(0 или ≥2 — баг). Плюс дубли H2 с одинаковым текстом. '
-                             'Несколько разных H2 — норма.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1226,7 +1221,6 @@ if pid:
         bool(st.session_state.get('c30_check_meta', True)),
         bool(st.session_state.get('c30_check_region', True)),
         bool(st.session_state.get('c30_check_cis', True)),
-        bool(st.session_state.get('c30_check_meta_unique', True)),
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
@@ -1266,7 +1260,6 @@ if pid:
                 'check_meta': st.session_state.get('c30_check_meta', True),
                 'check_region': st.session_state.get('c30_check_region', True),
                 'check_cis': st.session_state.get('c30_check_cis', True),
-                'check_meta_unique': st.session_state.get('c30_check_meta_unique', True),
                 'check_links': st.session_state.get('c30_check_links', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
