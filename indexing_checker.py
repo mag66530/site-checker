@@ -189,13 +189,14 @@ def _find_meta_robots(html: str):
     return None, False
 
 
-def _find_canonical(html: str):
-    """href первого rel=canonical (или None)."""
-    m = _CANONICAL_RE.search(html[:200_000])
-    if not m:
-        return None
-    hm = _HREF_RE.search(m.group(0))
-    return hm.group(1).strip() if hm else None
+def _find_canonicals(html: str) -> list:
+    """href ВСЕХ rel=canonical на странице (валидно – ровно один)."""
+    out = []
+    for m in _CANONICAL_RE.finditer(html[:200_000]):
+        hm = _HREF_RE.search(m.group(0))
+        if hm and hm.group(1).strip():
+            out.append(hm.group(1).strip())
+    return out
 
 
 def _norm_url(u: str) -> str:
@@ -236,7 +237,8 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         'robots_disallowed': False, 'robots_rule': None, 'robots_agent': None,
         'meta_robots': None, 'meta_noindex': False,
         'x_robots': None, 'x_robots_noindex': False,
-        'canonical': None, 'canonical_self': None, 'canonical_disallowed': False,
+        'canonical': None, 'canonical_count': 0,
+        'canonical_self': None, 'canonical_disallowed': False,
         'issues': [], 'warnings': [],
     }
     issues, warnings = out['issues'], out['warnings']
@@ -273,27 +275,43 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         issues.append('расхождение с robots.txt: в robots страница открыта, '
                       'но на ней noindex (заголовок X-Robots-Tag)')
 
-    # 4. canonical
+    # 4. canonical – «верно настроен rel=canonical»:
+    #    ровно один тег; указывает на себя; не на чужой хост; не на URL,
+    #    закрытый в robots. Отсутствие тега – предупреждение.
     if html:
-        canon = _find_canonical(html)
-        out['canonical'] = canon
-        if canon:
+        canons = _find_canonicals(html)
+        out['canonical'] = canons[0] if canons else None
+        out['canonical_count'] = len(canons)
+        if not canons:
+            warnings.append('нет rel="canonical" на странице')
+        else:
+            if len(canons) >= 2:
+                issues.append('несколько rel="canonical" на странице – '
+                              'поисковики игнорируют такой сигнал')
+            canon = canons[0]
             try:
                 self_ref = _norm_url(canon) == _norm_url(url)
             except Exception:
                 self_ref = None
             out['canonical_self'] = self_ref
             if self_ref is False:
-                # Каноникл на закрытый robots'ом URL – расхождение:
-                # канонизируем «в никуда»
-                if robots is not None and robots.ok:
-                    c_dis, _c_rule, _ = robots_verdict(robots, canon)
-                    if c_dis:
-                        out['canonical_disallowed'] = True
-                        issues.append('расхождение с robots.txt: canonical '
-                                      'ведёт на URL, закрытый в robots')
-                if not out['canonical_disallowed']:
-                    warnings.append('canonical ведёт на другой URL')
+                _page_host = (urlsplit(url).netloc or '').lower().removeprefix('www.')
+                _can_host = (urlsplit(canon).netloc or '').lower().removeprefix('www.')
+                if _can_host and _can_host != _page_host:
+                    # Канонизация на другой домен/поддомен: страница города
+                    # отдаёт свой вес чужому хосту – выпадает из поиска.
+                    issues.append('canonical ведёт на другой домен/поддомен')
+                else:
+                    # Каноникл на закрытый robots'ом URL – канонизируем
+                    # «в никуда» (robots того же хоста).
+                    if robots is not None and robots.ok:
+                        c_dis, _c_rule, _ = robots_verdict(robots, canon)
+                        if c_dis:
+                            out['canonical_disallowed'] = True
+                            issues.append('расхождение с robots.txt: canonical '
+                                          'ведёт на URL, закрытый в robots')
+                    if not out['canonical_disallowed']:
+                        warnings.append('canonical ведёт на другой URL')
 
     out['verdict'] = 'closed' if issues else ('warn' if warnings else 'open')
     return out

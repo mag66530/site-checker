@@ -1486,7 +1486,9 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                'с robots: в robots страница открыта, а на ней noindex (meta или '
                'X-Robots-Tag), либо canonical ведёт на закрытый в robots URL. '
                'Закрыта в robots и noindex – согласовано, так задумано, не '
-               'показываем. Отдельно: пути из sitemap/каталога, закрытые '
+               'показываем. Плюс «верно настроен rel=canonical»: ровно один тег, '
+               'указывает на себя, не на чужой домен; отсутствие тега – '
+               'предупреждение. Отдельно: пути из sitemap/каталога, закрытые '
                'Disallow, – противоречие (sitemap говорит «в индекс», robots – '
                '«нельзя»).')
     c.font = _font(size=10, italic=True, color=C.text_soft)
