@@ -186,6 +186,11 @@ class CheckResult:
     # {'checked': int, 'broken': [{'url': str, 'code': int}]} | None (не проверяли)
     broken_links: Optional[dict] = None
 
+    # Индексация (п.1.7): robots.txt / meta robots / X-Robots-Tag / canonical.
+    # dict из indexing_checker.analyze_page_indexing | None (не проверяли)
+    indexing: Optional[dict] = None
+    has_indexing_issues: bool = False
+
     checked_at: Optional[str] = None
 
 
@@ -211,6 +216,7 @@ async def _attempt_once(
     body_text = None
     body_size = 0
     final_url = url
+    resp_headers = None
     MAX_REDIRECTS = 10
 
     timeout = aiohttp.ClientTimeout(total=timeout_ms / 1000)
@@ -241,6 +247,15 @@ async def _attempt_once(
 
                     # Финальный ответ – читаем тело
                     final_url = current_url
+                    # Заголовки финального ответа (для X-Robots-Tag и т.п.);
+                    # ключи в lower, повторяющиеся склеиваем через запятую.
+                    try:
+                        resp_headers = {
+                            k.lower(): ', '.join(resp.headers.getall(k))
+                            for k in set(resp.headers)
+                        }
+                    except Exception:
+                        resp_headers = None
                     try:
                         body_bytes = await resp.read()
                         body_size = len(body_bytes)
@@ -273,6 +288,7 @@ async def _attempt_once(
         'redirect_chain': redirect_chain,
         'body_size': body_size,
         'body_text': body_text,
+        'headers': resp_headers,
         'elapsed_ms': elapsed_ms,
     }
 
@@ -431,9 +447,11 @@ async def check_one(
     text_patterns: str | None = None,
     check_structure: bool = True,
     check_links: bool = False,
+    check_indexing: bool = False,
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
     get_css_hidden: Optional[Callable] = None,
+    get_robots: Optional[Callable] = None,
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
@@ -513,6 +531,21 @@ async def check_one(
         except Exception:
             page_phone = None
 
+    # Индексация (п.1.7): robots.txt (эталон) + meta robots + X-Robots-Tag +
+    # canonical. robots.txt хоста берём через get_robots (кэш на весь батч).
+    indexing = None
+    if check_indexing and is_ok:
+        try:
+            from indexing_checker import analyze_page_indexing
+            robots = None
+            if get_robots is not None:
+                host = urlsplit(task.url).netloc
+                robots = await get_robots(host)
+            indexing = analyze_page_indexing(
+                a['body_text'], a.get('headers'), task.url, robots)
+        except Exception:
+            indexing = None
+
     # «Ссылки реально открываются» (404) – тяжёлая опц. проверка (запрос по
     # каждой ссылке). Делаем только если включено, страница открылась и это
     # тех. страница (их немного, они на главном домене – нагрузка ограничена).
@@ -553,6 +586,8 @@ async def check_one(
         contacts_addr=contacts_addr,
         page_phone=page_phone,
         broken_links=broken_links,
+        indexing=indexing,
+        has_indexing_issues=bool(indexing and indexing.get('issues')),
         checked_at=None,
     )
 
@@ -572,6 +607,7 @@ async def run_batch(
     text_patterns: str | None = None,
     check_structure: bool = True,
     check_links: bool = False,
+    check_indexing: bool = False,
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
     proxy_url: Optional[str] = None,
@@ -606,6 +642,12 @@ async def run_batch(
     css_locks: dict = {}
     css_guard = asyncio.Lock()
 
+    # Кэш robots.txt по хостам (для проверки индексации) – качаем каждый
+    # поддомен один раз на батч.
+    robots_cache: dict = {}
+    robots_locks: dict = {}
+    robots_guard = asyncio.Lock()
+
     async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
 
         async def get_css_hidden(html, base_url):
@@ -614,6 +656,22 @@ async def run_batch(
                 sels.extend(await _css_sel_for_url(
                     session, u, timeout_ms, proxy_url, css_cache, css_locks, css_guard))
             return tuple(sels)
+
+        async def get_robots(host):
+            if host in robots_cache:
+                return robots_cache[host]
+            async with robots_guard:
+                lock = robots_locks.get(host)
+                if lock is None:
+                    lock = asyncio.Lock()
+                    robots_locks[host] = lock
+            async with lock:
+                if host in robots_cache:
+                    return robots_cache[host]
+                from indexing_checker import fetch_robots
+                info = await fetch_robots(session, host, proxy_url=proxy_url)
+                robots_cache[host] = info
+                return info
 
         async def worker(task):
             nonlocal done_count
@@ -633,9 +691,11 @@ async def run_batch(
                     text_patterns=text_patterns,
                     check_structure=check_structure,
                     check_links=check_links,
+                    check_indexing=check_indexing,
                     proxy_url=proxy_url,
                     kp_map=kp_map,
                     get_css_hidden=get_css_hidden,
+                    get_robots=get_robots if check_indexing else None,
                 )
                 done_count += 1
                 if on_progress:
