@@ -96,6 +96,7 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'check_filters': has_filters, 'check_products': True, 'check_text': True,
         'check_indexing': True,  # п.1.7 – индексация (robots/noindex/canonical)
         'check_meta': True,      # п.1.8 – метаданные и дубли (title/description/URL)
+        'check_meta_unique': True,  # п.1.11 – единственность title/description/H1
         'check_links': False,   # «ссылки открываются (404)» – тяжёлая, по запросу
         'fetch_notifications': fetch_notifications,
         'notify_days': int(days),

@@ -2295,6 +2295,104 @@ def _build_region_sheet(wb, results):
         c.alignment = _align(indent=1)
 
 
+# ── Лист «Заголовки и мета» (п.1.3.1: единственные H1/Title/Description) ──
+
+_META_LABEL = {
+    'title': 'Title', 'description': 'Meta description',
+    'h1': 'H1', 'h2': 'H2 (дубль)',
+}
+
+
+def _build_meta_unique_sheet(wb, results):
+    """Лист единственности ключевых SEO-тегов: несколько или отсутствие
+    title/description/H1, дубли H2. Добавляется только если проверка выполнялась."""
+    checked = [r for r in results if getattr(r, 'meta_unique', None) is not None]
+    if not checked:
+        return
+    rows = []
+    for r in checked:
+        for i in (r.meta_unique.get('issues') or []):
+            rows.append((r, i))
+
+    ws = wb.create_sheet('Заголовки и мета')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if rows else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 16   # Город
+    ws.column_dimensions['C'].width = 13   # Тип страницы
+    ws.column_dimensions['D'].width = 60   # URL
+    ws.column_dimensions['E'].width = 16   # Тег
+    ws.column_dimensions['F'].width = 66   # Что не так
+    ws.column_dimensions['G'].width = 3
+
+    ws.merge_cells('B2:F2')
+    c = ws['B2']
+    c.value = 'Единственность H1 / Title / Description (п.1.3.1)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:F3')
+    c = ws['B3']
+    c.value = ('На странице должны быть в единственном экземпляре <title>, '
+               '<meta name="description"> и <h1>: если их нет или больше одного – '
+               'баг. Также ловим дубли H2 (два H2 с одинаковым текстом). '
+               'Несколько разных H2 – это норма.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 40
+
+    row = 5
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+    c = ws.cell(row=row, column=2)
+    pages_bad = len({id(r) for r, _ in rows})
+    c.value = (f'Проверено страниц: {len(checked)}  ·  с проблемами: {pages_bad}  '
+               f'·  всего замечаний: {len(rows)}')
+    c.font = _font(size=10, bold=True, color=C.err if rows else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 24
+    row += 2
+
+    if not rows:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        c = ws.cell(row=row, column=2)
+        c.value = ('✅ На всех проверенных страницах title, description и H1 – '
+                   'в единственном экземпляре, дублей H2 нет.')
+        c.font = _font(size=11, color=C.ok)
+        c.alignment = _align(indent=1)
+        return
+
+    for ci, h in enumerate(['Город', 'Тип', 'URL', 'Тег', 'Что не так'], 2):
+        cell = ws.cell(row=row, column=ci)
+        cell.value = h
+        cell.font = _font(size=9, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align()
+        cell.border = _border()
+    ws.row_dimensions[row].height = 20
+    row += 1
+    for r, i in rows:
+        ws.row_dimensions[row].height = 30
+        vals = [
+            (r.city or '–', {'size': 10, 'color': C.text}),
+            (r.type_label, {'size': 9, 'color': C.text_muted}),
+            (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
+            (_META_LABEL.get(i.get('тип'), i.get('тип', '')),
+             {'size': 10, 'bold': True, 'color': C.err}),
+            (i.get('пояснение', ''), {'size': 10, 'color': C.text}),
+        ]
+        for ci, (val, kw) in enumerate(vals, 2):
+            cell = ws.cell(row=row, column=ci)
+            cell.value = val
+            cell.font = _font(**kw)
+            cell.alignment = _align(wrap=True, vertical='top')
+            cell.border = _border(color=C.border_light)
+            if ci == 4:
+                cell.hyperlink = r.url
+        row += 1
+
+
 # ── Главная функция ────────────────────────────────────────────────
 
 
@@ -2499,6 +2597,7 @@ def build_report(
         ('Структура страниц', 'что чинить в контенте – где нет цены, кнопок заказа, заголовка. Красное = баг.'),
         ('Индексация', 'если есть лист – что закрыто/открыто к индексации: robots.txt, meta noindex, canonical.'),
         ('Метаданные', 'если есть лист – title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
+        ('Заголовки и мета', 'если есть лист – единственность title/description/H1 на странице и дубли H2.'),
         ('Регион и СНГ', 'если есть лист – чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист – страницы с незаменёнными переменными ({{city}} и т.п.).'),
@@ -2523,6 +2622,9 @@ def build_report(
 
     # ─── Лист индексации (п.1.7) – если проверка выполнялась ────────
     _build_indexing_sheet(wb, results, indexing_summary)
+
+    # ─── Лист единственности тегов (п.1.3.1) – если проверялась ─────
+    _build_meta_unique_sheet(wb, results)
     _build_region_sheet(wb, results)
 
     # ─── Лист метаданных (п.1.8) – если проверка выполнялась ────────
