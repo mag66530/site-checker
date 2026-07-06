@@ -1582,32 +1582,46 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             ws.row_dimensions[row].height = 22
             row += 1
         else:
-            for ci, h in enumerate(['', '', 'Путь (есть в sitemap/каталоге)',
-                                    'Правило robots.txt'], 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = h
-                cell.font = _font(size=9, bold=True, color=C.text_muted)
-                cell.fill = _fill(C.surface)
-                cell.alignment = _align()
-                cell.border = _border()
-            ws.row_dimensions[row].height = 20
-            row += 1
+            # Группируем по правилу: одно правило Disallow бьёт сотни путей –
+            # без группировки каждая строка повторяет одно и то же правило.
+            _by_rule = {}
             for d in sm_dis:
-                ws.row_dimensions[row].height = 20
                 _agent = d.get('agent') or '*'
                 _rule = f'Disallow: {d.get("rule")}'
                 if _agent != '*':
                     _rule += f' (User-agent: {_agent})'
-                vals = [('', {}), ('', {}),
-                        (d.get('path', ''), {'size': 10, 'color': C.text}),
-                        (_rule, {'size': 10, 'color': C.err})]
-                for ci, (val, kw) in enumerate(vals, 2):
-                    cell = ws.cell(row=row, column=ci)
-                    cell.value = val
-                    if kw:
-                        cell.font = _font(**kw)
-                    cell.alignment = _align(wrap=True, vertical='top')
-                    cell.border = _border(color=C.border_light)
+                _by_rule.setdefault(_rule, []).append(d.get('path', ''))
+            _MAX_PATHS = 100
+            for _rule, _paths in sorted(_by_rule.items(),
+                                        key=lambda kv: -len(kv[1])):
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+                c = ws.cell(row=row, column=2)
+                c.value = (f'{_rule}  —  путей из sitemap/каталога: {len(_paths)}')
+                c.font = _font(size=10, bold=True, color=C.err)
+                c.fill = _fill(C.surface)
+                c.alignment = _align(wrap=True, indent=1)
+                c.border = _border()
+                ws.row_dimensions[row].height = 22
+                row += 1
+                for _p in _paths[:_MAX_PATHS]:
+                    ws.merge_cells(start_row=row, start_column=2,
+                                   end_row=row, end_column=5)
+                    c = ws.cell(row=row, column=2)
+                    c.value = _p
+                    c.font = _font(size=9, color=C.text_soft)
+                    c.alignment = _align(indent=2)
+                    c.border = _border(color=C.border_light)
+                    ws.row_dimensions[row].height = 16
+                    row += 1
+                if len(_paths) > _MAX_PATHS:
+                    ws.merge_cells(start_row=row, start_column=2,
+                                   end_row=row, end_column=5)
+                    c = ws.cell(row=row, column=2)
+                    c.value = f'… и ещё {len(_paths) - _MAX_PATHS} путей'
+                    c.font = _font(size=9, italic=True, color=C.text_muted)
+                    c.alignment = _align(indent=2)
+                    ws.row_dimensions[row].height = 16
+                    row += 1
                 row += 1
 
 
