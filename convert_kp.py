@@ -1,5 +1,5 @@
 """
-convert_kp.py – разовая конвертация «Карты присутствия» (xlsx) в компактный
+convert_kp.py - разовая конвертация «Карты присутствия» (xlsx) в компактный
 catalogs/{proj}-kp.csv для сверки контактов.
 
 Запуск:
@@ -8,7 +8,7 @@ catalogs/{proj}-kp.csv для сверки контактов.
     python convert_kp.py mpe /путь/к/КП_МПЭ.xlsx
 
 В CSV кладём ТОЛЬКО контактные поля (домен, город, телефоны SEO/реклама/общий,
-почта, адрес) – исходный xlsx с внутренними данными в репозиторий не идёт.
+почта, адрес) - исходный xlsx с внутренними данными в репозиторий не идёт.
 """
 import csv
 import re
@@ -38,13 +38,13 @@ def _phone_columns(headers):
 
 
 def _find_header_row(ws, max_scan=6):
-    """Найти строку заголовков – где встречаются 'город' и 'адрес'."""
+    """Найти строку заголовков - где встречаются 'город' и 'адрес'."""
     for i, row in enumerate(ws.iter_rows(min_row=1, max_row=max_scan, values_only=True), 1):
         cells = [str(c).lower() if c else '' for c in row]
         joined = ' '.join(cells)
         if 'город' in joined and 'адрес' in joined:
             return i, row
-    # запасной вариант – первая строка
+    # запасной вариант - первая строка
     first = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
     return 1, first
 
@@ -93,7 +93,7 @@ def convert(project_id: str, xlsx_path: str) -> Path:
         city = cell(row, ci_city)
         url = cell(row, ci_url)
         # домен: из url-колонки, либо ищем по строке любой домен сети
-        # (.ru/.uz/.kz/.by – у МПЭ есть Узбекистан и Казахстан)
+        # (.ru/.uz/.kz/.by - у МПЭ есть Узбекистан и Казахстан)
         host = _norm_host(url)
         if not host:
             joined = ' '.join(str(c) for c in row if c)
@@ -102,7 +102,7 @@ def convert(project_id: str, xlsx_path: str) -> Path:
         if not host or host in seen:
             continue
         seen.add(host)
-        # Все телефоны города (нормализованные, 10 цифр) из всех тел. колонок –
+        # Все телефоны города (нормализованные, 10 цифр) из всех тел. колонок -
         # сайт может статически показывать любой из них (Общий/SEO/Сотовый).
         all_norm = []
         for idx in phone_cols:

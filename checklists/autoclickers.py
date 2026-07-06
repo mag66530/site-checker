@@ -1,15 +1,15 @@
 """
-Страница «Автокликеры» – фоновый запуск кликеров GSC и Я.Вебмастера.
+Страница «Автокликеры» - фоновый запуск кликеров GSC и Я.Вебмастера.
 
 Запуск фоновый: кнопка стартует отдельный процесс и сразу освобождает
-интерфейс. Параллельно можно уйти в чек-листы и работать там – кликер
+интерфейс. Параллельно можно уйти в чек-листы и работать там - кликер
 крутится сам по себе (свой процесс + свой Chrome, ресурсы не конфликтуют).
 Прогресс смотри кнопкой «Обновить лог».
 
 Окружение:
-  • Локально (streamlit run app.py) – работает.
-  • Облако по ссылке – клики пока недоступны (нет браузера пользователя).
-  • Свой сервер (в планах) – заработает так же (тот же фоновый запуск).
+  • Локально (streamlit run app.py) - работает.
+  • Облако по ссылке - клики пока недоступны (нет браузера пользователя).
+  • Свой сервер (в планах) - заработает так же (тот же фоновый запуск).
 """
 import os
 import subprocess
@@ -64,11 +64,11 @@ def _kill_tree(pid):
             pass
 
 PROJECTS = {
-    'smu': {'name': 'СМУ – Стальметурал', 'google': 'stalmeturalru@gmail.com',
+    'smu': {'name': 'СМУ - Стальметурал', 'google': 'stalmeturalru@gmail.com',
             'yandex': 'stalmetural19@yandex.ru', 'domain': 'stalmetural.ru'},
-    'mpe': {'name': 'МПЭ – Mepen', 'google': 'mepen888@gmail.com',
+    'mpe': {'name': 'МПЭ - Mepen', 'google': 'mepen888@gmail.com',
             'yandex': 'mepen88@yandex.ru', 'domain': 'mepen.ru'},
-    'imp': {'name': 'ИМП – Инметпром', 'google': 'inmetprom77@gmail.com',
+    'imp': {'name': 'ИМП - Инметпром', 'google': 'inmetprom77@gmail.com',
             'yandex': 'inmetprom77@yandex.ru', 'domain': 'inmetprom.ru'},
 }
 
@@ -82,7 +82,7 @@ def _playwright_ok() -> bool:
 
 
 def _launch_background(args: list[str], log_path: Path):
-    """Запустить процесс в фоне, вывод – в файл. UI не блокируется."""
+    """Запустить процесс в фоне, вывод - в файл. UI не блокируется."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env['PYTHONIOENCODING'] = 'utf-8'
@@ -104,7 +104,7 @@ def _launch_background(args: list[str], log_path: Path):
 
 
 def _run_foreground(args: list[str], title: str):
-    """Короткие задачи (открыть браузер) – со стримом вывода."""
+    """Короткие задачи (открыть браузер) - со стримом вывода."""
     st.markdown(f'**{title}**')
     out = st.empty()
     lines: list[str] = []
@@ -128,18 +128,18 @@ def _run_foreground(args: list[str], title: str):
 
 # ── UI ──────────────────────────────────────────────────────────────
 
-st.title('🖱 Автокликеры – GSC и Яндекс.Вебмастер')
+st.title('🖱 Автокликеры - GSC и Яндекс.Вебмастер')
 
 st.warning(
     'Кликеры управляют браузером на ЭТОМ компьютере и требуют ручного входа в '
     'Google/Yandex. Работают, когда приложение запущено **локально** '
     '(`streamlit run app.py`). В облаке по ссылке клики пока недоступны. '
-    'После переноса на свой сервер – заработают.'
+    'После переноса на свой сервер - заработают.'
 )
 
 if not _playwright_ok():
     st.error(
-        'Playwright не установлен – кликеры не запустятся.\n\n'
+        'Playwright не установлен - кликеры не запустятся.\n\n'
         'Локально один раз:\n'
         '```\npip install -r requirements-local.txt\nplaywright install chromium\n```'
     )
@@ -158,7 +158,7 @@ st.divider()
 # ── Шаг 1: вход ─────────────────────────────────────────────────────
 st.subheader('Шаг 1. Открыть браузер и войти')
 st.caption('Откроется Chrome. Войди в Google и Yandex аккаунты проекта. '
-           'Окно не закрывай – кликеры к нему подключаются.')
+           'Окно не закрывай - кликеры к нему подключаются.')
 if st.button('🌐 Открыть браузер для входа', use_container_width=True):
     _run_foreground(['open_browser.py'], 'Открываю Chrome…')
 
@@ -170,7 +170,7 @@ st.subheader('Шаг 2. Что прокликать')
 do_gsc = st.checkbox('Прокликать ГСК', value=False)
 do_wm = st.checkbox('Прокликать Вебмастер', value=False)
 
-st.caption('Запуск фоновый – интерфейс сразу свободен. Можно уйти в чек-листы '
+st.caption('Запуск фоновый - интерфейс сразу свободен. Можно уйти в чек-листы '
            'и работать параллельно, кликер крутится сам.')
 
 _alive = _pid_alive(_read_pid())
@@ -224,6 +224,6 @@ if LOG_FILE.exists():
     if txt.strip():
         st.code('\n'.join(txt.splitlines()[-300:]), language='text')
     else:
-        st.caption('Лог пуст – кликер ещё не запускали.')
+        st.caption('Лог пуст - кликер ещё не запускали.')
 else:
     st.caption('Лог появится после запуска.')

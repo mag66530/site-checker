@@ -1,4 +1,4 @@
-"""Тесты product_links – сбор товарных ссылок с листингов."""
+"""Тесты product_links - сбор товарных ссылок с листингов."""
 import json
 
 from product_links import (
@@ -25,8 +25,8 @@ def test_extracts_product_links():
 
 
 def test_extracts_imp_root_level_product_from_card():
-    """ИМП: товар – КОРНЕВОЙ slug (/list-…/), карточка card-product. Берём его,
-    пропуская иконку-ассет; URL-фильтр (категория/характеристика/значение) – нет."""
+    """ИМП: товар - КОРНЕВОЙ slug (/list-…/), карточка card-product. Берём его,
+    пропуская иконку-ассет; URL-фильтр (категория/характеристика/значение) - нет."""
     html = (
         '<div class="listing__cards_col card-product">'
         '<a href="/catalog/view/theme/default/sprite.svg">иконка</a>'
@@ -39,7 +39,7 @@ def test_extracts_imp_root_level_product_from_card():
 
 
 def test_excludes_template_junk_hrefs():
-    """Битый JS-шаблон в href (${ product.href }) – не ссылка, пропускаем."""
+    """Битый JS-шаблон в href (${ product.href }) - не ссылка, пропускаем."""
     html = (
         '<div class="card-product">'
         '<a href="${ product.href }">шаблон</a>'
@@ -51,7 +51,7 @@ def test_excludes_template_junk_hrefs():
 
 
 def test_excludes_imp_facet_listing_in_fallback():
-    """Без карточек: ссылка-фильтр <категория>/<характеристика>/<значение>/ –
+    """Без карточек: ссылка-фильтр <категория>/<характеристика>/<значение>/ -
     это листинг, не товар (так устроен ИМП)."""
     known_cats = {'/catalog/listovoj-prokat/list-otsinkovannyj/'}
     html = (
@@ -114,7 +114,7 @@ def test_save_and_load_roundtrip(tmp_path, monkeypatch):
     assert loaded['pathnames'] == ['/catalog/armatura/tovar-1/', '/catalog/balka/tovar-2/']
     assert loaded['categories_total'] == 10
     assert loaded['categories_ok'] == 9
-    assert loaded['is_stale'] is False, 'только что собранная база – свежая'
+    assert loaded['is_stale'] is False, 'только что собранная база - свежая'
 
 
 def test_load_missing_returns_none(tmp_path, monkeypatch):

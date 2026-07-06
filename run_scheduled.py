@@ -1,21 +1,21 @@
 """
-run_scheduled.py – автономный прогон чек-листа по расписанию (GitHub Action / CLI).
+run_scheduled.py - автономный прогон чек-листа по расписанию (GitHub Action / CLI).
 
 Запускает runner_30min.run_check для одного или нескольких проектов БЕЗ Streamlit.
-Секреты читаются из переменных окружения (в GitHub Action – из repository Secrets),
-имена ключей – те же, что в st.secrets приложения:
+Секреты читаются из переменных окружения (в GitHub Action - из repository Secrets),
+имена ключей - те же, что в st.secrets приложения:
 
-  proxy_url                          – прокси (обязателен для ИМП; датацентр-IP блокируется)
-  telegram_bot_token                 – токен бота для отправки отчёта
-  telegram_recipients_<pid>          – получатель(и) chat_id, через запятую/пробел
-  metrika_<pid>_email / _password    – почта Метрики/Вебмастера/Я.Бизнес/2ГИС
-  gsc_<pid>_email / _password        – GSC / Google-аккаунты
-  yandex_oauth_<pid>                 – токен Вебмастер-API (запасные: webmaster_oauth_<pid>,
+  proxy_url                          - прокси (обязателен для ИМП; датацентр-IP блокируется)
+  telegram_bot_token                 - токен бота для отправки отчёта
+  telegram_recipients_<pid>          - получатель(и) chat_id, через запятую/пробел
+  metrika_<pid>_email / _password    - почта Метрики/Вебмастера/Я.Бизнес/2ГИС
+  gsc_<pid>_email / _password        - GSC / Google-аккаунты
+  yandex_oauth_<pid>                 - токен Вебмастер-API (запасные: webmaster_oauth_<pid>,
                                        yandex_oauth, webmaster_oauth)
 
 где <pid> ∈ {smu, imp, mpe}.
 
-Отчёт сохраняется в reports/ и (если заданы telegram_*) отправляется в Telegram –
+Отчёт сохраняется в reports/ и (если заданы telegram_*) отправляется в Telegram -
 эта отправка уже встроена в run_check.
 
 Запуск:
@@ -61,7 +61,7 @@ def _recipients(pid: str) -> list[str]:
 
 
 def build_creds(pid: str) -> dict:
-    """Собрать creds из окружения – та же структура, что готовит UI из st.secrets."""
+    """Собрать creds из окружения - та же структура, что готовит UI из st.secrets."""
     return {
         'proxy_url': _env('proxy_url'),
         'tg_token': _env('telegram_bot_token'),
@@ -94,16 +94,16 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'custom_urls': [],
         'check_main': True, 'check_catalog': True, 'check_categories': True,
         'check_filters': has_filters, 'check_products': True, 'check_text': True,
-        'check_indexing': True,  # п.1.7 – индексация (robots/noindex/canonical)
-        'check_meta': True,      # п.1.8 – метаданные, дубли, единственность тегов
-        'check_links': False,   # «ссылки открываются (404)» – тяжёлая, по запросу
+        'check_indexing': True,  # п.1.7 - индексация (robots/noindex/canonical)
+        'check_meta': True,      # п.1.8 - метаданные, дубли, единственность тегов
+        'check_links': False,   # «ссылки открываются (404)» - тяжёлая, по запросу
         'fetch_notifications': fetch_notifications,
         'notify_days': int(days),
     }
 
 
 def _make_progress():
-    """Колбэк прогресса для CI – печатает не чаще, чем раз в 20%, чтобы не спамить."""
+    """Колбэк прогресса для CI - печатает не чаще, чем раз в 20%, чтобы не спамить."""
     state = {'pct': -20}
 
     def progress(frac, text):
@@ -148,10 +148,10 @@ def main():
             creds = build_creds(pid)
             if not creds['tg_token'] or not creds['tg_recipients']:
                 log(f'⚠ Telegram не настроен (нужны telegram_bot_token и '
-                    f'telegram_recipients_{pid}) – отчёт не отправится, '
+                    f'telegram_recipients_{pid}) - отчёт не отправится, '
                     f'останется в reports/ (и в artifact).')
             if not creds['proxy_url']:
-                log('⚠ proxy_url не задан – ИМП с датацентр-IP вернёт 403.')
+                log('⚠ proxy_url не задан - ИМП с датацентр-IP вернёт 403.')
             params = build_params(pid, a.profile, a.days, not a.no_notifications)
             result = run_check(pid, params, creds, log, _make_progress())
             if result.get('error'):

@@ -1,5 +1,5 @@
 """
-sitemap.py – загрузка и парсинг sitemap.xml для определения товарных URL.
+sitemap.py - загрузка и парсинг sitemap.xml для определения товарных URL.
 
 Точная копия логики Node.js версии:
   • Sitemap может быть индексом (<sitemapindex>) или обычным (<urlset>)
@@ -74,7 +74,7 @@ async def collect_all_urls(
     proxy_url: Optional[str] = None,
 ) -> list[str]:
     """Рекурсивно обойти sitemap-индекс и собрать все URL."""
-    # Если прокси не задан явно – берём из env
+    # Если прокси не задан явно - берём из env
     if proxy_url is None:
         proxy_url = os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy')
 
@@ -103,11 +103,11 @@ async def collect_all_urls(
                 log('info', f'Обработан sitemap: {next_url}')
 
             if SITEMAP_INDEX_RE.search(xml):
-                # Это индекс – добавляем под-sitemap'ы в очередь
+                # Это индекс - добавляем под-sitemap'ы в очередь
                 for sub in _parse_urls(xml):
                     queue.append(sub)
             else:
-                # Обычный sitemap – собираем URL'ы
+                # Обычный sitemap - собираем URL'ы
                 collected.extend(_parse_urls(xml))
 
     if queue and log:
@@ -243,7 +243,7 @@ async def load_product_pathnames(
             continue
         if p in ('/', '/catalog/'):
             continue
-        # /filter/ в пути – явный фильтр
+        # /filter/ в пути - явный фильтр
         if '/filter/' in p:
             continue
         if not p.startswith('/catalog/'):

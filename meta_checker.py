@@ -1,24 +1,24 @@
 """
-meta_checker.py – проверка метаданных и дублей (пункт 1.8 чек-листа)
+meta_checker.py - проверка метаданных и дублей (пункт 1.8 чек-листа)
 + единственность ключевых SEO-тегов (пункт 1.3.1, см. низ файла).
 
 Что проверяем (по уже скачанному HTML, без доп. запросов):
-  • title / meta description / H1 – есть и не пустые;
+  • title / meta description / H1 - есть и не пустые;
   • город поддомена встречается в title и description (стем-сравнение,
-    чтобы «в Москве» совпало с городом «Москва») – ловит незамененные
+    чтобы «в Москве» совпало с городом «Москва») - ловит незамененные
     шаблоны и чужой город;
-  • длины: title ~10–70, description ~50–160 – выход за рамки =
+  • длины: title ~10-70, description ~50-160 - выход за рамки =
     предупреждение (не баг).
 
 Дубли (пост-обработка всех результатов прогона):
   • внутри одного города (поддомена) одинаковый title/description/H1
-    у разных страниц – баг;
+    у разных страниц - баг;
   • между городами баг только при ПОЛНОМ совпадении title/description
-    (значит, город не подставился в шаблон); тех. страницы исключаем –
+    (значит, город не подставился в шаблон); тех. страницы исключаем -
     политики/доставка легитимно одинаковы на всех городах.
 
 Дубли УРЛОВ (лёгкие доп. запросы, только главная и каталог поддомена):
-  • варианты адреса – http://, без завершающего слэша, с www – должны
+  • варианты адреса - http://, без завершающего слэша, с www - должны
     301-редиректить на канонический вид; ответ 200 без редиректа = дубль.
 """
 import asyncio
@@ -36,7 +36,7 @@ DESC_MIN, DESC_MAX = 50, 160
 _TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>', re.I | re.S)
 _DESC_RE = re.compile(
     r'<meta\b[^>]*name\s*=\s*["\']description["\'][^>]*>', re.I)
-_DESC_RE2 = re.compile(  # content до name – тоже валидный порядок атрибутов
+_DESC_RE2 = re.compile(  # content до name - тоже валидный порядок атрибутов
     r'<meta\b[^>]*content\s*=\s*["\']([^"\']*)["\'][^>]*name\s*=\s*["\']description["\']', re.I)
 _CONTENT_RE = re.compile(r'content\s*=\s*["\']([^"\']*)["\']', re.I)
 _H1_RE = re.compile(r'<h1\b[^>]*>(.*?)</h1>', re.I | re.S)
@@ -92,7 +92,7 @@ def _city_stems(city: str) -> list:
 
 def city_in_text(city: str, text: str) -> Optional[bool]:
     """Есть ли город в тексте (по стемам всех слов названия).
-    None – город не задан/слишком короткий (проверить нельзя)."""
+    None - город не задан/слишком короткий (проверить нельзя)."""
     stems = _city_stems(city)
     if not stems or not text:
         return None if not stems else False
@@ -120,11 +120,11 @@ def check_meta(meta: dict, city: str, type_code: str) -> dict:
         issues.append('нет meta description')
     if not h1 and type_code != 'tech':
         # На тех. страницах H1 не обязателен (и он уже есть в структурной
-        # проверке для остальных) – здесь фиксируем для полноты картины.
+        # проверке для остальных) - здесь фиксируем для полноты картины.
         issues.append('нет заголовка H1')
 
-    # Город в title/description – только для SEO-типов.
-    # Тексты замечаний – БЕЗ подстановок (города/длины): по одинаковому
+    # Город в title/description - только для SEO-типов.
+    # Тексты замечаний - БЕЗ подстановок (города/длины): по одинаковому
     # тексту отчёт группирует страницы в одну строку-проблему.
     if type_code in _CITY_TYPES and city:
         if title and city_in_text(city, title) is False:
@@ -132,7 +132,7 @@ def check_meta(meta: dict, city: str, type_code: str) -> dict:
         if desc and city_in_text(city, desc) is False:
             issues.append('в description нет города')
 
-    # Длины – мягкие пороги, предупреждения
+    # Длины - мягкие пороги, предупреждения
     if title:
         if len(title) < TITLE_MIN:
             warnings.append('title короткий')
@@ -159,7 +159,7 @@ def _norm_val(v: Optional[str]) -> Optional[str]:
 def find_duplicates(results) -> dict:
     """Найти дубли метаданных среди результатов прогона.
 
-    Возвращает {'same_city': [...], 'cross_city': [...]} – списки групп:
+    Возвращает {'same_city': [...], 'cross_city': [...]} - списки групп:
     {'field': 'title'|'description'|'h1', 'value': str,
      'scope': subdomain|None, 'pages': [{'city','url','type_label'}]}"""
     same_city, cross_city = [], []
@@ -223,7 +223,7 @@ def _url_variants(url: str) -> list:
         variants.append(('без слэша', f'{sp.scheme}://{host}{path.rstrip("/")}'))
     elif not path.endswith('/') and path != '':
         variants.append(('со слэшем', f'{sp.scheme}://{host}{path}/'))
-    # 3. www. – только для корневого домена (www.spb.… обычно без DNS)
+    # 3. www. - только для корневого домена (www.spb.… обычно без DNS)
     if not host.startswith('www.') and host.count('.') == 1:
         variants.append(('www', f'{sp.scheme}://www.{host}{path}'))
     return variants
@@ -231,7 +231,7 @@ def _url_variants(url: str) -> list:
 
 async def _probe_variant(session, url, proxy_url, timeout_ms=20000):
     """Код первого ответа варианта БЕЗ следования редиректам.
-    3xx – ок (редиректит), 200 – дубль, 4xx/сеть – дубля нет."""
+    3xx - ок (редиректит), 200 - дубль, 4xx/сеть - дубля нет."""
     import aiohttp
     to = aiohttp.ClientTimeout(total=timeout_ms / 1000)
     try:
@@ -282,13 +282,13 @@ async def check_url_duplicates(urls: list, *, proxy_url=None,
 # П.1.3.1 чек-листа: единственность ключевых SEO-тегов.
 #
 # На странице ключевые теги должны быть в ЕДИНСТВЕННОМ экземпляре:
-#   • <title>              – ровно 1 непустой (0 → нет тега; ≥2 → дубли);
-#   • <meta name=descr…>   – ровно 1 непустой (0 → нет; ≥2 → дубли; 1 пустой → пустой);
-#   • <h1>                 – не больше 1 (≥2 → несколько H1). Отсутствие H1 не
-#                            дублируем — его по типу страницы уже ловит
+#   • <title>              - ровно 1 непустой (0 → нет тега; ≥2 → дубли);
+#   • <meta name=descr…>   - ровно 1 непустой (0 → нет; ≥2 → дубли; 1 пустой → пустой);
+#   • <h1>                 - не больше 1 (≥2 → несколько H1). Отсутствие H1 не
+#                            дублируем - его по типу страницы уже ловит
 #                            структурная проверка (лист «Структура страниц»).
-# Плюс дубли H2: два и более <h2> с ОДИНАКОВЫМ текстом — шаблонная ошибка.
-# (Несколько РАЗНЫХ H2 — норма, не баг: их «текстовость» проверяет п.1.3.2.)
+# Плюс дубли H2: два и более <h2> с ОДИНАКОВЫМ текстом - шаблонная ошибка.
+# (Несколько РАЗНЫХ H2 - норма, не баг: их «текстовость» проверяет п.1.3.2.)
 #
 # Считаем по «структурному» HTML: вырезаем <svg> (там бывают свои <title>) и
 # <template> (неактивный контент), чтобы не завышать счётчики.
@@ -321,7 +321,7 @@ def _tag_texts(html: str, tag: str) -> list[str]:
 
 def _meta_descriptions(html: str) -> list[str]:
     """Содержимое всех <meta name="description"> (в т.ч. пустых). og:description
-    и прочие НЕ считаем — только name="description"."""
+    и прочие НЕ считаем - только name="description"."""
     out = []
     for tag in _RE_META.findall(html):
         if not re.search(r'''name\s*=\s*["']?\s*description\b''', tag, re.I):
@@ -352,7 +352,7 @@ def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict
 
     # ── title ──
     if len(titles) == 0:
-        issues.append({'тип': 'title', 'найдено': '—',
+        issues.append({'тип': 'title', 'найдено': '-',
                        'пояснение': 'нет тега <title> на странице'})
     elif len(titles) >= 2:
         issues.append({'тип': 'title', 'найдено': f'{len(titles)} тегов',
@@ -361,7 +361,7 @@ def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict
 
     # ── meta description ──
     if len(descs) == 0:
-        issues.append({'тип': 'description', 'найдено': '—',
+        issues.append({'тип': 'description', 'найдено': '-',
                        'пояснение': 'нет meta description'})
     elif len(descs) >= 2:
         issues.append({'тип': 'description', 'найдено': f'{len(descs)} тегов',
@@ -392,11 +392,11 @@ def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict
 
 
 # ═════════════════════════════════════════════════════════════════════
-# П.1.3.2 чек-листа: заголовки h2–h6 используются только в тексте.
+# П.1.3.2 чек-листа: заголовки h2-h6 используются только в тексте.
 #
-# Заголовок — элемент СТРУКТУРЫ ТЕКСТА, а не вёрстки. h2–h6 в шапке,
+# Заголовок - элемент СТРУКТУРЫ ТЕКСТА, а не вёрстки. h2-h6 в шапке,
 # подвале, меню или сайдбаре (семантические зоны <header>/<footer>/
-# <nav>/<aside>) — ошибка шаблона: их видят роботы и ломается иерархия
+# <nav>/<aside>) - ошибка шаблона: их видят роботы и ломается иерархия
 # заголовков страницы.
 
 _PLACEMENT_ZONES = (
@@ -410,10 +410,10 @@ _MAX_PLACEMENT_ISSUES = 20   # кап находок на страницу (ша
 
 
 def check_headings_placement(html: str) -> dict:
-    """Проверка «текстовости» заголовков (п.1.3.2): h2–h6 не должны
+    """Проверка «текстовости» заголовков (п.1.3.2): h2-h6 не должны
     встречаться в служебных зонах страницы (<header>/<footer>/<nav>/<aside>).
 
-    Возвращает {'issues': [{'тип','найдено','пояснение'}, …]} — тот же
+    Возвращает {'issues': [{'тип','найдено','пояснение'}, …]} - тот же
     формат, что у check_meta_uniqueness (попадает в тот же лист отчёта)."""
     h = _clean_struct(html or '')
     issues: list[dict] = []
@@ -425,14 +425,14 @@ def check_headings_placement(html: str) -> dict:
                 htag = m.group(1).lower()
                 txt = _txt(m.group(2))
                 key = (htag, re.sub(r'\s+', ' ', txt.strip().lower()))
-                # вложенные зоны (nav внутри header) дают повтор — дедуп
+                # вложенные зоны (nav внутри header) дают повтор - дедуп
                 if key in seen:
                     continue
                 seen.add(key)
                 issues.append({
                     'тип': htag, 'найдено': f'в <{tag}>',
                     'пояснение': f'{htag.upper()} «{_short(txt, 45)}» в зоне '
-                                 f'«{label}» (<{tag}>) — заголовки h2–h6 '
+                                 f'«{label}» (<{tag}>) - заголовки h2-h6 '
                                  f'должны быть только в тексте',
                 })
                 if len(issues) >= _MAX_PLACEMENT_ISSUES:

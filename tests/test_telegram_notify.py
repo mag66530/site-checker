@@ -1,4 +1,4 @@
-"""Тесты telegram_notify.py – без реальной сети."""
+"""Тесты telegram_notify.py - без реальной сети."""
 import sys
 sys.path.insert(0, '/home/claude/site-checker-py-current')
 
@@ -15,9 +15,9 @@ def test_escape_html():
 
 
 def test_format_success():
-    """Прогон без проблем – зелёная плашка."""
+    """Прогон без проблем - зелёная плашка."""
     msg = format_summary_message(
-        project_name='СМУ – Стальметурал',
+        project_name='СМУ - Стальметурал',
         started_at='26.05.2026 19:43',
         duration_sec=14,
         total_checks=30,
@@ -33,9 +33,9 @@ def test_format_success():
 
 
 def test_format_critical():
-    """Прогон с ошибками – без эмодзи, блок срочных убран."""
+    """Прогон с ошибками - без эмодзи, блок срочных убран."""
     msg = format_summary_message(
-        project_name='СМУ – Стальметурал',
+        project_name='СМУ - Стальметурал',
         started_at='26.05.2026 19:43',
         duration_sec=14,
         total_checks=30,
@@ -75,7 +75,7 @@ def test_format_with_metrika():
 
 
 def test_format_escapes_in_project_name():
-    """Если в имени проекта будут спецсимволы – должны экранироваться."""
+    """Если в имени проекта будут спецсимволы - должны экранироваться."""
     msg = format_summary_message(
         project_name='Test <a>',
         started_at='26.05.2026 19:43',

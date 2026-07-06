@@ -1,5 +1,5 @@
 """
-sources.py – загрузка каталогов и построение плана проверки.
+sources.py - загрузка каталогов и построение плана проверки.
 
 Работает с CSV-файлами (быстрее xlsx в десятки раз).
 
@@ -38,8 +38,8 @@ class Subdomain:
 class Sources:
     """Загруженные данные проекта."""
     subdomains: list[Subdomain]
-    categories: list[str]          # pathname'ы категорий (общий каталог – РФ)
-    filters: list[str]             # pathname'ы фильтров (общий каталог – РФ)
+    categories: list[str]          # pathname'ы категорий (общий каталог - РФ)
+    filters: list[str]             # pathname'ы фильтров (общий каталог - РФ)
     products: list[str] = field(default_factory=list)  # из sitemap, добавится потом
     # Отдельные каталоги для части доменов (у СНГ свой каталог): host → (категории, фильтры)
     host_catalogs: dict = field(default_factory=dict)
@@ -105,7 +105,7 @@ def parse_subdomains(csv_path: Path) -> list[Subdomain]:
 
 def parse_catalog(csv_path: Path) -> tuple[list[str], list[str]]:
     """
-    Загрузить каталог. Возвращает (категории, фильтры) – pathname'ы.
+    Загрузить каталог. Возвращает (категории, фильтры) - pathname'ы.
     Тип 'категория' → categories, тип 'тег' → filters.
     """
     rows = _read_csv(csv_path)
@@ -160,7 +160,7 @@ def load_sources(project: dict) -> Sources:
     subdomains = parse_subdomains(sub_path)
     categories, filters = parse_catalog(cat_path)
 
-    # Если есть отдельный файл актуальных категорий – он замещает
+    # Если есть отдельный файл актуальных категорий - он замещает
     if project.get('categories_csv'):
         categories_extra_path = PROJECT_ROOT / project['categories_csv']
         if categories_extra_path.exists():
@@ -199,7 +199,7 @@ def list_projects() -> list[dict]:
 # ── Построение плана ────────────────────────────────────────────────
 
 
-# Метки для типов задач – на русском, для отчёта
+# Метки для типов задач - на русском, для отчёта
 TYPE_LABELS = {
     'main': 'Главная',
     'catalog': 'Каталог',
@@ -235,7 +235,7 @@ _TECH_PATHS_IMP = [
 ]
 TECH_PAGE_PATHS = {
     'smu': _TECH_PATHS_SMU,
-    'smu-test': _TECH_PATHS_SMU,   # тест-стенд СМУ – те же страницы
+    'smu-test': _TECH_PATHS_SMU,   # тест-стенд СМУ - те же страницы
     'imp': _TECH_PATHS_IMP,
     'mpe': [
         '/about/', '/catalog/spetstekhnika/', '/payment_delivery/',
@@ -250,8 +250,8 @@ def get_tech_paths(project_id: str) -> list[str]:
     return TECH_PAGE_PATHS.get(project_id, [])
 
 
-# Человеческие названия тех. страниц для отчёта (ключ – путь). Чтобы в таблице
-# было «Оплата», а не «/oplata/». Подписи короткие – помещаются в первый столбец.
+# Человеческие названия тех. страниц для отчёта (ключ - путь). Чтобы в таблице
+# было «Оплата», а не «/oplata/». Подписи короткие - помещаются в первый столбец.
 TECH_PAGE_LABELS = {
     # общие
     '/about/': 'О компании',
@@ -331,21 +331,21 @@ def build_plan(
     """
     Построить план проверки: Москва + обязательные домены + доп. СНГ + N случайных.
 
-    mandatory_hosts – хосты, которые включаем ВСЕГДА (напр. ['smg.az'] для СМУ).
-    cis_extra_subdomains – сколько ещё СНГ-доменов (country != «Россия») гарантированно
+    mandatory_hosts - хосты, которые включаем ВСЕГДА (напр. ['smg.az'] для СМУ).
+    cis_extra_subdomains - сколько ещё СНГ-доменов (country != «Россия») гарантированно
         добавить помимо mandatory_hosts (0 для быстрой, 1 для стандартной/полной).
 
-    Если передана rotation_history – pathname'ы из неё получают меньший
+    Если передана rotation_history - pathname'ы из неё получают меньший
     вес (в 3 раза реже попадают в выборку), но не исключаются полностью.
     """
     rng = random.Random(seed)
 
-    # 1) Главный город (Москва) – всегда.
+    # 1) Главный город (Москва) - всегда.
     mandatory = next((s for s in sources.subdomains if s.city == mandatory_city), None)
     selected = [mandatory] if mandatory else []
     chosen_hosts = {s.host for s in selected}
 
-    # 2) Обязательные домены (напр. smg.az) – всегда, помимо города.
+    # 2) Обязательные домены (напр. smg.az) - всегда, помимо города.
     for h in (mandatory_hosts or []):
         if h in chosen_hosts:
             continue
@@ -361,11 +361,11 @@ def build_plan(
         for s in _pick_random(cis_pool, cis_extra_subdomains, rng):
             selected.append(s); chosen_hosts.add(s.host)
 
-    # 4) Остальные – случайные из оставшихся (steelgroup.az и пр. могут попасть сюда).
+    # 4) Остальные - случайные из оставшихся (steelgroup.az и пр. могут попасть сюда).
     rest = [s for s in sources.subdomains if s.host not in chosen_hosts]
     selected += _pick_random(rest, random_subdomains_count, rng)
 
-    # Если есть история ротации – используем weighted_sample вместо обычного _pick_random
+    # Если есть история ротации - используем weighted_sample вместо обычного _pick_random
     from history import weighted_sample
     recent = rotation_history or set()
 
@@ -379,7 +379,7 @@ def build_plan(
         base = sub.url.rstrip('/')
 
         # Каталог домена: у части доменов (СНГ) свой набор категорий/фильтров;
-        # у остальных (РФ) – общий каталог проекта. Товары у СНГ пока не проверяем
+        # у остальных (РФ) - общий каталог проекта. Товары у СНГ пока не проверяем
         # (своей базы товаров нет, а товары РФ на их доменах дали бы ложные 404).
         if sub.host in sources.host_catalogs:
             sub_categories, sub_filters = sources.host_catalogs[sub.host]

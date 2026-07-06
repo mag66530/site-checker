@@ -1,16 +1,16 @@
 """
-Чек-лист – проверка сайта-проекта (объединённый 15- и 30-минутный).
+Чек-лист - проверка сайта-проекта (объединённый 15- и 30-минутный).
 
 Объём задаётся вручную полями ввода (города / категории / фильтры / товары на
-город): минимум – быстрый тест, больше – полная еженедельная проверка.
+город): минимум - быстрый тест, больше - полная еженедельная проверка.
 
 Что делает:
-  1. Доступность и визуальные ошибки – выборка URL (главная 1.1, каталог 1.2,
+  1. Доступность и визуальные ошибки - выборка URL (главная 1.1, каталог 1.2,
      категории 1.3, фильтры 1.4, товары 1.5, битые переменные 1.6) + структура
      (цена, кнопки заказа, H1, шапка/подвал). Ротация с окном 30 дней.
      Можно добавить свой список URL.
   2. Сбор уведомлений из почты (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google) +
-     404 из Метрики – в xlsx-отчёт.
+     404 из Метрики - в xlsx-отчёт.
   3. Telegram-уведомление с отчётом после прогона.
 
 Прогон идёт ОТДЕЛЬНЫМ процессом (checklist_run.py → runner_30min), поэтому
@@ -201,7 +201,7 @@ def _tags_html(tags: list[str]) -> str:
 
 
 def _dept_tags_result(r) -> list[str]:
-    """Кто отвечает за конкретную проблему. Пусто – если страница работает.
+    """Кто отвечает за конкретную проблему. Пусто - если страница работает.
 
     Карта проблема → отдел:
       • сервер не отвечает / таймаут / нет соединения (5xx) → разработка
@@ -250,7 +250,7 @@ def _dept_tags_notif(n) -> list[str]:
 # ── Фоновый прогон (переживает переключение вкладок) ─────────────────
 # Состояние прогона хранится в модульной переменной (живёт в процессе
 # сервера, не в session_state), поэтому переход на другую вкладку и обратно
-# не перезапускает прогон – поток продолжает работать сам.
+# не перезапускает прогон - поток продолжает работать сам.
 
 _RUNS: dict = {}  # project_id -> состояние прогона (устаревший потоковый путь)
 
@@ -349,7 +349,7 @@ def _run_state_new() -> dict:
 
 
 def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
-    """Выполняет прогон в фоне. НЕ обращается к st.* – все секреты переданы
+    """Выполняет прогон в фоне. НЕ обращается к st.* - все секреты переданы
     в creds из основного потока. Пишет прогресс/лог/результат в _RUNS[pid]."""
     state = _RUNS[pid]
     _run_log_path = Path('cache') / 'last_run.log'
@@ -435,7 +435,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
                 counters['err'] += 1
             set_progress(
                 done / max(total_n, 1),
-                f'Проверено {done} из {total_n} – '
+                f'Проверено {done} из {total_n} - '
                 f'✅ {counters["ok"]} · ⚠ {counters["warn"]} · ❌ {counters["err"]}',
             )
 
@@ -499,7 +499,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             append_log(f'Отправляю отчёт в Telegram ({len(tg_recipients)} получателей)…')
             try:
                 problems_for_tg = [
-                    {'city': r.city or '–', 'url': r.url,
+                    {'city': r.city or '-', 'url': r.url,
                      'status': {'not_found': '404 Не найдена',
                                 'client_error': 'Ошибка на сайте',
                                 'server_error': 'Сервер не отвечает',
@@ -507,7 +507,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
                                 'network_error': 'Нет соединения'}.get(r.status, r.status)}
                     for r in results if r.is_error][:5]
                 empty_sections = [
-                    {'city': r.city or '–', 'url': r.url} for r in results
+                    {'city': r.city or '-', 'url': r.url} for r in results
                     if getattr(r, 'content', None) is not None
                     and getattr(r.content, 'page_kind', '') == 'empty']
                 summary_text = format_summary_message(
@@ -535,7 +535,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             except Exception as e:
                 append_log(f'⚠ Telegram-отправка упала: {e}')
         else:
-            append_log('Telegram не настроен – отправьте отчёт ответственным вручную (пункт 2).')
+            append_log('Telegram не настроен - отправьте отчёт ответственным вручную (пункт 2).')
 
         # Сбор уведомлений из почты
         if flags['fetch_notifications']:
@@ -607,9 +607,9 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
                 )
                 append_log(f'✓ Отчёт обновлён с уведомлениями ({len(_notifs2)} шт.)')
             else:
-                append_log('Уведомлений нет – лист «Уведомления» в отчёт не добавлен.')
+                append_log('Уведомлений нет - лист «Уведомления» в отчёт не добавлен.')
         else:
-            append_log('Чекбокс «Собрать уведомления из почты» выключен – почту не проверяю.')
+            append_log('Чекбокс «Собрать уведомления из почты» выключен - почту не проверяю.')
 
         state['results'] = results
         state['report_path'] = str(report_path)
@@ -646,12 +646,12 @@ def init_session():
         'c30_check_categories': True,
         'c30_check_filters': True,
         'c30_check_products': True,
-        'c30_check_text': True,        # пункт 1.6 – битые переменные
-        'c30_check_indexing': True,    # пункт 1.7 – индексация (robots/noindex/canonical)
-        'c30_check_meta': True,        # пункт 1.8 – метаданные, дубли, единственность тегов
-        'c30_check_region': True,      # пункт 1.9 – верные переменные города (по КП)
-        'c30_check_cis': True,         # пункт 1.10 – СНГ-домены без РФ/СНГ/чужих стран
-        'c30_check_links': False,      # «ссылки открываются (404)» – тяжёлая, по запросу
+        'c30_check_text': True,        # пункт 1.6 - битые переменные
+        'c30_check_indexing': True,    # пункт 1.7 - индексация (robots/noindex/canonical)
+        'c30_check_meta': True,        # пункт 1.8 - метаданные, дубли, единственность тегов
+        'c30_check_region': True,      # пункт 1.9 - верные переменные города (по КП)
+        'c30_check_cis': True,         # пункт 1.10 - СНГ-домены без РФ/СНГ/чужих стран
+        'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -686,11 +686,11 @@ def c30_load_sources(project_id: str):
 
 def split_budget(target_urls: int, cities: int, has_filters: bool) -> dict:
     """
-    Разложить общий размер выборки (300–500 URL) на параметры build_plan.
+    Разложить общий размер выборки (300-500 URL) на параметры build_plan.
 
     На каждый город: главная + каталог (фикс) + категории/фильтры/товары.
-    Категории – самая большая доля (все уровни вложенности), затем фильтры
-    и товары. Если фильтров у проекта нет – их долю делят категории и товары.
+    Категории - самая большая доля (все уровни вложенности), затем фильтры
+    и товары. Если фильтров у проекта нет - их долю делят категории и товары.
     """
     per_city = max(target_urls // max(cities, 1), 4)
     rest = per_city - 2          # минус главная и каталог
@@ -716,14 +716,14 @@ def split_budget(target_urls: int, cities: int, has_filters: bool) -> dict:
 st.title('Чек-лист')
 st.caption(
     'Проверка сайта-проекта: доступность, визуальные ошибки и структура по '
-    'случайной выборке URL. Объём задаёте сами – минимум для быстрого теста, '
+    'случайной выборке URL. Объём задаёте сами - минимум для быстрого теста, '
     'больше для еженедельной проверки. Прогон идёт в фоне и переживает '
     'переключение вкладок.'
 )
 
 # Локальный CSS только для этой страницы: primary-кнопка («Запустить
 # еженедельную проверку»). app.py красит белым саму кнопку, но текст лежит
-# во вложенном <p>, который глобальное правило перекрашивает в тёмный –
+# во вложенном <p>, который глобальное правило перекрашивает в тёмный -
 # получалась чёрная кнопка без видимого текста. Здесь явно белим и текст.
 st.markdown(
     """
@@ -744,7 +744,7 @@ st.markdown(
         background: #000000 !important;
         border-color: #000000 !important;
     }
-    /* Зелёная кнопка скачивания отчёта – чтобы не путалась с primary */
+    /* Зелёная кнопка скачивания отчёта - чтобы не путалась с primary */
     div[data-testid="stDownloadButton"] > button,
     div[data-testid="stDownloadButton"] > button * {
         color: #FFFFFF !important;
@@ -767,14 +767,14 @@ st.markdown(
         border-bottom: 1px solid #ECEAE4;
     }
     .c30-sub:first-of-type { margin-top: .3rem; }
-    /* Подписи полей чуть крупнее и темнее – читаемо */
+    /* Подписи полей чуть крупнее и темнее - читаемо */
     [data-testid="stNumberInput"] label p,
     .stCheckbox label p, .stSelectbox label p {
         font-size: .9rem !important; color: #3A3A3A !important; font-weight: 500 !important;
     }
-    /* Значение в числовом поле – крупное, в фокусе внимания */
+    /* Значение в числовом поле - крупное, в фокусе внимания */
     [data-testid="stNumberInput"] input { font-size: 1.05rem !important; font-weight: 600 !important; }
-    /* Итог/оценка – спокойный вторичный текст */
+    /* Итог/оценка - спокойный вторичный текст */
     .c30-summary { font-size: .95rem; color: #1A1A1A; margin-top: .3rem; }
 
     /* ── Раскладка: воздух в карточках, отступы между блоками, выравнивание ── */
@@ -783,7 +783,7 @@ st.markdown(
         padding: 20px 24px !important; margin-bottom: 16px !important;
     }
     /* Раскрывашки делаем ЛЁГКИМИ (не вторая жирная рамка), чтобы «скрытое»
-       читалось как второстепенное, а карточки-секции – как главное. */
+       читалось как второстепенное, а карточки-секции - как главное. */
     [data-testid="stExpander"] {
         border: 1px solid #ECEAE4 !important; background: #FBFAF8 !important;
         box-shadow: none !important; border-radius: 10px !important;
@@ -792,7 +792,7 @@ st.markdown(
     [data-testid="stExpander"] summary {
         font-size: .9rem !important; font-weight: 600 !important; color: #5B5853 !important;
     }
-    /* Карточки-пресеты (контейнер с рамкой в колонке) – кликабельный вид */
+    /* Карточки-пресеты (контейнер с рамкой в колонке) - кликабельный вид */
     [data-testid="column"] [data-testid="stVerticalBlockBorderWrapper"] {
         padding: 14px 12px !important; margin-bottom: 0 !important;
         transition: border-color .15s;
@@ -800,11 +800,11 @@ st.markdown(
     [data-testid="column"] [data-testid="stVerticalBlockBorderWrapper"]:hover {
         border-color: #B9B2A6 !important;
     }
-    /* Метрики каталога – числа крупные, подписи спокойные (ровный ряд) */
+    /* Метрики каталога - числа крупные, подписи спокойные (ровный ряд) */
     [data-testid="stMetricValue"] { font-size: 1.7rem !important; }
     [data-testid="stMetricLabel"] p { font-size: .8rem !important; color: #8A867F !important; }
     /* Значок подсказки «?» глобально скрыт (app.py). У метрик «Каталог проекта»
-       он нужен (откуда города/категории/…) – возвращаем точечно и аккуратно. */
+       он нужен (откуда города/категории/…) - возвращаем точечно и аккуратно. */
     [data-testid="stMetricLabel"] [data-testid="stTooltipIcon"] {
         display: inline-flex !important; align-items: center;
         margin-left: 5px; cursor: help;
@@ -813,10 +813,10 @@ st.markdown(
         width: 15px !important; height: 15px !important; opacity: .7;
     }
 
-    /* Пресеты как карточки (radio с подписями): клик = выбор, выбранная –
+    /* Пресеты как карточки (radio с подписями): клик = выбор, выбранная -
        рамка подсвечивается; равные, по центру, без кружка и кнопки «Выбрать». */
     .st-key-c30_preset div[role="radiogroup"] { gap: 12px !important; align-items: stretch !important; }
-    /* прячем кружок радио – карточка кликается целиком, заголовок по центру */
+    /* прячем кружок радио - карточка кликается целиком, заголовок по центру */
     .st-key-c30_preset div[role="radiogroup"] > label > div:first-child { display: none !important; }
     .st-key-c30_preset div[role="radiogroup"] > label {
         flex: 1 1 0 !important; min-height: 90px;
@@ -833,13 +833,13 @@ st.markdown(
         border-color: #1A1A1A !important; background: #ECEAE4 !important;
         box-shadow: inset 0 0 0 1px #1A1A1A;
     }
-    /* Заголовок карточки – крупнее, по центру, наш шрифт */
+    /* Заголовок карточки - крупнее, по центру, наш шрифт */
     .st-key-c30_preset div[role="radiogroup"] > label [data-testid="stMarkdownContainer"] p {
         font-family: 'Hanken Grotesk', sans-serif !important;
         font-size: 1.15rem !important; font-weight: 600 !important;
         color: #1A1A1A !important; text-align: center !important; margin: 0 !important;
     }
-    /* Подпись снизу – мельче, БЕЗ жирности, по центру */
+    /* Подпись снизу - мельче, БЕЗ жирности, по центру */
     .st-key-c30_preset [data-testid="stCaptionContainer"],
     .st-key-c30_preset [data-testid="stCaptionContainer"] p {
         font-family: 'Hanken Grotesk', sans-serif !important;
@@ -863,10 +863,10 @@ def _c30_sub(text: str):
 with st.container(border=True):
     st.markdown('### Какой сайт проверяем')
     projects = list_projects()
-    options = ['– выберите –'] + [p['name'] for p in projects]
+    options = ['- выберите -'] + [p['name'] for p in projects]
     name_to_id = {p['name']: p['id'] for p in projects}
 
-    current = '– выберите –'
+    current = '- выберите -'
     for p in projects:
         if p['id'] == st.session_state.c30_project_id:
             current = p['name']
@@ -879,13 +879,13 @@ with st.container(border=True):
         st.session_state.c30_results = None
         st.session_state.c30_report_path = None
         st.session_state.c30_last_error = None
-        # Сбрасываем «подпись прогона» – чтобы при смене проекта не показывался
+        # Сбрасываем «подпись прогона» - чтобы при смене проекта не показывался
         # старый лог/результат от прошлого проекта или прошлой сессии.
         st.session_state.c30_run_sig = None
         # Поля выборки перечитаются под новый проект (свои лимиты городов).
         for _k in ('c30_in_cities', 'c30_in_cats', 'c30_in_filters', 'c30_in_products'):
             st.session_state.pop(_k, None)
-        # Галочки «Что проверять» при заходе на проект – все включены (дефолт).
+        # Галочки «Что проверять» при заходе на проект - все включены (дефолт).
         # Ставим ЯВНО здесь (до отрисовки чекбоксов), иначе значение из init_session
         # не подхватывалось виджетом и галочки выходили пустыми, а кнопка врала.
         for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
@@ -915,14 +915,14 @@ if pid:
                         f'число случайных городов из этого списка.')
         _m2.metric('Категорий', f'{stats["categories_count"]:,}'.replace(',', ' '),
                    help='Категории каталога (страницы вида /catalog/…) из выгрузки каталога '
-                        'проекта. Сколько из них проверять на каждый город – задаётся ниже, '
+                        'проекта. Сколько из них проверять на каждый город - задаётся ниже, '
                         'в «Объём проверки → Категорий на город».')
         _m3.metric('Фильтров',
                    f'{stats["filters_count"]:,}'.replace(',', ' ')
                    if stats['has_filters'] else 'нет',
                    help='Страницы-фильтры (теги, напр. подборки по параметру) из выгрузки '
                         'каталога проекта. Есть не у всех проектов. Сколько проверять на '
-                        'город – в «Объём проверки → Фильтров на город».')
+                        'город - в «Объём проверки → Фильтров на город».')
         _pbase = load_product_links(pid)
         if _pbase and _pbase['pathnames']:
             _d = datetime.fromtimestamp(_pbase['collected_at_ms'] / 1000)
@@ -935,7 +935,7 @@ if pid:
         else:
             _pinfo = get_cached_products_info(pid)
             _m4.metric('Товаров',
-                       f'{_pinfo["count"]:,}'.replace(',', ' ') if _pinfo and _pinfo.get('count') else '–',
+                       f'{_pinfo["count"]:,}'.replace(',', ' ') if _pinfo and _pinfo.get('count') else '-',
                        help='Из sitemap.xml (или соберите базу collect_products.py).')
         st.caption(f'Главный город (всегда в выборке): {cfg.get("mandatory_city", "Москва")}.')
         if st.button('Сбросить кэш товаров', key='c30_reset_cache',
@@ -981,13 +981,13 @@ if pid:
         st.session_state.c30_in_cities = _maxsubs
     st.session_state.setdefault('c30_preset', 'standard')
 
-    # БЛОК 1 – Доступность: объём (карточки-пресеты + ручная настройка)
+    # БЛОК 1 - Доступность: объём (карточки-пресеты + ручная настройка)
     with st.container(border=True):
         st.markdown('### 1. Доступность и визуальные ошибки')
         _c30_sub('Объём проверки')
 
         # Радио-карточки пресетов. Применяем выбор в основном потоке (по
-        # возвращённому значению – оно всегда валидно), без on_change: callback
+        # возвращённому значению - оно всегда валидно), без on_change: callback
         # иногда срабатывал со старым/чужим значением и падал.
         _choice = st.radio('Объём', ['quick', 'standard', 'full'],
                            format_func=lambda p: PROFILES[p]['label'],
@@ -1034,10 +1034,10 @@ if pid:
     }
     budget['per_city'] = 2 + budget['cats'] + budget['filters'] + budget['products']
 
-    # БЛОК 2 – Что проверять на страницах (1.1–1.10)
+    # БЛОК 2 - Что проверять на страницах (1.1-1.10)
     with st.container(border=True):
         # Учитываем только РЕАЛЬНО показанные галочки: фильтры есть не у всех
-        # проектов (если их нет – чекбокс не рисуется, и его нельзя учитывать в
+        # проектов (если их нет - чекбокс не рисуется, и его нельзя учитывать в
         # «Выбрать/Снять все», иначе кнопка врёт).
         _CHK_KEYS = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                      'c30_check_products', 'c30_check_text', 'c30_check_indexing',
@@ -1046,7 +1046,7 @@ if pid:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
         # прогоне session_state консистентен (галочки покажут ровно эти значения),
-        # поэтому подпись всегда совпадает. Обычную кнопку (не в st.empty) – иначе
+        # поэтому подпись всегда совпадает. Обычную кнопку (не в st.empty) - иначе
         # плейсхолдер «залипал» со старой подписью после клика.
         _all_on = all(st.session_state.get(_k, False) for _k in _CHK_KEYS)
 
@@ -1078,23 +1078,23 @@ if pid:
                         key='c30_check_text')
             st.checkbox('1.7  Индексация страниц (robots.txt, noindex, canonical)',
                         key='c30_check_indexing',
-                        help='Эталон – robots.txt. Ошибка = расхождение сигналов '
+                        help='Эталон - robots.txt. Ошибка = расхождение сигналов '
                              'страницы с robots: noindex на открытой в robots '
                              'странице или canonical на закрытый URL. Закрыта в '
-                             'robots и noindex – так задумано, не показываем. '
+                             'robots и noindex - так задумано, не показываем. '
                              'Плюс сверка всех путей каталога (sitemap) с robots.txt.')
             st.checkbox('1.8  Корректность вывода и дубли (заголовки, метаданные, урлы)',
                         key='c30_check_meta',
                         help='Наличие и непустота title/description/H1, город '
                              'поддомена в title/description, длины. Дубли: '
-                             'повторы внутри города – баг, полное совпадение '
-                             'между городами – не подставился город. Дубли '
+                             'повторы внутри города - баг, полное совпадение '
+                             'между городами - не подставился город. Дубли '
                              'урлов: варианты адреса (http, слэш, www) главной '
                              'и каталога должны редиректить. Плюс единственность '
                              'тегов (ровно один title/description/H1, дубли H2) '
-                             'и «текстовость» заголовков: h2–h6 не должны быть '
+                             'и «текстовость» заголовков: h2-h6 не должны быть '
                              'в шапке/подвале/меню/сайдбаре.')
-            st.checkbox('1.9  Переменные города (город, телефон, почта — по КП)',
+            st.checkbox('1.9  Переменные города (город, телефон, почта - по КП)',
                         key='c30_check_region',
                         help='На странице города не должно быть подстановок другого '
                              'города: чужой город в title/description/H1, телефон '
@@ -1104,11 +1104,11 @@ if pid:
                         help='На сайте страны СНГ (домены .kz/.by/.uz/…) в текстах, '
                              'заголовках, метаданных и контактах не должно быть: '
                              '«РФ», «Россия», аббревиатуры «СНГ» и названий других '
-                             'стран — только своя страна. Для доменов РФ не выполняется.')
+                             'стран - только своя страна. Для доменов РФ не выполняется.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
-    # БЛОК 3 – Дополнительно: три одинаковых пункта-галочки (по клику разворачиваются)
+    # БЛОК 3 - Дополнительно: три одинаковых пункта-галочки (по клику разворачиваются)
     with st.container(border=True):
         st.markdown('### Дополнительно')
         _ck_notif = st.checkbox(
@@ -1116,7 +1116,7 @@ if pid:
             key='c30_fetch_notifications')
         if _ck_notif:
             # Без st.columns (пустая вторая колонка оставляла «призрачный»
-            # селектор при выключенном чекбоксе — как было у 404).
+            # селектор при выключенном чекбоксе - как было у 404).
             st.selectbox('За какой период',
                          [1, 3, 7, 14, 30],
                          format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
@@ -1125,12 +1125,12 @@ if pid:
             'Собрать 404 из Метрики',
             key='c30_fetch_metrika_404',
             help='Берёт 404-страницы напрямую из Метрики (API, по всем счётчикам '
-                 'проекта) за выбранный период. За день трафик на 404 мал – '
+                 'проекта) за выбранный период. За день трафик на 404 мал - '
                  'обычно нужен период 7+ дней.')
         if _ck_m404:
             from datetime import date as _date, timedelta as _td
             # Селектор без обёртки в колонки (пустые колонки оставляли
-            # «призрачные» виджеты при выключении чекбокса). Поля даты —
+            # «призрачные» виджеты при выключении чекбокса). Поля даты -
             # сразу под селектором, появляются в том же ране.
             _m404_mode = st.selectbox(
                 'Период 404',
@@ -1152,7 +1152,7 @@ if pid:
                     key='c30_check_links',
                     help='Прозваниваем каждую внутреннюю ссылку в тексте тех. страниц '
                          '(оплата, доставка, контакты, политики и т.п.) и помечаем те, '
-                         'что отдают 404/410. Дольше – по запросу на каждую ссылку.')
+                         'что отдают 404/410. Дольше - по запросу на каждую ссылку.')
 
         # ── Автокликер (локально) ──────────────────────────────────
         _ck_ac = st.checkbox(
@@ -1181,8 +1181,8 @@ if pid:
                        'автокликер пропускается с пометкой в отчёте.')
         st.checkbox('Добавить свой список URL', key='c30_use_custom_urls')
         if st.session_state.c30_use_custom_urls:
-            st.caption('Ссылки – по одной на строку. Тип по адресу: /catalog/x/ – '
-                       'категория, /catalog/x/y/ – товар, …/filter/… – фильтр, / – главная.')
+            st.caption('Ссылки - по одной на строку. Тип по адресу: /catalog/x/ - '
+                       'категория, /catalog/x/y/ - товар, …/filter/… - фильтр, / - главная.')
             _up = st.file_uploader('Загрузить .txt / .csv', type=['txt', 'csv'],
                                    label_visibility='collapsed', key='c30_custom_file')
             if _up is not None:
@@ -1206,12 +1206,12 @@ if pid:
                 from collections import Counter as _Counter
                 _bt = ', '.join(f'{lbl}: {n}' for lbl, n
                                 in _Counter(t.type_label for t in _typed).items())
-                st.success(f'Будет добавлено {len(_typed)} URL – {_bt}')
+                st.success(f'Будет добавлено {len(_typed)} URL - {_bt}')
 
-    # «Подпись прогона» – проект + объём выборки + что проверяем. По ней решаем,
+    # «Подпись прогона» - проект + объём выборки + что проверяем. По ней решаем,
     # показывать ли блок результатов/лог: показываем только для прогона, который
     # запущен в этой сессии при текущих настройках. Сменили проект, объём или
-    # набор галочек (или зашли утром заново) – старый лог не показываем.
+    # набор галочек (или зашли утром заново) - старый лог не показываем.
     _cur_sig = (
         pid, int(random_cities), int(budget['cats']), int(budget['filters']),
         int(budget['products']),
@@ -1230,7 +1230,7 @@ if pid:
     with st.container():
         _paths = _c30_paths(pid)
         _alive = _pid_alive(_read_pidfile(_paths['pid']))
-        # Идёт прогон – «присваиваем» его текущим настройкам, чтобы после
+        # Идёт прогон - «присваиваем» его текущим настройкам, чтобы после
         # завершения показать его результаты/лог (даже если зашли в новой сессии).
         if _alive:
             st.session_state.c30_run_sig = _cur_sig
@@ -1270,7 +1270,7 @@ if pid:
                 'autoclick_wm': st.session_state.get('c30_ac_wm', False),
                 'autoclick_gsc': st.session_state.get('c30_ac_gsc', False),
             }
-            # Свой список URL (если включён) – добавится к обычной выборке проекта.
+            # Свой список URL (если включён) - добавится к обычной выборке проекта.
             _custom_urls = []
             if (st.session_state.get('c30_use_custom_urls')
                     and st.session_state.get('c30_custom_urls_text', '').strip()):
@@ -1281,7 +1281,7 @@ if pid:
             try:
                 _sk_hint = [k for k in list(st.secrets.keys())
                             if 'gsc' in k.lower() or pid in k.lower()]
-                # Какие «webmaster/oauth»-ключи реально есть – для диагностики
+                # Какие «webmaster/oauth»-ключи реально есть - для диагностики
                 _wm_hint = [k for k in list(st.secrets.keys())
                             if 'webmaster' in k.lower() or 'oauth' in k.lower()]
             except Exception:
@@ -1306,7 +1306,7 @@ if pid:
                 'webmaster_keys_hint': _wm_hint,
                 'secret_keys_hint': _sk_hint,
             }
-            # Доп. СНГ-домены по пресету (быстрая 0, стандарт/полная 1) – помимо
+            # Доп. СНГ-домены по пресету (быстрая 0, стандарт/полная 1) - помимо
             # обязательного smg.az (см. mandatory_hosts в smu.json).
             _cis_extra = get_profile_kwargs(
                 st.session_state.get('c30_preset', 'standard')).get('cis_extra_subdomains', 0)
@@ -1315,7 +1315,7 @@ if pid:
             st.session_state.c30_results = None
             st.session_state.c30_report_path = None
             st.session_state.c30_last_error = None
-            st.session_state.c30_run_sig = _cur_sig   # этот прогон – «наш», его и покажем
+            st.session_state.c30_run_sig = _cur_sig   # этот прогон - «наш», его и покажем
             _launch_checklist_bg(pid, params, creds)
             st.rerun()
 
@@ -1331,7 +1331,7 @@ if pid:
     if _alive and not _done:
         with st.container(border=True):
             st.markdown('### ⏳ Идёт проверка')
-            st.caption('Можно переключаться на другие вкладки – прогон идёт в фоне '
+            st.caption('Можно переключаться на другие вкладки - прогон идёт в фоне '
                        'и не прервётся.')
             _prog, _ptext = 0.0, 'Подготовка…'
             try:
@@ -1351,7 +1351,7 @@ if pid:
         st.rerun()
     elif _paths['result'].exists() or _paths['report'].exists():
         # Процесс завершился.
-        # 1) Путь к отчёту – из лёгкого сайдкара (надёжно, не зависит от pickle).
+        # 1) Путь к отчёту - из лёгкого сайдкара (надёжно, не зависит от pickle).
         try:
             if _paths['report'].exists():
                 _rp_txt = _paths['report'].read_text(encoding='utf-8').strip()
@@ -1359,7 +1359,7 @@ if pid:
                     st.session_state.c30_report_path = _rp_txt
         except Exception:
             pass
-        # 2) Результаты – из pickle (для метрик и блока результатов); если
+        # 2) Результаты - из pickle (для метрик и блока результатов); если
         #    pickle упал, кнопка скачивания всё равно работает (см. п.1).
         if _paths['result'].exists():
             try:
@@ -1388,7 +1388,7 @@ if pid:
 
     # ── Запасная кнопка скачивания ──────────────────────────────────
     # Если отчёт на диске есть, но блок результатов ниже не отрисовался
-    # (нет распарсенных результатов) – всё равно даём скачать xlsx.
+    # (нет распарсенных результатов) - всё равно даём скачать xlsx.
     if (_show_run and st.session_state.get('c30_report_path')
             and not st.session_state.get('c30_results')):
         _rp = Path(st.session_state.c30_report_path)
@@ -1462,8 +1462,8 @@ if pid:
                     city = f'[{r.city}] ' if r.city else ''
                     tags_html = _tags_html(_dept_tags_result(r))
                     url_safe = _html.escape(r.url, quote=True)
-                    extra_html = (' – ' + _html.escape(' · '.join(extra))) if extra else ''
-                    # Вся строка – чистый HTML (без смешения с markdown-разметкой),
+                    extra_html = (' - ' + _html.escape(' · '.join(extra))) if extra else ''
+                    # Вся строка - чистый HTML (без смешения с markdown-разметкой),
                     # иначе Streamlit иногда не дорисовывает теги-span после markdown-ссылки.
                     st.markdown(
                         f'<div style="margin:2px 0;font-size:0.9rem">'
@@ -1473,14 +1473,14 @@ if pid:
                         unsafe_allow_html=True,
                     )
                 if len(problems) > 50:
-                    st.caption(f'... и ещё {len(problems) - 50}. Все детали – в xlsx-отчёте.')
+                    st.caption(f'... и ещё {len(problems) - 50}. Все детали - в xlsx-отчёте.')
 
-    # Уведомления из почты и 404 из Метрики – в xlsx-отчёте (лист
+    # Уведомления из почты и 404 из Метрики - в xlsx-отчёте (лист
     # «Уведомления»), собираются по галке «Собрать уведомления» за
     # выбранный период. Отдельный блок в UI убран.
 
     # ── Лог прогона: самый нижний блок (под результатами). Показываем только
-    #    для «нашего» прогона (текущие настройки) – иначе утром/после смены
+    #    для «нашего» прогона (текущие настройки) - иначе утром/после смены
     #    проекта висел бы старый лог. ──
     if _show_run and not _alive:
         _lp = _c30_paths(pid)['log']

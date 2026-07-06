@@ -2,7 +2,7 @@
 gsc_indexing_report.py
 ======================
 Разведка отчёта «Индексирование → Страницы» одного ресурса.
-Выводит таблицу причин (Причина + статус Проверки) и кнопки/ссылки –
+Выводит таблицу причин (Причина + статус Проверки) и кнопки/ссылки -
 чтобы поймать селекторы для авто-«Проверить исправление».
 
 Перед запуском:
@@ -90,9 +90,9 @@ async def main(resource_id: str, open_first: bool):
 
         body = (await page.inner_text('body'))[:200]
         if 'не найден' in body.lower():
-            print('⚠ Ресурс не открылся – проверь resource_id.')
+            print('⚠ Ресурс не открылся - проверь resource_id.')
 
-        # Скроллим до конца – второй блок «Проблемы с представлением страниц»
+        # Скроллим до конца - второй блок «Проблемы с представлением страниц»
         # подгружается ниже по странице.
         for _ in range(8):
             await page.mouse.wheel(0, 1600)
@@ -126,7 +126,7 @@ async def main(resource_id: str, open_first: bool):
         if open_first:
             print('\n=== ПРОБУЮ ОТКРЫТЬ ПЕРВУЮ ПРИЧИНУ ===')
             opened = False
-            # Строки причин – <tr data-rowid="N"> с jsaction.
+            # Строки причин - <tr data-rowid="N"> с jsaction.
             rows = await page.query_selector_all('tr[data-rowid]')
             print(f'  Найдено строк tr[data-rowid]: {len(rows)}')
             for tr in rows:

@@ -1,4 +1,4 @@
-"""Тесты sources.py – проверяем что данные парсятся корректно."""
+"""Тесты sources.py - проверяем что данные парсятся корректно."""
 import sys
 sys.path.insert(0, '/home/claude/site-checker-py')
 
@@ -11,7 +11,7 @@ from sources import (
 def test_list_projects():
     projects = list_projects()
     ids = {p['id'] for p in projects}
-    # Базовые проекты должны быть; могут быть и доп. (напр. smu-test – тестовый стенд)
+    # Базовые проекты должны быть; могут быть и доп. (напр. smu-test - тестовый стенд)
     assert {'smu', 'imp', 'mpe'} <= ids, f"Нет базовых проектов, получили {ids}"
     print(f'✓ list_projects: {len(projects)} проектов ({", ".join(sorted(ids))})')
 
@@ -19,7 +19,7 @@ def test_list_projects():
 def test_smu_sources():
     cfg = load_project_config('smu')
     src = load_sources(cfg)
-    # Список городов пополняется – проверяем «не меньше базы», а не точное число.
+    # Список городов пополняется - проверяем «не меньше базы», а не точное число.
     assert len(src.subdomains) >= 34, f"СМУ: ожидалось ≥34 поддомена, получили {len(src.subdomains)}"
     assert len(src.categories) > 1000, f"СМУ: мало категорий ({len(src.categories)})"
     assert len(src.filters) > 9000, f"СМУ: мало фильтров ({len(src.filters)})"
@@ -32,7 +32,7 @@ def test_smu_sources():
 def test_imp_sources():
     cfg = load_project_config('imp')
     src = load_sources(cfg)
-    # Список городов пополняется – проверяем «не меньше базы», а не точное число.
+    # Список городов пополняется - проверяем «не меньше базы», а не точное число.
     assert len(src.subdomains) >= 239, f"ИМП: ожидалось ≥239, получили {len(src.subdomains)}"
     assert len(src.categories) > 1400, f"ИМП: мало категорий"
     assert len(src.filters) > 14000, f"ИМП: мало фильтров"
@@ -76,7 +76,7 @@ def test_build_plan_smu():
 
 
 def test_smu_per_domain_catalogs():
-    """У СНГ-доменов СМУ свой каталог (категории своего домена), у РФ – общий;
+    """У СНГ-доменов СМУ свой каталог (категории своего домена), у РФ - общий;
     товары на СНГ-доменах не проверяются (своей базы товаров пока нет)."""
     cfg = load_project_config('smu')
     src = load_sources(cfg)
@@ -99,7 +99,7 @@ def test_smu_per_domain_catalogs():
 
 
 def test_build_plan_mpe_no_filters():
-    """МПЭ – нет фильтров, поле filters_per_subdomain должно игнорироваться."""
+    """МПЭ - нет фильтров, поле filters_per_subdomain должно игнорироваться."""
     cfg = load_project_config('mpe')
     src = load_sources(cfg)
     plan = build_plan(

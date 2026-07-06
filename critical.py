@@ -1,26 +1,26 @@
 """
-critical.py – выделение критических ошибок прогона для срочных уведомлений (п.4.3).
+critical.py - выделение критических ошибок прогона для срочных уведомлений (п.4.3).
 
-Чистый анализ результатов проверки (без Telegram/отчёта) – какие находки считать
+Чистый анализ результатов проверки (без Telegram/отчёта) - какие находки считать
 критическими и достойными немедленного внимания SEO/руководителя.
 
 Два уровня:
-  • availability  – ПАДЕНИЕ ДОСТУПНОСТИ: сервер не отвечает (5xx/таймаут/нет
+  • availability  - ПАДЕНИЕ ДОСТУПНОСТИ: сервер не отвечает (5xx/таймаут/нет
     соединения) на любой странице ИЛИ недоступна главная страница города.
     Под это шлём ОТДЕЛЬНОЕ срочное сообщение.
-  • others        – прочие критические (в блок подписи к отчёту):
-        kp          – контакты на сайте ≠ КП (телефон/почта/адрес);
-        cannot_buy  – нельзя купить: нет цены или кнопки заказа;
-        empty       – пустой раздел: ни товаров, ни подразделов;
-        not_found   – 404 на странице выборки или soft-404 («заглушка» 200);
-        text        – битые шаблонные переменные в текстах.
+  • others        - прочие критические (в блок подписи к отчёту):
+        kp          - контакты на сайте ≠ КП (телефон/почта/адрес);
+        cannot_buy  - нельзя купить: нет цены или кнопки заказа;
+        empty       - пустой раздел: ни товаров, ни подразделов;
+        not_found   - 404 на странице выборки или soft-404 («заглушка» 200);
+        text        - битые шаблонные переменные в текстах.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-# Сервер не отвечает – это падение доступности на любой странице.
+# Сервер не отвечает - это падение доступности на любой странице.
 _SERVER_DOWN = ('server_error', 'timeout', 'network_error')
 
 _STATUS_LABEL = {
@@ -98,19 +98,19 @@ def analyze(results) -> CriticalSummary:
     for r in results or []:
         if getattr(r, 'status', '') == 'cancelled':
             continue
-        city = getattr(r, 'city', '') or '–'
+        city = getattr(r, 'city', '') or '-'
         url = getattr(r, 'url', '') or ''
         path = _path(url)
         page = _page_name(r, path)
 
-        # 1) Падение доступности (сервер / главная) – дальше контента нет.
+        # 1) Падение доступности (сервер / главная) - дальше контента нет.
         if is_availability_down(r):
             label = _STATUS_LABEL.get(getattr(r, 'status', ''), 'не открылась')
             s.availability.append(
                 CriticalItem('availability', city, page, label, url))
             continue
 
-        # Прочие недоступности (напр. 404 не на главной) – в not_found.
+        # Прочие недоступности (напр. 404 не на главной) - в not_found.
         if not getattr(r, 'is_ok', False):
             if getattr(r, 'status', '') == 'not_found':
                 s.others['not_found'].append(
@@ -134,8 +134,8 @@ def analyze(results) -> CriticalSummary:
                 s.others['kp'].append(
                     CriticalItem('kp', city, page, f'{", ".join(bad)} не совпадает с КП', url))
 
-        # 4) Пустой раздел (нет ни товаров, ни подразделов) – отдельная тема.
-        #    Нельзя купить (нет цены/кнопки заказа) – другая тема.
+        # 4) Пустой раздел (нет ни товаров, ни подразделов) - отдельная тема.
+        #    Нельзя купить (нет цены/кнопки заказа) - другая тема.
         if content is not None:
             pk = getattr(content, 'page_kind', '')
             bug_keys = {getattr(b, 'key', '') for b in getattr(content, 'bugs', [])}
@@ -157,7 +157,7 @@ def analyze(results) -> CriticalSummary:
             s.others['text'].append(
                 CriticalItem('text', city, page, f'{n} битых переменных', url))
 
-        # 6) Долгий ответ сервера (очень медленно) – критично для UX/SEO.
+        # 6) Долгий ответ сервера (очень медленно) - критично для UX/SEO.
         if getattr(r, 'speed_rating', '') == 'very_slow':
             s.others['slow'].append(
                 CriticalItem('slow', city, page, 'долгий ответ сервера', url))
@@ -166,7 +166,7 @@ def analyze(results) -> CriticalSummary:
 
 
 def for_city(summary: CriticalSummary, city: str) -> CriticalSummary:
-    """Подмножество критических только по одному городу (для краткого Telegram –
+    """Подмножество критических только по одному городу (для краткого Telegram -
     в сообщениях пишем только про главный город, остальное остаётся в отчёте)."""
     s = CriticalSummary()
     s.availability = [it for it in summary.availability if it.city == city]

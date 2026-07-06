@@ -1,5 +1,5 @@
 """
-metrika_api.py — 404-страницы из Яндекс.Метрики за СЕГОДНЯ через Reporting API.
+metrika_api.py - 404-страницы из Яндекс.Метрики за СЕГОДНЯ через Reporting API.
 
 Почтовые отчёты (metrika_404.py) приходят с задержкой (за вчера). Этот модуль
 тянет данные за сегодня напрямую из API:
@@ -8,7 +8,7 @@ metrika_api.py — 404-страницы из Яндекс.Метрики за С
 
 Авторизация: OAuth-токен Яндекса со scope `metrika:read`.
 Секрет: metrika_oauth_<pid> (или общий metrika_oauth).
-counter_id — ниже в COUNTER_IDS.
+counter_id - ниже в COUNTER_IDS.
 """
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -38,7 +38,7 @@ COUNTER_AUTO = {
     'mpe': {'include': 'mepen', 'exclude': ['yandex', 'pulscen', 'maps', 'карты']},
 }
 
-# У проекта несколько счётчиков (по доменам стран) — 404 собираем из ВСЕХ.
+# У проекта несколько счётчиков (по доменам стран) - 404 собираем из ВСЕХ.
 COUNTER_GROUPS = {
     'smu': [
         '15630172',  # stalmetural.ru
@@ -62,7 +62,7 @@ COUNTER_GROUPS = {
 }
 
 # Серверный фильтр: заголовок содержит «найдена» (чистая подстрока, без
-# спецсимволов) — сужает выборку. Точная проверка «не найдена» — на клиенте
+# спецсимволов) - сужает выборку. Точная проверка «не найдена» - на клиенте
 # (устойчиво к вариациям заголовка по доменам и скрытым символам \xa0).
 _404_SERVER_FILTER = "ym:pv:title=@'найдена'"
 
@@ -132,7 +132,7 @@ def discover_counters(token, include, exclude, proxy_url=None, log=None):
             r = requests.get(COUNTERS_URL, headers=headers, proxies=proxies,
                              params={'per_page': per, 'offset': offset}, timeout=40)
         except Exception as e:
-            _log(f'⚠ discover_counters: сеть — {e}')
+            _log(f'⚠ discover_counters: сеть - {e}')
             break
         if r.status_code >= 400:
             _log(f'⚠ discover_counters: HTTP {r.status_code}: {r.text[:160]}')
@@ -156,7 +156,7 @@ def _counters_for(project_id, override=None, token=None, proxy_url=None, log=Non
     3) группа COUNTER_GROUPS;
     4) одиночный override / зашитый COUNTER_IDS."""
     ov = _parse_counters(override)
-    if len(ov) > 1:                      # явный список из секрета — главный
+    if len(ov) > 1:                      # явный список из секрета - главный
         return ov
     auto = COUNTER_AUTO.get(project_id)
     if auto and token:
@@ -183,7 +183,7 @@ def _counters_for(project_id, override=None, token=None, proxy_url=None, log=Non
 
 def _is_404_title(title) -> bool:
     """404 по заголовку: нормализуем (nbsp→пробел, нижний регистр) и ищем
-    «не найдена» — ловит все варианты («... | Стальметурал», «(Ошибка 404)»)."""
+    «не найдена» - ловит все варианты («... | Стальметурал», «(Ошибка 404)»)."""
     t = (title or '').replace('\xa0', ' ').lower()
     return 'не найдена' in t
 
@@ -206,7 +206,7 @@ def _query_counter_404(cid, token, proxy_url, date1, date2, log):
         r = requests.get(API_URL, params=params, headers=headers,
                          proxies=proxies, timeout=40)
     except Exception as e:
-        log(f'⚠ Метрика-API сч.{cid}: сеть — {e}')
+        log(f'⚠ Метрика-API сч.{cid}: сеть - {e}')
         return [], 0
     if r.status_code >= 400:
         log(f'⚠ Метрика-API сч.{cid}: HTTP {r.status_code}: {r.text[:160]}')
@@ -214,7 +214,7 @@ def _query_counter_404(cid, token, proxy_url, date1, date2, log):
     try:
         data = (r.json() or {}).get('data', []) or []
     except Exception as e:
-        log(f'⚠ Метрика-API сч.{cid}: разбор — {e}')
+        log(f'⚠ Метрика-API сч.{cid}: разбор - {e}')
         return [], 0
 
     pages, tv = [], 0
@@ -241,8 +241,8 @@ def fetch_today_404(project_id: str, token: str,
                     date1: str = '7daysAgo', date2: str = 'today'
                     ) -> Optional[Report404]:
     """404-страницы за ПЕРИОД по ВСЕМ счётчикам проекта (домены стран).
-    По умолчанию последние 7 дней (трафик на 404 мал — за один день часто 0).
-    date1/date2 — 'today' | 'yesterday' | 'NdaysAgo' | 'YYYY-MM-DD'."""
+    По умолчанию последние 7 дней (трафик на 404 мал - за один день часто 0).
+    date1/date2 - 'today' | 'yesterday' | 'NdaysAgo' | 'YYYY-MM-DD'."""
     def _log(msg):
         if log:
             log('info', msg)
@@ -284,7 +284,7 @@ def fetch_today_404(project_id: str, token: str,
 
 def list_counters(token, proxy_url=None):
     """Вывести все счётчики, доступные токену (Management API).
-    Показывает id, имя, сайт и зеркала (поддомены) — для поиска нужного."""
+    Показывает id, имя, сайт и зеркала (поддомены) - для поиска нужного."""
     if requests is None:
         print('requests не установлен'); return
     headers = {'Authorization': f'OAuth {token}'}
@@ -346,7 +346,7 @@ def counter_info(token, counter, proxy_url=None):
 def probe_counter(project_id, token, proxy_url=None, counter=None,
                   date='yesterday'):
     """Диагностика доступа: запрос БЕЗ фильтра (любые данные за день).
-    Печатает total просмотров + топ заголовков. Если 0 — токен не видит счётчик
+    Печатает total просмотров + топ заголовков. Если 0 - токен не видит счётчик
     или счётчик не тот. Используется из CLI: python metrika_api.py check ..."""
     cid = str(counter).strip() if counter else counter_id(project_id)
     print(f'Проверка: проект={project_id} счётчик={cid} дата={date}')
@@ -370,28 +370,28 @@ def probe_counter(project_id, token, proxy_url=None, counter=None,
         print('Ответ:', r.text[:400]); return
     payload = r.json()
     totals = payload.get('totals') or []
-    total_pv = totals[0] if totals else '—'
+    total_pv = totals[0] if totals else '-'
     data = payload.get('data', []) or []
     print(f'Всего просмотров за день: {total_pv}; строк (заголовков): {len(data)}')
 
-    # Заголовки с «найд»/«404» — печатаем через repr(), чтобы увидеть скрытые
+    # Заголовки с «найд»/«404» - печатаем через repr(), чтобы увидеть скрытые
     # символы (неразрывный пробел \xa0, другой дефис, хвостовые пробелы).
     hits = []
     for row in data:
         title = (row.get('dimensions', [{}])[0].get('name') or '')
         low = title.lower()
         if 'найд' in low or '404' in low:
-            hits.append((row.get('metrics', ['—'])[0], title))
-    print(f'\n=== Заголовки с «найд»/«404» ({len(hits)}) — repr показывает спецсимволы ===')
+            hits.append((row.get('metrics', ['-'])[0], title))
+    print(f'\n=== Заголовки с «найд»/«404» ({len(hits)}) - repr показывает спецсимволы ===')
     for pv, title in hits[:30]:
         print(f'  {pv:>8}  {title!r}')
     if not hits:
-        print('  (нет — за день 404 не было, либо заголовок без «найд»/«404»)')
+        print('  (нет - за день 404 не было, либо заголовок без «найд»/«404»)')
 
-    print('\n=== Топ-20 заголовков (repr — видно спецсимволы) ===')
+    print('\n=== Топ-20 заголовков (repr - видно спецсимволы) ===')
     for row in data[:20]:
         title = (row.get('dimensions', [{}])[0].get('name') or '')
-        pv = row.get('metrics', ['—'])[0]
+        pv = row.get('metrics', ['-'])[0]
         print(f'  {pv:>8}  {title!r}')
     if not data:
         print('→ 0 данных: токен НЕ видит этот счётчик, либо счётчик не тот, '
@@ -402,7 +402,7 @@ if __name__ == '__main__':
     # Прямой тест запроса к API:
     #   python metrika_api.py <pid> <token> [date] [counter] [proxy]
     #   date: today | yesterday | YYYY-MM-DD (по умолчанию today)
-    # Без аргументов — печатает фильтры/счётчики (offline).
+    # Без аргументов - печатает фильтры/счётчики (offline).
     import sys
     if len(sys.argv) < 3:
         print(f'Серверный фильтр: {_404_SERVER_FILTER}  + client-проверка «не найдена»')

@@ -1,8 +1,8 @@
 """
-runner_30min.py – логика прогона 30-мин чек-листа БЕЗ Streamlit.
+runner_30min.py - логика прогона 30-мин чек-листа БЕЗ Streamlit.
 
 Используется фоновым подпроцессом checklist_run.py, чтобы тяжёлая async-работа
-(run_batch на aiohttp) шла в отдельном ПРОЦЕССЕ – надёжно, в отличие от потока
+(run_batch на aiohttp) шла в отдельном ПРОЦЕССЕ - надёжно, в отличие от потока
 внутри Streamlit. Возвращает результаты, путь отчёта и т.п.
 """
 import asyncio
@@ -58,12 +58,12 @@ def _resolve_metrika_date(s):
 
 
 def _metrika_period_display(d1, d2):
-    """Человекочитаемый период: «18.06.2026» или «12.06.2026 – 18.06.2026»."""
+    """Человекочитаемый период: «18.06.2026» или «12.06.2026 - 18.06.2026»."""
     a, b = _resolve_metrika_date(d1), _resolve_metrika_date(d2)
     if not a or not b:
         return None
     fa, fb = a.strftime('%d.%m.%Y'), b.strftime('%d.%m.%Y')
-    return fa if fa == fb else f'{fa} – {fb}'
+    return fa if fa == fb else f'{fa} - {fb}'
 
 
 # ── Автокликер (локально: залогиненный Chrome через CDP 9222) ────────
@@ -106,10 +106,10 @@ def _run_autoclicker(pid, params, log):
     import sys as _sys
     root = Path(__file__).parent
     if not _cdp_alive():
-        log('⚠ Автокликер: Chrome/CDP 9222 не запущен — пропускаю '
+        log('⚠ Автокликер: Chrome/CDP 9222 не запущен - пропускаю '
             '(нужен локальный залогиненный браузер).')
         return {'available': False,
-                'note': 'Chrome/CDP 9222 не запущен — автокликер пропущен. '
+                'note': 'Chrome/CDP 9222 не запущен - автокликер пропущен. '
                         'Нужен локальный залогиненный браузер (вкладка '
                         '«Автокликеры» → «Открыть браузер для входа»).'}
     args = [_sys.executable, 'autoclick_run.py', '--project', pid]
@@ -117,7 +117,7 @@ def _run_autoclicker(pid, params, log):
         args.append('--wm')
     if params.get('autoclick_gsc'):
         args.append('--gsc')
-    # Чистим прошлый лог Вебмастера — чтобы парсить только текущий прогон.
+    # Чистим прошлый лог Вебмастера - чтобы парсить только текущий прогон.
     try:
         (root / 'webmaster_recheck_log.json').unlink(missing_ok=True)
     except Exception:
@@ -142,7 +142,7 @@ def _run_autoclicker(pid, params, log):
 
 
 def run_check(pid, params, creds, log, progress):
-    """Выполнить прогон. log(msg), progress(frac, text) – колбэки.
+    """Выполнить прогон. log(msg), progress(frac, text) - колбэки.
     Возвращает dict с results / report_path / started_at / finished_at / error."""
     out = {'results': None, 'report_path': None,
            'started_at': int(datetime.now().timestamp() * 1000),
@@ -195,7 +195,7 @@ def run_check(pid, params, creds, log, progress):
             cis_extra_subdomains=int(params.get('cis_extra', 0)),
             rotation_history=recent,
         )
-        # Свой список URL – добавляем к выборке проекта (тип по адресу).
+        # Свой список URL - добавляем к выборке проекта (тип по адресу).
         _custom = params.get('custom_urls') or []
         if _custom:
             try:
@@ -206,7 +206,7 @@ def run_check(pid, params, creds, log, progress):
             except Exception as e:
                 log(f'⚠ Свой список URL не разобран: {e}')
 
-        # Технические страницы (на главном домене) – проверяем ВСЕГДА, при любом
+        # Технические страницы (на главном домене) - проверяем ВСЕГДА, при любом
         # прогоне, вне зависимости от объёма выборки.
         _tech_paths = get_tech_paths(pid)
         _mcity = cfg.get('mandatory_city', 'Москва')
@@ -218,7 +218,7 @@ def run_check(pid, params, creds, log, progress):
                 for _t in _tt:
                     _p = urlparse(_t.url).path.rstrip('/')
                     if _p.endswith('/specials'):
-                        # Спецпредложения – это листинг товаров, проверяем как раздел.
+                        # Спецпредложения - это листинг товаров, проверяем как раздел.
                         _t.type_code = 'category'
                         _t.type_label = 'Спецпредложения'
                     else:
@@ -242,7 +242,7 @@ def run_check(pid, params, creds, log, progress):
             else:
                 counters['err'] += 1
             progress(done / max(total_n, 1),
-                     f'Проверено {done} из {total_n} – '
+                     f'Проверено {done} из {total_n} - '
                      f'✅ {counters["ok"]} · ⚠ {counters["warn"]} · ❌ {counters["err"]}')
 
         try:
@@ -284,7 +284,7 @@ def run_check(pid, params, creds, log, progress):
         # ── Индексация (п.1.7): кросс-проверка sitemap ↔ robots.txt ──
         # Все известные пути каталога (категории/фильтры/товары) прогоняем
         # через robots главного домена: путь в sitemap = «хочу в индекс»,
-        # Disallow на нём – противоречие.
+        # Disallow на нём - противоречие.
         _idx_summary = None
         if _chk_idx and _main:
             try:
@@ -304,8 +304,8 @@ def run_check(pid, params, creds, log, progress):
                 log(f'⚠ Индексация (sitemap↔robots): {_e}')
 
         # ── Метаданные и дубли (п.1.8) ──
-        # Дубли title/description/H1 – по всем результатам прогона; дубли
-        # УРЛОВ – прозвон вариантов (http/слэш/www) главной и каталога
+        # Дубли title/description/H1 - по всем результатам прогона; дубли
+        # УРЛОВ - прозвон вариантов (http/слэш/www) главной и каталога
         # каждого проверенного поддомена.
         _meta_summary = None
         if _chk_meta:
@@ -336,11 +336,11 @@ def run_check(pid, params, creds, log, progress):
         report_path = REPORTS_DIR / report_filename
         _today_404 = None   # отчёт 404 из Метрика-API
         _nlog = lambda lvl, msg: log(msg)
-        # Прокси для почты/Метрики/Вебмастера – тот же, что и для страниц: с
+        # Прокси для почты/Метрики/Вебмастера - тот же, что и для страниц: с
         # учётом use_proxy проекта. Иначе при use_proxy=false сбор всё равно лез
         # через (возможно мёртвый) прокси из secrets, хотя страницы шли напрямую.
         _proxy = proxy_url
-        # ── Сбор почты/Метрики ДО сборки отчёта – чтобы отчёт сразу полный ──
+        # ── Сбор почты/Метрики ДО сборки отчёта - чтобы отчёт сразу полный ──
         if params['fetch_notifications']:
             log('Собираю уведомления из почты…')
 
@@ -385,7 +385,7 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Google: {_e}')
 
-            # Папка GSC в Яндекс-почте («Гугл» / «Google Search Console») —
+            # Папка GSC в Яндекс-почте («Гугл» / «Google Search Console») -
             # то же содержимое, что GSC → пишем в source 'gsc', классифицируем.
             _gf_e, _gf_p, _gf_f = creds.get('google_folder') or (None, None, None)
             if _gf_e and _gf_p and _gf_f:
@@ -428,7 +428,7 @@ def run_check(pid, params, creds, log, progress):
         else:
             log('Сбор уведомлений выключен.')
 
-        # ── 404 из Метрики (API) — отдельная галка со своим периодом ──
+        # ── 404 из Метрики (API) - отдельная галка со своим периодом ──
         _m404_disp = None
         if params.get('fetch_metrika_404', True):
             _mt_token = creds.get('metrika_oauth')
@@ -450,7 +450,7 @@ def run_check(pid, params, creds, log, progress):
         else:
             log('Сбор 404 из Метрики выключен.')
 
-        # ── Автокликер (локально) — блокирует до перекликивания всех ошибок ──
+        # ── Автокликер (локально) - блокирует до перекликивания всех ошибок ──
         _autoclick = None
         if params.get('autoclick'):
             _autoclick = _run_autoclicker(pid, params, log)
@@ -464,7 +464,7 @@ def run_check(pid, params, creds, log, progress):
             + load_notifications(pid, 'google_accounts', _nd)
         )
         _metrika_reports = load_reports_for_period(pid, _nd) or []
-        if _today_404:                       # сегодняшние 404 (API) — первыми
+        if _today_404:                       # сегодняшние 404 (API) - первыми
             _metrika_reports = [_today_404] + list(_metrika_reports)
         _metrika_reports = _metrika_reports or None
         _service_issues = load_issues(pid) or None
@@ -482,18 +482,18 @@ def run_check(pid, params, creds, log, progress):
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
 
-        # Критические ошибки (п.4.3) – выделяем для срочного уведомления и для
+        # Критические ошибки (п.4.3) - выделяем для срочного уведомления и для
         # блока в подписи к отчёту (по всем городам).
         crit = analyze_critical(results)
         if crit.has_any:
             log(f'Критических находок: {crit.total} '
                 f'(падений доступности: {len(crit.availability)})')
 
-        # Telegram (полный отчёт – почта/метрика уже собраны выше)
+        # Telegram (полный отчёт - почта/метрика уже собраны выше)
         tg_token = creds.get('tg_token')
         tg_recipients = creds.get('tg_recipients') or []
         if tg_token and tg_recipients:
-            # Срочное ОТДЕЛЬНОЕ сообщение о падении доступности – ДО отчёта.
+            # Срочное ОТДЕЛЬНОЕ сообщение о падении доступности - ДО отчёта.
             if crit.has_availability:
                 _alert = format_critical_alert(cfg['name'], crit.availability)
                 _a_sent = 0
@@ -507,7 +507,7 @@ def run_check(pid, params, creds, log, progress):
             log(f'Отправляю отчёт в Telegram ({len(tg_recipients)})…')
             try:
                 problems_for_tg = [
-                    {'city': r.city or '–', 'url': r.url,
+                    {'city': r.city or '-', 'url': r.url,
                      'status': {'not_found': '404 Не найдена',
                                 'client_error': 'Ошибка на сайте',
                                 'server_error': 'Сервер не отвечает',
@@ -515,7 +515,7 @@ def run_check(pid, params, creds, log, progress):
                                 'network_error': 'Нет соединения'}.get(r.status, r.status)}
                     for r in results if r.is_error][:5]
                 empty_sections = [
-                    {'city': r.city or '–', 'url': r.url} for r in results
+                    {'city': r.city or '-', 'url': r.url} for r in results
                     if getattr(r, 'content', None) is not None
                     and getattr(r.content, 'page_kind', '') == 'empty']
                 summary_text = format_summary_message(
