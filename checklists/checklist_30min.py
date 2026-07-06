@@ -448,10 +448,26 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             kp_map = None
             append_log(f'⚠ Не удалось загрузить КП: {e}')
 
+        # Региональные проверки (п.1.8 верные переменные / п.1.9 СНГ-чистота)
+        _chk_region = bool(flags.get('check_region', True))
+        _chk_cis = bool(flags.get('check_cis', True))
+        region_ctx = None
+        if _chk_region or _chk_cis:
+            try:
+                from region_checker import build_region_context
+                region_ctx = build_region_context(kp_map, src.subdomains)
+            except Exception as e:
+                region_ctx = None
+                append_log(f'⚠ Регион-проверки не активны: {e}')
+
         results = asyncio.run(run_batch(
             plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
             retry_delay_ms=2500, check_text=True,
             check_links=bool(flags.get('check_links', False)),
+            check_indexing=bool(flags.get('check_indexing', True)),
+            check_region=_chk_region and region_ctx is not None,
+            check_cis=_chk_cis and region_ctx is not None,
+            region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map,
         ))
 
@@ -631,6 +647,8 @@ def init_session():
         'c30_check_products': True,
         'c30_check_text': True,        # пункт 1.6 – битые переменные
         'c30_check_indexing': True,    # пункт 1.7 – индексация (robots/noindex/canonical)
+        'c30_check_region': True,      # пункт 1.8 – верные переменные города (по КП)
+        'c30_check_cis': True,         # пункт 1.9 – СНГ-домены без РФ/СНГ/чужих стран
         'c30_check_links': False,      # «ссылки открываются (404)» – тяжёлая, по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
@@ -870,7 +888,7 @@ with st.container(border=True):
         # не подхватывалось виджетом и галочки выходили пустыми, а кнопка врала.
         for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                    'c30_check_filters', 'c30_check_products', 'c30_check_text',
-                   'c30_check_indexing'):
+                   'c30_check_indexing', 'c30_check_region', 'c30_check_cis'):
             st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
@@ -1019,7 +1037,8 @@ if pid:
         # проектов (если их нет – чекбокс не рисуется, и его нельзя учитывать в
         # «Выбрать/Снять все», иначе кнопка врёт).
         _CHK_KEYS = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
-                     'c30_check_products', 'c30_check_text', 'c30_check_indexing']
+                     'c30_check_products', 'c30_check_text', 'c30_check_indexing',
+                     'c30_check_region', 'c30_check_cis']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
@@ -1060,6 +1079,17 @@ if pid:
                              'открыты к индексации: Disallow, meta noindex, '
                              'X-Robots-Tag или canonical на закрытый URL – баг. '
                              'Плюс сверка всех путей каталога (sitemap) с robots.txt.')
+            st.checkbox('1.8  Переменные города (город, телефон, почта — по КП)',
+                        key='c30_check_region',
+                        help='На странице города не должно быть подстановок другого '
+                             'города: чужой город в title/description/H1, телефон '
+                             'или почта другого города (сверка со справочником КП).')
+            st.checkbox('1.9  СНГ-домены: нет упоминаний РФ, СНГ и чужих стран',
+                        key='c30_check_cis',
+                        help='На сайте страны СНГ (домены .kz/.by/.uz/…) в текстах, '
+                             'заголовках, метаданных и контактах не должно быть: '
+                             '«РФ», «Россия», аббревиатуры «СНГ» и названий других '
+                             'стран — только своя страна. Для доменов РФ не выполняется.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1210,6 +1240,8 @@ if pid:
                 'check_products': st.session_state.c30_check_products,
                 'check_text': st.session_state.c30_check_text,
                 'check_indexing': st.session_state.get('c30_check_indexing', True),
+                'check_region': st.session_state.get('c30_check_region', True),
+                'check_cis': st.session_state.get('c30_check_cis', True),
                 'check_links': st.session_state.get('c30_check_links', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),

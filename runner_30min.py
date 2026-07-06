@@ -254,12 +254,30 @@ def run_check(pid, params, creds, log, progress):
             kp_map = None
             log(f'⚠ Не удалось загрузить КП: {e}')
 
+        # Региональные проверки: п.1.4.1 (верные переменные) и п.1.6 (СНГ-чистота).
+        # Контекст (города/номера/почты по КП) строится один раз на прогон.
+        _chk_region = bool(params.get('check_region', True))
+        _chk_cis = bool(params.get('check_cis', True))
+        region_ctx = None
+        if _chk_region or _chk_cis:
+            try:
+                from region_checker import build_region_context
+                region_ctx = build_region_context(kp_map, src.subdomains)
+                log(f'Регион-проверки: городов {len(region_ctx.city_regex)}, '
+                    f'номеров КП {len(region_ctx.phone_cities)}')
+            except Exception as e:
+                region_ctx = None
+                log(f'⚠ Регион-проверки не активны: {e}')
+
         _chk_idx = bool(params.get('check_indexing', True))
         results = asyncio.run(run_batch(
             plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
             retry_delay_ms=2500, check_text=bool(params.get('check_text', True)),
             check_links=bool(params.get('check_links', False)),
             check_indexing=_chk_idx,
+            check_region=_chk_region and region_ctx is not None,
+            check_cis=_chk_cis and region_ctx is not None,
+            region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
 
         # ── Индексация (п.1.7): кросс-проверка sitemap ↔ robots.txt ──
