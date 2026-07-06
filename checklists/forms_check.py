@@ -383,8 +383,13 @@ with _qh:
         st.markdown(HELP_TEXT)
 
 # ── Выбор проекта ────────────────────────────────────────────────────
+# По умолчанию проект НЕ выбран - чтобы ничего не запускалось случайно.
 pid_key = st.selectbox('Проект', list(PROJECTS.keys()),
-                       format_func=lambda k: PROJECTS[k]['name'])
+                       format_func=lambda k: PROJECTS[k]['name'],
+                       index=None, placeholder='- выберите проект -')
+if not pid_key:
+    st.info('Выберите проект, чтобы настроить и запустить проверку форм.')
+    st.stop()
 proj = PROJECTS[pid_key]
 st.markdown(
     f"Будут проверены формы сайта **{proj['name']}** (`{proj['domain']}`): "
@@ -886,21 +891,47 @@ _run_proj = st.session_state.get('forms_project')      # какой проект
 _this = (_run_proj == _sel)                            # выбранный == запущенный
 xlsx = ROOT / 'cache' / 'forms' / _sel / 'log_forms.xlsx'
 
+# Готовность определяем ПО ЛОГУ (движок пишет «✅ ВСЁ ГОТОВО»), а не только по
+# «жив ли процесс»: в облаке PID может «висеть» после завершения, из-за чего
+# прогресс-бар не переключался на «готово». Живой лог - надёжный признак.
+_log_txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore') if LOG_FILE.exists() else ''
+_done_by_log = ('✅ ВСЁ ГОТОВО' in _log_txt or 'ОТМЕНЕНО' in _log_txt
+                or '✗ Ошибка' in _log_txt)
+
+
+def _forms_done_live(txt: str) -> int:
+    """Сколько форм уже отработало - считаем по живому логу (обновляется сразу,
+    в отличие от Excel, который движок сохраняет в конце). Строки-итоги форм
+    начинаются с ✅/❌ и содержат « - УСПЕШНО/ОШИБКА», плюс «поля заполнены»."""
+    n = 0
+    for ln in txt.splitlines():
+        s = ln.strip()
+        if (s.startswith(('✅', '❌')) and (' - УСПЕШНО' in s or ' - ОШИБКА' in s)) \
+                or 'поля заполнены (без отправки)' in s \
+                or (s.startswith('🔎') and ' - УСПЕШНО' in s):
+            n += 1
+    return n
+
+
 if _this and st.session_state.get('forms_started'):
     st.caption(f'Последний запуск: {st.session_state["forms_started"]}')
 
-if _alive and _this:
+if _alive and _this and not _done_by_log:
     # Идёт проверка ВЫБРАННОГО проекта - живой прогресс
     _ts = st.session_state.get('forms_started_ts')
     _elapsed = int(time.time() - _ts) if _ts else None
     _mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
-    _done = _rows_done(xlsx)
-    # Если при запуске сохранили ожидаемое число форм (учитывает выбор форм) - берём его.
+    # Прогресс по живому логу (обновляется сразу); подстраховка - строки Excel.
+    _done = _forms_done_live(_log_txt)
+    _xl = _rows_done(xlsx)
+    if _xl and _xl > _done:
+        _done = _xl
     _total = st.session_state.get('forms_expected_total') \
         or _count_expected(_sel) * st.session_state.get('forms_cities_n', 1)
 
-    if _total and _done is not None:
-        st.progress(min(_done / _total, 0.99), text=f'Проверено форм: {_done} из ~{_total}')
+    if _total:
+        st.progress(min(_done / max(_total, 1), 0.99),
+                    text=f'Проверено форм: {_done} из ~{_total}')
     else:
         st.progress(min(0.95, (_elapsed or 0) / 90.0), text='Идёт проверка…')
 
@@ -908,9 +939,17 @@ if _alive and _this:
                '(зависит от числа форм). Страница обновляется сама - можно уйти '
                'на другие вкладки, прогон не прервётся.')
     with st.expander('Подробный лог', expanded=True):
-        _txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore') if LOG_FILE.exists() else ''
-        st.code('\n'.join(_txt.splitlines()[-300:]) or '…', language='text')
+        st.code('\n'.join(_log_txt.splitlines()[-300:]) or '…', language='text')
     time.sleep(2)
+    st.rerun()
+
+elif _alive and _this and _done_by_log:
+    # Процесс ещё числится живым (в облаке PID «висит»), но лог говорит «готово».
+    # Снимаем зависший PID и перерисовываем - дальше сработает ветка результата.
+    try:
+        PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
     st.rerun()
 
 elif _alive and not _this:
