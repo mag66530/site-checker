@@ -1449,8 +1449,9 @@ def _idx_signals_text(ix):
 
 
 def _build_indexing_sheet(wb, results, indexing_summary):
-    """Лист проверки индексации: страницы выборки, закрытые от индексации
-    (robots/noindex/canonical), + противоречия sitemap ↔ robots.txt.
+    """Лист проверки индексации: расхождения сигналов страниц с robots.txt
+    (noindex на открытой в robots странице, canonical на закрытый URL)
+    + противоречия sitemap ↔ robots.txt.
     Добавляется только если проверка индексации выполнялась."""
     checked = [r for r in results if getattr(r, 'indexing', None)]
     if not checked and not indexing_summary:
@@ -1481,12 +1482,13 @@ def _build_indexing_sheet(wb, results, indexing_summary):
 
     ws.merge_cells('B3:E3')
     c = ws['B3']
-    c.value = ('Эталон – robots.txt сайта. Страницы выборки (главная, каталог, '
-               'категории, фильтры, товары) должны быть ОТКРЫТЫ к индексации: '
-               'Disallow в robots.txt, meta noindex, X-Robots-Tag: noindex или '
-               'canonical на закрытый URL – баг. Отдельно: пути из sitemap, '
-               'закрытые Disallow, – противоречие (sitemap говорит «в индекс», '
-               'robots – «нельзя»).')
+    c.value = ('Эталон – robots.txt сайта. Ошибка = РАСХОЖДЕНИЕ сигналов страницы '
+               'с robots: в robots страница открыта, а на ней noindex (meta или '
+               'X-Robots-Tag), либо canonical ведёт на закрытый в robots URL. '
+               'Закрыта в robots и noindex – согласовано, так задумано, не '
+               'показываем. Отдельно: пути из sitemap/каталога, закрытые '
+               'Disallow, – противоречие (sitemap говорит «в индекс», robots – '
+               '«нельзя»).')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 44
@@ -1499,7 +1501,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     _rs = (indexing_summary or {}).get('robots_status')
     _sm = (indexing_summary or {}).get('sitemaps') or []
     bits = [f'Проверено страниц: {len(checked)}',
-            f'закрыто ошибочно: {len(bad)}',
+            f'расхождений с robots: {len(bad)}',
             f'предупреждений: {len(warned)}']
     if indexing_summary:
         bits.append(f'путей каталога проверено по robots: '
@@ -1516,10 +1518,10 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     ws.row_dimensions[row].height = 30
     row += 2
 
-    # ── Секция 1: закрытые страницы выборки ──
+    # ── Секция 1: закрытые страницы выборки (сгруппированы по проблеме) ──
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
-    c.value = f'Страницы, закрытые от индексации  ({len(bad)})'
+    c.value = f'Расхождения с robots.txt  ({len(bad)})'
     c.font = _font(size=13, bold=True, color=C.err if bad else C.ok)
     c.fill = _fill(C.accent_soft)
     c.alignment = _align(indent=1)
@@ -1529,42 +1531,16 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     if not bad:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
-        c.value = '✅ Все проверенные страницы открыты к индексации.'
+        c.value = '✅ Расхождений с robots.txt нет – сигналы страниц согласованы.'
         c.font = _font(size=10, color=C.ok)
         c.alignment = _align(indent=1)
         ws.row_dimensions[row].height = 22
-        row += 1
+        row += 2
     else:
-        for ci, h in enumerate(['Город', 'Тип', 'URL', 'Что не так'], 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = h
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
-            cell.fill = _fill(C.surface)
-            cell.alignment = _align()
-            cell.border = _border()
-        ws.row_dimensions[row].height = 20
-        row += 1
-        for r in bad:
-            ws.row_dimensions[row].height = 30
-            vals = [
-                (r.city or '–', {'size': 10, 'color': C.text}),
-                (r.type_label, {'size': 9, 'color': C.text_muted}),
-                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
-                ('; '.join(r.indexing.get('issues') or []),
-                 {'size': 10, 'color': C.err}),
-            ]
-            for ci, (val, kw) in enumerate(vals, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 4:
-                    cell.hyperlink = r.url
-            row += 1
-    row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(bad, 'indexing', 'issues'), C.err)
 
-    # ── Секция 2: предупреждения (canonical на другой URL и т.п.) ──
+    # ── Секция 2: предупреждения (сгруппированы по замечанию) ──
     if warned:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
@@ -1574,34 +1550,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         c.alignment = _align(indent=1)
         ws.row_dimensions[row].height = 24
         row += 1
-        for ci, h in enumerate(['Город', 'Тип', 'URL', 'Замечание'], 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = h
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
-            cell.fill = _fill(C.surface)
-            cell.alignment = _align()
-            cell.border = _border()
-        ws.row_dimensions[row].height = 20
-        row += 1
-        for r in warned:
-            ws.row_dimensions[row].height = 30
-            vals = [
-                (r.city or '–', {'size': 10, 'color': C.text}),
-                (r.type_label, {'size': 9, 'color': C.text_muted}),
-                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
-                ('; '.join(r.indexing.get('warnings') or []),
-                 {'size': 10, 'color': C.warn}),
-            ]
-            for ci, (val, kw) in enumerate(vals, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 4:
-                    cell.hyperlink = r.url
-            row += 1
-        row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(warned, 'indexing', 'warnings'), C.warn)
 
     # ── Секция 3: sitemap ↔ robots противоречия ──
     if indexing_summary:
@@ -1632,32 +1582,302 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             ws.row_dimensions[row].height = 22
             row += 1
         else:
-            for ci, h in enumerate(['', '', 'Путь (есть в sitemap/каталоге)',
-                                    'Правило robots.txt'], 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = h
-                cell.font = _font(size=9, bold=True, color=C.text_muted)
-                cell.fill = _fill(C.surface)
-                cell.alignment = _align()
-                cell.border = _border()
-            ws.row_dimensions[row].height = 20
-            row += 1
+            # Группируем по правилу: одно правило Disallow бьёт сотни путей –
+            # без группировки каждая строка повторяет одно и то же правило.
+            _by_rule = {}
             for d in sm_dis:
-                ws.row_dimensions[row].height = 20
                 _agent = d.get('agent') or '*'
                 _rule = f'Disallow: {d.get("rule")}'
                 if _agent != '*':
                     _rule += f' (User-agent: {_agent})'
-                vals = [('', {}), ('', {}),
-                        (d.get('path', ''), {'size': 10, 'color': C.text}),
-                        (_rule, {'size': 10, 'color': C.err})]
+                _by_rule.setdefault(_rule, []).append(d.get('path', ''))
+            _MAX_PATHS = 100
+            for _rule, _paths in sorted(_by_rule.items(),
+                                        key=lambda kv: -len(kv[1])):
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+                c = ws.cell(row=row, column=2)
+                c.value = (f'{_rule}  —  путей из sitemap/каталога: {len(_paths)}')
+                c.font = _font(size=10, bold=True, color=C.err)
+                c.fill = _fill(C.surface)
+                c.alignment = _align(wrap=True, indent=1)
+                c.border = _border()
+                ws.row_dimensions[row].height = 22
+                row += 1
+                for _p in _paths[:_MAX_PATHS]:
+                    ws.merge_cells(start_row=row, start_column=2,
+                                   end_row=row, end_column=5)
+                    c = ws.cell(row=row, column=2)
+                    c.value = _p
+                    c.font = _font(size=9, color=C.text_soft)
+                    c.alignment = _align(indent=2)
+                    c.border = _border(color=C.border_light)
+                    ws.row_dimensions[row].height = 16
+                    row += 1
+                if len(_paths) > _MAX_PATHS:
+                    ws.merge_cells(start_row=row, start_column=2,
+                                   end_row=row, end_column=5)
+                    c = ws.cell(row=row, column=2)
+                    c.value = f'… и ещё {len(_paths) - _MAX_PATHS} путей'
+                    c.font = _font(size=9, italic=True, color=C.text_muted)
+                    c.alignment = _align(indent=2)
+                    ws.row_dimensions[row].height = 16
+                    row += 1
+                row += 1
+
+
+# ── Группировка «одна проблема – одна строка + список URL» ─────────
+# Как на листе «Уведомления»: не плодим милион одинаковых строк, а
+# группируем страницы по тексту проблемы.
+
+
+def _issue_groups(pages, attr, key):
+    """[(текст проблемы, [CheckResult])] по убыванию количества страниц."""
+    groups = {}
+    for r in pages:
+        data = getattr(r, attr, None) or {}
+        for t in (data.get(key) or []):
+            groups.setdefault(t, []).append(r)
+    return sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+
+
+def _render_issue_groups(ws, row, groups, color, max_urls=100):
+    """Строка-проблема (текст + сколько страниц), под ней – город/тип/URL."""
+    for text, rs in groups:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = f'{text}  —  {len(rs)} {_plural_pages(len(rs))}'
+        c.font = _font(size=10, bold=True, color=color)
+        c.fill = _fill(C.surface)
+        c.alignment = _align(wrap=True, indent=1)
+        c.border = _border()
+        ws.row_dimensions[row].height = 22
+        row += 1
+        for r in rs[:max_urls]:
+            ws.row_dimensions[row].height = 18
+            for ci, (val, kw) in enumerate([
+                (r.city or '–', {'size': 9, 'color': C.text_muted}),
+                (r.type_label, {'size': 9, 'color': C.text_muted}),
+                (r.url, {'size': 9, 'color': C.accent, 'underline': 'single'}),
+                ('', {}),
+            ], 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = val
+                if kw:
+                    cell.font = _font(**kw)
+                cell.alignment = _align(vertical='top')
+                cell.border = _border(color=C.border_light)
+                if ci == 4 and val:
+                    cell.hyperlink = val
+            row += 1
+        if len(rs) > max_urls:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = f'… и ещё {len(rs) - max_urls} {_plural_pages(len(rs) - max_urls)}'
+            c.font = _font(size=9, italic=True, color=C.text_muted)
+            c.alignment = _align(indent=2)
+            ws.row_dimensions[row].height = 16
+            row += 1
+        row += 1
+    return row
+
+
+# ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
+
+_META_FIELD_LABEL = {'title': 'title', 'description': 'description', 'h1': 'H1'}
+
+
+def _meta_table_header(ws, row, headers):
+    """Строка заголовков таблицы в стиле остальных листов."""
+    for ci, h in enumerate(headers, 2):
+        cell = ws.cell(row=row, column=ci)
+        cell.value = h
+        cell.font = _font(size=9, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align()
+        cell.border = _border()
+    ws.row_dimensions[row].height = 20
+
+
+def _meta_section_title(ws, row, text, color):
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = text
+    c.font = _font(size=13, bold=True, color=color)
+    c.fill = _fill(C.accent_soft)
+    c.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 24
+
+
+def _meta_ok_line(ws, row, text):
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = text
+    c.font = _font(size=10, color=C.ok)
+    c.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 22
+
+
+def _build_meta_sheet(wb, results, meta_summary):
+    """Лист метаданных: проблемы title/description/H1 на страницах +
+    дубли внутри города / между городами + дубли УРЛОВ.
+    Добавляется только если проверка метаданных выполнялась."""
+    checked = [r for r in results if getattr(r, 'meta', None)]
+    if not checked and not meta_summary:
+        return
+
+    bad = [r for r in checked if r.meta.get('issues')]
+    warned = [r for r in checked if (not r.meta.get('issues')
+                                     and r.meta.get('warnings'))]
+    dups = (meta_summary or {}).get('duplicates') or {}
+    same_city = dups.get('same_city') or []
+    cross_city = dups.get('cross_city') or []
+    url_dups = (meta_summary or {}).get('url_duplicates') or []
+    has_bugs = bool(bad or same_city or cross_city or url_dups)
+
+    ws = wb.create_sheet('Метаданные')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 18   # Город
+    ws.column_dimensions['C'].width = 14   # Тип
+    ws.column_dimensions['D'].width = 62   # URL
+    ws.column_dimensions['E'].width = 60   # Проблема / значение
+    ws.column_dimensions['F'].width = 3
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Метаданные и дубли (п.1.8)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('Каждая страница выборки: title, meta description и H1 есть и не '
+               'пустые, город поддомена присутствует в title/description, длины '
+               'в рекомендуемых рамках. Дубли: одинаковые title/description/H1 '
+               'у разных страниц одного города – баг; полное совпадение между '
+               'городами – город не подставился в шаблон. Дубли УРЛОВ: варианты '
+               'адреса (http, без слэша, www) должны редиректить – ответ 200 '
+               'без редиректа = страница доступна по двум адресам.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+
+    # ── Сводка ──
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Проверено страниц: {len(checked)} · с проблемами: {len(bad)} · '
+               f'предупреждений: {len(warned)} · дублей в городе: {len(same_city)} · '
+               f'межгородских: {len(cross_city)} · дублей URL: {len(url_dups)}')
+    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 30
+    row += 2
+
+    # ── Секция 1: проблемы на страницах (сгруппированы по проблеме) ──
+    _meta_section_title(ws, row, f'Проблемы метаданных на страницах  ({len(bad)})',
+                        C.err if bad else C.ok)
+    row += 1
+    if not bad:
+        _meta_ok_line(ws, row, '✅ У всех проверенных страниц метаданные в порядке.')
+        row += 2
+    else:
+        row = _render_issue_groups(
+            ws, row, _issue_groups(bad, 'meta', 'issues'), C.err)
+
+    # ── Секция 2: предупреждения (длины; сгруппированы по замечанию) ──
+    if warned:
+        _meta_section_title(ws, row, f'Предупреждения (длины)  ({len(warned)})', C.warn)
+        row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn)
+
+    # ── Секции 3–4: дубли метаданных ──
+    for title_text, groups, note in (
+        (f'Дубли внутри города  ({len(same_city)})', same_city,
+         'Одинаковое значение у разных страниц одного поддомена.'),
+        (f'Межгородские дубли (город не подставился)  ({len(cross_city)})', cross_city,
+         'Полное совпадение между разными городами – шаблон не подставил город.'),
+    ):
+        _meta_section_title(ws, row, title_text, C.err if groups else C.ok)
+        row += 1
+        if not groups:
+            _meta_ok_line(ws, row, '✅ Дублей не найдено.')
+            row += 1
+        else:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = note
+            c.font = _font(size=9, italic=True, color=C.text_muted)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 18
+            row += 1
+            for g in groups:
+                fld = _META_FIELD_LABEL.get(g.get('field'), g.get('field'))
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+                c = ws.cell(row=row, column=2)
+                c.value = f'{fld}: «{g.get("value", "")}»'
+                c.font = _font(size=10, bold=True, color=C.text)
+                c.fill = _fill(C.surface)
+                c.alignment = _align(wrap=True, indent=1)
+                ws.row_dimensions[row].height = 22
+                row += 1
+                for p in g.get('pages', []):
+                    ws.row_dimensions[row].height = 18
+                    vals = [
+                        (p.get('city') or '–', {'size': 9, 'color': C.text_muted}),
+                        (p.get('type_label', ''), {'size': 9, 'color': C.text_muted}),
+                        (p.get('url', ''), {'size': 9, 'color': C.accent,
+                                            'underline': 'single'}),
+                        ('', {}),
+                    ]
+                    for ci, (val, kw) in enumerate(vals, 2):
+                        cell = ws.cell(row=row, column=ci)
+                        cell.value = val
+                        if kw:
+                            cell.font = _font(**kw)
+                        cell.alignment = _align(vertical='top')
+                        cell.border = _border(color=C.border_light)
+                        if ci == 4 and val:
+                            cell.hyperlink = val
+                    row += 1
+        row += 1
+
+    # ── Секция 5: дубли УРЛОВ ──
+    if meta_summary is not None:
+        _meta_section_title(ws, row, f'Дубли УРЛОВ (нет редиректа)  ({len(url_dups)})',
+                            C.err if url_dups else C.ok)
+        row += 1
+        if not url_dups:
+            _meta_ok_line(ws, row, '✅ Все варианты адресов (http, слэш, www) '
+                                   'корректно редиректят.')
+            row += 1
+        else:
+            _meta_table_header(ws, row, ['Вариант', 'Код',
+                                         'Дубль (отвечает без редиректа)',
+                                         'Канонический адрес'])
+            row += 1
+            for d in url_dups:
+                ws.row_dimensions[row].height = 20
+                vals = [
+                    (d.get('kind', ''), {'size': 9, 'color': C.text_muted}),
+                    (d.get('code', ''), {'size': 10, 'color': C.err}),
+                    (d.get('variant', ''), {'size': 10, 'color': C.err}),
+                    (d.get('canonical', ''), {'size': 10, 'color': C.accent,
+                                              'underline': 'single'}),
+                ]
                 for ci, (val, kw) in enumerate(vals, 2):
                     cell = ws.cell(row=row, column=ci)
                     cell.value = val
-                    if kw:
-                        cell.font = _font(**kw)
+                    cell.font = _font(**kw)
                     cell.alignment = _align(wrap=True, vertical='top')
                     cell.border = _border(color=C.border_light)
+                    if ci == 5 and val:
+                        cell.hyperlink = val
                 row += 1
 
 
@@ -1927,7 +2147,7 @@ def _region_issue_rows(pages, attr):
 
 def _build_region_sheet(wb, results):
     """Лист региональных проверок: чужой город/телефон/почта на странице города
-    (п.1.8) и упоминания РФ/СНГ/чужих стран на СНГ-доменах (п.1.9).
+    (п.1.9) и упоминания РФ/СНГ/чужих стран на СНГ-доменах (п.1.10).
     Добавляется только если проверки выполнялись."""
     reg_checked = [r for r in results if getattr(r, 'region', None) is not None]
     cis_checked = [r for r in results if getattr(r, 'cis', None) is not None]
@@ -1959,10 +2179,10 @@ def _build_region_sheet(wb, results):
 
     ws.merge_cells('B3:G3')
     c = ws['B3']
-    c.value = ('П.1.8: на странице города не должно быть подстановок другого города – '
+    c.value = ('П.1.9: на странице города не должно быть подстановок другого города – '
                'чужой город в title/description/H1, телефон или почта другого города '
                '(сверка со справочником КП). '
-               'П.1.9: на сайте страны СНГ в текстах, заголовках, метаданных и '
+               'П.1.10: на сайте страны СНГ в текстах, заголовках, метаданных и '
                'контактах не должно быть «РФ», «Россия», «СНГ» и названий других '
                'стран – только своя страна.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
@@ -2052,19 +2272,19 @@ def _build_region_sheet(wb, results):
 
 _META_LABEL = {
     'title': 'Title', 'description': 'Meta description',
-    'h1': 'H1', 'h2': 'H2 (дубль)',
+    'h1': 'H1', 'h2': 'H2', 'h3': 'H3', 'h4': 'H4', 'h5': 'H5', 'h6': 'H6',
 }
 
 
-def _build_meta_sheet(wb, results):
+def _build_meta_unique_sheet(wb, results):
     """Лист единственности ключевых SEO-тегов: несколько или отсутствие
     title/description/H1, дубли H2. Добавляется только если проверка выполнялась."""
-    checked = [r for r in results if getattr(r, 'meta', None) is not None]
+    checked = [r for r in results if getattr(r, 'meta_unique', None) is not None]
     if not checked:
         return
     rows = []
     for r in checked:
-        for i in (r.meta.get('issues') or []):
+        for i in (r.meta_unique.get('issues') or []):
             rows.append((r, i))
 
     ws = wb.create_sheet('Заголовки и мета')
@@ -2081,7 +2301,7 @@ def _build_meta_sheet(wb, results):
 
     ws.merge_cells('B2:F2')
     c = ws['B2']
-    c.value = 'Единственность H1 / Title / Description (п.1.3.1)'
+    c.value = 'Заголовки и мета: единственность и «текстовость» (часть п.1.8)'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
@@ -2089,8 +2309,9 @@ def _build_meta_sheet(wb, results):
     c = ws['B3']
     c.value = ('На странице должны быть в единственном экземпляре <title>, '
                '<meta name="description"> и <h1>: если их нет или больше одного – '
-               'баг. Также ловим дубли H2 (два H2 с одинаковым текстом). '
-               'Несколько разных H2 – это норма.')
+               'баг. Также ловим дубли H2 (два H2 с одинаковым текстом; '
+               'несколько разных H2 – норма) и заголовки h2–h6 вне текста: '
+               'в шапке, подвале, меню или сайдбаре им не место.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 40
@@ -2111,7 +2332,8 @@ def _build_meta_sheet(wb, results):
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
         c = ws.cell(row=row, column=2)
         c.value = ('✅ На всех проверенных страницах title, description и H1 – '
-                   'в единственном экземпляре, дублей H2 нет.')
+                   'в единственном экземпляре, дублей H2 нет, заголовки '
+                   'h2–h6 только в тексте.')
         c.font = _font(size=11, color=C.ok)
         c.alignment = _align(indent=1)
         return
@@ -2164,6 +2386,7 @@ def build_report(
     service_issues: list = None,   # список ServiceIssue – добавит лист «Ошибки сервисов»
     autoclick: dict = None,        # итоги автокликера – добавит лист «Автокликер»
     indexing_summary: dict = None, # sitemap↔robots (п.1.7) – в лист «Индексация»
+    meta_summary: dict = None,     # дубли мета/URL (п.1.8) – в лист «Метаданные»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -2188,6 +2411,15 @@ def build_report(
     # Индексация (п.1.7): страницы выборки, закрытые от индексации
     indexing_bad_pages = [r for r in results if getattr(r, 'has_indexing_issues', False)]
     indexing_sitemap_conflicts = len((indexing_summary or {}).get('disallowed') or [])
+
+    # Метаданные (п.1.8): проблемы title/description/H1 + дубли + единственность
+    meta_bad_pages = [r for r in results
+                      if getattr(r, 'has_meta_issues', False)
+                      or getattr(r, 'has_meta_unique_issues', False)]
+    _mdups = (meta_summary or {}).get('duplicates') or {}
+    meta_dup_groups = (len(_mdups.get('same_city') or [])
+                       + len(_mdups.get('cross_city') or [])
+                       + len((meta_summary or {}).get('url_duplicates') or []))
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 1: Обзор
@@ -2255,7 +2487,8 @@ def build_report(
     sum_body_row = sum_row + 1
     _extra = ((1 if total_text_issues > 0 else 0)
               + (1 if total_content_bugs > 0 else 0)
-              + (1 if (indexing_bad_pages or indexing_sitemap_conflicts) else 0))
+              + (1 if (indexing_bad_pages or indexing_sitemap_conflicts) else 0)
+              + (1 if (meta_bad_pages or meta_dup_groups) else 0))
     ws1.row_dimensions[sum_body_row].height = 44 + _extra * 17
     ws1.merge_cells(f'B{sum_body_row}:E{sum_body_row}')
     c = ws1[f'B{sum_body_row}']
@@ -2276,13 +2509,22 @@ def build_report(
     if indexing_bad_pages or indexing_sitemap_conflicts:
         _idx_bits = []
         if indexing_bad_pages:
-            _idx_bits.append(f'{len(indexing_bad_pages)} {_plural_pages(len(indexing_bad_pages))} '
-                             f'закрыто от индексации')
+            _idx_bits.append(f'расхождения с robots.txt на {len(indexing_bad_pages)} '
+                             f'{_plural_pages(len(indexing_bad_pages))}')
         if indexing_sitemap_conflicts:
             _idx_bits.append(f'{indexing_sitemap_conflicts} путей каталога под Disallow '
                              f'в robots.txt')
         summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
                          + ' – см. лист «Индексация».')
+    if meta_bad_pages or meta_dup_groups:
+        _mb = []
+        if meta_bad_pages:
+            _mb.append(f'проблемы на {len(meta_bad_pages)} '
+                       f'{_plural_pages(len(meta_bad_pages))}')
+        if meta_dup_groups:
+            _mb.append(f'{meta_dup_groups} групп дублей (title/описания/URL)')
+        summary_text += ('\nМетаданные: ' + ', '.join(_mb)
+                         + ' – см. лист «Метаданные».')
     summary_text += '\nПодробности – на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -2330,7 +2572,10 @@ def build_report(
     nav_items = [
         ('Обзор', 'эта страница: сколько проверено, сколько работает и сколько сломано.'),
         ('Структура страниц', 'что чинить в контенте – где нет цены, кнопок заказа, заголовка. Красное = баг.'),
-        ('Индексация', 'если есть лист – что закрыто/открыто к индексации: robots.txt, meta noindex, canonical.'),
+        ('Индексация', 'если есть лист – расхождения сигналов страниц с robots.txt (noindex, canonical) и sitemap↔robots.'),
+        ('Метаданные', 'если есть лист – title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
+        ('Заголовки и мета', 'если есть лист – единственность title/description/H1, дубли H2 и заголовки вне текста.'),
+        ('Регион и СНГ', 'если есть лист – чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист – страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист – страницы, куда заходили люди и упёрлись в 404.'),
@@ -2354,8 +2599,13 @@ def build_report(
 
     # ─── Лист индексации (п.1.7) – если проверка выполнялась ────────
     _build_indexing_sheet(wb, results, indexing_summary)
-    _build_meta_sheet(wb, results)
+
+    # ─── Лист единственности тегов (п.1.3.1) – если проверялась ─────
+    _build_meta_unique_sheet(wb, results)
     _build_region_sheet(wb, results)
+
+    # ─── Лист метаданных (п.1.8) – если проверка выполнялась ────────
+    _build_meta_sheet(wb, results, meta_summary)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

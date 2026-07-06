@@ -191,6 +191,11 @@ class CheckResult:
     indexing: Optional[dict] = None
     has_indexing_issues: bool = False
 
+    # Метаданные (п.1.8): title / description / H1 + город + длины.
+    # dict из meta_checker.check_meta | None (не проверяли)
+    meta: Optional[dict] = None
+    has_meta_issues: bool = False
+
     # Региональные проверки (region_checker):
     # п.1.4.1 – верные переменные (чужой город/телефон/почта) | None – не проверяли
     region: Optional[dict] = None
@@ -199,9 +204,10 @@ class CheckResult:
     cis: Optional[dict] = None
     has_cis_issues: bool = False
 
-    # п.1.3.1 – единственность title/description/H1 (+ дубли H2) | None – не проверяли
-    meta: Optional[dict] = None
-    has_meta_issues: bool = False
+    # п.1.3.1 + 1.3.2 (часть пункта 1.8) – единственность title/description/H1,
+    # дубли H2, заголовки h2–h6 вне текста | None – не проверяли
+    meta_unique: Optional[dict] = None
+    has_meta_unique_issues: bool = False
 
     checked_at: Optional[str] = None
 
@@ -460,9 +466,9 @@ async def check_one(
     check_structure: bool = True,
     check_links: bool = False,
     check_indexing: bool = False,
+    check_meta: bool = False,
     check_region: bool = False,
     check_cis: bool = False,
-    check_meta: bool = False,
     region_ctx=None,            # RegionContext из region_checker.py
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
@@ -558,9 +564,21 @@ async def check_one(
                 host = urlsplit(task.url).netloc
                 robots = await get_robots(host)
             indexing = analyze_page_indexing(
-                a['body_text'], a.get('headers'), task.url, robots)
+                a['body_text'], a.get('headers'), task.url, robots,
+                page_type=task.type_code)
         except Exception:
             indexing = None
+
+    # Метаданные (п.1.8): title/description/H1 + город + длины – из уже
+    # скачанного HTML, без доп. запросов. Дубли считаются после батча.
+    meta = None
+    if check_meta and is_ok and a['body_text']:
+        try:
+            from meta_checker import extract_meta, check_meta as _check_meta
+            meta = _check_meta(extract_meta(a['body_text']),
+                               task.city, task.type_code)
+        except Exception:
+            meta = None
 
     # «Ссылки реально открываются» (404) – тяжёлая опц. проверка (запрос по
     # каждой ссылке). Делаем только если включено, страница открылась и это
@@ -591,14 +609,15 @@ async def check_one(
             cis = check_cis_mentions(a['body_text'], task.subdomain, region_ctx)
         except Exception:
             cis = None
-    # п.1.3.1: единственность title / description / H1 (+ дубли H2).
-    meta = None
+    # п.1.3.1 + 1.3.2 (та же галочка 1.8): единственность title/description/H1,
+    # дубли H2 и «текстовость» заголовков (h2–h6 не в шапке/подвале/меню).
+    meta_unique = None
     if check_meta and is_ok and a['body_text']:
         try:
-            from meta_checker import check_meta_uniqueness
-            meta = check_meta_uniqueness(a['body_text'], task.url, task.type_code)
+            from meta_checker import check_tags
+            meta_unique = check_tags(a['body_text'], task.url, task.type_code)
         except Exception:
-            meta = None
+            meta_unique = None
 
     return CheckResult(
         url=task.url,
@@ -630,12 +649,14 @@ async def check_one(
         broken_links=broken_links,
         indexing=indexing,
         has_indexing_issues=bool(indexing and indexing.get('issues')),
+        meta=meta,
+        has_meta_issues=bool(meta and meta.get('issues')),
         region=region,
         has_region_issues=bool(region and region.get('issues')),
         cis=cis,
         has_cis_issues=bool(cis and cis.get('issues')),
-        meta=meta,
-        has_meta_issues=bool(meta and meta.get('issues')),
+        meta_unique=meta_unique,
+        has_meta_unique_issues=bool(meta_unique and meta_unique.get('issues')),
         checked_at=None,
     )
 
@@ -656,9 +677,9 @@ async def run_batch(
     check_structure: bool = True,
     check_links: bool = False,
     check_indexing: bool = False,
+    check_meta: bool = False,
     check_region: bool = False,
     check_cis: bool = False,
-    check_meta: bool = False,
     region_ctx=None,            # RegionContext из region_checker.build_region_context
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
@@ -744,9 +765,9 @@ async def run_batch(
                     check_structure=check_structure,
                     check_links=check_links,
                     check_indexing=check_indexing,
+                    check_meta=check_meta,
                     check_region=check_region,
                     check_cis=check_cis,
-                    check_meta=check_meta,
                     region_ctx=region_ctx,
                     proxy_url=proxy_url,
                     kp_map=kp_map,

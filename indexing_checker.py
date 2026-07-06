@@ -219,10 +219,16 @@ def _x_robots_noindex(headers: dict):
 
 
 def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
-                          url: str, robots: Optional[RobotsInfo]) -> dict:
-    """Собрать сигналы индексации страницы и вынести вердикт.
+                          url: str, robots: Optional[RobotsInfo],
+                          page_type: str = '') -> dict:
+    """Сверить сигналы индексации страницы с robots.txt (эталоном).
 
-    Ожидание: страница из выборки ДОЛЖНА быть открыта (SEO-страница).
+    Ошибка = РАСХОЖДЕНИЕ с robots.txt:
+      • в robots страница открыта, а на ней noindex (meta / X-Robots-Tag);
+      • canonical ведёт на URL, закрытый в robots.
+    Закрыта в robots + noindex = согласовано (так задумано) – молчим.
+    Закрыта в robots без noindex = тоже задумано (robots прав) – молчим;
+    противоречия «в sitemap, но под Disallow» ловит отдельная кросс-проверка.
     Возвращает dict для CheckResult.indexing."""
     out = {
         'checked': True,
@@ -235,34 +241,37 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
     }
     issues, warnings = out['issues'], out['warnings']
 
-    # 1. robots.txt
+    # 1. robots.txt – ЭТАЛОН. Disallow сам по себе не ошибка: так задумано.
+    closed_by_robots = False
     if robots is not None and robots.ok:
         dis, rule, agent = robots_verdict(robots, url)
         out['robots_disallowed'] = dis
         out['robots_rule'] = rule
         out['robots_agent'] = agent
-        if dis:
-            _a = '' if agent == '*' else f' для {agent}'
-            issues.append(f'закрыта в robots.txt{_a} (Disallow: {rule})')
+        closed_by_robots = dis
     elif robots is not None and robots.fetched and robots.status != 200:
         warnings.append(f'robots.txt отдаёт {robots.status} – правила не применяются')
     elif robots is not None and not robots.fetched:
         warnings.append('robots.txt не удалось скачать')
 
-    # 2. meta robots (в т.ч. name=yandex / name=googlebot)
+    # 2. meta robots (в т.ч. name=yandex / name=googlebot) – сверяем с robots:
+    # noindex на открытой в robots странице = расхождение = ошибка;
+    # noindex на закрытой в robots = согласовано, молчим.
     if html:
         meta_val, meta_noidx = _find_meta_robots(html)
         out['meta_robots'] = meta_val
         out['meta_noindex'] = meta_noidx
-        if meta_noidx:
-            issues.append(f'meta robots: {meta_val}')
+        if meta_noidx and not closed_by_robots:
+            issues.append('расхождение с robots.txt: в robots страница открыта, '
+                          'но на ней noindex (meta robots)')
 
-    # 3. X-Robots-Tag
+    # 3. X-Robots-Tag – так же сверяем с robots
     x_val, x_noidx = _x_robots_noindex(headers)
     out['x_robots'] = x_val
     out['x_robots_noindex'] = x_noidx
-    if x_noidx:
-        issues.append(f'заголовок X-Robots-Tag: {x_val}')
+    if x_noidx and not closed_by_robots:
+        issues.append('расхождение с robots.txt: в robots страница открыта, '
+                      'но на ней noindex (заголовок X-Robots-Tag)')
 
     # 4. canonical
     if html:
@@ -275,16 +284,16 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                 self_ref = None
             out['canonical_self'] = self_ref
             if self_ref is False:
-                # Каноникл на закрытый robots'ом URL – канонизируем «в никуда»
+                # Каноникл на закрытый robots'ом URL – расхождение:
+                # канонизируем «в никуда»
                 if robots is not None and robots.ok:
-                    c_dis, c_rule, _ = robots_verdict(robots, canon)
+                    c_dis, _c_rule, _ = robots_verdict(robots, canon)
                     if c_dis:
                         out['canonical_disallowed'] = True
-                        issues.append(
-                            f'canonical ведёт на закрытый в robots.txt URL '
-                            f'({canon}; Disallow: {c_rule})')
+                        issues.append('расхождение с robots.txt: canonical '
+                                      'ведёт на URL, закрытый в robots')
                 if not out['canonical_disallowed']:
-                    warnings.append(f'canonical ведёт на другой URL: {canon}')
+                    warnings.append('canonical ведёт на другой URL')
 
     out['verdict'] = 'closed' if issues else ('warn' if warnings else 'open')
     return out

@@ -648,9 +648,9 @@ def init_session():
         'c30_check_products': True,
         'c30_check_text': True,        # пункт 1.6 – битые переменные
         'c30_check_indexing': True,    # пункт 1.7 – индексация (robots/noindex/canonical)
-        'c30_check_meta': True,        # пункт 1.10 – единственные H1/title/description
-        'c30_check_region': True,      # пункт 1.8 – верные переменные города (по КП)
-        'c30_check_cis': True,         # пункт 1.9 – СНГ-домены без РФ/СНГ/чужих стран
+        'c30_check_meta': True,        # пункт 1.8 – метаданные, дубли, единственность тегов
+        'c30_check_region': True,      # пункт 1.9 – верные переменные города (по КП)
+        'c30_check_cis': True,         # пункт 1.10 – СНГ-домены без РФ/СНГ/чужих стран
         'c30_check_links': False,      # «ссылки открываются (404)» – тяжёлая, по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
@@ -1034,7 +1034,7 @@ if pid:
     }
     budget['per_city'] = 2 + budget['cats'] + budget['filters'] + budget['products']
 
-    # БЛОК 2 – Что проверять на страницах (1.1–1.6)
+    # БЛОК 2 – Что проверять на страницах (1.1–1.10)
     with st.container(border=True):
         # Учитываем только РЕАЛЬНО показанные галочки: фильтры есть не у всех
         # проектов (если их нет – чекбокс не рисуется, и его нельзя учитывать в
@@ -1078,22 +1078,28 @@ if pid:
                         key='c30_check_text')
             st.checkbox('1.7  Индексация страниц (robots.txt, noindex, canonical)',
                         key='c30_check_indexing',
-                        help='Эталон – robots.txt. Страницы выборки должны быть '
-                             'открыты к индексации: Disallow, meta noindex, '
-                             'X-Robots-Tag или canonical на закрытый URL – баг. '
+                        help='Эталон – robots.txt. Ошибка = расхождение сигналов '
+                             'страницы с robots: noindex на открытой в robots '
+                             'странице или canonical на закрытый URL. Закрыта в '
+                             'robots и noindex – так задумано, не показываем. '
                              'Плюс сверка всех путей каталога (sitemap) с robots.txt.')
-            st.checkbox('1.10  Единственные H1 / Title / Description (без дублей)',
+            st.checkbox('1.8  Корректность вывода и дубли (заголовки, метаданные, урлы)',
                         key='c30_check_meta',
-                        help='ТЗ 1.3.1: на странице должны быть в единственном '
-                             'экземпляре <title>, <meta description> и <h1> '
-                             '(0 или ≥2 — баг). Плюс дубли H2 с одинаковым текстом. '
-                             'Несколько разных H2 — норма.')
-            st.checkbox('1.8  Переменные города (город, телефон, почта — по КП)',
+                        help='Наличие и непустота title/description/H1, город '
+                             'поддомена в title/description, длины. Дубли: '
+                             'повторы внутри города – баг, полное совпадение '
+                             'между городами – не подставился город. Дубли '
+                             'урлов: варианты адреса (http, слэш, www) главной '
+                             'и каталога должны редиректить. Плюс единственность '
+                             'тегов (ровно один title/description/H1, дубли H2) '
+                             'и «текстовость» заголовков: h2–h6 не должны быть '
+                             'в шапке/подвале/меню/сайдбаре.')
+            st.checkbox('1.9  Переменные города (город, телефон, почта — по КП)',
                         key='c30_check_region',
                         help='На странице города не должно быть подстановок другого '
                              'города: чужой город в title/description/H1, телефон '
                              'или почта другого города (сверка со справочником КП).')
-            st.checkbox('1.9  СНГ-домены: нет упоминаний РФ, СНГ и чужих стран',
+            st.checkbox('1.10  СНГ-домены: нет упоминаний РФ, СНГ и чужих стран',
                         key='c30_check_cis',
                         help='На сайте страны СНГ (домены .kz/.by/.uz/…) в текстах, '
                              'заголовках, метаданных и контактах не должно быть: '
@@ -1213,6 +1219,9 @@ if pid:
         bool(st.session_state.c30_check_categories), bool(st.session_state.c30_check_filters),
         bool(st.session_state.c30_check_products), bool(st.session_state.c30_check_text),
         bool(st.session_state.get('c30_check_indexing', True)),
+        bool(st.session_state.get('c30_check_meta', True)),
+        bool(st.session_state.get('c30_check_region', True)),
+        bool(st.session_state.get('c30_check_cis', True)),
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
