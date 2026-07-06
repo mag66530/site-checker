@@ -277,6 +277,7 @@ def run_check(pid, params, creds, log, progress):
             check_indexing=_chk_idx,
             check_region=_chk_region and region_ctx is not None,
             check_cis=_chk_cis and region_ctx is not None,
+            check_meta=bool(params.get('check_meta', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
 

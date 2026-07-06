@@ -199,6 +199,10 @@ class CheckResult:
     cis: Optional[dict] = None
     has_cis_issues: bool = False
 
+    # п.1.3.1 – единственность title/description/H1 (+ дубли H2) | None – не проверяли
+    meta: Optional[dict] = None
+    has_meta_issues: bool = False
+
     checked_at: Optional[str] = None
 
 
@@ -458,6 +462,7 @@ async def check_one(
     check_indexing: bool = False,
     check_region: bool = False,
     check_cis: bool = False,
+    check_meta: bool = False,
     region_ctx=None,            # RegionContext из region_checker.py
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
@@ -586,6 +591,14 @@ async def check_one(
             cis = check_cis_mentions(a['body_text'], task.subdomain, region_ctx)
         except Exception:
             cis = None
+    # п.1.3.1: единственность title / description / H1 (+ дубли H2).
+    meta = None
+    if check_meta and is_ok and a['body_text']:
+        try:
+            from meta_checker import check_meta_uniqueness
+            meta = check_meta_uniqueness(a['body_text'], task.url, task.type_code)
+        except Exception:
+            meta = None
 
     return CheckResult(
         url=task.url,
@@ -621,6 +634,8 @@ async def check_one(
         has_region_issues=bool(region and region.get('issues')),
         cis=cis,
         has_cis_issues=bool(cis and cis.get('issues')),
+        meta=meta,
+        has_meta_issues=bool(meta and meta.get('issues')),
         checked_at=None,
     )
 
@@ -643,6 +658,7 @@ async def run_batch(
     check_indexing: bool = False,
     check_region: bool = False,
     check_cis: bool = False,
+    check_meta: bool = False,
     region_ctx=None,            # RegionContext из region_checker.build_region_context
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
@@ -730,6 +746,7 @@ async def run_batch(
                     check_indexing=check_indexing,
                     check_region=check_region,
                     check_cis=check_cis,
+                    check_meta=check_meta,
                     region_ctx=region_ctx,
                     proxy_url=proxy_url,
                     kp_map=kp_map,

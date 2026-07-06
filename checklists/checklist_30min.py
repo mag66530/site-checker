@@ -467,6 +467,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             check_indexing=bool(flags.get('check_indexing', True)),
             check_region=_chk_region and region_ctx is not None,
             check_cis=_chk_cis and region_ctx is not None,
+            check_meta=bool(flags.get('check_meta', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map,
         ))
@@ -647,6 +648,7 @@ def init_session():
         'c30_check_products': True,
         'c30_check_text': True,        # пункт 1.6 – битые переменные
         'c30_check_indexing': True,    # пункт 1.7 – индексация (robots/noindex/canonical)
+        'c30_check_meta': True,        # пункт 1.10 – единственные H1/title/description
         'c30_check_region': True,      # пункт 1.8 – верные переменные города (по КП)
         'c30_check_cis': True,         # пункт 1.9 – СНГ-домены без РФ/СНГ/чужих стран
         'c30_check_links': False,      # «ссылки открываются (404)» – тяжёлая, по запросу
@@ -888,7 +890,8 @@ with st.container(border=True):
         # не подхватывалось виджетом и галочки выходили пустыми, а кнопка врала.
         for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                    'c30_check_filters', 'c30_check_products', 'c30_check_text',
-                   'c30_check_indexing', 'c30_check_region', 'c30_check_cis'):
+                   'c30_check_indexing', 'c30_check_meta',
+                   'c30_check_region', 'c30_check_cis'):
             st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
@@ -1038,7 +1041,7 @@ if pid:
         # «Выбрать/Снять все», иначе кнопка врёт).
         _CHK_KEYS = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                      'c30_check_products', 'c30_check_text', 'c30_check_indexing',
-                     'c30_check_region', 'c30_check_cis']
+                     'c30_check_meta', 'c30_check_region', 'c30_check_cis']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
@@ -1079,6 +1082,12 @@ if pid:
                              'открыты к индексации: Disallow, meta noindex, '
                              'X-Robots-Tag или canonical на закрытый URL – баг. '
                              'Плюс сверка всех путей каталога (sitemap) с robots.txt.')
+            st.checkbox('1.10  Единственные H1 / Title / Description (без дублей)',
+                        key='c30_check_meta',
+                        help='ТЗ 1.3.1: на странице должны быть в единственном '
+                             'экземпляре <title>, <meta description> и <h1> '
+                             '(0 или ≥2 — баг). Плюс дубли H2 с одинаковым текстом. '
+                             'Несколько разных H2 — норма.')
             st.checkbox('1.8  Переменные города (город, телефон, почта — по КП)',
                         key='c30_check_region',
                         help='На странице города не должно быть подстановок другого '
@@ -1240,6 +1249,7 @@ if pid:
                 'check_products': st.session_state.c30_check_products,
                 'check_text': st.session_state.c30_check_text,
                 'check_indexing': st.session_state.get('c30_check_indexing', True),
+                'check_meta': st.session_state.get('c30_check_meta', True),
                 'check_region': st.session_state.get('c30_check_region', True),
                 'check_cis': st.session_state.get('c30_check_cis', True),
                 'check_links': st.session_state.get('c30_check_links', False),
