@@ -257,56 +257,79 @@ def _выбрать(кандидаты: list, o: dict):
     return sorted(похожие, key=dist)[0]
 
 
-def записать_лист_админка(excel_path: str, результаты: list, дата_str: str) -> None:
-    """Пишет/пересоздаёт лист «Админка» в log_forms.xlsx: по строке на каждую
-    отправленную форму — есть ли она в «Уведомлениях с форм» админки."""
+def записать_в_логи(excel_path: str, результаты: list) -> None:
+    """Дописывает результат проверки админки ПРЯМО в лист «Логи»: добавляет колонку
+    «Статус в админке» и заполняет её у соответствующих строк форм (сопоставление
+    по городу + названию формы). Детали (номер заявки / причина) дописывает в
+    «Комментарий». Отдельный лист не создаём — вся инфо в одном месте."""
     from openpyxl import load_workbook
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     wb = load_workbook(excel_path)
-    if "Админка" in wb.sheetnames:
-        del wb["Админка"]
-    # Ставим сразу после «Сводки» (если она есть) — Уровень 1 должен быть на виду.
-    поз = (wb.sheetnames.index("Сводка") + 1) if "Сводка" in wb.sheetnames else 0
-    ws = wb.create_sheet("Админка", поз)
+    if "Логи" not in wb.sheetnames:
+        return
+    ws = wb["Логи"]
+    headers = [str(c.value or "").strip() for c in ws[1]]
 
-    headers = ["Дата", "Время отправки", "Город", "Форма (наш тест)",
-               "Статус", "Заявка в админке", "Имя / Почта в заявке",
-               "Админка", "Примечание"]
-    fill = PatternFill("solid", fgColor="E3F2FD")   # мягкий голубой – «Уровень 1»
-    for c, h in enumerate(headers, 1):
-        cell = ws.cell(1, c, h)
-        cell.font = Font(bold=True)
-        cell.fill = fill
-        ws.column_dimensions[get_column_letter(c)].width = len(h) + 4
+    def col(name):
+        for i, h in enumerate(headers):
+            if h.lower() == name.lower():
+                return i + 1
+        return -1
 
-    r = 2
+    i_city, i_name = col("Город"), col("Название")
+    i_comment = col("Комментарий")
+    if i_city == -1 or i_name == -1:
+        return
+
+    # Колонку «Статус в админке» ставим сразу после «Статус» (или в конец).
+    i_adm = col("Статус в админке")
+    if i_adm == -1:
+        i_st = col("Статус")
+        i_adm = (i_st + 1) if i_st != -1 else len(headers) + 1
+        ws.insert_cols(i_adm)
+        # заголовок в стиле остальной шапки «Логов»
+        hc = ws.cell(1, i_adm, "Статус в админке")
+        hc.font = Font(bold=True)
+        hc.fill = PatternFill("solid", fgColor="EEF3FB")
+        ws.column_dimensions[get_column_letter(i_adm)].width = 22
+        # пересчитать сдвинувшиеся индексы комментария
+        headers = [str(c.value or "").strip() for c in ws[1]]
+        i_comment = col("Комментарий")
+
+    def norm(v):
+        return _norm(str(v or ""))
+
+    # индекс строк по (город, название) — берём каждую строку один раз
+    строки = {}
+    for r in range(2, ws.max_row + 1):
+        key = (norm(ws.cell(r, i_city).value), norm(ws.cell(r, i_name).value))
+        строки.setdefault(key, []).append(r)
+    занято = set()
+
     for res in результаты:
+        key = (norm(res.get("город", "")), norm(res.get("название", "")))
+        rows = [r for r in строки.get(key, []) if r not in занято]
+        if not rows:
+            continue
+        r = rows[0]
+        занято.add(r)
         z = res.get("заявка")
-        заявка_txt = (f"#{z['id']} · {z['тип_формы']} · {z['время']}" if z else "—")
-        имяпочта = (f"{z.get('имя','')} / {z.get('email','')}".strip(" /") if z else "")
-        vals = [дата_str, _hhmmss(res.get("ts", "")),
-                res.get("город", "") or "(основной)",
-                res.get("название", ""), res.get("статус", ""),
-                заявка_txt, имяпочта, res.get("домен_кратко", ""),
-                res.get("примечание", "")]
-        for c, v in enumerate(vals, 1):
-            ws.cell(r, c, v)
-            L = get_column_letter(c)
-            cur = ws.column_dimensions[L].width or 10
-            ws.column_dimensions[L].width = min(max(cur, len(str(v)) + 3), 70)
-        st = ws.cell(r, 5)
-        if res.get("статус", "").startswith("Есть"):
-            st.font = Font(color="1E8E3E", bold=True)   # зелёный
-        else:
-            st.font = Font(color="C62828", bold=True)   # красный
-        r += 1
+        есть = str(res.get("статус", "")).startswith("Есть")
+        cell = ws.cell(r, i_adm, "Есть в админке" if есть else "НЕ найдено")
+        cell.font = Font(color="1E8E3E" if есть else "C62828", bold=True)
+        # детали → в «Комментарий» (объединяем с тем, что уже есть)
+        if i_comment != -1:
+            если_есть = (f"заявка #{z['id']} в админке "
+                         f"({z.get('время','')}, {res.get('домен_кратко','')})") if z else ""
+            деталь = если_есть if есть else (res.get("примечание", "")
+                                             or "в админке не найдена")
+            if деталь:
+                prev = str(ws.cell(r, i_comment).value or "").strip()
+                ws.cell(r, i_comment,
+                        (prev + "; " if prev else "") + деталь)
 
-    try:
-        ws.freeze_panes = "A2"
-    except Exception:
-        pass
     wb.save(excel_path)
 
 
@@ -453,9 +476,9 @@ def выполнить_проверку(проект_дир, зоны, excel_pat
         finally:
             b.close()
 
-    записать_лист_админка(excel_path, все_результаты, дата.strftime("%d.%m.%Y"))
-    log(f"✅ Админка (Уровень 1): найдено {итог_есть}, НЕ найдено {итог_нет}. "
-        f"Подробности — на листе «Админка».")
+    записать_в_логи(excel_path, все_результаты)
+    log(f"✅ Проверка админки: найдено {итог_есть}, НЕ найдено {итог_нет}. "
+        f"Смотри колонку «Статус в админке» на листе «Логи».")
     return True
 
 
