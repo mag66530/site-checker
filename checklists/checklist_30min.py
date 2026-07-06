@@ -631,6 +631,7 @@ def init_session():
         'c30_check_products': True,
         'c30_check_text': True,        # пункт 1.6 – битые переменные
         'c30_check_indexing': True,    # пункт 1.7 – индексация (robots/noindex/canonical)
+        'c30_check_meta': True,        # пункт 1.8 – метаданные и дубли (title/description/URL)
         'c30_check_links': False,      # «ссылки открываются (404)» – тяжёлая, по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
@@ -870,7 +871,7 @@ with st.container(border=True):
         # не подхватывалось виджетом и галочки выходили пустыми, а кнопка врала.
         for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                    'c30_check_filters', 'c30_check_products', 'c30_check_text',
-                   'c30_check_indexing'):
+                   'c30_check_indexing', 'c30_check_meta'):
             st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
@@ -1019,7 +1020,8 @@ if pid:
         # проектов (если их нет – чекбокс не рисуется, и его нельзя учитывать в
         # «Выбрать/Снять все», иначе кнопка врёт).
         _CHK_KEYS = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
-                     'c30_check_products', 'c30_check_text', 'c30_check_indexing']
+                     'c30_check_products', 'c30_check_text', 'c30_check_indexing',
+                     'c30_check_meta']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
@@ -1060,6 +1062,14 @@ if pid:
                              'открыты к индексации: Disallow, meta noindex, '
                              'X-Robots-Tag или canonical на закрытый URL – баг. '
                              'Плюс сверка всех путей каталога (sitemap) с robots.txt.')
+            st.checkbox('1.8  Метаданные и дубли (title, description, H1, урлы)',
+                        key='c30_check_meta',
+                        help='Наличие и непустота title/description/H1, город '
+                             'поддомена в title/description, длины. Дубли: '
+                             'повторы внутри города – баг, полное совпадение '
+                             'между городами – не подставился город. Дубли '
+                             'урлов: варианты адреса (http, слэш, www) главной '
+                             'и каталога должны редиректить.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1174,6 +1184,7 @@ if pid:
         bool(st.session_state.c30_check_categories), bool(st.session_state.c30_check_filters),
         bool(st.session_state.c30_check_products), bool(st.session_state.c30_check_text),
         bool(st.session_state.get('c30_check_indexing', True)),
+        bool(st.session_state.get('c30_check_meta', True)),
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
@@ -1210,6 +1221,7 @@ if pid:
                 'check_products': st.session_state.c30_check_products,
                 'check_text': st.session_state.c30_check_text,
                 'check_indexing': st.session_state.get('c30_check_indexing', True),
+                'check_meta': st.session_state.get('c30_check_meta', True),
                 'check_links': st.session_state.get('c30_check_links', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),

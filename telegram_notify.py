@@ -71,6 +71,8 @@ def format_summary_message(
     empty_sections: Optional[list] = None,  # пустые разделы [{city, url}]
     critical_block: str = '',             # готовый блок «Критические» (см. format_critical_block)
     indexing_issues_pages: int = 0,       # страниц с проблемами индексации (п.1.7)
+    meta_issues_pages: int = 0,           # страниц с проблемами метаданных (п.1.8)
+    meta_duplicates: int = 0,             # групп дублей title/description/H1 + URL (п.1.8)
 ) -> str:
     """
     Сформировать текст сообщения для Telegram.
@@ -83,7 +85,8 @@ def format_summary_message(
     has_problems = (
         err_count > 0 or warn_count > 0 or text_issues_count > 0
         or metrika_pages_count > 0 or content_bugs_count > 0
-        or indexing_issues_pages > 0 or bool(critical_block)
+        or indexing_issues_pages > 0 or meta_issues_pages > 0
+        or meta_duplicates > 0 or bool(critical_block)
     )
 
     # Короткое имя проекта: "СМУ – Стальметурал" → "СМУ".
@@ -123,6 +126,12 @@ def format_summary_message(
     # Индексация (п.1.7): закрытые от индексации SEO-страницы
     if indexing_issues_pages > 0:
         lines.append(f'Закрыто от индексации: <b>{indexing_issues_pages}</b> страниц')
+
+    # Метаданные (п.1.8): title/description/H1 и дубли
+    if meta_issues_pages > 0:
+        lines.append(f'Проблемы метаданных: <b>{meta_issues_pages}</b> страниц')
+    if meta_duplicates > 0:
+        lines.append(f'Дубли (title/описания/URL): <b>{meta_duplicates}</b>')
 
     # 404 из Метрики
     if metrika_pages_count > 0:

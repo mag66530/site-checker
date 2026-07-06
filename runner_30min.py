@@ -255,11 +255,12 @@ def run_check(pid, params, creds, log, progress):
             log(f'⚠ Не удалось загрузить КП: {e}')
 
         _chk_idx = bool(params.get('check_indexing', True))
+        _chk_meta = bool(params.get('check_meta', True))
         results = asyncio.run(run_batch(
             plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
             retry_delay_ms=2500, check_text=bool(params.get('check_text', True)),
             check_links=bool(params.get('check_links', False)),
-            check_indexing=_chk_idx,
+            check_indexing=_chk_idx, check_meta=_chk_meta,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
 
         # ── Индексация (п.1.7): кросс-проверка sitemap ↔ robots.txt ──
@@ -283,6 +284,30 @@ def run_check(pid, params, creds, log, progress):
                     f'(проверено {_idx_summary.get("checked", 0)})')
             except Exception as _e:
                 log(f'⚠ Индексация (sitemap↔robots): {_e}')
+
+        # ── Метаданные и дубли (п.1.8) ──
+        # Дубли title/description/H1 – по всем результатам прогона; дубли
+        # УРЛОВ – прозвон вариантов (http/слэш/www) главной и каталога
+        # каждого проверенного поддомена.
+        _meta_summary = None
+        if _chk_meta:
+            try:
+                from meta_checker import find_duplicates, check_url_duplicates
+                _dups = find_duplicates(results)
+                _probe_urls = [r.url for r in results
+                               if r.is_ok and r.type_code in ('main', 'catalog')]
+                _url_dups = asyncio.run(check_url_duplicates(
+                    _probe_urls, proxy_url=proxy_url))
+                _meta_summary = {'duplicates': _dups, 'url_duplicates': _url_dups,
+                                 'probed_urls': len(_probe_urls)}
+                _m_pages_bad = sum(1 for r in results
+                                   if getattr(r, 'has_meta_issues', False))
+                log(f'Метаданные: страниц с проблемами {_m_pages_bad}, '
+                    f'дублей в городе {len(_dups["same_city"])}, '
+                    f'межгородских {len(_dups["cross_city"])}, '
+                    f'дублей URL {len(_url_dups)}')
+            except Exception as _e:
+                log(f'⚠ Метаданные/дубли: {_e}')
 
         finished_ms = int(datetime.now().timestamp() * 1000)
         out['finished_at'] = finished_ms
@@ -433,7 +458,7 @@ def run_check(pid, params, creds, log, progress):
             metrika_data_date=(_m404_disp if _today_404
                                else get_latest_available_date(pid)),
             service_issues=_service_issues, autoclick=_autoclick,
-            indexing_summary=_idx_summary)
+            indexing_summary=_idx_summary, meta_summary=_meta_summary)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
@@ -490,7 +515,14 @@ def run_check(pid, params, creds, log, progress):
                     critical_block=format_critical_block(crit),
                     indexing_issues_pages=sum(
                         1 for r in results
-                        if getattr(r, 'has_indexing_issues', False)))
+                        if getattr(r, 'has_indexing_issues', False)),
+                    meta_issues_pages=sum(
+                        1 for r in results
+                        if getattr(r, 'has_meta_issues', False)),
+                    meta_duplicates=(
+                        len((_meta_summary or {}).get('duplicates', {}).get('same_city', []))
+                        + len((_meta_summary or {}).get('duplicates', {}).get('cross_city', []))
+                        + len((_meta_summary or {}).get('url_duplicates', []))))
                 tg_result = send_run_notification(
                     bot_token=tg_token, recipients=tg_recipients,
                     project_name=cfg['name'], summary_text=summary_text,

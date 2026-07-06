@@ -191,6 +191,11 @@ class CheckResult:
     indexing: Optional[dict] = None
     has_indexing_issues: bool = False
 
+    # Метаданные (п.1.8): title / description / H1 + город + длины.
+    # dict из meta_checker.check_meta | None (не проверяли)
+    meta: Optional[dict] = None
+    has_meta_issues: bool = False
+
     checked_at: Optional[str] = None
 
 
@@ -448,6 +453,7 @@ async def check_one(
     check_structure: bool = True,
     check_links: bool = False,
     check_indexing: bool = False,
+    check_meta: bool = False,
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
     get_css_hidden: Optional[Callable] = None,
@@ -546,6 +552,17 @@ async def check_one(
         except Exception:
             indexing = None
 
+    # Метаданные (п.1.8): title/description/H1 + город + длины – из уже
+    # скачанного HTML, без доп. запросов. Дубли считаются после батча.
+    meta = None
+    if check_meta and is_ok and a['body_text']:
+        try:
+            from meta_checker import extract_meta, check_meta as _check_meta
+            meta = _check_meta(extract_meta(a['body_text']),
+                               task.city, task.type_code)
+        except Exception:
+            meta = None
+
     # «Ссылки реально открываются» (404) – тяжёлая опц. проверка (запрос по
     # каждой ссылке). Делаем только если включено, страница открылась и это
     # тех. страница (их немного, они на главном домене – нагрузка ограничена).
@@ -588,6 +605,8 @@ async def check_one(
         broken_links=broken_links,
         indexing=indexing,
         has_indexing_issues=bool(indexing and indexing.get('issues')),
+        meta=meta,
+        has_meta_issues=bool(meta and meta.get('issues')),
         checked_at=None,
     )
 
@@ -608,6 +627,7 @@ async def run_batch(
     check_structure: bool = True,
     check_links: bool = False,
     check_indexing: bool = False,
+    check_meta: bool = False,
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
     proxy_url: Optional[str] = None,
@@ -692,6 +712,7 @@ async def run_batch(
                     check_structure=check_structure,
                     check_links=check_links,
                     check_indexing=check_indexing,
+                    check_meta=check_meta,
                     proxy_url=proxy_url,
                     kp_map=kp_map,
                     get_css_hidden=get_css_hidden,
