@@ -50,6 +50,25 @@ def _stamp(msg):
     print(f'[{datetime.now().strftime("%H:%M:%S")}] {msg}', flush=True)
 
 
+def _load_admin_zones(src_config: Path, main_host: str, cities_all: list):
+    """Читает АДМИН_ЗОНЫ из ИСХОДНОГО config.py проекта (не из рабочей копии, где
+    домены уже подменены под город). Если ключа нет — одна зона на основной домен.
+    Зона = {домен, города}; города=[] — «все остальные» (обычно РФ)."""
+    домен_осн = f'https://{main_host}' if main_host else (
+        cities_all[0][1] if cities_all else '')
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('_orig_cfg_zones', str(src_config))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        зоны = getattr(mod, 'АДМИН_ЗОНЫ', None)
+        if зоны:
+            return [dict(z) for z in зоны]
+    except Exception as e:  # noqa: BLE001
+        _stamp(f'⚠️ Не удалось прочитать АДМИН_ЗОНЫ из конфига: {e}')
+    return [{'домен': домен_осн, 'города': []}]
+
+
 def _load_cities(project: str):
     """Справочник городов проекта: [(город, url, почта), ...]. Пусто, если файла нет.
     Для проектов-вариантов (CITIES_FROM) берём справочник у родителя."""
@@ -174,18 +193,17 @@ def main() -> int:
             )
 
         # ── Уровень 1: проверка админки (если заданы креды admin.local.json) ──
-        # Логинимся в общую админку основного домена, читаем «Уведомления с форм»
-        # за сегодня и сверяем с отправленными формами (submitted_forms.json).
-        # Тихо пропускается, если файла с логином/паролем нет.
+        # У СМУ разные админки для РФ / СНГ / Steelgroup (АДМИН_ЗОНЫ в конфиге), но
+        # логин/пароль общие. Логинимся в каждую нужную зону, читаем «Уведомления
+        # с форм» за сегодня и сверяем с отправками. Пропускается без admin.local.json.
         if not a.no_admin and not (stop and stop()):
             try:
                 import admin_check
                 проект_дир = PROJECTS_ROOT / a.project
-                домен = f'https://{main_host}' if main_host else (
-                    cities_all[0][1] if cities_all else '')
-                if домен and (проект_дир / 'admin.local.json').is_file():
+                if (проект_дир / 'admin.local.json').is_file():
+                    зоны = _load_admin_zones(src_config, main_host, cities_all)
                     admin_check.выполнить_проверку(
-                        str(проект_дир), домен,
+                        str(проект_дир), зоны,
                         excel_path='log_forms.xlsx',
                         submitted_path='submitted_forms.json',
                         show=a.show_browser, log=_stamp,
