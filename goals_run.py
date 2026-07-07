@@ -38,22 +38,31 @@ def _прогнать_формы(base: str, show: bool) -> None:
         args.append('--show-browser')
     _pat1 = re.compile(r'зафиксирована цель [«"]([\w\-.]+)[»"]')
     _pat2 = re.compile(r'Сработала цель:\s*([\w\-.]+)')
+    # URL, до которых дошёл прогон форм (переходы + итоговый URL сценария): по ним
+    # «Проверка целей» подтверждает url-цели (оформленный заказ / «спасибо»).
+    _patu = re.compile(r'(?:URL сценария:|переход →)\s*(https?://\S+)')
     fired: set = set()
+    urls: set = set()
     try:
         proc = subprocess.Popen(args, cwd=str(ROOT), stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
-        for line in proc.stdout:            # стримим в общий лог И ловим цели
+        for line in proc.stdout:            # стримим в общий лог И ловим цели/URL
             print(line, end='', flush=True)
             for m in _pat1.finditer(line):
                 fired.add(m.group(1))
             for m in _pat2.finditer(line):
                 fired.add(m.group(1))
+            for m in _patu.finditer(line):
+                urls.add(m.group(1).rstrip('.,;'))
         proc.wait(timeout=1800)
         d = ROOT / 'cache' / 'forms' / base
         d.mkdir(parents=True, exist_ok=True)
         (d / 'fired_goals.json').write_text(
             json.dumps(sorted(fired), ensure_ascii=False), encoding='utf-8')
-        _stamp(f'ФОРМЫ: готово (код {proc.returncode}); поймано целей форм: {len(fired)}')
+        (d / 'fired_urls.json').write_text(
+            json.dumps(sorted(urls), ensure_ascii=False), encoding='utf-8')
+        _stamp(f'ФОРМЫ: готово (код {proc.returncode}); поймано целей форм: '
+               f'{len(fired)}, URL прогона: {len(urls)}')
     except Exception as e:  # noqa: BLE001
         _stamp(f'ФОРМЫ: не удалось прогнать ({e}) - продолжаю без них')
 
