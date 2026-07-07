@@ -1076,7 +1076,7 @@ if pid:
             st.checkbox('1.5  Товары', key='c30_check_products')
             st.checkbox('1.6  Текстовые блоки категорий/фильтров/товаров и переменные',
                         key='c30_check_text')
-            st.checkbox('1.7  Индексация страниц (robots.txt, noindex, canonical)',
+            st.checkbox('1.7  Индексация страниц (robots.txt, sitemap, noindex, canonical)',
                         key='c30_check_indexing',
                         help='Эталон - robots.txt. Ошибка = расхождение сигналов '
                              'страницы с robots: noindex на открытой в robots '
