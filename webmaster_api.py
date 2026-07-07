@@ -431,6 +431,61 @@ def fetch_webmaster_issues(project_id: str, token: str,
         return load_issues(project_id)
 
 
+# ── Sitemap в Вебмастере (ТЗ 3.4.2/3.4.4: добавлен и без ошибок) ─────
+
+
+def fetch_sitemap_status(project_id: str, token: str, host: str,
+                         proxy_url: Optional[str] = None,
+                         log: Optional[Callable] = None) -> Optional[dict]:
+    """Статус sitemap-файлов главного хоста проекта в Яндекс.Вебмастере.
+
+    Возвращает {'host', 'sitemaps': [{'url', 'errors', 'urls_count',
+    'last_access'}], 'error': str|None} или None (нет токена).
+    Схему ответа API разбираем терпимо - берём известные поля, лишние
+    игнорируем."""
+    def _log(msg):
+        if log:
+            log('info', msg)
+
+    if not token:
+        return None
+    want = _norm_host(host)
+    out = {'host': want, 'sitemaps': [], 'error': None}
+    try:
+        user = _get(token, '/user/', proxy_url)
+        user_id = user.get('user_id')
+        if not user_id:
+            raise RuntimeError('user_id не получен')
+        hosts_resp = _get(token, f'/user/{user_id}/hosts/', proxy_url)
+        host_id = None
+        for h in hosts_resp.get('hosts', []) or []:
+            hn = (_norm_host(h.get('ascii_host_url') or '')
+                  or _norm_host(h.get('host_id', '')))
+            if hn == want:
+                host_id = h.get('host_id')
+                break
+        if not host_id:
+            out['error'] = f'хост {want} не найден в аккаунте Вебмастера'
+            return out
+        resp = _get(token, f'/user/{user_id}/hosts/{host_id}/sitemaps/',
+                    proxy_url)
+        for s in (resp or {}).get('sitemaps', []) or []:
+            out['sitemaps'].append({
+                'url': s.get('sitemap_url') or s.get('url') or '',
+                'errors': (s.get('errors_count')
+                           if s.get('errors_count') is not None
+                           else s.get('errors')),
+                'urls_count': s.get('urls_count'),
+                'last_access': (s.get('last_access_date')
+                                or s.get('last_access') or ''),
+            })
+        _log(f'Вебмастер-API: sitemap-файлов у {want}: {len(out["sitemaps"])}')
+    except Exception as e:
+        out['error'] = str(e)
+        _log(f'⚠ Вебмастер-API (sitemaps {want}): {e}')
+    return out
+
+
 if __name__ == '__main__':
     # Самотест парсинга без сети
     sample = {'problems': {
