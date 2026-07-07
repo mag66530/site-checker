@@ -34,7 +34,7 @@ PROJECTS = {
         ('smu',     'Россия · stalmetural.ru'),
         ('smu-uz',  'Узбекистан · stalmetural.uz'),
         ('smu-az',  'Азербайджан · smg.az'),
-        ('smu-az2', 'Азербайджан, перевод · smg.az'),
+        ('smu-az2', 'Азербайджан, перевод · steelgroup.az'),
         ('smu-am',  'Армения · stalmetural.am'),
         ('smu-kg',  'Кыргызстан · stalmetural.kg'),
         ('smu-kz',  'Казахстан · stalmetural.kz'),
@@ -42,12 +42,18 @@ PROJECTS = {
     ],
     'imp': [
         ('imp',    'Россия · inmetprom.ru'),
-        ('imp-uz', 'Узбекистан · домен уточняется'),
-        ('imp-kz', 'Казахстан · домен уточняется'),
-        ('imp-kg', 'Кыргызстан · домен уточняется'),
-        ('imp-rb', 'Беларусь · домен уточняется'),
+        ('imp-uz', 'Узбекистан · inmetprom.uz'),
+        ('imp-kz', 'Казахстан · inmetprom.kz'),
+        ('imp-kg', 'Кыргызстан · inmetprom.kg'),
+        ('imp-rb', 'Беларусь · inmetprom.by'),
     ],
-    'mpe': [('mpe', 'Россия · mepen.ru')],
+    'mpe': [
+        ('mpe',    'Россия · mepen.ru'),
+        ('mpe-uz', 'Узбекистан · домен уточняется'),
+        ('mpe-kz', 'Казахстан · домен уточняется'),
+        ('mpe-kg', 'Кыргызстан · домен уточняется'),
+        ('mpe-rb', 'Беларусь · домен уточняется'),
+    ],
 }
 
 st.title('🎯 Проверка целей')
