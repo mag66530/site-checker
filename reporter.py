@@ -1701,6 +1701,98 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100):
     return row
 
 
+# ── Лист «Вёрстка» (п.1.11, ТЗ 2.1/2.1.1: viewport, стили, @media) ──
+
+
+def _build_layout_sheet(wb, results):
+    """Лист вёрстки и адаптивности: страницы без viewport, битые CSS,
+    отсутствие @media. Добавляется только если проверка выполнялась."""
+    checked = [r for r in results if getattr(r, 'layout', None)]
+    if not checked:
+        return
+
+    bad = [r for r in checked if r.layout.get('issues')]
+    warned = [r for r in checked if (not r.layout.get('issues')
+                                     and r.layout.get('warnings'))]
+    has_bugs = bool(bad)
+
+    ws = wb.create_sheet('Вёрстка')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 18   # Город
+    ws.column_dimensions['C'].width = 14   # Тип
+    ws.column_dimensions['D'].width = 62   # URL
+    ws.column_dimensions['E'].width = 60
+    ws.column_dimensions['F'].width = 3
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Вёрстка и адаптивность (п.1.11)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('ТЗ 2.1/2.1.1: страницы выводятся со стилями на ПК и мобильных. '
+               'Проверяем по HTML/CSS: задан тег viewport (без него мобильная '
+               'версия не масштабируется), каждый подключённый CSS-файл реально '
+               'грузится (4xx/5xx = страница без вёрстки), в стилях есть '
+               '@media-запросы по ширине (признак адаптивности; их отсутствие - '
+               'предупреждение). Полный визуальный рендер это не заменяет - '
+               'выборочный ручной просмотр остаётся.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+
+    # Сводка
+    _no_vp = sum(1 for r in checked if not r.layout.get('viewport'))
+    _css_broken_pages = sum(1 for r in checked if r.layout.get('css_broken'))
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Проверено страниц: {len(checked)} · без viewport: {_no_vp} · '
+               f'с битыми CSS: {_css_broken_pages} · предупреждений: {len(warned)}')
+    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 26
+    row += 2
+
+    # Секция 1: проблемы (сгруппированы по тексту)
+    _meta_section_title(ws, row, f'Проблемы вёрстки  ({len(bad)})',
+                        C.err if bad else C.ok)
+    row += 1
+    if not bad:
+        _meta_ok_line(ws, row, '✅ На всех проверенных страницах viewport задан, '
+                               'все CSS-файлы грузятся.')
+        row += 2
+    else:
+        row = _render_issue_groups(
+            ws, row, _issue_groups(bad, 'layout', 'issues'), C.err)
+
+    # Секция 2: битые CSS-файлы (по файлу: какой файл на каких страницах)
+    _by_css = {}
+    for r in checked:
+        for b in (r.layout.get('css_broken') or []):
+            _key = f'{b.get("url", "")} (HTTP {b.get("status")})'
+            _by_css.setdefault(_key, []).append(r)
+    if _by_css:
+        _meta_section_title(ws, row, f'Битые CSS-файлы  ({len(_by_css)})', C.err)
+        row += 1
+        row = _render_issue_groups(
+            ws, row, sorted(_by_css.items(), key=lambda kv: -len(kv[1])), C.err)
+
+    # Секция 3: предупреждения (нет @media)
+    if warned:
+        _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
+        row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(warned, 'layout', 'warnings'), C.warn)
+
+
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
 
 _META_FIELD_LABEL = {'title': 'title', 'description': 'description', 'h1': 'H1'}
@@ -2436,6 +2528,9 @@ def build_report(
     meta_bad_pages = [r for r in results
                       if getattr(r, 'has_meta_issues', False)
                       or getattr(r, 'has_meta_unique_issues', False)]
+
+    # Вёрстка (п.1.11): нет viewport / битые CSS
+    layout_bad_pages = [r for r in results if getattr(r, 'has_layout_issues', False)]
     _mdups = (meta_summary or {}).get('duplicates') or {}
     meta_dup_groups = (len(_mdups.get('same_city') or [])
                        + len(_mdups.get('cross_city') or [])
@@ -2545,6 +2640,11 @@ def build_report(
             _mb.append(f'{meta_dup_groups} групп дублей (title/описания/URL)')
         summary_text += ('\nМетаданные: ' + ', '.join(_mb)
                          + ' - см. лист «Метаданные».')
+    if layout_bad_pages:
+        summary_text += (f'\nВёрстка: проблемы (viewport/CSS) на '
+                         f'{len(layout_bad_pages)} '
+                         f'{_plural_pages(len(layout_bad_pages))} - '
+                         f'см. лист «Вёрстка».')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -2595,6 +2695,7 @@ def build_report(
         ('Индексация', 'если есть лист - расхождения сигналов страниц с robots.txt (noindex, canonical) и sitemap↔robots.'),
         ('Метаданные', 'если есть лист - title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
         ('Заголовки и мета', 'если есть лист - единственность title/description/H1, дубли H2 и заголовки вне текста.'),
+        ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS-стилей и признак адаптивности (@media).'),
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
@@ -2626,6 +2727,9 @@ def build_report(
 
     # ─── Лист метаданных (п.1.8) - если проверка выполнялась ────────
     _build_meta_sheet(wb, results, meta_summary)
+
+    # ─── Лист вёрстки (п.1.11) - если проверка выполнялась ──────────
+    _build_layout_sheet(wb, results)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
