@@ -80,24 +80,35 @@ def extract_meta(html: str) -> dict:
 
 
 def _city_stems(city: str) -> list:
-    """Стемы слов города: «Нижний Новгород» → ['нижн', 'новгород'].
-    Отрезаем окончание (до 2 букв), чтобы «в Москве» совпало с «Москва»."""
+    """Варианты стемов по каждому слову города: [[варианты слова 1], …].
+
+    «Нижний Новгород» → [['нижн'], ['новгор']]. Отрезаем окончание (до
+    2 букв), чтобы «в Москве» совпало с «Москва». Нормализуем ё→е («Орёл»
+    и «в Орле» - разные буквы). Плюс вариант с БЕГЛОЙ гласной: «Орёл» →
+    «Орла/Орлу» - гласная выпадает, поэтому добавляем стем без неё
+    («орл»)."""
     stems = []
     for w in re.split(r'[\s-]+', (city or '').strip().lower()):
         if len(w) < 3:
             continue
-        stems.append(w[:len(w) - 1] if len(w) <= 4 else w[:len(w) - 2])
+        w = w.replace('ё', 'е')
+        variants = [w[:len(w) - 1] if len(w) <= 4 else w[:len(w) - 2]]
+        # Беглая гласная в последнем слоге: орел→орл, посёлок→поселк.
+        if len(w) >= 4 and w[-2] in 'еео' and w[-1] not in 'аеиоуыэюя':
+            variants.append(w[:-2] + w[-1])
+        stems.append(variants)
     return stems
 
 
 def city_in_text(city: str, text: str) -> Optional[bool]:
-    """Есть ли город в тексте (по стемам всех слов названия).
+    """Есть ли город в тексте: каждое слово названия найдено хотя бы одним
+    вариантом стема (терпимо к склонениям, ё/е и беглым гласным).
     None - город не задан/слишком короткий (проверить нельзя)."""
     stems = _city_stems(city)
     if not stems or not text:
         return None if not stems else False
-    low = text.lower()
-    return all(s in low for s in stems)
+    low = text.lower().replace('ё', 'е')
+    return all(any(v in low for v in variants) for variants in stems)
 
 
 # ── Проверка метаданных одной страницы ──────────────────────────────
