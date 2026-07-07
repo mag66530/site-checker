@@ -63,6 +63,8 @@ ACTIONS = {
             ('Главная',   'https://stalmetural.ru/',
              [# СРОЧНО (до автозакрытия): модалка «Ваш город - Москва?» → «Да (N)»
               '!button:has-text("Да"), .city-confirm button:has-text("Да")',
+              # «Заказать звонок» в шапке = #call-back-form → фиксирует callorderclick
+              # (устаревшей цели call_ordering сайт больше не шлёт).
               '#call-back-form', '#txt-back-form', '#txt-back-form-footer',
               '#call-back-form-main, [class*="manager-connect"], a:has-text("Связаться с менеджером")',
               'a:has-text("Показать больше категорий")',                   # morecatalog
@@ -83,12 +85,18 @@ ACTIONS = {
             # «Расчет стоимости» (.cost-calc) → в модалке «В корзину»
             # (raschetst/raschetaddtocart), «Скачать прайс-лист» ловится onclick-генериком.
             ('Листинг',   'https://stalmetural.ru/catalog/truba-profilnaya/',
-             ['.add-to-cart, button:has-text("В корзину"), a:has-text("В корзину"), text=Добавить в корзину',
-              {'цепочка': ['.cost-calc >> visible=true',
-                           '.modal button:has-text("В корзину"), [class*="popup"] button:has-text("В корзину"), button:has-text("В корзину")']},
+             [# кнопка «В корзину» на СМУ - это div.btn.btn-catalog (не <button>/<a>)
+              '.add-to-cart, div.btn:has-text("В корзину"), .btn-catalog:has-text("В корзину"), button:has-text("В корзину"), a:has-text("В корзину"), text=Добавить в корзину',
+              # «Расчет стоимости» (div.cost-calc) открывает попап → в нём «В корзину»
+              # (div.btn) даёт raschetst + raschetaddtocart. Кнопка - div, не <button>.
+              {'цепочка': ['div.cost-calc >> visible=true',
+                           '[class*="popup"] div.btn:has-text("В корзину"), .modal div.btn:has-text("В корзину"), [class*="popup"] button:has-text("В корзину"), div.btn:has-text("В корзину")']},
               '.one-click-to-buy, text=Купить в один клик',
               'text=Срочный заказ, text=Быстрый заказ',
               'text=Не нашли что искали, text=Не нашли']),
+            # «Скачать прайс-лист» (a.btn, onclick reachGoal) → price_download_category
+            ('Листинг (прайс)', 'https://stalmetural.ru/catalog/list-goryachekatanyy/',
+             ['a.btn:has-text("Скачать прайс"), a:has-text("Скачать прайс-лист"), text=Скачать прайс']),
             # Корзина (товар положен «В корзину» на листинге): клик по полю купона
             # + ввод буквы → цель coupon.
             ('Корзина',   'https://stalmetural.ru/basket/',
@@ -123,13 +131,16 @@ ACTIONS = {
             'callorderclick', 'zayavkaclick', 'svyazclick', 'oneclickbuy',
             'managerclick', 'morecatalog', 'gotomorecatalog', 'moreuslugi',
             'moreproizvodstvo', 'click_favorites', 'click_share', 'addocart',
-            'tocart', '404error', 'click_yes_confirm', 'click_no_confirm',
-            'auto_close_confirm', 'izmenit_gorod', 'raschetst', 'raschetaddtocart',
-            'coupon', 'price_download_category', 'call_ordering',
+            'tocart', '404error', 'click_yes_confirm',
+            'izmenit_gorod', 'raschetst', 'raschetaddtocart',
+            'price_download_category',
         ],
         # Подтверждено заказчиком: таких кнопок/форм на сайте НЕТ - статус
         # «Не найдена на сайте» вместо «Нет в коде».
-        'нет_на_сайте': ['phone_header', 'phone_footer', 'zvonok_text_category'],
+        # call_ordering: кнопка «Заказать звонок» в шапке есть, но сайт шлёт с неё
+        # актуальную цель callorderclick, а не call_ordering (старый идентификатор).
+        'нет_на_сайте': ['phone_header', 'phone_footer', 'zvonok_text_category',
+                         'call_ordering'],
     },
     'imp': {
         'страницы': [
@@ -508,20 +519,40 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                     'a[onclick*="reachGoal"], div[onclick*="reachGoal"], '
                     'span[onclick*="reachGoal"], '
                     'button[onclick*="reachGoal"]:not([type="submit"])')
-                for i in range(min(_rg.count(), 20)):
+                _видели_цель: set[str] = set()   # по одной цели каждого id хватит
+                _обработано = 0
+                for i in range(_rg.count()):
+                    if _обработано >= 30:
+                        break
                     el = _rg.nth(i)
+                    # id цели из onclick - чтобы не жать 40 одинаковых «городов»
                     try:
-                        el.scroll_into_view_if_needed(timeout=1200)
-                        try:
-                            el.click(timeout=1800, no_wait_after=True)
-                        except Exception:
-                            # скрытый элемент (d-none и т.п.): шлём событие клика
-                            el.dispatch_event('click')
-                        page.wait_for_timeout(300)
-                        page.keyboard.press('Escape')
-                        page.wait_for_timeout(150)
+                        _oc = el.get_attribute('onclick') or ''
+                        _m = re.search(r"reachGoal[^)]*['\"]([\w\-.]+)['\"]", _oc)
+                        _gid = _m.group(1) if _m else f'#{i}'
                     except Exception:
+                        _gid = f'#{i}'
+                    if _gid in _видели_цель:
                         continue
+                    _видели_цель.add(_gid)
+                    _обработано += 1
+                    # scroll не должен «съедать» скрытый элемент: если не вышло -
+                    # всё равно шлём dispatch_event (onclick с reachGoal сработает
+                    # без перехода по ссылке - важно для города в скрытом попапе).
+                    try:
+                        el.scroll_into_view_if_needed(timeout=1000)
+                    except Exception:
+                        pass
+                    try:
+                        try:
+                            el.click(timeout=1500, no_wait_after=True)
+                        except Exception:
+                            el.dispatch_event('click')   # скрытый/перекрытый
+                        page.wait_for_timeout(280)
+                        page.keyboard.press('Escape')
+                        page.wait_for_timeout(120)
+                    except Exception:
+                        pass
                     if page.url != url:      # ссылка увела - вернёмся
                         try:
                             page.go_back(wait_until='domcontentloaded', timeout=15000)
