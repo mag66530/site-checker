@@ -49,7 +49,8 @@ GENERIC_CLICK_SELECTORS = [
     "a[href*='max.ru'], a[href*='web.max']",
     "a[href*='yandex.ru/profile'], a[href*='yandex.ru/maps/org']",
 ]
-MAX_PER_SELECTOR = 3     # кликаем не больше N элементов на селектор (шапка+подвал)
+MAX_PER_SELECTOR = 5     # кликаем не больше N элементов на селектор (шапка+подвал+
+                         # блоки «в корзину»: похожие/ранее просмотренные/акции)
 
 # План действий по проектам: какие страницы открыть и какие кнопки нажать
 # (кнопки открытия модалок дают цели «*click»; сами формы НЕ отправляем).
@@ -106,14 +107,16 @@ ACTIONS = {
               'text=Изменить город, text=Сменить город, [class*="city-change"], [class*="change-city"]']),
             ('Контакты',  'https://inmetprom.ru/contacts/', []),
             ('Листинг',   'https://inmetprom.ru/catalog/listovoj-prokat/',
-             ['text=Быстрый заказ',
-              'text=В корзину, text=в корзину',
+             ['.add-to-cart-btn',                          # «в корзину» на карточках листинга
+              'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]',
               'a:has-text("Скачать прайс"), text=Скачать прайс',
-              '.tags a, [class*="tag"] a, [class*="tags"] a']),
+              '.tags a, [class*="tag"] a, [class*="tags"] a',
+              'button:has-text("Показать ещё"), a:has-text("Показать ещё")']),
             ('Товар',     'https://inmetprom.ru/list-gesti-0-2-mm-klass-1-gost-13345-85/',
-             ['text=В корзину, text=в корзину',
-              'text=Быстрый заказ',
-              'text=Оставить отзыв, text=Написать отзыв, a:has-text("Отзыв")']),
+             ['.add-to-cart-btn',                          # «в корзину» ВСЕХ блоков (похожие/ранее/с этим товаром/акции)
+              'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]',
+              'text=Оставить отзыв, text=Написать отзыв, a:has-text("Отзыв")',
+              'text=Нужна консультация, [class*="konsultac"]']),
             ('Страница 404', 'https://inmetprom.ru/nesuschestvuyushaya-404-xyz/', []),
         ],
         'ожидаемые': [
@@ -125,9 +128,17 @@ ACTIONS = {
             'klik-v-podvale-po-napisat-nam', 'klik-na-tg-v-mobilke',
             'klik-na-whatsapp-v-mobilke', 'click-telephone-utf-gorod',
             'izmenit_gorod', 'click_yes_confirm', 'bystryy-zakaz-katalog',
-            'bystryy-zakaz-listing', 'v-cart-listing', 'listing-skachat-prays-list',
-            'listing-klik-po-tegam', 'v-cart-kartochka', 'bistrii-zakaz-cartochka',
-            'klik-tel', '404error',
+            'bystryy-zakaz-listing', 'v-cart-listing', 'v-cart-listing-img',
+            'bistrii-zakaz-listing', 'bistrii-zakaz-listing-img',
+            'listing-skachat-prays-list', 'listing-klik-po-tegam', 'v-cart-kartochka',
+            'bistrii-zakaz-cartochka', 'v-cart-kartochka-ranee-prosmotrennye',
+            'bistrii-zakaz-cartochka-ranee-prosmotrennye',
+            'v-korzinu-kartochka-pokhozhiye-tovary',
+            'bystryy-zakaz-kartochka-pokhozhiye-tovary',
+            'v-korzinu-kartochka-s-etim-tovarom-pokupayut',
+            'bystryy-zakaz-kartochka-s-etim-tovarom-pokupayut',
+            'v-korzinu-kartochka-tovara-aktsii', 'bystryy-zakaz-kartochka-tovara-aktsii',
+            'tovar_konsultaciya', 'klik-tel', '404error',
         ],
     },
     'mpe': {
@@ -409,35 +420,43 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             except Exception:
                 pass
 
-            # клики проекта (кнопки модалок форм и т.п.). Escape ДО клика снимает
-            # модалку прошлого клика (перекрытие - главная причина «через раз»),
-            # Escape ПОСЛЕ закрывает открытую. Без перезагрузок - быстро; если
-            # элемента нет или клик не прошёл, просто идём дальше.
+            # клики проекта (кнопки модалок форм, «в корзину» разных блоков и т.п.).
+            # Кликаем НЕСКОЛЬКО элементов на селектор: на карточке товара кнопки
+            # «в корзину»/«быстрый заказ» повторяются в блоках «похожие», «ранее
+            # просмотренные», «с этим товаром покупают», «акции» - у каждой СВОЯ
+            # цель. Escape ДО клика снимает модалку прошлого (перекрытие - причина
+            # «через раз»), Escape ПОСЛЕ закрывает открытую.
             for sel in клики:
                 try:
-                    page.keyboard.press('Escape')
-                    page.wait_for_timeout(150)
-                    el = page.locator(sel).first
-                    if el.count() == 0:
-                        continue
-                    el.scroll_into_view_if_needed(timeout=1500)
-                    try:
-                        el.click(timeout=2000)
-                    except Exception:
-                        el.click(timeout=2000, force=True)
-                    page.wait_for_timeout(600)
-                    # клик мог быть по ссылке-переходу (Каталог/Акции/Прайс в шапке):
-                    # цель сработала, а нам нужно вернуться, чтобы кликать дальше.
-                    if page.url != url:
-                        try:
-                            page.go_back(wait_until='domcontentloaded', timeout=15000)
-                        except Exception:
-                            page.goto(url, wait_until='domcontentloaded', timeout=30000)
-                        page.wait_for_timeout(600)
-                    page.keyboard.press('Escape')
-                    page.wait_for_timeout(200)
+                    total = page.locator(sel).count()
                 except Exception:
-                    pass
+                    continue
+                for i in range(min(total, MAX_PER_SELECTOR)):
+                    try:
+                        page.keyboard.press('Escape')
+                        page.wait_for_timeout(150)
+                        el = page.locator(sel).nth(i)
+                        if el.count() == 0:
+                            break
+                        el.scroll_into_view_if_needed(timeout=1500)
+                        try:
+                            el.click(timeout=2000)
+                        except Exception:
+                            el.click(timeout=2000, force=True)
+                        page.wait_for_timeout(500)
+                        # клик мог быть по ссылке-переходу (Каталог/Акции/Прайс в
+                        # шапке): цель сработала, но нужно вернуться и кликать дальше.
+                        if page.url != url:
+                            try:
+                                page.go_back(wait_until='domcontentloaded', timeout=15000)
+                            except Exception:
+                                page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                            page.wait_for_timeout(600)
+                            break   # после ухода нумерация сбилась - к следующему селектору
+                        page.keyboard.press('Escape')
+                        page.wait_for_timeout(150)
+                    except Exception:
+                        continue
             page.wait_for_timeout(300)
 
             страницы_инфо.append({'название': название, 'url': url, 'код': код,
