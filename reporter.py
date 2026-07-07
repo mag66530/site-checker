@@ -366,7 +366,11 @@ def _problem_text(r):
                 if b.key in ('photos', 'img_alt') and getattr(b, 'count', None):
                     phrase += f' ({b.count})'
                 if getattr(b, 'note', ''):
-                    phrase += f' ({b.note})'
+                    # У картинок без alt пояснение - список адресов: через «:»
+                    if b.key == 'img_alt':
+                        phrase += f': {b.note}'
+                    else:
+                        phrase += f' ({b.note})'
                 bugs.append(phrase)
             if bugs:
                 parts.append(', '.join(bugs))

@@ -505,13 +505,36 @@ _RE_HTML_COMMENT = re.compile(r'<!--.*?-->', re.S)
 _RE_ALT_ATTR = re.compile(r'(?<![\w-])alt\s*(?==|\s|/|>)', re.I)
 
 
+_RE_IMG_SRC = re.compile(
+    r'(?:data-src|src)\s*=\s*(?:["\']([^"\']+)["\']|([^\s>"\']+))', re.I)
+
+
+def _imgs_no_alt_srcs(html: str) -> list:
+    """Адреса (src) всех <img> БЕЗ атрибута alt - для списка в отчёте."""
+    out = []
+    for tag in _RE_IMG_TAG.findall(_RE_HTML_COMMENT.sub(' ', html or '')):
+        if _RE_ALT_ATTR.search(tag[4:]):         # [4:] отрезает сам «<img»
+            continue
+        m = _RE_IMG_SRC.search(tag)
+        src = ((m.group(1) or m.group(2) or '').strip() if m else '') or '[без src]'
+        if src.startswith('data:'):
+            src = '[inline-картинка]'
+        else:
+            # Короче: только путь, без домена (домен = сама страница)
+            try:
+                from urllib.parse import urlsplit as _us
+                _sp = _us(src)
+                if _sp.netloc:
+                    src = _sp.path or src
+            except Exception:
+                pass
+        out.append(src)
+    return out
+
+
 def _d_img_alt(c: _Ctx):
     """present = у всех <img> есть alt; count = сколько картинок БЕЗ alt."""
-    html = _RE_HTML_COMMENT.sub(' ', c.html)
-    missing = 0
-    for tag in _RE_IMG_TAG.findall(html):
-        if not _RE_ALT_ATTR.search(tag[4:]):     # [4:] отрезает сам «<img»
-            missing += 1
+    missing = len(_imgs_no_alt_srcs(c.html))
     return missing == 0, (missing or None)
 
 
@@ -1484,6 +1507,13 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
                 note = 'в коде есть, но покупатель не видит (скрыто стилями/disabled)'
         if _photo_warn:
             note = _photo_names        # названия товаров с заглушкой
+        # «Alt у картинок»: в пояснение - адреса картинок без alt (компактно,
+        # первые 3 + «и ещё N», чтобы не растягивать отчёт).
+        if blk.key == 'img_alt' and required and not present:
+            _srcs = _imgs_no_alt_srcs(ctx.html)
+            note = '; '.join(_srcs[:3])
+            if len(_srcs) > 3:
+                note += f' и ещё {len(_srcs) - 3}'
         result.blocks.append(BlockResult(
             key=blk.key,
             label=blk.label,
