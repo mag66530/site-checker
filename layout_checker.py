@@ -73,17 +73,21 @@ def check_layout(html: Optional[str], css_infos: Optional[list]) -> dict:
 
 _RE_MENU_ZONE = re.compile(r'<(header|nav)\b[^>]*>.*?</\1>', re.I | re.S)
 _RE_A_HREF = re.compile(r'<a\b[^>]*href\s*=\s*["\']([^"\']+)["\']', re.I)
+_RE_HTML_COMMENT = re.compile(r'<!--.*?-->', re.S)
 
 MENU_LINKS_LIMIT = 40    # ссылок меню на поддомен (тех. страницы + каталог)
 
 
 def extract_menu_links(html: str, base_url: str, limit: int = MENU_LINKS_LIMIT) -> list:
     """Внутренние ссылки из шапки (<header>/<nav>): меню тех. страниц и меню
-    каталога. Только свой хост, без якорей/tel:/mailto:, без дублей."""
+    каталога. Только свой хост, без якорей/tel:/mailto:, без дублей.
+    Закомментированная вёрстка (<!-- … -->) вырезается - выключенные из меню
+    ссылки не проверяем: пользователь по ним перейти не может."""
     from urllib.parse import urljoin, urlsplit
     host = (urlsplit(base_url).netloc or '').lower().removeprefix('www.')
+    html = _RE_HTML_COMMENT.sub(' ', html or '')
     out, seen = [], set()
-    for zone in _RE_MENU_ZONE.finditer(html or ''):
+    for zone in _RE_MENU_ZONE.finditer(html):
         for href in _RE_A_HREF.findall(zone.group(0)):
             href = href.strip()
             if not href or href.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
