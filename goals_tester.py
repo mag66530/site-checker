@@ -61,8 +61,16 @@ ACTIONS = {
     'smu': {
         'страницы': [
             ('Главная',   'https://stalmetural.ru/',
-             ['#call-back-form', '#txt-back-form', '#txt-back-form-footer',
+             [# модалка выбора города: «Да» подтверждает (click_yes_confirm/auto_close_confirm)
+              'text="Да" >> visible=true, .modal button:has-text("Да")',
+              # смена города: открыть выбор города в шапке → кликнуть другой город (izmenit_gorod)
+              {'цепочка': ['[class*="city"], .header__city, button:has-text("Москва"), a:has-text("Москва")',
+                           'text=Санкт-Петербург, text=Казань, a:has-text("Екатеринбург")']},
+              '#call-back-form', '#txt-back-form', '#txt-back-form-footer',
               '#call-back-form-main, [class*="manager-connect"], a:has-text("Связаться с менеджером")',
+              'a:has-text("Показать больше категорий")',                   # morecatalog
+              'a:has-text("Перейти ко всем категориям каталога")',         # gotomorecatalog
+              'a:has-text("категориям производства"), a:has-text("ко всем категориям произ")',
               'button:has-text("Показать больше"), a:has-text("Показать больше")',
               'a:has-text("ко всем категориям"), a:has-text("всем категориям")']),
             ('Контакты',  'https://stalmetural.ru/contacts/', []),
@@ -71,10 +79,12 @@ ACTIONS = {
              ['.breadcrumbs a[href^="tel:"], [class*="breadcrumb"] a[href^="tel:"]',
               'button:has-text("Показать больше"), a:has-text("Показать больше")',
               'a:has-text("ко всем категориям"), a:has-text("всем категориям")']),
-            # Листинг труб (реальные карточки с кнопкой «в корзину» - в отличие
-            # от пружин под заказ): цель tocart/addocart, срочный заказ, «не нашли».
+            # Листинг труб (реальные карточки с кнопкой «в корзину»): tocart/addocart,
+            # + цепочка «Расчёт стоимости» → в модалке «В корзину» (raschetst/raschetaddtocart).
             ('Листинг',   'https://stalmetural.ru/catalog/truba-profilnaya/',
              ['.add-to-cart, button:has-text("В корзину"), a:has-text("В корзину"), text=Добавить в корзину',
+              {'цепочка': ['text=Расчет стоимости, a:has-text("Расчёт стоимости"), a:has-text("Расчет стоимости")',
+                           '.modal button:has-text("В корзину"), [class*="popup"] button:has-text("В корзину"), button:has-text("В корзину")']},
               '.one-click-to-buy, text=Купить в один клик',
               'text=Срочный заказ, text=Быстрый заказ',
               'text=Не нашли что искали, text=Не нашли']),
@@ -90,6 +100,12 @@ ACTIONS = {
             ('Доставка',  'https://stalmetural.ru/delivery/', ['#call-back-form-delivery']),
             ('Вакансии',  'https://stalmetural.ru/vacancy/',
              ['text=Откликнуться, text=Отклик, button:has-text("Откликнуться")']),
+            # Избранное/поделиться настроены ТОЛЬКО на хабаровском поддомене -
+            # ловим click_favorites/click_share именно там.
+            ('Товар (Хабаровск)', 'https://habarovsk.stalmetural.ru/catalog/truba-profilnaya/2972110-truba-profilnaya-100kh10-mm-gost-8639-82-kvadratnaya/',
+             ['[class*="favorite"], [class*="favourite"], [class*="to-fav"], button:has(.an-ico-heart)',
+              '[class*="share"], .an-ico-share, button:has-text("Поделиться")']),
+            ('Избранное (Хабаровск)', 'https://habarovsk.stalmetural.ru/favorites/', []),
             # 404: несуществующий адрес - должна сработать цель 404error
             ('Страница 404', 'https://stalmetural.ru/nesuschestvuyushaya-404-xyz/', []),
         ],
@@ -101,7 +117,8 @@ ACTIONS = {
             'callorderclick', 'zayavkaclick', 'svyazclick', 'oneclickbuy',
             'managerclick', 'morecatalog', 'gotomorecatalog', 'moreuslugi',
             'moreproizvodstvo', 'click_favorites', 'click_share', 'addocart',
-            'tocart', '404error',
+            'tocart', '404error', 'click_yes_confirm', 'click_no_confirm',
+            'auto_close_confirm', 'izmenit_gorod', 'raschetst', 'raschetaddtocart',
         ],
     },
     'imp': {
@@ -356,6 +373,10 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                             })
         ctx.add_init_script(
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
+        try:
+            ctx.clear_cookies()   # чтобы вылезла модалка выбора города (кука не стоит)
+        except Exception:
+            pass
         page = ctx.new_page()
 
         текущий_url = {'u': ''}
@@ -468,6 +489,35 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             # цель. Escape ДО клика снимает модалку прошлого (перекрытие - причина
             # «через раз»), Escape ПОСЛЕ закрывает открытую.
             for sel in клики:
+                # ЦЕПОЧКА: {'цепочка': [sel1, sel2, ...]} - клики ПОДРЯД без Escape
+                # между ними (модалка остаётся открытой). Нужно, когда одна цель
+                # ведёт к другой: «Расчёт стоимости» → в модалке «В корзину»;
+                # модалка города «Нет» → выбор города.
+                if isinstance(sel, dict) and sel.get('цепочка'):
+                    try:
+                        page.keyboard.press('Escape')
+                        page.wait_for_timeout(150)
+                        for step in sel['цепочка']:
+                            el = page.locator(step).first
+                            if el.count() == 0:
+                                break
+                            el.scroll_into_view_if_needed(timeout=1500)
+                            try:
+                                el.click(timeout=2500)
+                            except Exception:
+                                el.click(timeout=2500, force=True)
+                            page.wait_for_timeout(900)
+                        page.keyboard.press('Escape')
+                        page.wait_for_timeout(200)
+                        if page.url != url:
+                            try:
+                                page.go_back(wait_until='domcontentloaded', timeout=15000)
+                            except Exception:
+                                page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                            page.wait_for_timeout(600)
+                    except Exception:
+                        pass
+                    continue
                 try:
                     total = page.locator(sel).count()
                 except Exception:
@@ -578,15 +628,25 @@ def _клик_соцсети(g: dict) -> bool:
     return any(k in text for k in _СОЦ_КОНТАКТ_КЛЮЧИ)
 
 
+def _вход_в_аккаунт(g: dict) -> bool:
+    """Цель «вход/авторизация в личном кабинете». На сайтах входа как такового
+    нет (или он не найден) - помечаем «Не найдено», а не «нужно спец-действие»."""
+    ids = ' '.join(g.get('идентификаторы') or []).lower()
+    name = (g.get('название', '') or '').lower()
+    return ('login' in ids or 'avtoriz' in ids
+            or 'вход в аккаунт' in name or 'авторизов' in name)
+
+
 # Цвета статусов и порядок вывода - на уровне модуля (используются в
 # классификации и в рисовании листов).
 _GREEN, _RED, _GREY, _BLUE = '1E8E3E', 'C62828', '757575', '1565C0'
 _ФОН = {_GREEN: 'E6F4EA', _RED: 'FCE8E6', _BLUE: 'E8F0FE', _GREY: 'F1F3F4'}
 _ПОРЯДОК = {'Сработала': 0, 'Сработала (формы)': 1, 'Действие выполнено': 2,
             'Сработает': 3, 'Нет в коде сайта': 4, 'НЕ сработала': 5, 'Проблема': 6,
-            'Нужно спец-действие': 7, 'Не проверено': 8, 'Нет автопроверки': 9,
-            'Проверяется формами': 10, 'Только в Метрике': 11, 'Составная': 12,
-            'Вручную': 13}
+            'Нужно спец-действие': 7, 'Не найдено на сайте': 8, 'Не проверено': 9,
+            'Нет автопроверки': 10, 'Проверяется формами': 11,
+            'Автоцель (Метрика сама)': 12, 'Только в Метрике': 12, 'Составная': 13,
+            'Вручную': 14}
 
 
 def _классифицировать(pid: str, каталог: dict, прогон: dict) -> dict:
@@ -675,6 +735,12 @@ def _классифицировать(pid: str, каталог: dict, прого
                 детали = ('зафиксирована при отправке формы на странице «Проверка '
                           f'форм» (идентификатор «{форма_id}»)')
                 счёт['ok_forms'] += 1
+            elif _вход_в_аккаунт(g):
+                # Вход в личный кабинет на сайте найти не удалось.
+                способ, статус, цвет = 'вручную', 'Не найдено на сайте', GREY
+                детали = ('кнопку/страницу входа в личный кабинет на сайте найти '
+                          'не удалось - проверьте вручную')
+                счёт['manual'] += 1
             elif в_формах:
                 # Цель привязана к отправке формы в конфиге, но результата форм ещё
                 # нет: подскажем запустить «Проверку форм» (результат подтянется сам).
@@ -764,12 +830,13 @@ def _классифицировать(pid: str, каталог: dict, прого
                           'Метрике цель зачтётся')
                 счёт['ok'] += 1
             else:
-                статус, цвет = 'Только в Метрике', BLUE
-                детали = ('автоцель Метрики (форма/файл/поиск/контакты). Считается на '
-                          'сервере Яндекса без goal-сигнала в трафике, поэтому мы не '
-                          'видим факт срабатывания напрямую. Само действие закрывает '
-                          '«Проверка форм» (для форм) либо оно происходит у реального '
-                          'посетителя - смотрите цифры в самой Метрике')
+                статус, цвет = 'Автоцель (Метрика сама)', BLUE
+                детали = ('это автоцель Метрики: Яндекс считает её сам на сервере '
+                          '(отправка формы/файл/поиск/контакты) - отдельного '
+                          'goal-сигнала в трафике нет, извне факт срабатывания не '
+                          'виден. Действие закрывает «Проверка форм» (для форм) либо '
+                          'оно совершается реальным посетителем - смотрите цифры в '
+                          'самой Метрике')
                 счёт['info'] += 1
         elif t == 'jivo':
             способ, статус, цвет = 'вручную', 'Вручную', GREY
