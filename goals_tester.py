@@ -124,23 +124,30 @@ ACTIONS = {
     'imp': {
         'страницы': [
             ('Главная',   'https://inmetprom.ru/',
-             ['text="Да" >> visible=true',                 # модалка подтверждения города
-              '[data-my-modal="#modal-callback"]',
-              '.banner-fast-order__application',
-              'button:has-text("Оставить заявку"), button:has-text("Просчёт"), button:has-text("Заявка")',
-              'header a:has-text("Прайс"), a:has-text("Прайс-лист")',
-              'header a:has-text("Каталог")',
+             [# ШАПКА: заявка/просчёт, каталог (klik-na-katalog-v-shapke), акции, прайс
+              '[data-my-modal="#modal-callback"], .banner-fast-order__application',
+              'header a:has-text("Каталог"), .header a:has-text("Каталог")',
               'header a:has-text("Акции"), a:has-text("Акции")',
-              'text=Написать нам',
-              'text=Звонок менеджеру, a:has-text("менеджеру")',
-              'text=Изменить город, text=Сменить город, [class*="city-change"], [class*="change-city"]']),
-            ('Контакты',  'https://inmetprom.ru/contacts/', []),
-            ('Листинг',   'https://inmetprom.ru/catalog/listovoj-prokat/',
-             ['.add-to-cart-btn',                          # «в корзину» на карточках листинга
+              'header a:has-text("Прайс"), a:has-text("Прайс-лист")',
+              # СМЕНА ГОРОДА: открыть модалку города → кликнуть другой город (izmenit_gorod)
+              {'цепочка': ['[data-my-modal="#city-modal-id"], .choose-city',
+                           '.city-modal__city:not(.active), #city-modal-id a:has-text("Санкт-Петербург")']},
+              # ПОДВАЛ: звонок менеджеру, написать нам, городской телефон
+              '.footer-manager-call, footer a:has-text("Звонок менеджеру")',
+              '.footer-email, footer a:has-text("Написать нам")',
+              '.footer-phone, footer .telephone-utf']),
+            ('Контакты',  'https://inmetprom.ru/contacts/',
+             ['.footer-manager-call', '.footer-email']),
+            ('Листинг',   'https://inmetprom.ru/catalog/reshetchatyj-nastil/',
+             ['a:has-text("Скачать прайс-лист"), button:has-text("Скачать прайс-лист"), a:has-text("Скачать прайс")',
+              '.add-to-cart-btn',
               'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]',
-              'a:has-text("Скачать прайс"), text=Скачать прайс',
               '.tags a, [class*="tag"] a, [class*="tags"] a',
               'button:has-text("Показать ещё"), a:has-text("Показать ещё")']),
+            # Спецпредложения/акции: «в корзину» и «быстрый заказ» карточек акций.
+            ('Акции',     'https://inmetprom.ru/specials/',
+             ['.add-to-cart-btn, button:has-text("В корзину")',
+              'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]']),
             ('Товар',     'https://inmetprom.ru/list-gesti-0-2-mm-klass-1-gost-13345-85/',
              ['.add-to-cart-btn',                          # «в корзину» ВСЕХ блоков (похожие/ранее/с этим товаром/акции)
               'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]',
@@ -637,6 +644,17 @@ def _вход_в_аккаунт(g: dict) -> bool:
             or 'вход в аккаунт' in name or 'авторизов' in name)
 
 
+def _лид_цель(g: dict) -> bool:
+    """Составная «лид»-цель («Основная цель на лиды», «Весь сайт», d_Goal/Lid_Goal):
+    Метрика сама агрегирует её из под-целей - отдельного goal-сигнала нет, считается
+    в кабинете. Помечаем как автоцель Метрики."""
+    ids = ' '.join(g.get('идентификаторы') or []).lower()
+    name = (g.get('название', '') or '').lower()
+    return ('d_goal' in ids or 'lid_goal' in ids or 'lidgoal' in ids
+            or 'основная цель на лиды' in name or 'весь сайт' in name
+            or 'лиды не основные' in name)
+
+
 # Цвета статусов и порядок вывода - на уровне модуля (используются в
 # классификации и в рисовании листов).
 _GREEN, _RED, _GREY, _BLUE = '1E8E3E', 'C62828', '757575', '1565C0'
@@ -724,7 +742,15 @@ def _классифицировать(pid: str, каталог: dict, прого
             форма_id = _форма_поймала(g)
             в_формах = any(gid in формные for gid in (g.get('идентификаторы') or []))
             _особое = _нужно_спец_действие(g)
-            if hit:
+            if _лид_цель(g):
+                # Составная лид-цель: Метрика агрегирует сама на сервере - в отчёте
+                # всегда «автоцель», а не зелёное срабатывание под-цели.
+                способ, статус, цвет = 'автоцель Метрики', 'Автоцель (Метрика сама)', BLUE
+                детали = ('составная «лид»-цель (Основная цель на лиды/Весь сайт): '
+                          'Метрика собирает её из под-целей сама на сервере - '
+                          'отдельного goal-сигнала в трафике нет, смотрите в кабинете')
+                счёт['info'] += 1
+            elif hit:
                 способ, статус, цвет = 'клики автотеста', 'Сработала', GREEN
                 детали = f'зафиксирован идентификатор «{hit}»'
                 счёт['ok'] += 1
