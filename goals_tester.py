@@ -61,11 +61,8 @@ ACTIONS = {
     'smu': {
         'страницы': [
             ('Главная',   'https://stalmetural.ru/',
-             [# модалка выбора города: «Да» подтверждает (click_yes_confirm/auto_close_confirm)
-              'text="Да" >> visible=true, .modal button:has-text("Да")',
-              # смена города: открыть выбор города в шапке → кликнуть другой город (izmenit_gorod)
-              {'цепочка': ['[class*="city"], .header__city, button:has-text("Москва"), a:has-text("Москва")',
-                           'text=Санкт-Петербург, text=Казань, a:has-text("Екатеринбург")']},
+             [# СРОЧНО (до автозакрытия): модалка «Ваш город - Москва?» → «Да (N)»
+              '!button:has-text("Да"), .city-confirm button:has-text("Да")',
               '#call-back-form', '#txt-back-form', '#txt-back-form-footer',
               '#call-back-form-main, [class*="manager-connect"], a:has-text("Связаться с менеджером")',
               'a:has-text("Показать больше категорий")',                   # morecatalog
@@ -73,21 +70,30 @@ ACTIONS = {
               'a:has-text("категориям производства"), a:has-text("ко всем категориям произ")',
               'button:has-text("Показать больше"), a:has-text("Показать больше")',
               'a:has-text("ко всем категориям"), a:has-text("всем категориям")']),
-            ('Контакты',  'https://stalmetural.ru/contacts/', []),
+            ('Контакты',  'https://stalmetural.ru/contacts/',
+             [# смена города: «изменить» в шапке → выбрать другой город (izmenit_gorod)
+              {'цепочка': ['a:has-text("изменить"), text=изменить',
+                           'a:has-text("Санкт-Петербург"), a:has-text("Казань")']}]),
             # breadcrumbphone - клик по номеру в «хлебных крошках» каталога
             ('Каталог',   'https://stalmetural.ru/catalog/',
              ['.breadcrumbs a[href^="tel:"], [class*="breadcrumb"] a[href^="tel:"]',
               'button:has-text("Показать больше"), a:has-text("Показать больше")',
               'a:has-text("ко всем категориям"), a:has-text("всем категориям")']),
             # Листинг труб (реальные карточки с кнопкой «в корзину»): tocart/addocart,
-            # + цепочка «Расчёт стоимости» → в модалке «В корзину» (raschetst/raschetaddtocart).
+            # «Расчет стоимости» (.cost-calc) → в модалке «В корзину»
+            # (raschetst/raschetaddtocart), «Скачать прайс-лист» ловится onclick-генериком.
             ('Листинг',   'https://stalmetural.ru/catalog/truba-profilnaya/',
              ['.add-to-cart, button:has-text("В корзину"), a:has-text("В корзину"), text=Добавить в корзину',
-              {'цепочка': ['text=Расчет стоимости, a:has-text("Расчёт стоимости"), a:has-text("Расчет стоимости")',
+              {'цепочка': ['.cost-calc >> visible=true',
                            '.modal button:has-text("В корзину"), [class*="popup"] button:has-text("В корзину"), button:has-text("В корзину")']},
               '.one-click-to-buy, text=Купить в один клик',
               'text=Срочный заказ, text=Быстрый заказ',
               'text=Не нашли что искали, text=Не нашли']),
+            # Корзина (товар положен «В корзину» на листинге): клик по полю купона
+            # + ввод буквы → цель coupon.
+            ('Корзина',   'https://stalmetural.ru/basket/',
+             [{'цепочка': [{'ввод': '.basket-coupon-block-field input, input[id*="coupon" i], input[name*="coupon" i]',
+                            'текст': 'а'}]}]),
             # Первый товар открываем, чтобы он попал в «Ранее просмотренные» второго.
             ('Товар (труба)', 'https://stalmetural.ru/catalog/truba-profilnaya/2972110-truba-profilnaya-100kh10-mm-gost-8639-82-kvadratnaya/',
              ['.one-click-to-buy', 'text=Добавить в корзину, text=В корзину']),
@@ -119,7 +125,11 @@ ACTIONS = {
             'moreproizvodstvo', 'click_favorites', 'click_share', 'addocart',
             'tocart', '404error', 'click_yes_confirm', 'click_no_confirm',
             'auto_close_confirm', 'izmenit_gorod', 'raschetst', 'raschetaddtocart',
+            'coupon', 'price_download_category', 'call_ordering',
         ],
+        # Подтверждено заказчиком: таких кнопок/форм на сайте НЕТ - статус
+        # «Не найдена на сайте» вместо «Нет в коде».
+        'нет_на_сайте': ['phone_header', 'phone_footer', 'zvonok_text_category'],
     },
     'imp': {
         'страницы': [
@@ -181,24 +191,34 @@ ACTIONS = {
     },
     'mpe': {
         'страницы': [
+            # Цели МПЭ прошиты в onclick="ym(...,'reachGoal','X')" - генерик-кликер
+            # движка снимает их сам (login/citys/about/catalog/smotretvse/raschet/
+            # rekvizity_podval). Ниже - только то, что требует особых шагов.
             ('Главная',   'https://mepen.ru/',
              ['header.header-kostyl .bottom-header-right button.popup_form',
-              'text=Выбрать город, text=Ваш город, [class*="city-select"], [class*="select-city"]',
-              'text=Узнать больше',
-              'header a:has-text("Каталог"), a:has-text("каталог")',
-              'button:has-text("Рассчитать"), text=Рассчитать стоимость',
-              'text=Смотреть всё, text=Показать все, a:has-text("Смотреть все")',
-              'footer a:has-text("Реквизиты"), a:has-text("Реквизиты")']),
+              '[onclick*="rasschitatzakaz"]',              # «Прикрепить файл» в форме заказа (скрытый - dispatch)
+              'a.link_more',                               # «Узнать больше» → about
+              'a.footer-link[href="/catalog/"]']),         # «Смотреть все» в подвале → smotretvse
             ('Контакты',  'https://mepen.ru/contacts/',
-             ['a:has-text("Реквизиты"), text=Реквизиты компании']),
-            ('Каталог',   'https://mepen.ru/catalog/',
-             ['text=В корзину, text=в корзину',
-              'text=Смотреть всё, text=Показать',
-              '.catalog-item a, .product-card a, [class*="product"] a[href*="tovar"]']),
+             ['[onclick*="rekvizity_contacts"], a:has-text("Реквизиты компании")']),
+            # Реквизиты: «Скачать реквизиты» → skachat_rekvizity
+            ('Реквизиты', 'https://mepen.ru/rekvizity/',
+             ['[onclick*="skachat_rekvizity"], a:has-text("Скачать реквизиты")']),
+            # Листинг с корзиной (болты): «В корзину» → tocart, клик по карточке →
+            # klik_kartochka_tovara. Товар кладётся в корзину для купона ниже.
+            ('Листинг (болты)', 'https://mepen.ru/catalog/zheleznodorozhnaya-avtomatika/zheleznodorozhnyy-krepezh/bolt/',
+             ['[onclick*="tocart"], button:has-text("В корзину"), text=В корзину',
+              '[onclick*="klik_kartochka_tovara"]']),
+            # Корзина: клик по полю купона → skidochnyy_kupon (товар уже в корзине).
+            ('Корзина',   'https://mepen.ru/personal/basket/',
+             ['[onclick*="skidochnyy_kupon"], text=Введите код купона, [class*="coupon"]']),
+            # Авторизация: кнопка «Авторизоваться» → klik_avtorizovatsya (форма
+            # пустая - вход не произойдёт, заявка не уходит, цель фиксируется).
+            ('Авторизация', 'https://mepen.ru/personal/',
+             ['[onclick*="klik_avtorizovatsya"], button:has-text("Авторизоваться")']),
             ('Товар',     'https://mepen.ru/catalog/tovar/telezhka-tip-b-gcl/',
              ['text=Нужна консультация', 'text=Нашли дешевле',
-              'text=В корзину, text=в корзину',
-              'text=Скидочный купон, text=купон, [class*="coupon"]']),
+              '[onclick*="tovar_v_korzinu"], text=в корзину']),
             ('Страница 404', 'https://mepen.ru/nesuschestvuyushaya-404-xyz/', []),
         ],
         'ожидаемые': [
@@ -206,6 +226,7 @@ ACTIONS = {
             'telegram', 'clickwapp', 'tocart', 'tovar_v_korzinu',
             'klik_kartochka_tovara', 'tovar_konsultaciya', 'klik_nashli_deshevle',
             'citys', 'about', 'rekvizity_podval', 'rekvizity_contacts',
+            'skachat_rekvizity', 'skidochnyy_kupon', 'login', 'klik_avtorizovatsya',
         ],
     },
 }
@@ -432,6 +453,18 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                 страницы_инфо.append({'название': название, 'url': url, 'код': код,
                                       'счётчик': False, 'визит': False})
                 continue
+            # СРОЧНЫЕ клики (префикс '!'): выполняются сразу после загрузки -
+            # до прокрутки и генериков. Нужны для модалки города «Да/Нет»,
+            # которая автозакрывается через несколько секунд.
+            for sel in [s[1:] for s in клики
+                        if isinstance(s, str) and s.startswith('!')]:
+                try:
+                    el = page.locator(sel).first
+                    el.click(timeout=3500)
+                    page.wait_for_timeout(500)
+                except Exception:
+                    pass
+
             html = page.content()
             есть_счётчик = counter in html if counter else False
             _собрать_привязки(html, url)
@@ -467,6 +500,37 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                 except Exception:
                     continue
 
+            # ЭЛЕМЕНТЫ С ЦЕЛЬЮ В onclick: на СМУ/МПЭ цели прошиты прямо в
+            # onclick="ym(...,'reachGoal','X')" - кликаем их все напрямую.
+            # Submit-кнопки и input НЕ трогаем (иначе ушла бы пустая заявка).
+            try:
+                _rg = page.locator(
+                    'a[onclick*="reachGoal"], div[onclick*="reachGoal"], '
+                    'span[onclick*="reachGoal"], '
+                    'button[onclick*="reachGoal"]:not([type="submit"])')
+                for i in range(min(_rg.count(), 20)):
+                    el = _rg.nth(i)
+                    try:
+                        el.scroll_into_view_if_needed(timeout=1200)
+                        try:
+                            el.click(timeout=1800, no_wait_after=True)
+                        except Exception:
+                            # скрытый элемент (d-none и т.п.): шлём событие клика
+                            el.dispatch_event('click')
+                        page.wait_for_timeout(300)
+                        page.keyboard.press('Escape')
+                        page.wait_for_timeout(150)
+                    except Exception:
+                        continue
+                    if page.url != url:      # ссылка увела - вернёмся
+                        try:
+                            page.go_back(wait_until='domcontentloaded', timeout=15000)
+                        except Exception:
+                            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                        page.wait_for_timeout(600)
+            except Exception:
+                pass
+
             # подвал: кликаем ТОЛЬКО соцсети/мессенджеры (открываются новой
             # вкладкой - её закрываем; на текущей странице ничего не ломается).
             # Внутренние ссылки не трогаем, чтобы не уходить со страницы.
@@ -496,15 +560,27 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             # цель. Escape ДО клика снимает модалку прошлого (перекрытие - причина
             # «через раз»), Escape ПОСЛЕ закрывает открытую.
             for sel in клики:
-                # ЦЕПОЧКА: {'цепочка': [sel1, sel2, ...]} - клики ПОДРЯД без Escape
-                # между ними (модалка остаётся открытой). Нужно, когда одна цель
-                # ведёт к другой: «Расчёт стоимости» → в модалке «В корзину»;
-                # модалка города «Нет» → выбор города.
+                if isinstance(sel, str) and sel.startswith('!'):
+                    continue        # срочный - уже выполнен сразу после загрузки
+                # ЦЕПОЧКА: {'цепочка': [шаг1, шаг2, ...]} - действия ПОДРЯД без
+                # Escape между ними (модалка остаётся открытой). Шаг - селектор
+                # (клик) или {'ввод': селектор, 'текст': 'а'} (клик + ввод текста,
+                # напр. поле купона в корзине). Нужно, когда одна цель ведёт к
+                # другой: «Расчёт стоимости» → в модалке «В корзину».
                 if isinstance(sel, dict) and sel.get('цепочка'):
                     try:
                         page.keyboard.press('Escape')
                         page.wait_for_timeout(150)
                         for step in sel['цепочка']:
+                            if isinstance(step, dict) and step.get('ввод'):
+                                el = page.locator(step['ввод']).first
+                                if el.count() == 0:
+                                    break
+                                el.scroll_into_view_if_needed(timeout=1500)
+                                el.click(timeout=2500)
+                                el.type(step.get('текст', 'а'), delay=120)
+                                page.wait_for_timeout(900)
+                                continue
                             el = page.locator(step).first
                             if el.count() == 0:
                                 break
@@ -661,7 +737,8 @@ _GREEN, _RED, _GREY, _BLUE = '1E8E3E', 'C62828', '757575', '1565C0'
 _ФОН = {_GREEN: 'E6F4EA', _RED: 'FCE8E6', _BLUE: 'E8F0FE', _GREY: 'F1F3F4'}
 _ПОРЯДОК = {'Сработала': 0, 'Сработала (формы)': 1, 'Действие выполнено': 2,
             'Сработает': 3, 'Нет в коде сайта': 4, 'НЕ сработала': 5, 'Проблема': 6,
-            'Нужно спец-действие': 7, 'Не найдено на сайте': 8, 'Не проверено': 9,
+            'Нужно спец-действие': 7, 'Не найдено на сайте': 8,
+            'Не найдена на сайте': 8, 'Не проверено': 9,
             'Нет автопроверки': 10, 'Проверяется формами': 11,
             'Автоцель (Метрика сама)': 12, 'Только в Метрике': 12, 'Составная': 13,
             'Вручную': 14}
@@ -680,6 +757,7 @@ def _классифицировать(pid: str, каталог: dict, прого
     url_map = _url_цели_проверка(каталог, страницы)
     _план = ACTIONS.get(pid) or _план_для_домена(каталог.get('домен', ''))
     ожидаемые = {i.lower() for i in _план.get('ожидаемые', [])}
+    нет_на_сайте = {i.lower() for i in _план.get('нет_на_сайте', [])}
     GREEN, RED, GREY, BLUE = _GREEN, _RED, _GREY, _BLUE
     _код_кэш: dict[str, bool] = {}
 
@@ -761,8 +839,19 @@ def _классифицировать(pid: str, каталог: dict, прого
                 детали = ('зафиксирована при отправке формы на странице «Проверка '
                           f'форм» (идентификатор «{форма_id}»)')
                 счёт['ok_forms'] += 1
-            elif _вход_в_аккаунт(g):
-                # Вход в личный кабинет на сайте найти не удалось.
+            elif any(gid.lower() in нет_на_сайте
+                     for gid in (g.get('идентификаторы') or [])):
+                # Подтверждено вручную: такой кнопки/формы на сайте нет.
+                способ, статус, цвет = 'вручную', 'Не найдена на сайте', GREY
+                детали = ('кнопки/формы под эту цель на сайте нет (проверено '
+                          'вручную) - цель осталась в Метрике от старой версии сайта')
+                счёт['manual'] += 1
+            elif _вход_в_аккаунт(g) and not any(
+                    gid.lower() in ожидаемые for gid in (g.get('идентификаторы') or [])):
+                # Вход в личный кабинет: на этом сайте кнопки/страницы входа в
+                # плане прогона нет - найти не удалось, проверяется вручную.
+                # (Если вход в плане есть - напр. МПЭ /personal/ - цель идёт по
+                # обычной логике: сработала/НЕ сработала.)
                 способ, статус, цвет = 'вручную', 'Не найдено на сайте', GREY
                 детали = ('кнопку/страницу входа в личный кабинет на сайте найти '
                           'не удалось - проверьте вручную')
