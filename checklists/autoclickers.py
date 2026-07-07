@@ -81,12 +81,35 @@ def _playwright_ok() -> bool:
         return False
 
 
-def _launch_background(args: list[str], log_path: Path):
+def _cdp_alive(host='127.0.0.1', port=9222, timeout=1.0) -> bool:
+    """Есть ли локальный залогиненный Chrome (CDP 9222)."""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def _session_secret():
+    """base64-сессия для облачного режима из Streamlit Secrets (или None)."""
+    try:
+        from autoclick_browser import SESSION_SECRET_KEY
+        if hasattr(st, 'secrets') and SESSION_SECRET_KEY in st.secrets:
+            return str(st.secrets[SESSION_SECRET_KEY])
+    except Exception:
+        pass
+    return None
+
+
+def _launch_background(args: list[str], log_path: Path, extra_env: dict = None):
     """Запустить процесс в фоне, вывод - в файл. UI не блокируется."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env['PYTHONIOENCODING'] = 'utf-8'
     env['PYTHONUNBUFFERED'] = '1'
+    if extra_env:
+        env.update(extra_env)
     creationflags = 0
     if os.name == 'nt':
         creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -130,12 +153,25 @@ def _run_foreground(args: list[str], title: str):
 
 st.title('🖱 Автокликеры - GSC и Яндекс.Вебмастер')
 
-st.warning(
-    'Кликеры управляют браузером на ЭТОМ компьютере и требуют ручного входа в '
-    'Google/Yandex. Работают, когда приложение запущено **локально** '
-    '(`streamlit run app.py`). В облаке по ссылке клики пока недоступны. '
-    'После переноса на свой сервер - заработают.'
-)
+_cdp = _cdp_alive()
+_cloud_session = _session_secret()
+if _cdp:
+    st.success('Режим: **локальный** - найден залогиненный Chrome (CDP 9222). '
+               'Клики пойдут через него, как обычно.')
+elif _cloud_session:
+    st.info('Режим: **облачный** - локального Chrome нет, но в Secrets есть '
+            'сессия (autoclick_session). Клики пойдут через headless-браузер '
+            'с этой сессией. Если сессия протухла - кликер напишет в лог, '
+            'тогда пере-экспортируй её локально (Шаг 1).')
+else:
+    st.warning(
+        'Локального Chrome нет (CDP 9222) и сессии в Secrets нет '
+        '(autoclick_session). Два пути:\n'
+        '1. **Локально**: открой браузер для входа (Шаг 1) и запускай как раньше.\n'
+        '2. **Облако**: локально экспортируй сессию (кнопка в Шаге 1) и положи '
+        'строку в Streamlit Secrets ключом `autoclick_session` - после этого '
+        'клики работают прямо из облака.'
+    )
 
 if not _playwright_ok():
     st.error(
@@ -156,11 +192,26 @@ st.markdown(
 st.divider()
 
 # ── Шаг 1: вход ─────────────────────────────────────────────────────
-st.subheader('Шаг 1. Открыть браузер и войти')
+st.subheader('Шаг 1. Открыть браузер и войти (локально)')
 st.caption('Откроется Chrome. Войди в Google и Yandex аккаунты проекта. '
            'Окно не закрывай - кликеры к нему подключаются.')
-if st.button('🌐 Открыть браузер для входа', use_container_width=True):
-    _run_foreground(['open_browser.py'], 'Открываю Chrome…')
+_b1, _b2 = st.columns(2)
+with _b1:
+    if st.button('🌐 Открыть браузер для входа', use_container_width=True):
+        _run_foreground(['open_browser.py'], 'Открываю Chrome…')
+with _b2:
+    if st.button('💾 Экспорт сессии для облака', use_container_width=True,
+                 disabled=not _cdp,
+                 help='Выгружает cookies Яндекса/Google из залогиненного '
+                      'Chrome. Строку из файла положи в Streamlit Secrets '
+                      'ключом autoclick_session - клики заработают в облаке. '
+                      'Кнопка активна только локально (нужен Chrome на 9222).'):
+        _run_foreground(['session_export.py'], 'Экспортирую сессию…')
+        _b64_file = ROOT / 'cache' / 'autoclick_session.b64'
+        if _b64_file.exists():
+            st.caption('Скопируй строку ниже в Streamlit Secrets → '
+                       '`autoclick_session = "<строка>"`:')
+            st.code(_b64_file.read_text(encoding='utf-8'), language='text')
 
 st.divider()
 
@@ -180,18 +231,35 @@ with _run_col:
     if st.button('Запустить', use_container_width=True, disabled=_alive):
         if not do_gsc and not do_wm:
             st.info('Отметь хотя бы один пункт выше.')
+        elif not _cdp and not _cloud_session:
+            st.error('Нет ни локального Chrome (9222), ни сессии в Secrets - '
+                     'кликерам не через что работать. См. подсказку сверху.')
         else:
             args = ['autoclick_run.py', '--project', pid]
             if do_gsc:
                 args.append('--gsc')
             if do_wm:
                 args.append('--wm')
+            # Режим: локальный Chrome в приоритете; нет его - облачный
+            # headless с сессией из Secrets.
+            extra_env = None
+            if not _cdp and _cloud_session:
+                try:
+                    from autoclick_browser import (
+                        session_file_from_secret, MODE_ENV, SESSION_FILE_ENV)
+                    extra_env = {MODE_ENV: 'cloud',
+                                 SESSION_FILE_ENV:
+                                     session_file_from_secret(_cloud_session)}
+                except Exception as e:
+                    st.error(f'Сессия из Secrets не читается: {e}. '
+                             f'Пере-экспортируй её локально.')
+                    st.stop()
             try:
                 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
                 LOG_FILE.write_text('', encoding='utf-8')
             except Exception:
                 pass
-            bg_pid = _launch_background(args, LOG_FILE)
+            bg_pid = _launch_background(args, LOG_FILE, extra_env)
             st.session_state['autoclick_started'] = datetime.now().strftime('%H:%M:%S')
             st.rerun()
 with _cancel_col:
