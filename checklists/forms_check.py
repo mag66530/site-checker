@@ -89,16 +89,12 @@ PROJECTS = {
     'smu': {'name': 'СМУ - Стальметурал', 'domain': 'stalmetural.ru'},
     'imp': {'name': 'ИМП - Инметпром', 'domain': 'inmetprom.ru'},
     'mpe': {'name': 'МПЭ - Мепэн', 'domain': 'mepen.ru'},
-    # Быстрая проверка ТОЛЬКО оформления заказа через корзину (Мепэн).
-    'mpe_cart': {'name': 'МПЭ - Корзина', 'domain': 'mepen.ru'},
     'avia': {'name': 'АПС - Авиапромсталь', 'domain': 'aviastal.ru'},
 }
 
 # Проекты-варианты берут справочник городов у «родителя» (свой config.py,
 # общий cities.csv). Держим в синхроне с CITIES_FROM в forms_run.py.
-CITIES_FROM = {
-    'mpe_cart': 'mpe',
-}
+CITIES_FROM = {}
 
 # Полный текст-подсказка (раньше был большим жёлтым блоком, теперь - в «❓»).
 HELP_TEXT = (
@@ -935,10 +931,10 @@ if _alive and _this and not _done_by_log:
     else:
         st.progress(min(0.95, (_elapsed or 0) / 90.0), text='Идёт проверка…')
 
-    st.caption(f'⏳ Идёт… {_mmss}. Обычно занимает от пары до нескольких минут '
-               '(зависит от числа форм). Страница обновляется сама - можно уйти '
-               'на другие вкладки, прогон не прервётся.')
-    with st.expander('Подробный лог', expanded=True):
+    st.caption(f'⏳ Идёт… {_mmss}. Один город - около 3-5 минут, несколько городов '
+               'сразу - до 20 минут (зависит от числа форм и городов). Страница '
+               'обновляется сама - можно уйти на другие вкладки, прогон не прервётся.')
+    with st.expander('Подробный лог', expanded=False):
         st.code('\n'.join(_log_txt.splitlines()[-300:]) or '…', language='text')
     time.sleep(2)
     st.rerun()
