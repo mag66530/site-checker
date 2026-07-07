@@ -132,9 +132,9 @@ ACTIONS = {
             'tel', 'email', 'clickwapp', 'clicktg', 'clickvk', 'clickmax',
             'click_vk_podval', 'click_ok_podval', 'click_tg_podval',
             'click_dzen_podval', 'click_rutube_podval', 'click_max_podval',
-            'click_yandexorg_podval', 'breadcrumbphone',
+            'breadcrumbphone',
             'callorderclick', 'zayavkaclick', 'svyazclick', 'oneclickbuy',
-            'managerclick', 'morecatalog', 'gotomorecatalog', 'moreuslugi',
+            'morecatalog', 'gotomorecatalog', 'moreuslugi',
             'moreproizvodstvo', 'click_favorites', 'click_share', 'addocart',
             'tocart', '404error', 'click_yes_confirm',
             'izmenit_gorod', 'raschetst', 'raschetaddtocart',
@@ -161,6 +161,9 @@ ACTIONS = {
                                'Хабаровске (если Хабаровск в прогоне - цель зелёная)',
             'click_share': 'кнопка «Поделиться» настроена только на Хабаровске '
                            '(если Хабаровск в прогоне - цель зелёная)',
+            'click_yandexorg_podval': 'это виджет Яндекс-карты (iframe) в подвале - '
+                                      'клик внутрь чужой карты автотест не '
+                                      'воспроизводит, проверьте вручную',
         },
     },
     'imp': {
