@@ -61,8 +61,13 @@ ACTIONS = {
     'smu': {
         'страницы': [
             ('Главная',   'https://stalmetural.ru/',
-             [# СРОЧНО (до автозакрытия): модалка «Ваш город - Москва?» → «Да (N)»
-              '!button:has-text("Да"), .city-confirm button:has-text("Да")',
+             [# СРОЧНО (до автозакрытия): модалка «Ваш город - Москва?».
+              # На боевом сайте кнопка = «Все верно» (button.city-popup__btn--yes),
+              # в части версий - «Да (N)». Жмём «оставить город» = закрыть модалку,
+              # иначе её оверлей блокирует ВСЕ клики страницы (→ куча «Не проверено»).
+              '!button.city-popup__btn--yes, .city-popup__btn--yes, '
+              'button:has-text("Все верно"), button:has-text("Да"), '
+              '.city-confirm button:has-text("Да")',
               # «Заказать звонок» в шапке = #call-back-form → фиксирует callorderclick
               # (устаревшей цели call_ordering сайт больше не шлёт).
               '#call-back-form', '#txt-back-form', '#txt-back-form-footer',
