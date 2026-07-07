@@ -510,9 +510,17 @@ def _build_structure_sheet(wb, results):
             uc.fill = _fill(band)
             uc.alignment = _align(horizontal='center'); uc.border = _border(color=C.border_light)
             ws.merge_cells(start_row=row, start_column=5, end_row=row, end_column=last_col)
-            mc = ws.cell(row=row, column=5, value=_problem_text(r))
+            _ptext = _problem_text(r)
+            mc = ws.cell(row=row, column=5, value=_ptext)
             mc.font = _font(size=10, color=C.err)
+            # Одна строка фиксированной высоты: длинный текст (списки адресов)
+            # визуально обрезается, НЕ раздувая таблицу. Полный текст - в
+            # тултипе (навести курсор), в строке формул (клик по ячейке) или
+            # растянув строку вручную. Данные не меняем - только отображение.
             mc.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 20
+            if len(_ptext) > 100:
+                mc.comment = Comment(_ptext, 'Site Checker', height=260, width=420)
             for cc2 in range(5, last_col + 1):
                 ws.cell(row=row, column=cc2).fill = _fill(band)
                 ws.cell(row=row, column=cc2).border = _border(color=C.border_light)
@@ -789,7 +797,12 @@ def _build_structure_sheet(wb, results):
                             or bool(_contacts_problem_text(r)) or _broken_n > 0)
             _wn = _problem_text(r) if _has_problem else ''
             wn = ws.cell(row=row, column=10, value=_wn or '-')
+            # Одна строка: длинные списки не растягивают таблицу; полный текст -
+            # в тултипе / строке формул / при растяжении строки вручную.
             wn.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 20
+            if len(_wn) > 100:
+                wn.comment = Comment(_wn, 'Site Checker', height=260, width=420)
             wn.border = _border(color=C.border_light)
             wn.fill = _fill(C.err_soft if _wn else band)
             wn.font = _font(size=9, color=C.err if _wn else C.text_muted)
