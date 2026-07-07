@@ -234,9 +234,25 @@ def _формные_цели(pid: str) -> set[str]:
 
 
 def _результаты_форм(pid: str) -> dict[str, str]:
-    """Статусы целей из последнего отчёта форм (лист «Цели»): идентификатор → статус."""
-    f = ROOT / 'cache' / 'forms' / _базовый(pid) / 'log_forms.xlsx'
+    """Статусы целей из последнего прогона форм: идентификатор → статус.
+    Берём из ДВУХ источников:
+      1) fired_goals.json - ВСЕ цели, сработавшие при формах (ловятся из вывода
+         форм-прогона, включая те, что движок пишет только в лог);
+      2) лист «Цели» отчёта форм (цели спец-сценариев)."""
+    base = _базовый(pid)
     out: dict[str, str] = {}
+    # 1) Все пойманные при формах цели.
+    fj = ROOT / 'cache' / 'forms' / base / 'fired_goals.json'
+    if fj.is_file():
+        try:
+            for gid in json.loads(fj.read_text(encoding='utf-8')):
+                gid = str(gid).strip()
+                if gid:
+                    out[gid] = 'Сработала'
+        except Exception:
+            pass
+    # 2) Лист «Цели» отчёта форм (статусы спец-сценариев дополняют/уточняют).
+    f = ROOT / 'cache' / 'forms' / base / 'log_forms.xlsx'
     if not f.is_file():
         return out
     try:
