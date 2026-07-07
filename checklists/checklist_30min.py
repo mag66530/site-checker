@@ -1325,8 +1325,9 @@ if pid:
                 'webmaster_oauth': _wm_token,
                 'metrika_oauth': _secret_pid('metrika_oauth', pid),
                 'metrika_counter': _secret_pid('metrika_counter', pid),
-                # Сессия для облачного автокликера (base64 storage_state)
-                'autoclick_session': _secret('autoclick_session'),
+                # Сессия для облачного автокликера (base64 storage_state).
+                # По-проектная: autoclick_session_<pid> (+ общий фоллбэк).
+                'autoclick_session': _secret_pid('autoclick_session', pid),
                 'webmaster_keys_hint': _wm_hint,
                 'secret_keys_hint': _sk_hint,
             }
