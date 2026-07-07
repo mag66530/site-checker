@@ -1729,19 +1729,20 @@ def _build_layout_sheet(wb, results):
 
     ws.merge_cells('B2:E2')
     c = ws['B2']
-    c.value = 'Вёрстка и адаптивность (п.1.11)'
+    c.value = 'Вёрстка, адаптивность и навигация (п.1.11)'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
     ws.merge_cells('B3:E3')
     c = ws['B3']
-    c.value = ('ТЗ 2.1/2.1.1: страницы выводятся со стилями на ПК и мобильных. '
-               'Проверяем по HTML/CSS: задан тег viewport (без него мобильная '
-               'версия не масштабируется), каждый подключённый CSS-файл реально '
+    c.value = ('ТЗ 2.1/2.1.1: страницы выводятся со стилями на ПК и мобильных - '
+               'задан тег viewport, каждый подключённый CSS-файл реально '
                'грузится (4xx/5xx = страница без вёрстки), в стилях есть '
-               '@media-запросы по ширине (признак адаптивности; их отсутствие - '
-               'предупреждение). Полный визуальный рендер это не заменяет - '
-               'выборочный ручной просмотр остаётся.')
+               '@media-запросы по ширине (признак адаптивности; отсутствие - '
+               'предупреждение). ТЗ 2.2/2.3: переходы из меню шапки работают - '
+               'все ссылки меню (тех. страницы и каталог) прозваниваются с '
+               'главной каждого поддомена, 404/410 = баг. Полный визуальный '
+               'рендер это не заменяет - выборочный ручной просмотр остаётся.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
@@ -1751,10 +1752,16 @@ def _build_layout_sheet(wb, results):
     # Сводка
     _no_vp = sum(1 for r in checked if not r.layout.get('viewport'))
     _css_broken_pages = sum(1 for r in checked if r.layout.get('css_broken'))
+    _menu_checked = sum((r.layout.get('menu') or {}).get('checked', 0)
+                        for r in checked)
+    _menu_broken = sum(len((r.layout.get('menu') or {}).get('broken') or [])
+                       for r in checked)
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
     c.value = (f'Проверено страниц: {len(checked)} · без viewport: {_no_vp} · '
-               f'с битыми CSS: {_css_broken_pages} · предупреждений: {len(warned)}')
+               f'с битыми CSS: {_css_broken_pages} · '
+               f'ссылок меню прозвонено: {_menu_checked}, битых: {_menu_broken} · '
+               f'предупреждений: {len(warned)}')
     c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
     c.fill = _fill(C.surface)
     c.alignment = _align(wrap=True)
@@ -1785,7 +1792,20 @@ def _build_layout_sheet(wb, results):
         row = _render_issue_groups(
             ws, row, sorted(_by_css.items(), key=lambda kv: -len(kv[1])), C.err)
 
-    # Секция 3: предупреждения (нет @media)
+    # Секция 3: битые ссылки меню шапки (ТЗ 2.2/2.3) - по ссылке: где битая
+    _by_link = {}
+    for r in checked:
+        for b in ((r.layout.get('menu') or {}).get('broken') or []):
+            _key = f'{b.get("url", "")} (HTTP {b.get("code")})'
+            _by_link.setdefault(_key, []).append(r)
+    if _by_link:
+        _meta_section_title(ws, row,
+                            f'Битые ссылки в меню шапки  ({len(_by_link)})', C.err)
+        row += 1
+        row = _render_issue_groups(
+            ws, row, sorted(_by_link.items(), key=lambda kv: -len(kv[1])), C.err)
+
+    # Секция 4: предупреждения (нет @media)
     if warned:
         _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
         row += 1
@@ -2695,7 +2715,7 @@ def build_report(
         ('Индексация', 'если есть лист - расхождения сигналов страниц с robots.txt (noindex, canonical) и sitemap↔robots.'),
         ('Метаданные', 'если есть лист - title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
         ('Заголовки и мета', 'если есть лист - единственность title/description/H1, дубли H2 и заголовки вне текста.'),
-        ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS-стилей и признак адаптивности (@media).'),
+        ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media) и переходы из меню шапки.'),
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),

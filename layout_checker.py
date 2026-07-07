@@ -66,3 +66,38 @@ def check_layout(html: Optional[str], css_infos: Optional[list]) -> dict:
         'issues': issues,
         'warnings': warnings,
     }
+
+
+# ── Меню шапки (ТЗ 2.2/2.3): переходы по тех. страницам и каталогу ───
+# Меню сквозное - прозваниваем ссылки один раз на поддомен (с его главной).
+
+_RE_MENU_ZONE = re.compile(r'<(header|nav)\b[^>]*>.*?</\1>', re.I | re.S)
+_RE_A_HREF = re.compile(r'<a\b[^>]*href\s*=\s*["\']([^"\']+)["\']', re.I)
+
+MENU_LINKS_LIMIT = 40    # ссылок меню на поддомен (тех. страницы + каталог)
+
+
+def extract_menu_links(html: str, base_url: str, limit: int = MENU_LINKS_LIMIT) -> list:
+    """Внутренние ссылки из шапки (<header>/<nav>): меню тех. страниц и меню
+    каталога. Только свой хост, без якорей/tel:/mailto:, без дублей."""
+    from urllib.parse import urljoin, urlsplit
+    host = (urlsplit(base_url).netloc or '').lower().removeprefix('www.')
+    out, seen = [], set()
+    for zone in _RE_MENU_ZONE.finditer(html or ''):
+        for href in _RE_A_HREF.findall(zone.group(0)):
+            href = href.strip()
+            if not href or href.startswith(('#', 'javascript:', 'mailto:', 'tel:')):
+                continue
+            absu = urljoin(base_url, href).split('#')[0]
+            sp = urlsplit(absu)
+            if sp.scheme not in ('http', 'https'):
+                continue
+            if (sp.netloc or '').lower().removeprefix('www.') != host:
+                continue                     # только свой сайт
+            if absu in seen:
+                continue
+            seen.add(absu)
+            out.append(absu)
+            if len(out) >= limit:
+                return out
+    return out

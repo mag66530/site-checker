@@ -640,6 +640,34 @@ async def check_one(
             layout = _check_layout(a['body_text'], _css_infos)
         except Exception:
             layout = None
+        # ТЗ 2.2/2.3: переходы из меню шапки (тех. страницы + каталог).
+        # Меню сквозное - прозваниваем ссылки один раз на поддомен, с его
+        # главной. Битой считаем ТОЛЬКО явный 404/410 (как в check_content_links).
+        if layout is not None and task.type_code == 'main':
+            try:
+                from layout_checker import extract_menu_links
+                _menu = extract_menu_links(
+                    a['body_text'], a['final_url'] or task.url)
+                if _menu:
+                    _menu_sem = asyncio.Semaphore(8)
+
+                    async def _probe_menu(u):
+                        async with _menu_sem:
+                            return await _link_status(
+                                session, u, min(timeout_ms, 20000), proxy_url)
+
+                    _codes = await asyncio.gather(
+                        *[_probe_menu(u) for u in _menu], return_exceptions=True)
+                    _broken = [{'url': u, 'code': c}
+                               for u, c in zip(_menu, _codes)
+                               if not isinstance(c, Exception) and c in (404, 410)]
+                    layout['menu'] = {'checked': len(_menu), 'broken': _broken}
+                    if _broken:
+                        layout['issues'].append(
+                            'битые ссылки в меню шапки (404) - переходы по '
+                            'тех. страницам/каталогу не работают')
+            except Exception:
+                pass
 
     # п.1.3.1 + 1.3.2 (та же галочка 1.8): единственность title/description/H1,
     # дубли H2 и «текстовость» заголовков (h2-h6 не в шапке/подвале/меню).
