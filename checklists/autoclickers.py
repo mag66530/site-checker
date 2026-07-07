@@ -195,23 +195,21 @@ st.divider()
 st.subheader('Шаг 1. Открыть браузер и войти (локально)')
 st.caption('Откроется Chrome. Войди в Google и Yandex аккаунты проекта. '
            'Окно не закрывай - кликеры к нему подключаются.')
-_b1, _b2 = st.columns(2)
-with _b1:
-    if st.button('🌐 Открыть браузер для входа', use_container_width=True):
-        _run_foreground(['open_browser.py'], 'Открываю Chrome…')
-with _b2:
-    if st.button('💾 Экспорт сессии для облака', use_container_width=True,
-                 disabled=not _cdp,
-                 help='Выгружает cookies Яндекса/Google из залогиненного '
-                      'Chrome. Строку из файла положи в Streamlit Secrets '
-                      'ключом autoclick_session - клики заработают в облаке. '
-                      'Кнопка активна только локально (нужен Chrome на 9222).'):
-        _run_foreground(['session_export.py'], 'Экспортирую сессию…')
-        _b64_file = ROOT / 'cache' / 'autoclick_session.b64'
-        if _b64_file.exists():
-            st.caption('Скопируй строку ниже в Streamlit Secrets → '
-                       '`autoclick_session = "<строка>"`:')
-            st.code(_b64_file.read_text(encoding='utf-8'), language='text')
+if st.button('🌐 Открыть браузер для входа', use_container_width=True):
+    _run_foreground(['open_browser.py'], 'Открываю Chrome…')
+
+st.caption('Для ОБЛАЧНЫХ кликов: когда вошёл в аккаунты - выгрузи сессию '
+           'кнопкой ниже и положи строку в Streamlit Secrets ключом '
+           '`autoclick_session`. Кнопка работает только локально '
+           '(нужен Chrome на 9222).')
+if st.button('💾 Экспорт сессии для облака', use_container_width=True,
+             disabled=not _cdp):
+    _run_foreground(['session_export.py'], 'Экспортирую сессию…')
+    _b64_file = ROOT / 'cache' / 'autoclick_session.b64'
+    if _b64_file.exists():
+        st.caption('Скопируй строку ниже в Streamlit Secrets → '
+                   '`autoclick_session = "<строка>"`:')
+        st.code(_b64_file.read_text(encoding='utf-8'), language='text')
 
 st.divider()
 
