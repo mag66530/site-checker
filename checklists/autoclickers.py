@@ -198,27 +198,40 @@ else:
 st.divider()
 
 # ── Шаг 1: вход ─────────────────────────────────────────────────────
-st.subheader('Шаг 1. Открыть браузер и войти (локально)')
-st.caption('Откроется Chrome. Войди в Google и Yandex аккаунты проекта. '
-           'Окно не закрывай - кликеры к нему подключаются.')
-if st.button('🌐 Открыть браузер для входа', use_container_width=True):
-    _run_foreground(['open_browser.py'], 'Открываю Chrome…')
+# Признак облака: linux-сервер без дисплея - окно браузера открывать
+# некому, вход и экспорт сессии возможны только на своём компьютере.
+_is_cloud_env = (os.name != 'nt' and not os.environ.get('DISPLAY'))
 
-st.caption(f'Для ОБЛАЧНЫХ кликов: когда вошёл в аккаунты **{proj["name"]}** - '
-           f'выгрузи сессию кнопкой ниже и положи строку в Streamlit Secrets '
-           f'ключом `autoclick_session_{pid}`. У каждого проекта свои аккаунты '
-           f'и свой секрет - экспортируй для каждого отдельно (вход → экспорт → '
-           f'выход → следующий проект). Кнопка работает только локально '
-           f'(нужен Chrome на 9222).')
-if st.button(f'💾 Экспорт сессии для облака ({proj["name"]})',
-             use_container_width=True, disabled=not _cdp):
-    _run_foreground(['session_export.py', '--project', pid],
-                    'Экспортирую сессию…')
-    _b64_file = ROOT / 'cache' / f'autoclick_session_{pid}.b64'
-    if _b64_file.exists():
-        st.caption(f'Скопируй строку ниже в Streamlit Secrets → '
-                   f'`autoclick_session_{pid} = "<строка>"`:')
-        st.code(_b64_file.read_text(encoding='utf-8'), language='text')
+st.subheader('Шаг 1. Открыть браузер и войти (локально)')
+if _is_cloud_env:
+    st.info('Это облако - тут окно браузера не открыть. Вход в аккаунты и '
+            'экспорт сессии делаются НА СВОЁМ компьютере (запусти приложение '
+            'локально: START.bat → вкладка «Автокликеры»). Секрет '
+            f'`autoclick_session_{pid}` уже в Secrets? Тогда сразу к Шагу 2 - '
+            'клики пойдут облачным браузером.')
+else:
+    st.caption('Откроется браузер (какой у тебя по умолчанию - Chrome/Edge/'
+               'Яндекс). Войди в Google и Yandex аккаунты проекта. '
+               'Окно не закрывай - кликеры к нему подключаются.')
+    if st.button('🌐 Открыть браузер для входа', use_container_width=True):
+        _run_foreground(['open_browser.py'], 'Открываю браузер…')
+
+if not _is_cloud_env:
+    st.caption(f'Для ОБЛАЧНЫХ кликов: когда вошёл в аккаунты **{proj["name"]}** - '
+               f'выгрузи сессию кнопкой ниже и положи строку в Streamlit Secrets '
+               f'ключом `autoclick_session_{pid}`. У каждого проекта свои аккаунты '
+               f'и свой секрет - экспортируй для каждого отдельно (вход → экспорт → '
+               f'выход → следующий проект). Кнопка активна, когда браузер для '
+               f'входа открыт (порт 9222).')
+    if st.button(f'💾 Экспорт сессии для облака ({proj["name"]})',
+                 use_container_width=True, disabled=not _cdp):
+        _run_foreground(['session_export.py', '--project', pid],
+                        'Экспортирую сессию…')
+        _b64_file = ROOT / 'cache' / f'autoclick_session_{pid}.b64'
+        if _b64_file.exists():
+            st.caption(f'Скопируй строку ниже в Streamlit Secrets → '
+                       f'`autoclick_session_{pid} = "<строка>"`:')
+            st.code(_b64_file.read_text(encoding='utf-8'), language='text')
 
 st.divider()
 
