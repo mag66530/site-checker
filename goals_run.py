@@ -25,14 +25,35 @@ def _stamp(msg):
 def _прогнать_формы(base: str, show: bool) -> None:
     """Синхронно прогоняет «Проверку форм» для базового проекта (Москва) - чтобы
     цели отправки форм реально сработали и подтянулись в отчёт целей. Реальные
-    заявки отправляются, поэтому делаем только по запросу (--with-forms)."""
+    заявки отправляются, поэтому делаем только по запросу (--with-forms).
+
+    ВСЕ сработавшие при формах цели (в т.ч. те, что форм-движок пишет только в
+    лог, а не в лист «Цели») вылавливаем прямо из вывода и сохраняем в
+    cache/forms/<base>/fired_goals.json - отчёт целей их подхватит."""
+    import re
+    import json
     _stamp(f'ФОРМЫ: запускаю прогон форм для «{base}» (Москва) - поймать цели форм')
     args = [sys.executable, 'forms_run.py', '--project', base, '--no-admin']
     if show:
         args.append('--show-browser')
+    _pat1 = re.compile(r'зафиксирована цель [«"]([\w\-.]+)[»"]')
+    _pat2 = re.compile(r'Сработала цель:\s*([\w\-.]+)')
+    fired: set = set()
     try:
-        p = subprocess.run(args, cwd=str(ROOT), timeout=1800)
-        _stamp(f'ФОРМЫ: готово (код {p.returncode})')
+        proc = subprocess.Popen(args, cwd=str(ROOT), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in proc.stdout:            # стримим в общий лог И ловим цели
+            print(line, end='', flush=True)
+            for m in _pat1.finditer(line):
+                fired.add(m.group(1))
+            for m in _pat2.finditer(line):
+                fired.add(m.group(1))
+        proc.wait(timeout=1800)
+        d = ROOT / 'cache' / 'forms' / base
+        d.mkdir(parents=True, exist_ok=True)
+        (d / 'fired_goals.json').write_text(
+            json.dumps(sorted(fired), ensure_ascii=False), encoding='utf-8')
+        _stamp(f'ФОРМЫ: готово (код {proc.returncode}); поймано целей форм: {len(fired)}')
     except Exception as e:  # noqa: BLE001
         _stamp(f'ФОРМЫ: не удалось прогнать ({e}) - продолжаю без них')
 
