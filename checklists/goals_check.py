@@ -202,6 +202,27 @@ def _read_pid():
 
 _alive = _pid_alive(_read_pid())
 
+# Читаем лог и определяем «прогон завершён» ДО кнопок. Финал ловим по маркеру
+# целей, а не по «ВСЁ ГОТОВО» форм. В облаке PID переиспользуется - тогда старый
+# run.pid «оживает» чужим процессом и кнопка «Запустить» залипает выключенной.
+# Поэтому: если в логе есть маркер завершения - прогон точно НЕ идёт, снимаем
+# «живой» флаг и чистим устаревший PID (иначе только «Отменить» разблокирует).
+log_txt = ''
+if LOG_FILE.is_file():
+    try:
+        log_txt = LOG_FILE.read_text(encoding='utf-8')
+    except Exception:
+        log_txt = ''
+_done = ('ПРОВЕРКА ЦЕЛЕЙ ЗАВЕРШЕНА' in log_txt) \
+    or ('✗ Нет каталога' in log_txt) or ('✗ Не заданы' in log_txt)
+if _done and _alive:
+    _alive = False
+    try:
+        PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+_running = _alive and not _done
+
 
 @st.cache_resource(show_spinner=False)
 def _browser():
@@ -220,7 +241,7 @@ if not _alive:
 c1, c2 = st.columns([3, 1])
 with c1:
     if st.button('▶ Запустить проверку целей', use_container_width=True,
-                 type='primary', disabled=_alive or not _bok or not _selected):
+                 type='primary', disabled=_running or not _bok or not _selected):
         WORK.mkdir(parents=True, exist_ok=True)
         LOG_FILE.write_text('', encoding='utf-8')
         # Удаляем ПРОШЛЫЙ сводный отчёт, чтобы, пока идёт новый прогон, не
@@ -264,18 +285,7 @@ with c2:
         st.rerun()
 
 st.subheader('Прогресс')
-log_txt = ''
-if LOG_FILE.is_file():
-    try:
-        log_txt = LOG_FILE.read_text(encoding='utf-8')
-    except Exception:
-        log_txt = ''
-# Готово определяем ПО УНИКАЛЬНОМУ маркеру целей, а не по «ВСЁ ГОТОВО» - иначе
-# форм-прогон (--with-forms) со своим «ВСЁ ГОТОВО» преждевременно «завершал» цели.
-_done = ('ПРОВЕРКА ЦЕЛЕЙ ЗАВЕРШЕНА' in log_txt) \
-    or ('✗ Нет каталога' in log_txt) or ('✗ Не заданы' in log_txt)
-_running = _alive and not _done
-
+# log_txt / _done / _running уже вычислены выше (до кнопок).
 # Прогресс И отчёт от СТАРОГО прогона (другой проект / другой набор галочек /
 # прошлая сессия, в т.ч. после перезагрузки страницы) не показываем - только
 # живой прогон или завершение ИМЕННО этого выбора в текущей сессии.
