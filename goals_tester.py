@@ -124,6 +124,31 @@ def загрузить_каталог(pid: str) -> dict | None:
     return json.loads(f.read_text(encoding='utf-8'))
 
 
+def _план_для_домена(домен: str) -> dict:
+    """Универсальный план прогона для сайта на той же платформе, что СМУ РФ
+    (СНГ-домены stalmetural.*, smg.az и т.п.): те же кнопки и ожидаемые цели,
+    только другой домен. Товар/доставку не трогаем - их адреса у стран разные."""
+    d = (домен or '').rstrip('/')
+    if not d:
+        return {'страницы': []}
+    return {
+        'страницы': [
+            ('Главная', d + '/',
+             ['#call-back-form', '#txt-back-form', '#txt-back-form-footer',
+              '#call-back-form-main, [class*="manager-connect"], a:has-text("Связаться с менеджером")',
+              'button:has-text("Показать больше"), a:has-text("Показать больше")',
+              'a:has-text("ко всем категориям"), a:has-text("всем категориям")']),
+            ('Контакты', d + '/contacts/', []),
+            ('Каталог', d + '/catalog/',
+             ['.breadcrumbs a[href^="tel:"], [class*="breadcrumb"] a[href^="tel:"]',
+              'button:has-text("Показать больше"), a:has-text("Показать больше")',
+              'a:has-text("ко всем категориям"), a:has-text("всем категориям")']),
+            ('Страница 404', d + '/nesuschestvuyushaya-404-xyz/', []),
+        ],
+        'ожидаемые': ACTIONS['smu']['ожидаемые'],
+    }
+
+
 def _формные_цели(pid: str) -> set[str]:
     """Идентификаторы целей, привязанных к ОТПРАВКЕ форм в конфиге форм-тестера
     (их не триггерим здесь, чтобы не слать заявки)."""
@@ -177,8 +202,9 @@ def _совпало(цель: dict, fired: set[str]) -> str | None:
 def выполнить_прогон(pid: str, headless: bool = True, log=print, stop=None) -> dict:
     """Открывает страницы, кликает, слушает Метрику. Возвращает
     {'fired': set(id), 'страницы': [{'название','url','код','счётчик','визит'}]}."""
-    план = ACTIONS.get(pid) or {'страницы': []}
     каталог = загрузить_каталог(pid) or {}
+    # Явный план проекта; для суб-проектов (страны СМУ) - универсальный по домену.
+    план = ACTIONS.get(pid) or _план_для_домена(каталог.get('домен', ''))
     counter = str(каталог.get('счётчик') or '')
     fired: set[str] = set()
     привязки: set[str] = set()       # reachGoal-идентификаторы, найденные явно
@@ -430,7 +456,8 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
     формные = _формные_цели(pid)
     форм_статусы = _результаты_форм(pid)
     url_map = _url_цели_проверка(каталог, страницы)
-    ожидаемые = {i.lower() for i in (ACTIONS.get(pid) or {}).get('ожидаемые', [])}
+    _план = ACTIONS.get(pid) or _план_для_домена(каталог.get('домен', ''))
+    ожидаемые = {i.lower() for i in _план.get('ожидаемые', [])}
     _код_кэш: dict[str, bool] = {}
 
     def _id_в_коде(gid: str) -> bool:
@@ -621,17 +648,24 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
                 'Вручную': 11}
     _строки.sort(key=lambda x: (_ПОРЯДОК.get(x['статус'].split(':')[0].strip(), 20),
                                 x['название']))
+    # Неяркая граница-сетка, чтобы лист читался таблицей, а не сплошным полотном.
+    _tside = Side(style='thin', color='D9DCE1')
+    _tbord = Border(left=_tside, right=_tside, top=_tside, bottom=_tside)
     ws.delete_rows(2, ws.max_row)   # заголовок уже есть, чистим тело
     r = 2
     for s in _строки:
         vals = [s['номер'], s['название'], s['статус'], s['детали'], s['условие']]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(r, c, v)
-            cell.alignment = Alignment(wrap_text=(c in (2, 4)), vertical='top')
+            cell.alignment = Alignment(wrap_text=(c in (2, 3, 4)), vertical='top')
+            cell.border = _tbord
         st = ws.cell(r, 3)
         st.font = Font(color=s['цвет'], bold=True)
         st.fill = PatternFill('solid', fgColor=_ФОН.get(s['цвет'], 'FFFFFF'))
         r += 1
+    # Граница и у строки заголовков - тогда таблица «в рамке» целиком.
+    for c in range(1, 6):
+        ws.cell(1, c).border = _tbord
     ws.auto_filter.ref = f"A1:E{max(2, r - 1)}"
 
     # ── Лист «Сводка»: заголовок + сгруппированная таблица категорий + страницы ──

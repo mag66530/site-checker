@@ -20,7 +20,8 @@ def _stamp(msg):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description='Проверка целей Яндекс.Метрики.')
-    ap.add_argument('--project', required=True, choices=['smu', 'imp', 'mpe'])
+    # project = код каталога: базовый (smu/imp/mpe) или страна (smu-uz, smu-az…).
+    ap.add_argument('--project', required=True)
     ap.add_argument('--show-browser', action='store_true')
     a = ap.parse_args()
 
