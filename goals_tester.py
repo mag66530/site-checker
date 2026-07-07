@@ -621,17 +621,24 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
                 'Вручную': 11}
     _строки.sort(key=lambda x: (_ПОРЯДОК.get(x['статус'].split(':')[0].strip(), 20),
                                 x['название']))
+    # Неяркая граница-сетка, чтобы лист читался таблицей, а не сплошным полотном.
+    _tside = Side(style='thin', color='D9DCE1')
+    _tbord = Border(left=_tside, right=_tside, top=_tside, bottom=_tside)
     ws.delete_rows(2, ws.max_row)   # заголовок уже есть, чистим тело
     r = 2
     for s in _строки:
         vals = [s['номер'], s['название'], s['статус'], s['детали'], s['условие']]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(r, c, v)
-            cell.alignment = Alignment(wrap_text=(c in (2, 4)), vertical='top')
+            cell.alignment = Alignment(wrap_text=(c in (2, 3, 4)), vertical='top')
+            cell.border = _tbord
         st = ws.cell(r, 3)
         st.font = Font(color=s['цвет'], bold=True)
         st.fill = PatternFill('solid', fgColor=_ФОН.get(s['цвет'], 'FFFFFF'))
         r += 1
+    # Граница и у строки заголовков - тогда таблица «в рамке» целиком.
+    for c in range(1, 6):
+        ws.cell(1, c).border = _tbord
     ws.auto_filter.ref = f"A1:E{max(2, r - 1)}"
 
     # ── Лист «Сводка»: заголовок + сгруппированная таблица категорий + страницы ──
