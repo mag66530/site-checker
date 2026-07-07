@@ -99,7 +99,7 @@ def _классифицировать(g: dict) -> dict:
 
 def построить_каталог(html_text: str, pid: str, проект: str | None,
                       домен: str, счётчик: str | None) -> dict:
-    m_cnt = re.search(r'counterId"\s*:\s*"?(\d{6,9})', html_text)
+    m_cnt = re.search(r'counterId"\s*:\s*"?(\d{6,9})', html_text, re.I)
     m_title = re.search(r'<title>([^<]*?)(?:\s*[-—]\s*Конверсии)?', html_text)
     цели = [_классифицировать(g) for g in _извлечь_цели(html_text)]
     return {

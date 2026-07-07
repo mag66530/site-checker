@@ -94,25 +94,70 @@ ACTIONS = {
     'imp': {
         'страницы': [
             ('Главная',   'https://inmetprom.ru/',
-             ['[data-my-modal="#modal-callback"]', '.banner-fast-order__application']),
+             ['text="Да" >> visible=true',                 # модалка подтверждения города
+              '[data-my-modal="#modal-callback"]',
+              '.banner-fast-order__application',
+              'button:has-text("Оставить заявку"), button:has-text("Просчёт"), button:has-text("Заявка")',
+              'header a:has-text("Прайс"), a:has-text("Прайс-лист")',
+              'header a:has-text("Каталог")',
+              'header a:has-text("Акции"), a:has-text("Акции")',
+              'text=Написать нам',
+              'text=Звонок менеджеру, a:has-text("менеджеру")',
+              'text=Изменить город, text=Сменить город, [class*="city-change"], [class*="change-city"]']),
             ('Контакты',  'https://inmetprom.ru/contacts/', []),
-            ('Листинг',   'https://inmetprom.ru/catalog/listovoj-prokat/', ['text=Быстрый заказ']),
-            ('Товар',     'https://inmetprom.ru/list-gesti-0-2-mm-klass-1-gost-13345-85/', []),
+            ('Листинг',   'https://inmetprom.ru/catalog/listovoj-prokat/',
+             ['text=Быстрый заказ',
+              'text=В корзину, text=в корзину',
+              'a:has-text("Скачать прайс"), text=Скачать прайс',
+              '.tags a, [class*="tag"] a, [class*="tags"] a']),
+            ('Товар',     'https://inmetprom.ru/list-gesti-0-2-mm-klass-1-gost-13345-85/',
+             ['text=В корзину, text=в корзину',
+              'text=Быстрый заказ',
+              'text=Оставить отзыв, text=Написать отзыв, a:has-text("Отзыв")']),
+            ('Страница 404', 'https://inmetprom.ru/nesuschestvuyushaya-404-xyz/', []),
         ],
         'ожидаемые': [
-            'klik-na-tg-v-mobilke', 'klik-na-whatsapp-v-mobilke',
-            'click-telephone-utf-gorod',
+            'tel-shapka-gorod', 'klik-v-shapke-po-elektronnoy-pochte',
+            'klik-v-shapke-na-whatsapp', 'klik-na-tg-v-shapke',
+            'klik-na-prays-list-iz-shapki', 'klik-na-katalog-v-shapke',
+            'click-proschet', 'klik-na-aktsii', 'click-podval-gorod-nomer',
+            'klik-v-podvale-zvonok-menedzheru', 'click-podval-email',
+            'klik-v-podvale-po-napisat-nam', 'klik-na-tg-v-mobilke',
+            'klik-na-whatsapp-v-mobilke', 'click-telephone-utf-gorod',
+            'izmenit_gorod', 'click_yes_confirm', 'bystryy-zakaz-katalog',
+            'bystryy-zakaz-listing', 'v-cart-listing', 'listing-skachat-prays-list',
+            'listing-klik-po-tegam', 'v-cart-kartochka', 'bistrii-zakaz-cartochka',
+            'klik-tel', '404error',
         ],
     },
     'mpe': {
         'страницы': [
             ('Главная',   'https://mepen.ru/',
-             ['header.header-kostyl .bottom-header-right button.popup_form']),
-            ('Контакты',  'https://mepen.ru/contacts/', []),
+             ['header.header-kostyl .bottom-header-right button.popup_form',
+              'text=Выбрать город, text=Ваш город, [class*="city-select"], [class*="select-city"]',
+              'text=Узнать больше',
+              'header a:has-text("Каталог"), a:has-text("каталог")',
+              'button:has-text("Рассчитать"), text=Рассчитать стоимость',
+              'text=Смотреть всё, text=Показать все, a:has-text("Смотреть все")',
+              'footer a:has-text("Реквизиты"), a:has-text("Реквизиты")']),
+            ('Контакты',  'https://mepen.ru/contacts/',
+             ['a:has-text("Реквизиты"), text=Реквизиты компании']),
+            ('Каталог',   'https://mepen.ru/catalog/',
+             ['text=В корзину, text=в корзину',
+              'text=Смотреть всё, text=Показать',
+              '.catalog-item a, .product-card a, [class*="product"] a[href*="tovar"]']),
             ('Товар',     'https://mepen.ru/catalog/tovar/telezhka-tip-b-gcl/',
-             ['text=Нужна консультация', 'text=Нашли дешевле']),
+             ['text=Нужна консультация', 'text=Нашли дешевле',
+              'text=В корзину, text=в корзину',
+              'text=Скидочный купон, text=купон, [class*="coupon"]']),
+            ('Страница 404', 'https://mepen.ru/nesuschestvuyushaya-404-xyz/', []),
         ],
-        'ожидаемые': ['tel', 'email', 'catalog'],
+        'ожидаемые': [
+            'tel', 'email', 'catalog', 'raschet', 'rasschitatzakaz', 'smotretvse',
+            'telegram', 'clickwapp', 'tocart', 'tovar_v_korzinu',
+            'klik_kartochka_tovara', 'tovar_konsultaciya', 'klik_nashli_deshevle',
+            'citys', 'about', 'rekvizity_podval', 'rekvizity_contacts',
+        ],
     },
 }
 
@@ -149,10 +194,16 @@ def _план_для_домена(домен: str) -> dict:
     }
 
 
+def _базовый(pid: str) -> str:
+    """Базовый проект для суб-проекта страны: smu-uz → smu (формы и их конфиг
+    едины для всех стран проекта, лежат под базовым кодом)."""
+    return (pid or '').split('-')[0]
+
+
 def _формные_цели(pid: str) -> set[str]:
     """Идентификаторы целей, привязанных к ОТПРАВКЕ форм в конфиге форм-тестера
     (их не триггерим здесь, чтобы не слать заявки)."""
-    p = ROOT / 'forms_tester' / 'projects' / pid / 'config.py'
+    p = ROOT / 'forms_tester' / 'projects' / _базовый(pid) / 'config.py'
     if not p.is_file():
         return set()
     txt = p.read_text(encoding='utf-8')
@@ -161,7 +212,7 @@ def _формные_цели(pid: str) -> set[str]:
 
 def _результаты_форм(pid: str) -> dict[str, str]:
     """Статусы целей из последнего отчёта форм (лист «Цели»): идентификатор → статус."""
-    f = ROOT / 'cache' / 'forms' / pid / 'log_forms.xlsx'
+    f = ROOT / 'cache' / 'forms' / _базовый(pid) / 'log_forms.xlsx'
     out: dict[str, str] = {}
     if not f.is_file():
         return out
@@ -375,6 +426,14 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                     except Exception:
                         el.click(timeout=2000, force=True)
                     page.wait_for_timeout(600)
+                    # клик мог быть по ссылке-переходу (Каталог/Акции/Прайс в шапке):
+                    # цель сработала, а нам нужно вернуться, чтобы кликать дальше.
+                    if page.url != url:
+                        try:
+                            page.go_back(wait_until='domcontentloaded', timeout=15000)
+                        except Exception:
+                            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                        page.wait_for_timeout(600)
                     page.keyboard.press('Escape')
                     page.wait_for_timeout(200)
                 except Exception:
@@ -441,13 +500,20 @@ def _нужно_спец_действие(g: dict) -> str | None:
     return None
 
 
-def построить_отчёт(pid: str, каталог: dict, прогон: dict,
-                    out_path: str | Path) -> Path:
-    """Сводит каталог целей с результатами прогона в xlsx."""
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
+# Цвета статусов и порядок вывода - на уровне модуля (используются в
+# классификации и в рисовании листов).
+_GREEN, _RED, _GREY, _BLUE = '1E8E3E', 'C62828', '757575', '1565C0'
+_ФОН = {_GREEN: 'E6F4EA', _RED: 'FCE8E6', _BLUE: 'E8F0FE', _GREY: 'F1F3F4'}
+_ПОРЯДОК = {'Сработала': 0, 'Сработала (формы)': 1, 'Действие выполнено': 2,
+            'Сработает': 3, 'Нет в коде сайта': 4, 'НЕ сработала': 5, 'Проблема': 6,
+            'Нужно спец-действие': 7, 'Не проверено': 8, 'Нет автопроверки': 9,
+            'Проверяется формами': 10, 'Только в Метрике': 11, 'Составная': 12,
+            'Вручную': 13}
 
+
+def _классифицировать(pid: str, каталог: dict, прогон: dict) -> dict:
+    """Сводит каталог целей с результатами прогона: список строк со статусом/
+    цветом/пояснением + счётчики категорий. Без рисования (его делают отдельно)."""
     import re as _re2
     fired = прогон['fired']
     страницы = прогон['страницы']
@@ -458,6 +524,7 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
     url_map = _url_цели_проверка(каталог, страницы)
     _план = ACTIONS.get(pid) or _план_для_домена(каталог.get('домен', ''))
     ожидаемые = {i.lower() for i in _план.get('ожидаемые', [])}
+    GREEN, RED, GREY, BLUE = _GREEN, _RED, _GREY, _BLUE
     _код_кэш: dict[str, bool] = {}
 
     def _id_в_коде(gid: str) -> bool:
@@ -503,19 +570,6 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
             return False
         return any(k in c for k in делаем)
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'Цели Метрики'
-    ws.sheet_view.showGridLines = False
-    headers = ['№ цели', 'Название', 'Статус', 'Что это значит', 'Условие (из Метрики)']
-    for c, (h, w) in enumerate(zip(headers, (12, 42, 20, 62, 44)), 1):
-        cell = ws.cell(1, c, h)
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill('solid', fgColor='EEF3FB')
-        ws.column_dimensions[get_column_letter(c)].width = w
-    ws.freeze_panes = 'A2'
-
-    GREEN, RED, GREY, BLUE = '1E8E3E', 'C62828', '757575', '1565C0'
     счёт = {'ok': 0, 'ok_forms': 0, 'bad': 0, 'no_code': 0, 'forms': 0,
             'special': 0, 'manual': 0, 'info': 0}
     # Прозрачен ли код сайта для статического анализа. Если reachGoal почти не
@@ -638,22 +692,31 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
                         'условие': g['условие'], 'статус': статус,
                         'детали': детали, 'цвет': цвет})
 
-    # ── Лист «Цели Метрики»: сортировка по статусу + цветные плашки + фильтр ──
-    _ФОН = {GREEN: 'E6F4EA', RED: 'FCE8E6', BLUE: 'E8F0FE', GREY: 'F1F3F4'}
-    # порядок вывода: сначала главное, потом проблемы, потом информация
-    _ПОРЯДОК = {'Сработала': 0, 'Действие выполнено': 1, 'Сработает': 2,
-                'Нет в коде сайта': 3, 'НЕ сработала': 4, 'Проблема': 5,
-                'Не проверено': 6, 'Нужно спец-действие': 6, 'Нет автопроверки': 7,
-                'Прогоном форм': 8, 'Только в Метрике': 9, 'Составная': 10,
-                'Вручную': 11}
+    # Сортировка по статусу для читаемости листа.
     _строки.sort(key=lambda x: (_ПОРЯДОК.get(x['статус'].split(':')[0].strip(), 20),
                                 x['название']))
-    # Неяркая граница-сетка, чтобы лист читался таблицей, а не сплошным полотном.
+    return {'строки': _строки, 'счёт': счёт, 'страницы': страницы,
+            'код_надёжен': _код_надёжен, 'проект': каталог.get('проект', ''),
+            'счётчик': каталог.get('счётчик', ''),
+            'всего': len(каталог.get('цели', []))}
+
+
+def _рисовать_цели(ws, строки):
+    """Рисует лист целей: шапка + цветные плашки статусов + сетка + автофильтр."""
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    ws.sheet_view.showGridLines = False
+    headers = ['№ цели', 'Название', 'Статус', 'Что это значит', 'Условие (из Метрики)']
+    for c, (h, w) in enumerate(zip(headers, (12, 42, 20, 62, 44)), 1):
+        cell = ws.cell(1, c, h)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='EEF3FB')
+        ws.column_dimensions[get_column_letter(c)].width = w
+    ws.freeze_panes = 'A2'
     _tside = Side(style='thin', color='D9DCE1')
     _tbord = Border(left=_tside, right=_tside, top=_tside, bottom=_tside)
-    ws.delete_rows(2, ws.max_row)   # заголовок уже есть, чистим тело
     r = 2
-    for s in _строки:
+    for s in строки:
         vals = [s['номер'], s['название'], s['статус'], s['детали'], s['условие']]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(r, c, v)
@@ -663,13 +726,20 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
         st.font = Font(color=s['цвет'], bold=True)
         st.fill = PatternFill('solid', fgColor=_ФОН.get(s['цвет'], 'FFFFFF'))
         r += 1
-    # Граница и у строки заголовков - тогда таблица «в рамке» целиком.
     for c in range(1, 6):
         ws.cell(1, c).border = _tbord
     ws.auto_filter.ref = f"A1:E{max(2, r - 1)}"
 
-    # ── Лист «Сводка»: заголовок + сгруппированная таблица категорий + страницы ──
-    sm = wb.create_sheet('Сводка', 0)
+
+def _рисовать_сводку(sm, данные):
+    """Лист «Сводка» одной страны: итоги по категориям + страницы прогона."""
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    GREEN, RED, GREY, BLUE = _GREEN, _RED, _GREY, _BLUE
+    счёт = данные['счёт']
+    страницы = данные['страницы']
+    _код_надёжен = данные['код_надёжен']
+    каталог = {'проект': данные['проект'], 'счётчик': данные['счётчик'],
+               'цели': [None] * данные['всего']}
     sm.sheet_view.showGridLines = False
     sm.column_dimensions['A'].width = 4
     sm.column_dimensions['B'].width = 32
@@ -767,6 +837,88 @@ def построить_отчёт(pid: str, каталог: dict, прогон: 
         sm.cell(rr, 4, f"{s['url']} - код {s['код']}, "
                        f"счётчик {'✓' if s['счётчик'] else '✗ НЕ найден'}")
         rr += 1
+
+
+def построить_отчёт(pid: str, каталог: dict, прогон: dict,
+                    out_path: str | Path) -> Path:
+    """Отчёт по одному сайту: лист «Сводка» + лист «Цели Метрики»."""
+    from openpyxl import Workbook
+    данные = _классифицировать(pid, каталог, прогон)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Цели Метрики'
+    _рисовать_цели(ws, данные['строки'])
+    _рисовать_сводку(wb.create_sheet('Сводка', 0), данные)
+    wb.active = 0
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(out_path)
+    return out_path
+
+
+def построить_сводный_отчёт(результаты: list, out_path: str | Path) -> Path:
+    """Один файл на несколько сайтов: лист «Сводка» (строка на сайт) + по листу
+    целей на каждый сайт. результаты = [(pid, каталог, прогон, метка), ...]."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    сайты = []
+    for pid, каталог, прогон, метка in результаты:
+        d = _классифицировать(pid, каталог, прогон)
+        d['метка'] = метка or (каталог.get('проект') or pid)
+        сайты.append(d)
+
+    wb = Workbook()
+    sm = wb.active
+    sm.title = 'Сводка'
+    sm.sheet_view.showGridLines = False
+    _thin = Side(style='thin', color='D9DCE1')
+    _bord = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
+    for c, w in enumerate([26, 8, 12, 12, 20, 14], 1):
+        sm.column_dimensions[get_column_letter(c)].width = w
+    sm.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
+    sm.cell(1, 1, 'Проверка целей Метрики - сводка по сайтам · '
+                  f"{datetime.now().strftime('%d.%m.%Y %H:%M')}").font = Font(bold=True, size=14)
+    hdr = ['Сайт', 'Целей', '✅ Подтв.', '❌ Проблемы', '🟡 Действие/вручную', '📝 Формы/авто']
+    for c, h in enumerate(hdr, 1):
+        cell = sm.cell(3, c, h)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='5B6470')
+        cell.border = _bord
+        cell.alignment = Alignment(horizontal='left' if c == 1 else 'center',
+                                   wrap_text=True, vertical='center')
+    r = 4
+    for d in сайты:
+        s = d['счёт']
+        подтв = s['ok'] + s['ok_forms']
+        пробл = s['no_code'] + s['bad']
+        vals = [d['метка'], d['всего'], подтв, пробл,
+                s['special'] + s['manual'], s['forms'] + s['info']]
+        for c, v in enumerate(vals, 1):
+            cell = sm.cell(r, c, v)
+            cell.border = _bord
+            cell.alignment = Alignment(horizontal='left' if c == 1 else 'center')
+            if c == 1:
+                cell.font = Font(bold=True)
+            elif c == 3 and подтв:
+                cell.font = Font(bold=True, color=_GREEN)
+                cell.fill = PatternFill('solid', fgColor=_ФОН[_GREEN])
+            elif c == 4 and пробл:
+                cell.font = Font(bold=True, color=_RED)
+                cell.fill = PatternFill('solid', fgColor=_ФОН[_RED])
+        r += 1
+
+    # По листу целей на каждый сайт (имя листа = метка, уникальное, <=31 символ).
+    занятые = set()
+    for d in сайты:
+        имя = (d['метка'] or 'Сайт').replace('/', '-').replace('\\', '-')[:28] or 'Сайт'
+        база, i = имя, 2
+        while имя in занятые:
+            имя = f"{база[:26]} {i}"
+            i += 1
+        занятые.add(имя)
+        _рисовать_цели(wb.create_sheet(имя), d['строки'])
 
     wb.active = 0
     out_path = Path(out_path)
