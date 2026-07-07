@@ -3,19 +3,26 @@ session_export.py - экспорт сессии залогиненного Chrom
 автокликеров.
 
 Запускается ЛОКАЛЬНО, когда открыт залогиненный Chrome (кнопка «Открыть
-браузер для входа» на вкладке «Автокликеры», вход в Яндекс и Google выполнен):
+браузер для входа» на вкладке «Автокликеры», вход в Яндекс и Google
+АККАУНТОВ ЭТОГО ПРОЕКТА выполнен):
 
-    python session_export.py
+    python session_export.py --project smu
 
 Что делает:
   1. Подключается к Chrome (CDP 9222) и забирает cookies Яндекса и Google.
-  2. Пишет base64-строку в cache/autoclick_session.b64.
+  2. Пишет base64-строку в cache/autoclick_session_<проект>.b64.
   3. Печатает инструкцию: строку скопировать в Streamlit Secrets ключом
-     autoclick_session - после этого автокликеры работают в облаке.
+     autoclick_session_<проект> - после этого автокликеры работают в облаке.
+
+У КАЖДОГО проекта свои аккаунты - экспортируй сессию отдельно для каждого:
+войди в аккаунты проекта → экспорт → выйди → войди в аккаунты следующего →
+экспорт. Секреты разные (autoclick_session_smu / _mpe / _imp) - не затирают
+друг друга.
 
 Сессию нужно пере-экспортировать, когда она протухнет (Яндекс - месяцы,
 Google - может чаще): кликер в облаке напишет об этом в лог.
 """
+import argparse
 import base64
 import json
 import sys
@@ -23,14 +30,21 @@ from pathlib import Path
 
 from autoclick_browser import CDP_URL, SESSION_SECRET_KEY
 
-OUT_FILE = Path(__file__).parent / 'cache' / 'autoclick_session.b64'
-
 # Домены, чьи cookies нужны кликерам (Вебмастер + GSC). Остальное не тащим -
 # секрет меньше, чужого в облако не уезжает.
 _KEEP = ('yandex', 'google', 'gstatic', 'ya.ru')
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--project', default='',
+                    help='id проекта (smu/mpe/imp) - свой секрет на проект')
+    a = ap.parse_args()
+    _suffix = f'_{a.project}' if a.project else ''
+    out_file = (Path(__file__).parent / 'cache'
+                / f'autoclick_session{_suffix}.b64')
+    secret_key = f'{SESSION_SECRET_KEY}{_suffix}'
+
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -63,17 +77,20 @@ def main():
     payload = json.dumps({'cookies': cookies, 'origins': []},
                          ensure_ascii=False).encode('utf-8')
     b64 = base64.b64encode(payload).decode('ascii')
-    OUT_FILE.parent.mkdir(exist_ok=True)
-    OUT_FILE.write_text(b64, encoding='utf-8')
+    out_file.parent.mkdir(exist_ok=True)
+    out_file.write_text(b64, encoding='utf-8')
 
     print(f'✓ Сессия выгружена: cookies Яндекса {ya}, Google {goog}')
-    print(f'✓ Файл: {OUT_FILE}')
+    print(f'✓ Файл: {out_file}')
     print(f'✓ Размер секрета: {len(b64) // 1024 + 1} КБ')
     print()
     print('ДАЛЬШЕ (один раз, потом только при протухании):')
     print('  1. Открой настройки приложения на Streamlit Cloud → Secrets.')
-    print(f'  2. Добавь строку:  {SESSION_SECRET_KEY} = "<содержимое файла>"')
+    print(f'  2. Добавь строку:  {secret_key} = "<содержимое файла>"')
     print('  3. Сохрани - облачные автокликеры заработают.')
+    if a.project:
+        print(f'  (у каждого проекта свой секрет: {SESSION_SECRET_KEY}_smu / '
+              f'_mpe / _imp)')
 
 
 if __name__ == '__main__':

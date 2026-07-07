@@ -91,12 +91,17 @@ def _cdp_alive(host='127.0.0.1', port=9222, timeout=1.0) -> bool:
         return False
 
 
-def _session_secret():
-    """base64-сессия для облачного режима из Streamlit Secrets (или None)."""
+def _session_secret(project_id: str = ''):
+    """base64-сессия для облачного режима из Streamlit Secrets (или None).
+    Сначала по-проектный ключ (autoclick_session_<pid>) - у каждого проекта
+    свои аккаунты; общий autoclick_session - запасной вариант."""
     try:
         from autoclick_browser import SESSION_SECRET_KEY
-        if hasattr(st, 'secrets') and SESSION_SECRET_KEY in st.secrets:
-            return str(st.secrets[SESSION_SECRET_KEY])
+        if hasattr(st, 'secrets'):
+            for key in ((f'{SESSION_SECRET_KEY}_{project_id}',)
+                        if project_id else ()) + (SESSION_SECRET_KEY,):
+                if key in st.secrets:
+                    return str(st.secrets[key])
     except Exception:
         pass
     return None
@@ -154,24 +159,6 @@ def _run_foreground(args: list[str], title: str):
 st.title('🖱 Автокликеры - GSC и Яндекс.Вебмастер')
 
 _cdp = _cdp_alive()
-_cloud_session = _session_secret()
-if _cdp:
-    st.success('Режим: **локальный** - найден залогиненный Chrome (CDP 9222). '
-               'Клики пойдут через него, как обычно.')
-elif _cloud_session:
-    st.info('Режим: **облачный** - локального Chrome нет, но в Secrets есть '
-            'сессия (autoclick_session). Клики пойдут через headless-браузер '
-            'с этой сессией. Если сессия протухла - кликер напишет в лог, '
-            'тогда пере-экспортируй её локально (Шаг 1).')
-else:
-    st.warning(
-        'Локального Chrome нет (CDP 9222) и сессии в Secrets нет '
-        '(autoclick_session). Два пути:\n'
-        '1. **Локально**: открой браузер для входа (Шаг 1) и запускай как раньше.\n'
-        '2. **Облако**: локально экспортируй сессию (кнопка в Шаге 1) и положи '
-        'строку в Streamlit Secrets ключом `autoclick_session` - после этого '
-        'клики работают прямо из облака.'
-    )
 
 if not _playwright_ok():
     st.error(
@@ -189,6 +176,25 @@ st.markdown(
     f"- Yandex (Вебмастер): `{proj['yandex']}`"
 )
 
+_cloud_session = _session_secret(pid)
+if _cdp:
+    st.success('Режим: **локальный** - найден залогиненный Chrome (CDP 9222). '
+               'Клики пойдут через него, как обычно.')
+elif _cloud_session:
+    st.info(f'Режим: **облачный** - локального Chrome нет, но в Secrets есть '
+            f'сессия проекта (autoclick_session_{pid}). Клики пойдут через '
+            f'headless-браузер с этой сессией. Протухнет - кликер напишет '
+            f'в лог, тогда пере-экспортируй её локально (Шаг 1).')
+else:
+    st.warning(
+        f'Локального Chrome нет (CDP 9222) и сессии проекта в Secrets нет '
+        f'(autoclick_session_{pid}). Два пути:\n'
+        f'1. **Локально**: открой браузер для входа (Шаг 1) и запускай как раньше.\n'
+        f'2. **Облако**: локально войди в аккаунты проекта, экспортируй сессию '
+        f'(кнопка в Шаге 1) и положи строку в Streamlit Secrets ключом '
+        f'`autoclick_session_{pid}` - после этого клики работают из облака.'
+    )
+
 st.divider()
 
 # ── Шаг 1: вход ─────────────────────────────────────────────────────
@@ -198,17 +204,20 @@ st.caption('Откроется Chrome. Войди в Google и Yandex аккау
 if st.button('🌐 Открыть браузер для входа', use_container_width=True):
     _run_foreground(['open_browser.py'], 'Открываю Chrome…')
 
-st.caption('Для ОБЛАЧНЫХ кликов: когда вошёл в аккаунты - выгрузи сессию '
-           'кнопкой ниже и положи строку в Streamlit Secrets ключом '
-           '`autoclick_session`. Кнопка работает только локально '
-           '(нужен Chrome на 9222).')
-if st.button('💾 Экспорт сессии для облака', use_container_width=True,
-             disabled=not _cdp):
-    _run_foreground(['session_export.py'], 'Экспортирую сессию…')
-    _b64_file = ROOT / 'cache' / 'autoclick_session.b64'
+st.caption(f'Для ОБЛАЧНЫХ кликов: когда вошёл в аккаунты **{proj["name"]}** - '
+           f'выгрузи сессию кнопкой ниже и положи строку в Streamlit Secrets '
+           f'ключом `autoclick_session_{pid}`. У каждого проекта свои аккаунты '
+           f'и свой секрет - экспортируй для каждого отдельно (вход → экспорт → '
+           f'выход → следующий проект). Кнопка работает только локально '
+           f'(нужен Chrome на 9222).')
+if st.button(f'💾 Экспорт сессии для облака ({proj["name"]})',
+             use_container_width=True, disabled=not _cdp):
+    _run_foreground(['session_export.py', '--project', pid],
+                    'Экспортирую сессию…')
+    _b64_file = ROOT / 'cache' / f'autoclick_session_{pid}.b64'
     if _b64_file.exists():
-        st.caption('Скопируй строку ниже в Streamlit Secrets → '
-                   '`autoclick_session = "<строка>"`:')
+        st.caption(f'Скопируй строку ниже в Streamlit Secrets → '
+                   f'`autoclick_session_{pid} = "<строка>"`:')
         st.code(_b64_file.read_text(encoding='utf-8'), language='text')
 
 st.divider()
