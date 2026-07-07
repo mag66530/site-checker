@@ -320,38 +320,121 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
 # ── Кросс-проверка sitemap ↔ robots (весь каталог, не только выборка) ─
 
 
-async def check_paths_against_robots(host: str, paths: list, *,
-                                     proxy_url=None, limit: int = 300) -> dict:
-    """Прогнать ВСЕ известные пути каталога (категории/фильтры/товары из
-    sitemap и выгрузок) через robots.txt главного хоста.
+# Типовой «мусор», который ДОЛЖЕН быть закрыт в robots (ТЗ 3.3.4.2):
+# пагинация/сортировка строятся от реальной категории, остальное - типовые
+# пути Bitrix-проектов. Находка = путь ОТКРЫТ в robots И реально отвечает 200
+# (несуществующие страницы не считаем - закрывать нечего).
+_JUNK_FIXED = [
+    ('поиск', '/search/'),
+    ('корзина', '/basket/'),
+    ('корзина', '/cart/'),
+    ('сравнение', '/compare/'),
+    ('личный кабинет', '/personal/'),
+    ('авторизация', '/auth/'),
+]
 
-    Пути в sitemap = «хочу в индекс»; Disallow на них = противоречие.
-    Возвращает {'host', 'robots_status', 'sitemaps', 'checked',
-                'disallowed': [{'path', 'rule', 'agent'}], 'error'}."""
+
+async def _status_direct(session, url, proxy_url, *, timeout_ms=15000,
+                         follow_redirects=False):
+    """Код ответа URL. По умолчанию БЕЗ редиректов: 3xx на пагинации значит
+    «дубля нет» (страница сводится к базовой). HEAD, при 405/501 - GET."""
     import aiohttp
-    out = {'host': host, 'robots_status': None, 'sitemaps': [],
-           'checked': 0, 'disallowed': [], 'error': None}
+    to = aiohttp.ClientTimeout(total=timeout_ms / 1000)
     try:
-        async with aiohttp.ClientSession() as session:
+        async with session.head(url, timeout=to,
+                                allow_redirects=follow_redirects,
+                                proxy=proxy_url) as r:
+            if r.status not in (405, 501):
+                return r.status
+    except Exception:
+        pass
+    try:
+        async with session.get(url, timeout=to,
+                               allow_redirects=follow_redirects,
+                               proxy=proxy_url) as r:
+            return r.status
+    except Exception:
+        return None
+
+
+async def check_paths_against_robots(host: str, paths: list, *,
+                                     proxy_url=None, limit: int = 300,
+                                     sample_category: str = None,
+                                     project_sitemap_url: str = None) -> dict:
+    """Гигиена robots.txt главного хоста (ТЗ 3.3):
+
+    1. Все известные пути каталога (категории/фильтры/товары из sitemap и
+       выгрузок) через robots: путь в sitemap = «хочу в индекс», Disallow на
+       нём = противоречие (ТЗ 3.3.4.1).
+    2. Типовой мусор закрыт (ТЗ 3.3.4.2): пагинация/сортировка реальной
+       категории + поиск/корзина/сравнение/ЛК. Открыт в robots И отвечает
+       200 = находка.
+    3. Sitemap-директивы (ТЗ 3.3.6): есть хотя бы одна; каждая отдаёт 200;
+       совпадает ли с sitemap проекта.
+
+    Возвращает {'host', 'robots_status', 'sitemaps', 'checked',
+                'disallowed': [...], 'junk_open': [...],
+                'sitemap_checks': {...}, 'error'}."""
+    import aiohttp
+    from http_checker import make_browser_headers
+    out = {'host': host, 'robots_status': None, 'sitemaps': [],
+           'checked': 0, 'disallowed': [], 'junk_open': [],
+           'sitemap_checks': None, 'error': None}
+    try:
+        async with aiohttp.ClientSession(
+                headers=make_browser_headers()) as session:
             info = await fetch_robots(session, host, proxy_url=proxy_url)
+            out['robots_status'] = info.status
+            out['sitemaps'] = info.sitemaps
+            if not info.ok:
+                out['error'] = info.error or f'robots.txt: HTTP {info.status}'
+                return out
+
+            # ── 1. sitemap ↔ robots (пути каталога не закрыты) ──
+            seen = set()
+            for p in paths or []:
+                p = (p or '').strip()
+                if not p or p in seen:
+                    continue
+                seen.add(p)
+                out['checked'] += 1
+                dis, rule, agent = robots_verdict(info, f'https://{host}{p}')
+                if dis and len(out['disallowed']) < limit:
+                    out['disallowed'].append(
+                        {'path': p, 'rule': rule, 'agent': agent})
+
+            # ── 2. Мусор закрыт (ТЗ 3.3.4.2) ──
+            junk = list(_JUNK_FIXED)
+            if sample_category:
+                _c = '/' + sample_category.strip('/') + '/'
+                junk = [('пагинация', f'{_c}?PAGEN_1=2'),
+                        ('пагинация', f'{_c}?page=2'),
+                        ('сортировка', f'{_c}?sort=price')] + junk
+            for label, path in junk:
+                dis, _rule, _agent = robots_verdict(info, f'https://{host}{path}')
+                if dis:
+                    continue                     # закрыт - как и должно быть
+                status = await _status_direct(
+                    session, f'https://{host}{path}', proxy_url)
+                if status == 200:                # существует И открыт = находка
+                    out['junk_open'].append(
+                        {'label': label, 'path': path})
+
+            # ── 3. Sitemap-директивы (ТЗ 3.3.6) ──
+            sm = {'has_directive': bool(info.sitemaps),
+                  'directives': [], 'matches_project': None}
+            for u in info.sitemaps[:5]:
+                st = await _status_direct(session, u, proxy_url,
+                                          follow_redirects=True)
+                sm['directives'].append({'url': u, 'status': st})
+            if project_sitemap_url and info.sitemaps:
+                def _norm_sm(x):
+                    x = (x or '').strip().rstrip('/').lower()
+                    return x.replace('://www.', '://')
+                sm['matches_project'] = any(
+                    _norm_sm(u) == _norm_sm(project_sitemap_url)
+                    for u in info.sitemaps)
+            out['sitemap_checks'] = sm
     except Exception as e:
         out['error'] = str(e)
-        return out
-    out['robots_status'] = info.status
-    out['sitemaps'] = info.sitemaps
-    if not info.ok:
-        out['error'] = info.error or f'robots.txt: HTTP {info.status}'
-        return out
-    seen = set()
-    for p in paths or []:
-        p = (p or '').strip()
-        if not p or p in seen:
-            continue
-        seen.add(p)
-        out['checked'] += 1
-        dis, rule, agent = robots_verdict(info, f'https://{host}{p}')
-        if dis:
-            out['disallowed'].append({'path': p, 'rule': rule, 'agent': agent})
-            if len(out['disallowed']) >= limit:
-                break
     return out

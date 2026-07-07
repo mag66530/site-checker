@@ -1643,6 +1643,70 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                     ws.row_dimensions[row].height = 16
                     row += 1
                 row += 1
+        row += 1
+
+        def _line(text, color, bold=False):
+            nonlocal row
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = text
+            c.font = _font(size=10, bold=bold, color=color)
+            c.alignment = _align(wrap=True, indent=1)
+            ws.row_dimensions[row].height = 20
+            row += 1
+
+        # ── Секция 4: мусор не закрыт в robots (ТЗ 3.3.4.2) ──
+        junk = indexing_summary.get('junk_open')
+        if junk is not None and not indexing_summary.get('error'):
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = f'Служебные страницы не закрыты в robots.txt  ({len(junk)})'
+            c.font = _font(size=13, bold=True, color=C.err if junk else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            if not junk:
+                _line('✅ Пагинация, поиск, корзина, сравнение и личный кабинет '
+                      'закрыты в robots.txt (или не существуют на сайте).', C.ok)
+            else:
+                _line('Эти страницы отвечают 200, но НЕ закрыты в robots - '
+                      'мусор попадает в обход робота:', C.text_muted)
+                for j in junk:
+                    _line(f'{j.get("label", "")}: {j.get("path", "")}', C.err)
+            row += 1
+
+        # ── Секция 5: sitemap-директивы в robots (ТЗ 3.3.6) ──
+        smc = indexing_summary.get('sitemap_checks')
+        if smc is not None:
+            _sm_bad = (not smc.get('has_directive')
+                       or any((d.get('status') or 0) != 200
+                              for d in smc.get('directives') or [])
+                       or smc.get('matches_project') is False)
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = 'Sitemap в robots.txt'
+            c.font = _font(size=13, bold=True, color=C.err if _sm_bad else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            if not smc.get('has_directive'):
+                _line('❌ В robots.txt нет директивы Sitemap - роботы не видят '
+                      'карту сайта.', C.err, bold=True)
+            else:
+                for d in (smc.get('directives') or []):
+                    _st = d.get('status')
+                    if _st == 200:
+                        _line(f'✅ {d.get("url", "")} - открывается (HTTP 200)', C.ok)
+                    else:
+                        _line(f'❌ {d.get("url", "")} - не открывается '
+                              f'(HTTP {_st if _st is not None else "нет ответа"})',
+                              C.err, bold=True)
+                if smc.get('matches_project') is False:
+                    _line('⚠ Ни одна директива не совпадает с sitemap проекта '
+                          '(sitemap_url из настроек) - проверьте, тот ли адрес '
+                          'указан.', C.warn)
 
 
 # ── Группировка «одна проблема - одна строка + список URL» ─────────

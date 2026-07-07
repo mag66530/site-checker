@@ -294,13 +294,17 @@ def run_check(pid, params, creds, log, progress):
                               + list(src.filters or [])
                               + list(src.products or []))
                 _idx_summary = asyncio.run(check_paths_against_robots(
-                    _main.host, _all_paths, proxy_url=proxy_url))
+                    _main.host, _all_paths, proxy_url=proxy_url,
+                    sample_category=(src.categories[0] if src.categories else None),
+                    project_sitemap_url=cfg.get('sitemap_url')))
                 _n_dis = len(_idx_summary.get('disallowed') or [])
+                _n_junk = len(_idx_summary.get('junk_open') or [])
                 _pages_closed = sum(1 for r in results
                                     if getattr(r, 'has_indexing_issues', False))
                 log(f'Индексация: страниц с проблемами {_pages_closed}, '
                     f'путей каталога под Disallow {_n_dis} '
-                    f'(проверено {_idx_summary.get("checked", 0)})')
+                    f'(проверено {_idx_summary.get("checked", 0)}), '
+                    f'мусора не закрыто {_n_junk}')
             except Exception as _e:
                 log(f'⚠ Индексация (sitemap↔robots): {_e}')
 
