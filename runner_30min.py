@@ -99,19 +99,42 @@ def _parse_wm_recheck_log():
     return out
 
 
-def _run_autoclicker(pid, params, log):
-    """Прокликать ошибки (Вебмастер/ГСК) залогиненным локальным Chrome и
-    дождаться завершения. Возвращает dict для листа «Автокликер»."""
+def _run_autoclicker(pid, params, log, session_b64=None):
+    """Прокликать ошибки (Вебмастер/ГСК) и дождаться завершения.
+    Локальный залогиненный Chrome (CDP 9222) в приоритете; нет его, но есть
+    сессия (Secrets: autoclick_session) - облачный headless-режим.
+    Возвращает dict для листа «Автокликер»."""
+    import os as _os
     import subprocess
     import sys as _sys
     root = Path(__file__).parent
+    _env = None
     if not _cdp_alive():
-        log('⚠ Автокликер: Chrome/CDP 9222 не запущен - пропускаю '
-            '(нужен локальный залогиненный браузер).')
-        return {'available': False,
-                'note': 'Chrome/CDP 9222 не запущен - автокликер пропущен. '
-                        'Нужен локальный залогиненный браузер (вкладка '
-                        '«Автокликеры» → «Открыть браузер для входа»).'}
+        if session_b64:
+            try:
+                from autoclick_browser import (
+                    session_file_from_secret, MODE_ENV, SESSION_FILE_ENV)
+                _env = dict(_os.environ)
+                _env['PYTHONIOENCODING'] = 'utf-8'
+                _env[MODE_ENV] = 'cloud'
+                _env[SESSION_FILE_ENV] = session_file_from_secret(session_b64)
+                log('Автокликер: локального Chrome нет - облачный режим '
+                    '(headless + сессия из Secrets).')
+            except Exception as _e:
+                log(f'⚠ Автокликер: сессия из Secrets не читается ({_e}) - пропускаю.')
+                return {'available': False,
+                        'note': f'Сессия autoclick_session не читается: {_e}. '
+                                f'Пере-экспортируй её локально (вкладка '
+                                f'«Автокликеры» → «Экспорт сессии для облака»).'}
+        else:
+            log('⚠ Автокликер: Chrome/CDP 9222 не запущен и сессии в Secrets '
+                'нет - пропускаю.')
+            return {'available': False,
+                    'note': 'Нет ни локального Chrome (9222), ни сессии в '
+                            'Secrets (autoclick_session) - автокликер пропущен. '
+                            'Локально: «Автокликеры» → «Открыть браузер для '
+                            'входа». Облако: там же «Экспорт сессии для облака» '
+                            '+ секрет autoclick_session.'}
     args = [_sys.executable, 'autoclick_run.py', '--project', pid]
     if params.get('autoclick_wm'):
         args.append('--wm')
@@ -128,7 +151,7 @@ def _run_autoclicker(pid, params, log):
         proc = subprocess.Popen(
             args, cwd=str(root), stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, encoding='utf-8',
-            errors='replace')
+            errors='replace', env=_env)
         for line in proc.stdout:
             log(f'  [клик] {line.rstrip()}')
         proc.wait()
@@ -483,10 +506,13 @@ def run_check(pid, params, creds, log, progress):
         else:
             log('Сбор 404 из Метрики выключен.')
 
-        # ── Автокликер (локально) - блокирует до перекликивания всех ошибок ──
+        # ── Автокликер - блокирует до перекликивания всех ошибок.
+        # Локальный Chrome в приоритете, иначе облачный headless с сессией. ──
         _autoclick = None
         if params.get('autoclick'):
-            _autoclick = _run_autoclicker(pid, params, log)
+            _autoclick = _run_autoclicker(
+                pid, params, log,
+                session_b64=creds.get('autoclick_session'))
 
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых

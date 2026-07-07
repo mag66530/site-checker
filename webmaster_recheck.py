@@ -259,14 +259,14 @@ async def run(single_site: str | None, dry_run: bool, limit: int,
     entries = []
     async with async_playwright() as p:
         try:
-            browser = await p.chromium.connect_over_cdp(CDP_URL)
+            from autoclick_browser import open_browser
+            browser, page = await open_browser(p, lambda m: _log(m, 'info'))
         except Exception as e:
-            _log(f'Нет подключения к Chrome ({CDP_URL}): {e}', 'error')
-            _log('Сначала запусти gsc_save_session.py.')
+            _log(f'Браузер не открылся: {e}', 'error')
+            _log('Локально: запусти gsc_save_session.py (Chrome на 9222). '
+                 'В облаке: экспортируй сессию (session_export.py) и положи '
+                 'в Secrets ключом autoclick_session.')
             return
-
-        ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
         if single_site:
             sites = [single_site]
