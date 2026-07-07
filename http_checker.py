@@ -209,6 +209,11 @@ class CheckResult:
     meta_unique: Optional[dict] = None
     has_meta_unique_issues: bool = False
 
+    # п.1.11 (ТЗ 2.1/2.1.1) - вёрстка и адаптивность: viewport, битые CSS,
+    # @media | None - не проверяли
+    layout: Optional[dict] = None
+    has_layout_issues: bool = False
+
     checked_at: Optional[str] = None
 
 
@@ -343,30 +348,35 @@ def _extract_stylesheet_links(html: str, base_url: str) -> list[str]:
     return out[:12]
 
 
-async def _fetch_css_text(session, url, timeout_ms, proxy_url) -> str:
-    # Пара попыток: один сбой/таймаут на стиль не должен «ослеплять» проверку
-    # видимости для всего домена (цена/кнопка тогда ложно считаются видимыми).
+async def _fetch_css_text(session, url, timeout_ms, proxy_url):
+    """(HTTP-статус | None, текст CSS). Пара попыток: один сбой/таймаут на
+    стиль не должен «ослеплять» проверку видимости для всего домена
+    (цена/кнопка тогда ложно считаются видимыми)."""
     to = aiohttp.ClientTimeout(total=min(timeout_ms, 30000) / 1000)
     for attempt in range(2):
         try:
             async with session.get(url, timeout=to, allow_redirects=True,
                                    proxy=proxy_url) as r:
                 if r.status != 200:
-                    return ''          # 401/403/404 - повтор не поможет
+                    return r.status, ''    # 401/403/404 - повтор не поможет
                 data = await r.read()
                 if len(data) > _MAX_CSS_BYTES:
                     data = data[:_MAX_CSS_BYTES]
-                return data.decode('utf-8', errors='replace')
+                return 200, data.decode('utf-8', errors='replace')
         except Exception:
             if attempt == 0:
                 await asyncio.sleep(0.5)
                 continue
-            return ''
-    return ''
+            return None, ''                # сеть/таймаут - статус неизвестен
+    return None, ''
 
 
-async def _css_sel_for_url(session, url, timeout_ms, proxy_url, cache, locks, guard):
-    """Разобранные скрывающие селекторы для одного CSS-URL (с кэшем)."""
+_RE_CSS_MEDIA_WIDTH = re.compile(r'@media[^{]*\b(?:max|min)-width', re.I)
+
+
+async def _css_info_for_url(session, url, timeout_ms, proxy_url, cache, locks, guard):
+    """Инфо по одному CSS-URL (с кэшем на батч): скрывающие селекторы +
+    HTTP-статус + признак @media-запросов (для проверки вёрстки, п.1.11)."""
     if url in cache:
         return cache[url]
     async with guard:
@@ -377,10 +387,15 @@ async def _css_sel_for_url(session, url, timeout_ms, proxy_url, cache, locks, gu
     async with lock:
         if url in cache:
             return cache[url]
-        text = await _fetch_css_text(session, url, timeout_ms, proxy_url)
-        sels = parse_hidden_selectors(text) if text else ()
-        cache[url] = sels
-        return sels
+        status, text = await _fetch_css_text(session, url, timeout_ms, proxy_url)
+        info = {
+            'url': url,
+            'status': status,
+            'has_media': bool(text and _RE_CSS_MEDIA_WIDTH.search(text)),
+            'selectors': parse_hidden_selectors(text) if text else (),
+        }
+        cache[url] = info
+        return info
 
 
 # ── «Ссылки реально открываются» (404) ──────────────────────────────
@@ -469,11 +484,13 @@ async def check_one(
     check_meta: bool = False,
     check_region: bool = False,
     check_cis: bool = False,
+    check_layout: bool = False,
     region_ctx=None,            # RegionContext из region_checker.py
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
     get_css_hidden: Optional[Callable] = None,
     get_robots: Optional[Callable] = None,
+    get_css_infos: Optional[Callable] = None,
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
@@ -609,6 +626,21 @@ async def check_one(
             cis = check_cis_mentions(a['body_text'], task.subdomain, region_ctx)
         except Exception:
             cis = None
+    # п.1.11 (ТЗ 2.1/2.1.1): вёрстка и адаптивность - viewport, битые CSS,
+    # @media. Статусы CSS берём из кэша батча (стили уже качаются для
+    # проверки видимости цены/кнопок - лишних запросов нет).
+    layout = None
+    if check_layout and is_ok and a['body_text']:
+        try:
+            from layout_checker import check_layout as _check_layout
+            _css_infos = None
+            if get_css_infos is not None:
+                _css_infos = await get_css_infos(
+                    a['body_text'], a['final_url'] or task.url)
+            layout = _check_layout(a['body_text'], _css_infos)
+        except Exception:
+            layout = None
+
     # п.1.3.1 + 1.3.2 (та же галочка 1.8): единственность title/description/H1,
     # дубли H2 и «текстовость» заголовков (h2-h6 не в шапке/подвале/меню).
     meta_unique = None
@@ -657,6 +689,8 @@ async def check_one(
         has_cis_issues=bool(cis and cis.get('issues')),
         meta_unique=meta_unique,
         has_meta_unique_issues=bool(meta_unique and meta_unique.get('issues')),
+        layout=layout,
+        has_layout_issues=bool(layout and layout.get('issues')),
         checked_at=None,
     )
 
@@ -680,6 +714,7 @@ async def run_batch(
     check_meta: bool = False,
     check_region: bool = False,
     check_cis: bool = False,
+    check_layout: bool = False,
     region_ctx=None,            # RegionContext из region_checker.build_region_context
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
@@ -726,9 +761,19 @@ async def run_batch(
         async def get_css_hidden(html, base_url):
             sels = []
             for u in _extract_stylesheet_links(html, base_url):
-                sels.extend(await _css_sel_for_url(
-                    session, u, timeout_ms, proxy_url, css_cache, css_locks, css_guard))
+                info = await _css_info_for_url(
+                    session, u, timeout_ms, proxy_url, css_cache, css_locks, css_guard)
+                sels.extend(info['selectors'])
             return tuple(sels)
+
+        async def get_css_infos(html, base_url):
+            """[{'url','status','has_media'}] по подключённым CSS страницы
+            (для проверки вёрстки, п.1.11). Тот же кэш - без лишних запросов."""
+            out = []
+            for u in _extract_stylesheet_links(html, base_url):
+                out.append(await _css_info_for_url(
+                    session, u, timeout_ms, proxy_url, css_cache, css_locks, css_guard))
+            return out
 
         async def get_robots(host):
             if host in robots_cache:
@@ -768,11 +813,13 @@ async def run_batch(
                     check_meta=check_meta,
                     check_region=check_region,
                     check_cis=check_cis,
+                    check_layout=check_layout,
                     region_ctx=region_ctx,
                     proxy_url=proxy_url,
                     kp_map=kp_map,
                     get_css_hidden=get_css_hidden,
                     get_robots=get_robots if check_indexing else None,
+                    get_css_infos=get_css_infos if check_layout else None,
                 )
                 done_count += 1
                 if on_progress:

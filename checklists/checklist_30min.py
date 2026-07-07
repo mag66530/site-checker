@@ -649,6 +649,7 @@ def init_session():
         'c30_check_meta': True,        # пункт 1.8 - метаданные, дубли, единственность тегов
         'c30_check_region': True,      # пункт 1.9 - верные переменные города (по КП)
         'c30_check_cis': True,         # пункт 1.10 - СНГ-домены без РФ/СНГ/чужих стран
+        'c30_check_layout': True,      # пункт 1.11 - вёрстка и адаптивность (viewport, CSS)
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
@@ -889,7 +890,7 @@ with st.container(border=True):
         for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                    'c30_check_filters', 'c30_check_products', 'c30_check_text',
                    'c30_check_indexing', 'c30_check_meta',
-                   'c30_check_region', 'c30_check_cis'):
+                   'c30_check_region', 'c30_check_cis', 'c30_check_layout'):
             st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
@@ -1039,7 +1040,8 @@ if pid:
         # «Выбрать/Снять все», иначе кнопка врёт).
         _CHK_KEYS = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                      'c30_check_products', 'c30_check_text', 'c30_check_indexing',
-                     'c30_check_meta', 'c30_check_region', 'c30_check_cis']
+                     'c30_check_meta', 'c30_check_region', 'c30_check_cis',
+                     'c30_check_layout']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
@@ -1105,6 +1107,13 @@ if pid:
                              'заголовках, метаданных и контактах не должно быть: '
                              '«РФ», «Россия», аббревиатуры «СНГ» и названий других '
                              'стран - только своя страна. Для доменов РФ не выполняется.')
+            st.checkbox('1.11  Вёрстка и адаптивность (viewport, стили)',
+                        key='c30_check_layout',
+                        help='ТЗ 2.1/2.1.1: задан тег viewport (мобильная версия '
+                             'масштабируется), каждый подключённый CSS-файл реально '
+                             'грузится (битый стиль = страница без вёрстки), в стилях '
+                             'есть @media-запросы (признак адаптивности). Визуальный '
+                             'рендер не заменяет - выборочный ручной просмотр остаётся.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1222,6 +1231,7 @@ if pid:
         bool(st.session_state.get('c30_check_meta', True)),
         bool(st.session_state.get('c30_check_region', True)),
         bool(st.session_state.get('c30_check_cis', True)),
+        bool(st.session_state.get('c30_check_layout', True)),
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
@@ -1261,6 +1271,7 @@ if pid:
                 'check_meta': st.session_state.get('c30_check_meta', True),
                 'check_region': st.session_state.get('c30_check_region', True),
                 'check_cis': st.session_state.get('c30_check_cis', True),
+                'check_layout': st.session_state.get('c30_check_layout', True),
                 'check_links': st.session_state.get('c30_check_links', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
