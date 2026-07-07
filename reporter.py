@@ -1707,6 +1707,96 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                     _line('⚠ Ни одна директива не совпадает с sitemap проекта '
                           '(sitemap_url из настроек) - проверьте, тот ли адрес '
                           'указан.', C.warn)
+            row += 1
+
+        def _sec_title(text, bad):
+            nonlocal row
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = text
+            c.font = _font(size=13, bold=True, color=C.err if bad else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+
+        # ── Секция 6: структура sitemap (ТЗ 3.4.2) ──
+        aud = indexing_summary.get('sitemap_audit')
+        if aud is not None:
+            _bad_urls = aud.get('bad_urls') or []
+            _tot = aud.get('total', 0)
+            _fld_missing = [
+                (name, aud.get(key, 0))
+                for name, key in (('lastmod', 'with_lastmod'),
+                                  ('changefreq', 'with_changefreq'),
+                                  ('priority', 'with_priority'))
+                if _tot and aud.get(key, 0) == 0
+            ]
+            _sec_title('Sitemap: структура записей (ТЗ 3.4.2)',
+                       bool(aud.get('error') or _bad_urls))
+            if aud.get('error'):
+                _line(f'⚠ Аудит не выполнен: {aud["error"]}', C.warn)
+            else:
+                _line(f'Файлов sitemap: {aud.get("files", 0)} · записей URL: '
+                      f'{_tot} · с lastmod: {aud.get("with_lastmod", 0)} · '
+                      f'с changefreq: {aud.get("with_changefreq", 0)} · '
+                      f'с priority: {aud.get("with_priority", 0)}', C.text_muted)
+                if _bad_urls:
+                    _line(f'❌ Неправильные URL в sitemap ({len(_bad_urls)}):',
+                          C.err, bold=True)
+                    for b in _bad_urls[:20]:
+                        _line(f'{b.get("why", "")}: {b.get("url", "")}', C.err)
+                    if len(_bad_urls) > 20:
+                        _line(f'… и ещё {len(_bad_urls) - 20}', C.text_muted)
+                else:
+                    _line('✅ Все URL абсолютные, https и своего хоста.', C.ok)
+                for name, _n in _fld_missing:
+                    _line(f'⚠ Ни у одной записи нет <{name}> - ТЗ требует '
+                          f'заполнять.', C.warn)
+            row += 1
+
+            # ── Секция 7: даты lastmod (ТЗ 3.4.3) ──
+            la = aud.get('lastmod_analysis') or {}
+            _la_warn = la.get('warnings') or []
+            _sec_title('Sitemap: даты обновления (ТЗ 3.4.3)', bool(_la_warn))
+            if _la_warn:
+                for w in _la_warn:
+                    _line(f'⚠ {w}', C.warn)
+            elif aud.get('with_lastmod'):
+                _cr = la.get('changed_ratio')
+                _extra = (f' С прошлого прогона изменилось '
+                          f'{int(_cr * 100)}% дат.' if _cr is not None else
+                          ' Сравнение с прошлым прогоном появится со '
+                          'следующего запуска.')
+                _line('✅ Признаков динамической генерации дат нет.' + _extra,
+                      C.ok)
+            else:
+                _line('- Дат lastmod в sitemap нет - проверять нечего '
+                      '(см. секцию структуры выше).', C.text_muted)
+            row += 1
+
+        # ── Секция 8: sitemap в Яндекс.Вебмастере (ТЗ 3.4.4) ──
+        wm = indexing_summary.get('wm_sitemaps')
+        if wm is not None:
+            _wm_list = wm.get('sitemaps') or []
+            _wm_bad = (bool(wm.get('error')) or not _wm_list
+                       or any((s.get('errors') or 0) for s in _wm_list))
+            _sec_title('Sitemap в Яндекс.Вебмастере (ТЗ 3.4.4)', _wm_bad)
+            if wm.get('error'):
+                _line(f'⚠ Не удалось получить: {wm["error"]}', C.warn)
+            elif not _wm_list:
+                _line(f'❌ У хоста {wm.get("host", "")} в Вебмастере нет '
+                      f'sitemap-файлов - карта не добавлена.', C.err, bold=True)
+            else:
+                for s in _wm_list:
+                    _err = s.get('errors')
+                    if _err:
+                        _line(f'❌ {s.get("url", "")} - ошибок: {_err}', C.err,
+                              bold=True)
+                    else:
+                        _n = s.get('urls_count')
+                        _line(f'✅ {s.get("url", "")} - без ошибок'
+                              + (f', URL: {_n}' if _n else ''), C.ok)
 
 
 # ── Группировка «одна проблема - одна строка + список URL» ─────────

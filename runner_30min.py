@@ -308,6 +308,34 @@ def run_check(pid, params, creds, log, progress):
             except Exception as _e:
                 log(f'⚠ Индексация (sitemap↔robots): {_e}')
 
+        # ── Аудит sitemap (ТЗ 3.4.2/3.4.3, часть п.1.7) ──
+        if _chk_idx and _main and _idx_summary is not None:
+            try:
+                from sitemap_audit import audit_sitemap, analyze_lastmod
+                _sm_url = (cfg.get('sitemap_url')
+                           or f'https://{_main.host}/sitemap.xml')
+                _audit = asyncio.run(audit_sitemap(
+                    _sm_url, _main.host, proxy_url=proxy_url))
+                _audit['lastmod_analysis'] = analyze_lastmod(pid, _audit)
+                _audit.pop('lastmod_dates', None)   # в отчёт даты не тащим
+                _idx_summary['sitemap_audit'] = _audit
+                log(f'Sitemap-аудит: файлов {_audit.get("files", 0)}, '
+                    f'URL {_audit.get("total", 0)}, '
+                    f'битых URL {len(_audit.get("bad_urls") or [])}, '
+                    f'lastmod у {_audit.get("with_lastmod", 0)}')
+            except Exception as _e:
+                log(f'⚠ Sitemap-аудит: {_e}')
+            # Статус sitemap в Яндекс.Вебмастере (ТЗ 3.4.4)
+            _wm_tok = creds.get('webmaster_oauth')
+            if _wm_tok:
+                try:
+                    from webmaster_api import fetch_sitemap_status
+                    _idx_summary['wm_sitemaps'] = fetch_sitemap_status(
+                        pid, _wm_tok, _main.host, proxy_url,
+                        lambda lvl, msg: log(msg))
+                except Exception as _e:
+                    log(f'⚠ Sitemap в Вебмастере: {_e}')
+
         # ── Метаданные и дубли (п.1.8) ──
         # Дубли title/description/H1 - по всем результатам прогона; дубли
         # УРЛОВ - прозвон вариантов (http/слэш/www) главной и каталога
