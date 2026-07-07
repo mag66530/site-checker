@@ -261,7 +261,7 @@ ACTIONS = {
             'telegram', 'clickwapp', 'tocart', 'tovar_v_korzinu',
             'klik_kartochka_tovara', 'tovar_konsultaciya', 'klik_nashli_deshevle',
             'citys', 'about', 'rekvizity_podval', 'rekvizity_contacts',
-            'skachat_rekvizity', 'skidochnyy_kupon', 'login', 'klik_avtorizovatsya',
+            'skachat_rekvizity', 'skidochnyy_kupon', 'klik_avtorizovatsya',
         ],
     },
 }
@@ -901,6 +901,18 @@ def _классифицировать(pid: str, каталог: dict, прого
                 return gid
         return None
 
+    _ФОРМ_СЛОВА = ('form', 'forma', 'formu', 'otpravlen', 'otpravit',
+                   'zayavk', 'zayavka', 'заявк', 'форм', 'подписк', 'subscribe',
+                   'konsultaci', 'консультац', 'obratnoy_svyazi', 'obratnaya_svyaz')
+
+    def _похоже_на_форму(g) -> bool:
+        """Цель отправки формы (fires on onsubmit): её reachGoal почти никогда не
+        виден статически в коде, поэтому «нет в коде» - ложь. Определяем по
+        названию/идентификатору - такие показываем «Проверяется формами»."""
+        текст = ((g.get('название') or '') + ' ' +
+                 ' '.join(g.get('идентификаторы') or [])).lower()
+        return any(w in текст for w in _ФОРМ_СЛОВА)
+
     def _авто_действие_сделано(условие: str) -> bool:
         """Автоцель Метрики: выполнил ли автотест соответствующее действие.
         Клики по телефону/почте/соцсетям/мессенджерам мы делаем; формы/файлы/
@@ -928,7 +940,8 @@ def _классифицировать(pid: str, каталог: dict, прого
         if t == 'js':
             hit = _совпало(g, fired)
             форма_id = _форма_поймала(g)
-            в_формах = any(gid in формные for gid in (g.get('идентификаторы') or []))
+            в_формах = (any(gid in формные for gid in (g.get('идентификаторы') or []))
+                        or _похоже_на_форму(g))
             _особое = _нужно_спец_действие(g)
             if _лид_цель(g):
                 # Составная лид-цель: Метрика агрегирует сама на сервере - в отчёте
