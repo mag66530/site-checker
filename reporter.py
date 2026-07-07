@@ -1,10 +1,10 @@
 """
-reporter.py – формирование xlsx-отчёта.
+reporter.py - формирование xlsx-отчёта.
 
 Структура (как в Node.js версии):
-  • Лист «Обзор» – метрики, сводка, параметры прогона
-  • Лист «Все детали» – каждая проверка отдельной строкой
-  • Лист «Битые тексты» – добавляется ТОЛЬКО если есть находки
+  • Лист «Обзор» - метрики, сводка, параметры прогона
+  • Лист «Все детали» - каждая проверка отдельной строкой
+  • Лист «Битые тексты» - добавляется ТОЛЬКО если есть находки
 
 Колонки в «Все детали»:
   Город | Поддомен | Тип | URL | Код | Статус |
@@ -28,7 +28,7 @@ class C:
     text = '09090B'
     text_soft = '3F3F46'
     text_muted = '71717A'
-    # Раньше border_light был 'E4E4E7' – настолько светлый, что в Excel
+    # Раньше border_light был 'E4E4E7' - настолько светлый, что в Excel
     # границы данных не было видно («почему в отчёте нет границ»).
     # Делаем оба варианта заметнее.
     border = 'A8B2BD'
@@ -85,9 +85,9 @@ def _dept_result(r) -> str:
     """Отдел для колонки «Отдел» листа «Все детали».
 
     Тег ставим ТОЛЬКО при проблеме со статусом или скоростью.
-    Если статус «Работает» и скорость «ОК» – поле пустое, всё в порядке.
+    Если статус «Работает» и скорость «ОК» - поле пустое, всё в порядке.
     (Битые переменные и контент-баги показаны в своих колонках/листе,
-    здесь их не дублируем – иначе тег появлялся бы у рабочих страниц.)
+    здесь их не дублируем - иначе тег появлялся бы у рабочих страниц.)
 
     Карта:
       • сервер не отвечает / таймаут / нет соединения (5xx) → разработка
@@ -181,17 +181,17 @@ _STRUCT_GROUPS = [
 
 
 # «Схлопнутые» столбцы грида: 3 столбца цены и 3 столбца кнопок сводим в один
-# смысловой каждый – так таблица читается, а тип цены/кнопки виден в ячейке.
+# смысловой каждый - так таблица читается, а тип цены/кнопки виден в ячейке.
 
 def _price_cell(bk):
     # Одна галочка: есть цена в любом виде (₽ ИЛИ «по запросу») → ✓; нет ни того
-    # ни другого или скрыто стилями → БАГ. Без «₽ + запрос» – это лишний шум.
+    # ни другого или скрыто стилями → БАГ. Без «₽ + запрос» - это лишний шум.
     price = bk.get('price')
     if price and price.required and not price.present:
         return ('БАГ', 'bug')
     if price and price.present:
         return ('✓', 'ok')
-    return ('–', 'absent')
+    return ('-', 'absent')
 
 
 def _btn_cell(bk):
@@ -207,17 +207,17 @@ def _btn_cell(bk):
         return ('1 клик', 'okinfo')
     if order and order.present:
         return ('✓', 'ok')
-    return ('–', 'absent')
+    return ('-', 'absent')
 
 
 _COLLAPSE = [
     {'trigger': 'price', 'label': 'Цена',
-     'desc': 'Цена на карточках: «₽» – рублёвая, «по запросу» – цена по запросу. '
-             '«БАГ» – цены нет вовсе.',
+     'desc': 'Цена на карточках: «₽» - рублёвая, «по запросу» - цена по запросу. '
+             '«БАГ» - цены нет вовсе.',
      'keys': {'price', 'price_real', 'price_request'}, 'fn': _price_cell},
     {'trigger': 'btn_order', 'label': 'Кнопка заказа',
      'desc': 'Кнопка заказа: «в корзину» (товар с ценой) или «1 клик» (по запросу). '
-             '«БАГ» – нет ни одной.',
+             '«БАГ» - нет ни одной.',
      'keys': {'btn_order', 'btn_cart', 'btn_oneclick'}, 'fn': _btn_cell},
 ]
 
@@ -233,7 +233,7 @@ def _grid_columns(blocks):
             cols.append({'kind': 'virtual', 'label': c['label'],
                          'desc': c['desc'], 'fn': c['fn']})
         elif b.key in consumed:
-            continue                       # под-блок схлопнут – пропускаем
+            continue                       # под-блок схлопнут - пропускаем
         else:
             cols.append({'kind': 'block', 'key': b.key, 'label': b.label,
                          'desc': getattr(b, 'description', '')})
@@ -258,7 +258,7 @@ def _cell_state(col, by_key):
         if b.count is not None:
             return (b.count, 'count')
         return ('✓', 'ok')
-    return ('–', 'absent')
+    return ('-', 'absent')
 
 
 def _style_cell(cell, value, state):
@@ -274,7 +274,7 @@ def _style_cell(cell, value, state):
     elif state == 'count':
         cell.font = _font(size=10, color=C.text_soft)
     else:                          # absent
-        cell.value = '–'
+        cell.value = '-'
         cell.font = _font(size=10, color=C.text_muted)
 
 
@@ -298,7 +298,7 @@ def _contacts_problem_text(r):
     if ca and ca.get('mismatched'):
         mm = ca['mismatched']
         ex = '; '.join(f'{m["city"]}: сайт «{m["site"]}» / КП «{m["kp"]}»' for m in mm[:5])
-        parts.append('адреса не совпадают с КП – ' + ex
+        parts.append('адреса не совпадают с КП - ' + ex
                      + (f' и ещё {len(mm) - 5}' if len(mm) > 5 else ''))
     pp = getattr(r, 'page_phone', None)
     if pp and pp.get('status') in ('bug', 'critical'):
@@ -307,7 +307,7 @@ def _contacts_problem_text(r):
 
 
 def _broken_links_text(r):
-    """Битые ссылки (404/410) в контенте страницы – краткий текст для отчёта."""
+    """Битые ссылки (404/410) в контенте страницы - краткий текст для отчёта."""
     bl = getattr(r, 'broken_links', None)
     if not bl or not bl.get('broken'):
         return ''
@@ -354,9 +354,9 @@ def _problem_text(r):
     content = getattr(r, 'content', None)
     if content is not None:
         if getattr(content, 'is_soft_404', False):
-            parts.append('страница отдаёт 404 (не найдена) – проверить ссылку или убрать из каталога')
+            parts.append('страница отдаёт 404 (не найдена) - проверить ссылку или убрать из каталога')
         elif getattr(content, 'page_kind', '') == 'empty':
-            parts.append('раздел пуст – нет ни товаров, ни подразделов')
+            parts.append('раздел пуст - нет ни товаров, ни подразделов')
         else:
             # Человеческая фраза по каждому багу (+ число для фото, + пояснение,
             # напр. «в коде есть, но покупатель не видит»).
@@ -377,8 +377,8 @@ def _problem_text(r):
 
 
 def _build_structure_sheet(wb, results):
-    """Лист структурной проверки – дашборд, что чинить, сводка и детали."""
-    # Тех. страницы выносим отдельной секцией (у них нет структуры — только
+    """Лист структурной проверки - дашборд, что чинить, сводка и детали."""
+    # Тех. страницы выносим отдельной секцией (у них нет структуры - только
     # доступность), чтобы они не искажали статистику структурной проверки.
     pages = [r for r in results if getattr(r, 'content', None) is not None
              and getattr(r, 'type_code', '') != 'tech']
@@ -422,8 +422,8 @@ def _build_structure_sheet(wb, results):
 
     ws.merge_cells(f'B3:{LASTL}3')
     c = ws['B3']
-    c.value = ('Что должно быть на каждой странице для продаж – и чего не хватает. '
-               'Красное нужно чинить, серый прочерк – этого просто нет (норма).')
+    c.value = ('Что должно быть на каждой странице для продаж - и чего не хватает. '
+               'Красное нужно чинить, серый прочерк - этого просто нет (норма).')
     c.font = _font(size=11, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='center')
     ws.row_dimensions[3].height = 18
@@ -450,9 +450,9 @@ def _build_structure_sheet(wb, results):
         l.font = _font(size=9, bold=True, color=C.text_muted)
         l.alignment = _align(horizontal='center')
 
-    # ── «Что чинить» – главный блок ──
+    # ── «Что чинить» - главный блок ──
     bug_pages = [r for r in pages if r.content_bugs > 0]
-    # Тех. страницы с расхождением контактов с КП (адреса городов / телефон) –
+    # Тех. страницы с расхождением контактов с КП (адреса городов / телефон) -
     # тоже выводим наверх как ошибку.
     for r in results:
         if getattr(r, 'type_code', '') == 'tech' and (
@@ -464,11 +464,11 @@ def _build_structure_sheet(wb, results):
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=last_col)
     hc = ws.cell(row=row, column=2)
     if bug_pages:
-        hc.value = f'  Что чинить – {len(bug_pages)} {_plural_pages(len(bug_pages))}'
+        hc.value = f'  Что чинить - {len(bug_pages)} {_plural_pages(len(bug_pages))}'
         hc.font = _font(size=14, bold=True, color=C.err)
         hc.fill = _fill(C.err_soft)
     else:
-        hc.value = '  ✓ Всё в порядке – структурных проблем не найдено'
+        hc.value = '  ✓ Всё в порядке - структурных проблем не найдено'
         hc.font = _font(size=14, bold=True, color=C.ok)
         hc.fill = _fill(C.ok_soft)
     hc.alignment = _align(indent=1, vertical='center')
@@ -516,7 +516,7 @@ def _build_structure_sheet(wb, results):
         if len(bug_pages) > 50:
             ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=last_col)
             ws.cell(row=row, column=2,
-                    value=f'… и ещё {len(bug_pages) - 50} – см. таблицы ниже').font = \
+                    value=f'… и ещё {len(bug_pages) - 50} - см. таблицы ниже').font = \
                 _font(size=10, italic=True, color=C.text_muted)
             row += 1
 
@@ -525,8 +525,8 @@ def _build_structure_sheet(wb, results):
     ws.cell(row=row, column=2, value='Подробно по типам страниц').font = \
         _font(size=13, bold=True, color=C.text)
     ws.cell(row=row + 1, column=2,
-            value='✓ есть · БАГ обязательного нет · «–» необязательного нет (норма) · '
-                  'число = сколько найдено. Наведите курсор на заголовок столбца – пояснение.').font = \
+            value='✓ есть · БАГ обязательного нет · «-» необязательного нет (норма) · '
+                  'число = сколько найдено. Наведите курсор на заголовок столбца - пояснение.').font = \
         _font(size=9, italic=True, color=C.text_muted)
     ws.merge_cells(start_row=row + 1, start_column=2, end_row=row + 1, end_column=last_col)
     row += 3
@@ -542,7 +542,7 @@ def _build_structure_sheet(wb, results):
         # Заголовок секции
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4 + n_cols)
         gc = ws.cell(row=row, column=2)
-        gc.value = (f'  {group_label} – {len(group_pages)} стр.'
+        gc.value = (f'  {group_label} - {len(group_pages)} стр.'
                     + (f'  ·  проблем: {g_bugs}' if g_bugs else '  ·  все в порядке'))
         gc.font = _font(size=11, bold=True, color=C.err if g_bugs else C.ok)
         gc.fill = _fill(C.accent_soft)
@@ -609,7 +609,7 @@ def _build_structure_sheet(wb, results):
                 _style_cell(cell, value, state)
                 if state in ('absent', 'count', 'okinfo'):
                     cell.fill = _fill(band)
-                # У заглушки фото – всплывающая подсказка с названиями товаров.
+                # У заглушки фото - всплывающая подсказка с названиями товаров.
                 if state == 'warn' and col.get('kind') == 'block':
                     _b = by_key.get(col.get('key'))
                     _nm = getattr(_b, 'note', '') if _b else ''
@@ -637,7 +637,7 @@ def _build_structure_sheet(wb, results):
         _bad = sum(1 for r in tech if _tech_bad(r))
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=10)
         gc = ws.cell(row=row, column=2)
-        gc.value = (f'  Технические страницы – {len(tech)} стр.'
+        gc.value = (f'  Технические страницы - {len(tech)} стр.'
                     + (f'  ·  проблем: {_bad}' if _bad else '  ·  все в порядке'))
         gc.font = _font(size=11, bold=True, color=C.err if _bad else C.ok)
         gc.fill = _fill(C.accent_soft)
@@ -647,14 +647,14 @@ def _build_structure_sheet(wb, results):
         ws.row_dimensions[row].height = 22
         row += 1
         _tech_headers = [
-            (2, 'Страница', 'Название страницы – кликабельная ссылка, ведёт на страницу.'),
+            (2, 'Страница', 'Название страницы - кликабельная ссылка, ведёт на страницу.'),
             (3, 'Статус', 'Открывается ли страница: «Работает» / код ответа (404 и т.п.) / «404-заглушка» (отдаёт 200, но контент «страница не найдена»).'),
             (4, 'Проблем', 'Сколько проблем на странице: структурные баги, битые переменные, расхождения контактов с КП и битые ссылки (404).'),
-            (5, 'H1', 'Заголовок H1. Обязателен – у нормальной страницы он есть.'),
+            (5, 'H1', 'Заголовок H1. Обязателен - у нормальной страницы он есть.'),
             (6, 'Крошки', 'Хлебные крошки. Справочно: показываем есть/нет, отсутствие на служебной странице не баг.'),
             (7, 'Текст', 'Есть ли на странице собственный текст (помимо сквозных шапки и подвала). Обязателен.'),
             (8, 'Битые перем.', 'Битые шаблонные переменные ({{…}}, %name% и т.п.). Число = сколько найдено.'),
-            (9, 'Элементы страницы', 'Спец-проверки в зависимости от страницы: картинки, ссылка на каталог, карта, форма обратной связи, строка поиска (✓ есть / – нет / БАГ – обязательного нет). Обязательны: карта на «Контактах», картинки на «О компании», строка поиска на странице поиска. Если включена проверка ссылок – тут же «Ссылки: N ✓» или «N битых» (404/410).'),
+            (9, 'Элементы страницы', 'Спец-проверки в зависимости от страницы: картинки, ссылка на каталог, карта, форма обратной связи, строка поиска (✓ есть / - нет / БАГ - обязательного нет). Обязательны: карта на «Контактах», картинки на «О компании», строка поиска на странице поиска. Если включена проверка ссылок - тут же «Ссылки: N ✓» или «N битых» (404/410).'),
             (10, 'Что не так', 'Подробно: структурные баги (нет карты/картинок/строки поиска и т.п.) и расхождения контактов с КП (адреса городов / телефон страницы).'),
         ]
         hdr_row = row
@@ -671,7 +671,7 @@ def _build_structure_sheet(wb, results):
         for idx, r in enumerate(tech):
             band = C.surface if idx % 2 else C.bg_elev
 
-            # Страница – человеческое название (Оплата, Доставка…) как ссылка.
+            # Страница - человеческое название (Оплата, Доставка…) как ссылка.
             try:
                 _path = _urlparse(r.url).path or r.url
             except Exception:
@@ -714,15 +714,15 @@ def _build_structure_sheet(wb, results):
             pc.fill = _fill(C.err_soft) if _probs else _fill(band)
             pc.border = _border(color=C.border_light)
 
-            # H1 / Крошки: если страница не открылась или это 404-заглушка –
-            # структуры нет, ставим «–». Иначе берём из блоков контента.
+            # H1 / Крошки: если страница не открылась или это 404-заглушка -
+            # структуры нет, ставим «-». Иначе берём из блоков контента.
             by_key = {b.key: b for b in r.content.blocks} if (r.is_ok and r.content) else {}
             for ci, key in ((5, 'h1'), (6, 'breadcrumbs'), (7, 'content_text')):
                 cell = ws.cell(row=row, column=ci)
                 cell.alignment = _align(horizontal='center', indent=0)
                 cell.border = _border(color=C.border_light)
                 if not by_key or _soft:
-                    cell.value = '–'; cell.font = _font(size=10, color=C.text_muted)
+                    cell.value = '-'; cell.font = _font(size=10, color=C.text_muted)
                     cell.fill = _fill(band)
                 else:
                     value, state = _cell_state({'kind': 'block', 'key': key}, by_key)
@@ -730,7 +730,7 @@ def _build_structure_sheet(wb, results):
                     if state in ('absent', 'count', 'okinfo'):
                         cell.fill = _fill(band)
 
-            # Битые переменные – число найденных.
+            # Битые переменные - число найденных.
             _ti = len(r.text_issues or []) if r.is_ok else 0
             vc = ws.cell(row=row, column=8)
             vc.alignment = _align(horizontal='center', indent=0)
@@ -739,10 +739,10 @@ def _build_structure_sheet(wb, results):
                 vc.value = _ti; vc.font = _font(size=10, bold=True, color=C.err)
                 vc.fill = _fill(C.err_soft)
             else:
-                vc.value = '–'; vc.font = _font(size=10, color=C.text_muted)
+                vc.value = '-'; vc.font = _font(size=10, color=C.text_muted)
                 vc.fill = _fill(band)
 
-            # Элементы страницы – спец-проверки (картинки/каталог-ссылка/карта/форма)
+            # Элементы страницы - спец-проверки (картинки/каталог-ссылка/карта/форма)
             # + краткий итог сверки адресов/телефона с КП.
             _spec = [b for b in (r.content.blocks if (r.is_ok and r.content) else [])
                      if b.key.startswith('tech_')]
@@ -753,7 +753,7 @@ def _build_structure_sheet(wb, results):
                     _parts.append(f'{b.label}: БАГ')   # обязательный элемент, а его нет
                     _addr_bad = True
                 else:
-                    _parts.append(f'{b.label} {"✓" if b.present else "–"}')
+                    _parts.append(f'{b.label} {"✓" if b.present else "-"}')
             if _ca:
                 _mm = _ca.get('mismatched') or []
                 _txt = f'Адреса городов {_ca.get("matched", 0)}/{_ca.get("on_page", 0)}'
@@ -769,22 +769,22 @@ def _build_structure_sheet(wb, results):
             if _broken_n:
                 _parts.append(f'Ссылки: {_broken_n} битых')
                 _addr_bad = True
-            elif _blk:                       # проверяли – все ссылки открылись
+            elif _blk:                       # проверяли - все ссылки открылись
                 _parts.append(f'Ссылки: {_blk.get("checked", 0)} ✓')
             ec = ws.cell(row=row, column=9)
             ec.alignment = _align(indent=1)
             ec.border = _border(color=C.border_light)
             ec.fill = _fill(C.err_soft if _addr_bad else band)
-            ec.value = ' · '.join(_parts) if _parts else '–'
+            ec.value = ' · '.join(_parts) if _parts else '-'
             ec.font = _font(size=9, color=C.err if _addr_bad else
                             (C.text_soft if _parts else C.text_muted))
 
-            # Что не так – подробно: структурные баги (нет карты/картинок/строки
+            # Что не так - подробно: структурные баги (нет карты/картинок/строки
             # поиска и т.п.) и расхождения контактов с КП. Пусто, если проблем нет.
             _has_problem = ((r.content_bugs or 0) > 0
                             or bool(_contacts_problem_text(r)) or _broken_n > 0)
             _wn = _problem_text(r) if _has_problem else ''
-            wn = ws.cell(row=row, column=10, value=_wn or '–')
+            wn = ws.cell(row=row, column=10, value=_wn or '-')
             wn.alignment = _align(indent=1, wrap=True)
             wn.border = _border(color=C.border_light)
             wn.fill = _fill(C.err_soft if _wn else band)
@@ -825,14 +825,14 @@ _NOTIF_CATEGORY_LABEL = {
 }
 
 # Группировка уведомлений по теме (один и тот же текст письма приходит по
-# каждому домену отдельно – схлопываем в одну строку, домены в список).
+# каждому домену отдельно - схлопываем в одну строку, домены в список).
 _DOMAIN_TLDS = (
-    # рф/ru/su + СНГ/региональные зоны (.kz/.kg/.uz/.ua и т.д.) — чтобы один
+    # рф/ru/su + СНГ/региональные зоны (.kz/.kg/.uz/.ua и т.д.) - чтобы один
     # бренд в разных зонах не дробил тему на отдельные строки + gTLD.
     'ru|рф|su|by|kz|kg|uz|ua|am|az|ge|md|tj|tm|ee|lv|lt|'
     'com|net|org|info|biz|pro|online|store|site|shop|me|cc|io'
 )
-# URL c путём целиком (group1 = host+path) – для извлечения режем по '/'.
+# URL c путём целиком (group1 = host+path) - для извлечения режем по '/'.
 _URL_RE = re.compile(r'https?://([^\s,;()<>"\']+)', re.IGNORECASE)
 _HOST_RE = re.compile(
     r'\b((?:[a-zа-я0-9](?:[a-zа-я0-9-]*[a-zа-я0-9])?\.)+(?:' + _DOMAIN_TLDS + r'))\b',
@@ -858,11 +858,11 @@ def _extract_domains(text: str) -> list:
 
 
 def _canon_theme(subject: str) -> str:
-    """Тема без конкретного домена/URL – ключ группировки и текст для отчёта."""
+    """Тема без конкретного домена/URL - ключ группировки и текст для отчёта."""
     s = subject or ''
     s = _URL_RE.sub('', s)
     s = _HOST_RE.sub('', s)
-    s = re.sub(r'\s+', ' ', s).strip(' .,:;/––-«»"\'')
+    s = re.sub(r'\s+', ' ', s).strip(' .,:;/---«»"\'')
     return s or (subject or '').strip()
 
 
@@ -870,7 +870,7 @@ def _group_notifs_by_theme(items: list) -> list:
     """Схлопнуть письма с одинаковой темой в группы.
 
     Возвращает список dict: theme, date (минимальная), domains (список),
-    first (репрезентативное письмо), count. Порядок – первое появление темы.
+    first (репрезентативное письмо), count. Порядок - первое появление темы.
     """
     from collections import OrderedDict
     groups = OrderedDict()
@@ -903,7 +903,7 @@ def _notif_row_height(domains_str: str, preview: str) -> float:
 def _review_rating_cell(rating):
     """(текст, цвет) для колонки «Оценка». rating: 1..5 или None."""
     if not rating:
-        return '–', C.text_muted
+        return '-', C.text_muted
     stars = '★' * int(rating)
     if rating >= 4:
         return f'{stars} Хороший', C.ok
@@ -927,7 +927,7 @@ _SEV2PRIO = {'fatal': 'critical', 'critical': 'critical', 'possible': 'important
 
 def _group_service_issues(items: list) -> list:
     """Схлопнуть ошибки сервиса по одной проблеме: один и тот же тип проблемы
-    приходит по каждому сайту отдельно – собираем сайты в список.
+    приходит по каждому сайту отдельно - собираем сайты в список.
     Возвращает dict: title, code, hosts (список), date (мин), count, first."""
     from collections import OrderedDict, Counter
     groups = OrderedDict()
@@ -944,7 +944,7 @@ def _group_service_issues(items: list) -> list:
         host = getattr(i, 'host', '')
         if host and host not in g['hosts']:
             g['hosts'].append(host)
-        st = getattr(i, 'state', '') or '—'
+        st = getattr(i, 'state', '') or '-'
         g['states'][st] += 1
         d = getattr(i, 'date', '')
         if d and (not g['date'] or d < g['date']):
@@ -965,10 +965,10 @@ _WM_STATE_LABELS = {
 
 
 def _state_human(code: str):
-    """Код состояния → текст. Пусто/«—» → None (не выводим).
-    Старый кеш с уже-человеческим текстом — отдаём как есть."""
+    """Код состояния → текст. Пусто/«-» → None (не выводим).
+    Старый кеш с уже-человеческим текстом - отдаём как есть."""
     s = (code or '').strip()
-    if not s or s == '—':
+    if not s or s == '-':
         return None
     up = s.upper()
     if up in _WM_STATE_LABELS:
@@ -985,7 +985,7 @@ def _format_states(states) -> str:
         h = _state_human(code)
         if h:
             agg[h] += n
-    return '\n'.join(f'{n} — {label}' for label, n in agg.most_common())
+    return '\n'.join(f'{n} - {label}' for label, n in agg.most_common())
 
 
 # Секции в порядке убывания релевантности:
@@ -1000,7 +1000,7 @@ _NOTIF_SECTIONS = [
 
 
 def _build_notifications_sheet(wb, notifications, service_issues=None):
-    """Лист «Уведомления» – письма по источникам + ошибки прямо из сервисов
+    """Лист «Уведомления» - письма по источникам + ошибки прямо из сервисов
     (Вебмастер по API). Структурирован секциями. Добавляется всегда: при
     пустых данных показывает заглушку."""
     notifications = notifications or []
@@ -1040,12 +1040,12 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 24
 
-    # Нет ни писем, ни ошибок сервисов – показываем заглушку и выходим
+    # Нет ни писем, ни ошибок сервисов - показываем заглушку и выходим
     if not notifications and not service_issues:
         ws.merge_cells('B5:H5')
         c = ws['B5']
         c.value = ('За период проверки писем не найдено. '
-                   'Если ждёте уведомления – проверьте секреты почты и пароли приложений '
+                   'Если ждёте уведомления - проверьте секреты почты и пароли приложений '
                    '(Gmail требует App Password), затем запустите прогон с галкой '
                    '«Собрать уведомления из почты».')
         c.font = _font(size=11, color=C.text_soft)
@@ -1113,8 +1113,8 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
                 ws.row_dimensions[row].height = 20
                 row += 1
 
-                # Строки — одна на уникальную тему (без учёта доменной зоны),
-                # все домены в колонке «Сайты», их число — в «Кол-во».
+                # Строки - одна на уникальную тему (без учёта доменной зоны),
+                # все домены в колонке «Сайты», их число - в «Кол-во».
                 groups = _group_notifs_by_theme(p_items)
                 for g in sorted(groups, key=lambda x: len(x['domains']), reverse=True):
                     n0 = g['first']
@@ -1184,7 +1184,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
                     link_cell.hyperlink = review_url
                     link_cell.font = _font(size=9, color=C.accent, underline='single')
                 else:
-                    link_cell.value = '–'
+                    link_cell.value = '-'
                     link_cell.font = _font(size=9, color=C.text_muted)
                 link_cell.alignment = _align(vertical='top')
                 link_cell.border = _border(color=C.border_light)
@@ -1233,7 +1233,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
 
         row += 2  # пробел между секциями
 
-    # ── Секция «Вебмастер» – ошибки прямо из сервиса (API), не из почты ──
+    # ── Секция «Вебмастер» - ошибки прямо из сервиса (API), не из почты ──
     if service_issues:
         from collections import defaultdict as _dd
         _n_problems = len(_group_service_issues(service_issues))
@@ -1269,7 +1269,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
             ws.row_dimensions[row].height = 20
             row += 1
 
-            # Шапка: одна строка на проблему, сайты – списком + их состояния
+            # Шапка: одна строка на проблему, сайты - списком + их состояния
             for ci, h in enumerate(['Дата', 'Серьёзность', 'Категория', 'Проблема',
                                     'Сайты', 'Состояние', 'Кол-во', 'Отдел'], 2):
                 cell = ws.cell(row=row, column=ci)
@@ -1308,7 +1308,7 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
         row += 2
 
 
-# ── Лист «Ошибки сервисов» (Вебмастер/GSC/Метрика – из API) ─────────
+# ── Лист «Ошибки сервисов» (Вебмастер/GSC/Метрика - из API) ─────────
 
 _SVC_SECTION = [
     ('webmaster', 'Яндекс.Вебмастер'),
@@ -1329,7 +1329,7 @@ _SVC_SEV_ORDER = {'fatal': 0, 'critical': 1, 'possible': 2,
 
 
 def _build_service_issues_sheet(wb, service_issues):
-    """Лист «Ошибки сервисов» – проблемы сайтов прямо из сервисов (не из почты).
+    """Лист «Ошибки сервисов» - проблемы сайтов прямо из сервисов (не из почты).
     Добавляется только если есть данные."""
     issues = service_issues or []
     if not issues:
@@ -1357,7 +1357,7 @@ def _build_service_issues_sheet(wb, service_issues):
     c = ws['B3']
     c.value = ('Проблемы напрямую из Яндекс.Вебмастера / GSC / Метрики (диагностика: '
                'сайтмапы, дубли, мусорные ссылки, ошибки сервера и индексации). '
-               'Не из почты – из самих сервисов по API.')
+               'Не из почты - из самих сервисов по API.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 30
@@ -1412,7 +1412,7 @@ def _build_service_issues_sheet(wb, service_issues):
                 cell.alignment = _align(wrap=True, vertical='top')
                 cell.border = _border(color=C.border_light)
 
-            # «Открыть» – ссылка в панель сервиса
+            # «Открыть» - ссылка в панель сервиса
             link_cell = ws.cell(row=row, column=6)
             _u = getattr(i, 'url', '')
             if _u:
@@ -1420,7 +1420,7 @@ def _build_service_issues_sheet(wb, service_issues):
                 link_cell.hyperlink = _u
                 link_cell.font = _font(size=9, color=C.accent, underline='single')
             else:
-                link_cell.value = '–'
+                link_cell.value = '-'
                 link_cell.font = _font(size=9, color=C.text_muted)
             link_cell.alignment = _align(horizontal='center')
             link_cell.border = _border(color=C.border_light)
@@ -1483,14 +1483,14 @@ def _build_indexing_sheet(wb, results, indexing_summary):
 
     ws.merge_cells('B3:E3')
     c = ws['B3']
-    c.value = ('Эталон – robots.txt сайта. Ошибка = РАСХОЖДЕНИЕ сигналов страницы '
+    c.value = ('Эталон - robots.txt сайта. Ошибка = РАСХОЖДЕНИЕ сигналов страницы '
                'с robots: в robots страница открыта, а на ней noindex (meta или '
                'X-Robots-Tag), либо canonical ведёт на закрытый в robots URL. '
-               'Закрыта в robots и noindex – согласовано, так задумано, не '
+               'Закрыта в robots и noindex - согласовано, так задумано, не '
                'показываем. Плюс «верно настроен rel=canonical»: ровно один тег, '
-               'указывает на себя, не на чужой домен; отсутствие тега – '
+               'указывает на себя, не на чужой домен; отсутствие тега - '
                'предупреждение. Отдельно: пути из sitemap/каталога, закрытые '
-               'Disallow, – противоречие (sitemap говорит «в индекс», robots – '
+               'Disallow, - противоречие (sitemap говорит «в индекс», robots - '
                '«нельзя»).')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
@@ -1534,7 +1534,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     if not bad:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
-        c.value = '✅ Расхождений с robots.txt нет – сигналы страниц согласованы.'
+        c.value = '✅ Расхождений с robots.txt нет - сигналы страниц согласованы.'
         c.font = _font(size=10, color=C.ok)
         c.alignment = _align(indent=1)
         ws.row_dimensions[row].height = 22
@@ -1561,7 +1561,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
         c.value = (f'Противоречия sitemap ↔ robots.txt '
-                   f'({len(sm_dis)}) – {indexing_summary.get("host", "")}')
+                   f'({len(sm_dis)}) - {indexing_summary.get("host", "")}')
         c.font = _font(size=13, bold=True, color=C.err if sm_dis else C.ok)
         c.fill = _fill(C.accent_soft)
         c.alignment = _align(indent=1)
@@ -1585,7 +1585,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             ws.row_dimensions[row].height = 22
             row += 1
         else:
-            # Группируем по правилу: одно правило Disallow бьёт сотни путей –
+            # Группируем по правилу: одно правило Disallow бьёт сотни путей -
             # без группировки каждая строка повторяет одно и то же правило.
             _by_rule = {}
             for d in sm_dis:
@@ -1599,7 +1599,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                                         key=lambda kv: -len(kv[1])):
                 ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
                 c = ws.cell(row=row, column=2)
-                c.value = (f'{_rule}  —  путей из sitemap/каталога: {len(_paths)}')
+                c.value = (f'{_rule}  -  путей из sitemap/каталога: {len(_paths)}')
                 c.font = _font(size=10, bold=True, color=C.err)
                 c.fill = _fill(C.surface)
                 c.alignment = _align(wrap=True, indent=1)
@@ -1628,7 +1628,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 row += 1
 
 
-# ── Группировка «одна проблема – одна строка + список URL» ─────────
+# ── Группировка «одна проблема - одна строка + список URL» ─────────
 # Как на листе «Уведомления»: не плодим милион одинаковых строк, а
 # группируем страницы по тексту проблемы.
 
@@ -1644,11 +1644,11 @@ def _issue_groups(pages, attr, key):
 
 
 def _render_issue_groups(ws, row, groups, color, max_urls=100):
-    """Строка-проблема (текст + сколько страниц), под ней – город/тип/URL."""
+    """Строка-проблема (текст + сколько страниц), под ней - город/тип/URL."""
     for text, rs in groups:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
-        c.value = f'{text}  —  {len(rs)} {_plural_pages(len(rs))}'
+        c.value = f'{text}  -  {len(rs)} {_plural_pages(len(rs))}'
         c.font = _font(size=10, bold=True, color=color)
         c.fill = _fill(C.surface)
         c.alignment = _align(wrap=True, indent=1)
@@ -1658,7 +1658,7 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100):
         for r in rs[:max_urls]:
             ws.row_dimensions[row].height = 18
             for ci, (val, kw) in enumerate([
-                (r.city or '–', {'size': 9, 'color': C.text_muted}),
+                (r.city or '-', {'size': 9, 'color': C.text_muted}),
                 (r.type_label, {'size': 9, 'color': C.text_muted}),
                 (r.url, {'size': 9, 'color': C.accent, 'underline': 'single'}),
                 ('', {}),
@@ -1759,9 +1759,9 @@ def _build_meta_sheet(wb, results, meta_summary):
     c.value = ('Каждая страница выборки: title, meta description и H1 есть и не '
                'пустые, город поддомена присутствует в title/description, длины '
                'в рекомендуемых рамках. Дубли: одинаковые title/description/H1 '
-               'у разных страниц одного города – баг; полное совпадение между '
-               'городами – город не подставился в шаблон. Дубли УРЛОВ: варианты '
-               'адреса (http, без слэша, www) должны редиректить – ответ 200 '
+               'у разных страниц одного города - баг; полное совпадение между '
+               'городами - город не подставился в шаблон. Дубли УРЛОВ: варианты '
+               'адреса (http, без слэша, www) должны редиректить - ответ 200 '
                'без редиректа = страница доступна по двум адресам.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
@@ -1799,12 +1799,12 @@ def _build_meta_sheet(wb, results, meta_summary):
         row = _render_issue_groups(
             ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn)
 
-    # ── Секции 3–4: дубли метаданных ──
+    # ── Секции 3-4: дубли метаданных ──
     for title_text, groups, note in (
         (f'Дубли внутри города  ({len(same_city)})', same_city,
          'Одинаковое значение у разных страниц одного поддомена.'),
         (f'Межгородские дубли (город не подставился)  ({len(cross_city)})', cross_city,
-         'Полное совпадение между разными городами – шаблон не подставил город.'),
+         'Полное совпадение между разными городами - шаблон не подставил город.'),
     ):
         _meta_section_title(ws, row, title_text, C.err if groups else C.ok)
         row += 1
@@ -1832,7 +1832,7 @@ def _build_meta_sheet(wb, results, meta_summary):
                 for p in g.get('pages', []):
                     ws.row_dimensions[row].height = 18
                     vals = [
-                        (p.get('city') or '–', {'size': 9, 'color': C.text_muted}),
+                        (p.get('city') or '-', {'size': 9, 'color': C.text_muted}),
                         (p.get('type_label', ''), {'size': 9, 'color': C.text_muted}),
                         (p.get('url', ''), {'size': 9, 'color': C.accent,
                                             'underline': 'single'}),
@@ -1890,7 +1890,7 @@ def _build_meta_sheet(wb, results, meta_summary):
 def _build_kp_sheet(wb, results):
     """
     Сверка контактов (телефон / почта / адрес) на главных страницах
-    поддоменов с «Картой присутствия». По одному городу в строке –
+    поддоменов с «Картой присутствия». По одному городу в строке -
     наглядно видно, где номер/почта/адрес не совпали с КП.
     """
     rows = [r for r in results if getattr(r, 'kp_result', None)]
@@ -1919,7 +1919,7 @@ def _build_kp_sheet(wb, results):
     # Заголовок + пояснение
     ws.merge_cells('B2:G2')
     c = ws['B2']
-    c.value = 'Контакты по городам – сверка с КП'
+    c.value = 'Контакты по городам - сверка с КП'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 24
 
@@ -1927,10 +1927,10 @@ def _build_kp_sheet(wb, results):
     c = ws['B3']
     c.value = ('Сверяем телефон, почту и адрес на главной каждого города (шапка + '
                'подвал) с «Картой присутствия». Телефон: ожидается SEO-номер (если '
-               'нет – рекламный, затем общий). Зелёное «✓» – совпало с КП, красное – '
-               'нет. «есть» (серое) – на сайте есть, но в КП этого поля нет (сверять '
-               'не с чем, дополнить КП). «–» – нет ни в КП, ни на сайте. '
-               'Что именно не так – в последнем столбце.')
+               'нет - рекламный, затем общий). Зелёное «✓» - совпало с КП, красное - '
+               'нет. «есть» (серое) - на сайте есть, но в КП этого поля нет (сверять '
+               'не с чем, дополнить КП). «-» - нет ни в КП, ни на сайте. '
+               'Что именно не так - в последнем столбце.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 30
@@ -1995,14 +1995,14 @@ def _build_kp_sheet(wb, results):
             cell.border = _border(color=C.border_light)
             iss = issues.get(field)
             if iss is None:
-                cell.value = '–'           # и в КП нет, и на сайте нет – нечего показать
+                cell.value = '-'           # и в КП нет, и на сайте нет - нечего показать
                 cell.font = _font(size=10, color=C.text_muted)
             elif iss['status'] == 'ok':
                 cell.value = '✓'
                 cell.font = _font(size=10, bold=True, color=C.ok)
                 cell.fill = _fill(C.ok_soft)
             elif iss['status'] == 'info':
-                # на сайте есть, но в КП нет – не сверка, но и не «нет». «есть».
+                # на сайте есть, но в КП нет - не сверка, но и не «нет». «есть».
                 cell.value = 'есть'
                 cell.font = _font(size=9, color=C.text_soft)
                 if iss.get('comment'):
@@ -2017,7 +2017,7 @@ def _build_kp_sheet(wb, results):
                 cell.font = _font(size=10, bold=True, color=C.err)
                 cell.fill = _fill(C.err_soft)
 
-        # Что не так – комментарии по проблемным полям
+        # Что не так - комментарии по проблемным полям
         problems = [f'{i["field"]}: {i["comment"]}'
                     for i in kp.get('issues', [])
                     if i['status'] in ('bug', 'critical') and i.get('comment')]
@@ -2046,14 +2046,14 @@ def _country_by_url(url: str) -> str:
         netloc = host.split('/')[0]
     netloc = netloc.split(':')[0].strip('.')   # без порта
     tld = netloc.rsplit('.', 1)[-1].lower() if '.' in netloc else ''
-    return _TLD_COUNTRY.get(tld, '–')
+    return _TLD_COUNTRY.get(tld, '-')
 
 
 # ── Лист «Автокликер» ──────────────────────────────────────────────
 
 
 def _build_autoclick_sheet(wb, autoclick):
-    """Итоги автокликера (перекликивание ошибок в Вебмастере/ГСК) — сводка
+    """Итоги автокликера (перекликивание ошибок в Вебмастере/ГСК) - сводка
     по сайтам. Добавляется только если автокликер запускался."""
     if not autoclick:
         return
@@ -2072,7 +2072,7 @@ def _build_autoclick_sheet(wb, autoclick):
 
     ws.merge_cells('B2:H2')
     c = ws['B2']
-    c.value = 'Автокликер — перекликивание ошибок'
+    c.value = 'Автокликер - перекликивание ошибок'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
@@ -2182,12 +2182,12 @@ def _build_region_sheet(wb, results):
 
     ws.merge_cells('B3:G3')
     c = ws['B3']
-    c.value = ('П.1.9: на странице города не должно быть подстановок другого города – '
+    c.value = ('П.1.9: на странице города не должно быть подстановок другого города - '
                'чужой город в title/description/H1, телефон или почта другого города '
                '(сверка со справочником КП). '
                'П.1.10: на сайте страны СНГ в текстах, заголовках, метаданных и '
                'контактах не должно быть «РФ», «Россия», «СНГ» и названий других '
-               'стран – только своя страна.')
+               'стран - только своя страна.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 42
@@ -2238,7 +2238,7 @@ def _build_region_sheet(wb, results):
             найдено = i.get('найдено', '')
             зона = i.get('зона', '')
             vals = [
-                (r.city or '–', {'size': 10, 'color': C.text}),
+                (r.city or '-', {'size': 10, 'color': C.text}),
                 (r.type_label, {'size': 9, 'color': C.text_muted}),
                 (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
                 (f'«{найдено}» ({зона})', {'size': 10, 'color': C.err}),
@@ -2265,7 +2265,7 @@ def _build_region_sheet(wb, results):
     elif reg_checked:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
         c = ws.cell(row=row, column=2)
-        c.value = ('П.1.9 (СНГ-чистота): в этой выборке СНГ-доменов не было – '
+        c.value = ('П.1.9 (СНГ-чистота): в этой выборке СНГ-доменов не было - '
                    'проверка выполняется только на доменах не-РФ.')
         c.font = _font(size=10, italic=True, color=C.text_soft)
         c.alignment = _align(indent=1)
@@ -2311,9 +2311,9 @@ def _build_meta_unique_sheet(wb, results):
     ws.merge_cells('B3:F3')
     c = ws['B3']
     c.value = ('На странице должны быть в единственном экземпляре <title>, '
-               '<meta name="description"> и <h1>: если их нет или больше одного – '
+               '<meta name="description"> и <h1>: если их нет или больше одного - '
                'баг. Также ловим дубли H2 (два H2 с одинаковым текстом; '
-               'несколько разных H2 – норма) и заголовки h2–h6 вне текста: '
+               'несколько разных H2 - норма) и заголовки h2-h6 вне текста: '
                'в шапке, подвале, меню или сайдбаре им не место.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
@@ -2334,9 +2334,9 @@ def _build_meta_unique_sheet(wb, results):
     if not rows:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
         c = ws.cell(row=row, column=2)
-        c.value = ('✅ На всех проверенных страницах title, description и H1 – '
+        c.value = ('✅ На всех проверенных страницах title, description и H1 - '
                    'в единственном экземпляре, дублей H2 нет, заголовки '
-                   'h2–h6 только в тексте.')
+                   'h2-h6 только в тексте.')
         c.font = _font(size=11, color=C.ok)
         c.alignment = _align(indent=1)
         return
@@ -2353,7 +2353,7 @@ def _build_meta_unique_sheet(wb, results):
     for r, i in rows:
         ws.row_dimensions[row].height = 30
         vals = [
-            (r.city or '–', {'size': 10, 'color': C.text}),
+            (r.city or '-', {'size': 10, 'color': C.text}),
             (r.type_label, {'size': 9, 'color': C.text_muted}),
             (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
             (_META_LABEL.get(i.get('тип'), i.get('тип', '')),
@@ -2382,14 +2382,14 @@ def build_report(
     selected_subdomains: list,    # список Subdomain
     results: list,                 # список CheckResult
     output_path: Path | str,
-    metrika_reports: list = None,  # список Report404 – добавит лист «404 из Метрики»
+    metrika_reports: list = None,  # список Report404 - добавит лист «404 из Метрики»
     metrika_data_date: str = None, # дата отчёта Метрики (YYYY-MM-DD)
     metrika_is_stale: bool = False,# True если данные не за вчера, а за более ранний день
-    notifications: list = None,    # список WebmasterNotification – добавит лист «Уведомления»
-    service_issues: list = None,   # список ServiceIssue – добавит лист «Ошибки сервисов»
-    autoclick: dict = None,        # итоги автокликера – добавит лист «Автокликер»
-    indexing_summary: dict = None, # sitemap↔robots (п.1.7) – в лист «Индексация»
-    meta_summary: dict = None,     # дубли мета/URL (п.1.8) – в лист «Метаданные»
+    notifications: list = None,    # список WebmasterNotification - добавит лист «Уведомления»
+    service_issues: list = None,   # список ServiceIssue - добавит лист «Ошибки сервисов»
+    autoclick: dict = None,        # итоги автокликера - добавит лист «Автокликер»
+    indexing_summary: dict = None, # sitemap↔robots (п.1.7) - в лист «Индексация»
+    meta_summary: dict = None,     # дубли мета/URL (п.1.8) - в лист «Метаданные»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -2502,12 +2502,12 @@ def build_report(
     if total_text_issues > 0:
         summary_text += (
             f'\nДополнительно: на {len(pages_with_issues)} страницах найдено '
-            f'{total_text_issues} битых переменных в текстах – см. лист «Битые тексты».'
+            f'{total_text_issues} битых переменных в текстах - см. лист «Битые тексты».'
         )
     if total_content_bugs > 0:
         summary_text += (
             f'\nВ контенте {total_content_bugs} проблем на {len(pages_with_content_bugs)} страницах '
-            f'(нет цены, кнопок заказа или заголовка) – см. лист «Структура страниц».'
+            f'(нет цены, кнопок заказа или заголовка) - см. лист «Структура страниц».'
         )
     if indexing_bad_pages or indexing_sitemap_conflicts:
         _idx_bits = []
@@ -2518,7 +2518,7 @@ def build_report(
             _idx_bits.append(f'{indexing_sitemap_conflicts} путей каталога под Disallow '
                              f'в robots.txt')
         summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
-                         + ' – см. лист «Индексация».')
+                         + ' - см. лист «Индексация».')
     if meta_bad_pages or meta_dup_groups:
         _mb = []
         if meta_bad_pages:
@@ -2527,8 +2527,8 @@ def build_report(
         if meta_dup_groups:
             _mb.append(f'{meta_dup_groups} групп дублей (title/описания/URL)')
         summary_text += ('\nМетаданные: ' + ', '.join(_mb)
-                         + ' – см. лист «Метаданные».')
-    summary_text += '\nПодробности – на листе «Все детали» (фильтр по колонке «Статус»).'
+                         + ' - см. лист «Метаданные».')
+    summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
     c.alignment = _align(wrap=True)
@@ -2574,15 +2574,15 @@ def build_report(
 
     nav_items = [
         ('Обзор', 'эта страница: сколько проверено, сколько работает и сколько сломано.'),
-        ('Структура страниц', 'что чинить в контенте – где нет цены, кнопок заказа, заголовка. Красное = баг.'),
-        ('Индексация', 'если есть лист – расхождения сигналов страниц с robots.txt (noindex, canonical) и sitemap↔robots.'),
-        ('Метаданные', 'если есть лист – title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
-        ('Заголовки и мета', 'если есть лист – единственность title/description/H1, дубли H2 и заголовки вне текста.'),
-        ('Регион и СНГ', 'если есть лист – чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
+        ('Структура страниц', 'что чинить в контенте - где нет цены, кнопок заказа, заголовка. Красное = баг.'),
+        ('Индексация', 'если есть лист - расхождения сигналов страниц с robots.txt (noindex, canonical) и sitemap↔robots.'),
+        ('Метаданные', 'если есть лист - title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
+        ('Заголовки и мета', 'если есть лист - единственность title/description/H1, дубли H2 и заголовки вне текста.'),
+        ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
-        ('Битые тексты', 'если есть лист – страницы с незаменёнными переменными ({{city}} и т.п.).'),
-        ('404 из Метрики', 'если есть лист – страницы, куда заходили люди и упёрлись в 404.'),
-        ('Уведомления', 'если есть лист – письма от Яндекс.Вебмастера и GSC за выбранный период.'),
+        ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
+        ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
+        ('Уведомления', 'если есть лист - письма от Яндекс.Вебмастера и GSC за выбранный период.'),
     ]
     for i, (sheet_name, desc) in enumerate(nav_items):
         r = nav_row + 1 + i
@@ -2600,14 +2600,14 @@ def build_report(
     # ─── Лист структурной проверки (идёт сразу после «Обзора») ──────
     _build_structure_sheet(wb, results)
 
-    # ─── Лист индексации (п.1.7) – если проверка выполнялась ────────
+    # ─── Лист индексации (п.1.7) - если проверка выполнялась ────────
     _build_indexing_sheet(wb, results, indexing_summary)
 
-    # ─── Лист единственности тегов (п.1.3.1) – если проверялась ─────
+    # ─── Лист единственности тегов (п.1.3.1) - если проверялась ─────
     _build_meta_unique_sheet(wb, results)
     _build_region_sheet(wb, results)
 
-    # ─── Лист метаданных (п.1.8) – если проверка выполнялась ────────
+    # ─── Лист метаданных (п.1.8) - если проверка выполнялась ────────
     _build_meta_sheet(wb, results, meta_summary)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
@@ -2664,7 +2664,7 @@ def build_report(
             r.subdomain,                       # 2 Поддомен
             r.type_label,                      # 3 Тип
             r.url,                             # 4 URL
-            r.http_code if r.http_code else '–',  # 5 Код
+            r.http_code if r.http_code else '-',  # 5 Код
             STATUS_LABEL.get(r.status, r.status),  # 6 Статус
             speed_sec,                         # 7 Скорость, с
             speed_label,                       # 8 Оценка скорости
@@ -2683,32 +2683,32 @@ def build_report(
         # Спец-шрифты для отдельных колонок
         ws2.cell(row=row_idx, column=2).font = _font(name='Consolas', size=10, color=C.text_muted)
 
-        # URL – кликабельная гиперссылка
+        # URL - кликабельная гиперссылка
         url_cell = ws2.cell(row=row_idx, column=4)
         url_cell.hyperlink = r.url
         url_cell.font = _font(name='Consolas', size=10, color=C.accent, underline='single')
 
-        # Откуда перешли – моноширинный для цепочек, курсивный для прямых
+        # Откуда перешли - моноширинный для цепочек, курсивный для прямых
         path_cell = ws2.cell(row=row_idx, column=11)
         if r.redirect_chain:
             path_cell.font = _font(name='Consolas', size=9, color=C.text_soft)
         elif not r.is_ok:
             path_cell.font = _font(size=10, italic=True, color=C.text_muted)
 
-        # Битые переменные – подсветка
+        # Битые переменные - подсветка
         if r.has_text_issues:
             issue_cell = ws2.cell(row=row_idx, column=10)
             issue_cell.font = _font(size=10, bold=True, color=C.warn)
             issue_cell.fill = _fill(C.warn_soft)
 
-        # Оценка скорости – цвет по уровню
+        # Оценка скорости - цвет по уровню
         if r.speed_rating:
             speed_cell = ws2.cell(row=row_idx, column=8)
             color = SPEED_COLOR[r.speed_rating]
             bold = r.speed_rating in ('slow', 'very_slow')
             speed_cell.font = _font(size=10, bold=bold, color=color)
 
-        # Статус – цвет по результату
+        # Статус - цвет по результату
         status_color = C.ok if r.is_ok else C.warn if r.is_warning else C.err
         ws2.cell(row=row_idx, column=6).font = _font(size=10, bold=True, color=status_color)
 
@@ -2741,7 +2741,7 @@ def build_report(
         c.value = (
             'Шаблонизатор сайта не подставил значение, и фрагмент шаблона '
             '({{city}}, %price%, undefined и т.п.) остался виден пользователю в тексте страницы. '
-            'Чтобы увидеть проблему – откройте URL и поищите по странице (Ctrl+F) то, '
+            'Чтобы увидеть проблему - откройте URL и поищите по странице (Ctrl+F) то, '
             'что в колонке «Что нашлось».'
         )
         c.font = _font(size=10, italic=True, color=C.text_soft)
@@ -2774,7 +2774,7 @@ def build_report(
                 c.alignment = _align(wrap=True)
                 c.border = _border(color=C.border_light)
 
-                # URL – кликабельный
+                # URL - кликабельный
                 c = ws3.cell(row=row_idx, column=2)
                 c.value = page.url
                 c.hyperlink = page.url
@@ -2808,7 +2808,7 @@ def build_report(
         ws3.auto_filter.ref = f'A{hdr_row}:E{hdr_row}'
 
     # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 4: «404 из Метрики» – если есть данные
+    # ЛИСТ 4: «404 из Метрики» - если есть данные
     # ═══════════════════════════════════════════════════════════════
     if metrika_reports:
         # Собираем все страницы из всех стран, считаем сшивку с Site Checker
@@ -2856,12 +2856,12 @@ def build_report(
             d_obj = datetime.strptime(metrika_data_date or '', '%Y-%m-%d')
             date_display = d_obj.strftime('%d.%m.%Y')
         except ValueError:
-            date_display = metrika_data_date or '–'
+            date_display = metrika_data_date or '-'
 
         if metrika_is_stale:
             c.value = (
                 f'⚠ Внимание: данные за {date_display}. '
-                f'Свежий отчёт Метрики (за вчерашний день) ещё не пришёл – '
+                f'Свежий отчёт Метрики (за вчерашний день) ещё не пришёл - '
                 f'используем последний доступный.'
             )
             c.font = _font(size=10, italic=True, bold=True, color=C.err)
@@ -2872,14 +2872,14 @@ def build_report(
         c.alignment = _align(wrap=True)
         ws4.row_dimensions[2].height = 30 if metrika_is_stale else 20
 
-        # 3-я строка – пустая. Раньше тут была длинная пояснительная
+        # 3-я строка - пустая. Раньше тут была длинная пояснительная
         # строка про «🔴 Точно сломан / ⚠ Только в Метрике / Сортировка».
         # Убрана по требованию: цвета в колонке «Статус» интуитивно понятны,
         # а лишний текст загромождал шапку.
         ws4.row_dimensions[3].height = 8
 
         # ─── Шапка таблицы на 5-й строке ───────────────────────────
-        # 4-я строка – пустая разделительная
+        # 4-я строка - пустая разделительная
         hdr_row = 5
         ws4.row_dimensions[hdr_row].height = 28
         hdrs = ['Дата', 'Страна', 'Статус', 'URL страницы', 'Просмотры', 'Посетители', 'Реферер', 'Заголовок страницы']
@@ -2901,7 +2901,7 @@ def build_report(
                     if page.page_url in sc_failed_urls:
                         is_confirmed = True
                     else:
-                        # Также сравним по path – если в Метрике URL без поддомена, в SC с поддоменом
+                        # Также сравним по path - если в Метрике URL без поддомена, в SC с поддоменом
                         try:
                             p = _urlparse(page.page_url).path
                             if p and p in sc_failed_paths:
@@ -2925,7 +2925,7 @@ def build_report(
         flat_rows.sort(key=lambda r: (not r['confirmed'], -r['views']))
 
         # ─── Предупреждение о пустых URL ──────────────────────────
-        # Если у всех или у большинства строк нет page_url – Метрика
+        # Если у всех или у большинства строк нет page_url - Метрика
         # отдала только заголовки страниц. Так бывает, если в шаблоне
         # рассылки не настроена группировка «Адрес страницы». Чинить
         # это в Метрике, не в коде. Помечаем это прямо в xlsx, чтобы
@@ -2937,7 +2937,7 @@ def build_report(
             wc = ws4.cell(row=warn_row, column=1)
             wc.value = (
                 '⚠ Колонка «URL страницы» пустая: в текущем шаблоне рассылки '
-                'Метрики нет «Адреса страницы» – приходят только заголовки. '
+                'Метрики нет «Адреса страницы» - приходят только заголовки. '
                 'Чтобы получать URL: Метрика → Содержание → Страницы → 404 → '
                 '«Группировки» → добавить «Адрес страницы» → сохранить шаблон '
                 'рассылки. Со следующего письма URL начнут приходить.'
@@ -2947,7 +2947,7 @@ def build_report(
             wc.alignment = _align(wrap=True, vertical='top')
             ws4.row_dimensions[warn_row].height = 48
 
-        # ─── Если в почте есть отчёты но 404 не нашлось – короткое сообщение ──
+        # ─── Если в почте есть отчёты но 404 не нашлось - короткое сообщение ──
         if not flat_rows:
             ws4.merge_cells(f'A{hdr_row + 1}:H{hdr_row + 1}')
             cell = ws4.cell(row=hdr_row + 1, column=1)
@@ -2973,7 +2973,7 @@ def build_report(
                 cell.alignment = _align()
                 cell.border = _border(color=C.border_light)
 
-                # Страна — определяем по доменной зоне URL
+                # Страна - определяем по доменной зоне URL
                 cell = ws4.cell(row=row_idx, column=2)
                 cell.value = _country_by_url(fr['url'])
                 cell.font = _font(size=10)
@@ -2992,9 +2992,9 @@ def build_report(
                 cell.alignment = _align()
                 cell.border = _border(color=C.border_light)
 
-                # URL – кликабельный
+                # URL - кликабельный
                 cell = ws4.cell(row=row_idx, column=4)
-                cell.value = fr['url'] or '–'
+                cell.value = fr['url'] or '-'
                 if fr['url']:
                     cell.hyperlink = fr['url']
                     cell.font = _font(name='Consolas', size=10, color=C.accent, underline='single')
@@ -3019,7 +3019,7 @@ def build_report(
 
                 # Реферер
                 cell = ws4.cell(row=row_idx, column=7)
-                cell.value = fr['referer'] or '–'
+                cell.value = fr['referer'] or '-'
                 if fr['referer']:
                     cell.font = _font(name='Consolas', size=9, color=C.text_soft)
                 else:
@@ -3039,13 +3039,13 @@ def build_report(
             ws4.auto_filter.ref = f'A{hdr_row}:H{row_idx - 1}'
 
     # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 5: Уведомления (Вебмастер + GSC) – если есть данные
+    # ЛИСТ 5: Уведомления (Вебмастер + GSC) - если есть данные
     # ═══════════════════════════════════════════════════════════════
-    # Лист «Уведомления» добавляем всегда (при пустых данных – заглушка).
+    # Лист «Уведомления» добавляем всегда (при пустых данных - заглушка).
     # Сюда же идут ошибки из Вебмастера по API (секция «Вебмастер»).
     _build_notifications_sheet(wb, notifications, service_issues)
 
-    # ЛИСТ: «Автокликер» — итоги перекликивания ошибок (если запускался).
+    # ЛИСТ: «Автокликер» - итоги перекликивания ошибок (если запускался).
     _build_autoclick_sheet(wb, autoclick)
 
     # ── Сохраняем ──────────────────────────────────────────────────
@@ -3061,7 +3061,7 @@ def build_report(
 def make_report_filename(project_id: str, started_at_ms: int, reports_dir: Path) -> str:
     """
     Имя файла: smu-21.05.2026.xlsx
-    Если уже есть – smu-21.05.2026_2.xlsx, _3 и т.д.
+    Если уже есть - smu-21.05.2026_2.xlsx, _3 и т.д.
     """
     d = datetime.fromtimestamp(started_at_ms / 1000)
     date_part = d.strftime('%d.%m.%Y')

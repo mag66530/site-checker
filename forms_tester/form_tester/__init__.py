@@ -1,4 +1,4 @@
-"""Пакет прогона форм; публичная точка входа – `runner.run_test`."""
+"""Пакет прогона форм; публичная точка входа - `runner.run_test`."""
 
 from form_tester.runner import run_test
 

@@ -1,28 +1,28 @@
 """
-product_links.py – база товарных ссылок, собранных с листингов категорий.
+product_links.py - база товарных ссылок, собранных с листингов категорий.
 
 Зачем: товары для проверки раньше брались только из sitemap.xml. Sitemap
 может содержать удалённые или скрытые товары и не отражает того, что реально
-видит покупатель. Здесь товары собираются с самих страниц категорий – с тех
+видит покупатель. Здесь товары собираются с самих страниц категорий - с тех
 же карточек, по которым ходит пользователь.
 
 Как устроено (согласованная схема):
   1. Скрипт collect_products.py проходит ВСЕ категории проекта
-     (главный домен, ТОЛЬКО первая страница листинга – пагинация не нужна).
+     (главный домен, ТОЛЬКО первая страница листинга - пагинация не нужна).
   2. С каждой страницы собирает ссылки на карточки товаров.
   3. Результат сохраняется в репозитории:
-        catalogs/{proj}-products.csv        – сами ссылки (path + категория)
-        catalogs/{proj}-products-meta.json  – когда и как собрано
+        catalogs/{proj}-products.csv        - сами ссылки (path + категория)
+        catalogs/{proj}-products-meta.json  - когда и как собрано
      На Streamlit Cloud месячный кэш на диске не живёт (контейнер
      пересоздаётся), поэтому база лежит в git и обновляется вручную
      раз в месяц: запустить скрипт → закоммитить → задеплоить.
   4. Приложение читает базу из репозитория, показывает количество товаров
-     и дату сбора в интерфейсе. Через 30 дней база считается устаревшей –
+     и дату сбора в интерфейсе. Через 30 дней база считается устаревшей -
      интерфейс подсвечивает, что пора пересобрать.
 
 Распознавание ссылки на товар: берём ссылку ИЗ карточки товара (контейнер
 card-product / card-item / catalog-product-card-item / listing-card). Так
-ловятся и товары ИМП, чей адрес – КОРНЕВОЙ slug (/list-otsinkovannyj-…/), и
+ловятся и товары ИМП, чей адрес - КОРНЕВОЙ slug (/list-otsinkovannyj-…/), и
 товары СМУ/МПЭ под /catalog/. Категории, фильтры (в т.ч. URL-фильтры вида
 …/характеристика/значение/), ассеты и битые шаблоны (${…}) отбрасываются.
 """
@@ -54,12 +54,12 @@ DEFAULT_USER_AGENT = (
 _HREF_RE = re.compile(r'<a\b[^>]*?href\s*=\s*["\']([^"\'#]+)["\']', re.IGNORECASE)
 
 # Контейнеры карточек товара у наших проектов (СМУ / МПЭ / ИМП). Карточку
-# узнаём по классу-контейнеру и берём ссылку ИЗ НЕЁ – так ловим и ИМП, где
+# узнаём по классу-контейнеру и берём ссылку ИЗ НЕЁ - так ловим и ИМП, где
 # карточка ведёт на КОРНЕВОЙ адрес товара (/slug/), а не под /catalog/.
 _CARD_SPLIT_RE = re.compile(
     r'\b(?:catalog-product-card-item|card-product|card-item|listing-card)\b'
 )
-# Ассеты/статика – не товар.
+# Ассеты/статика - не товар.
 _ASSET_RE = re.compile(
     r'\.(?:svg|png|jpe?g|gif|webp|bmp|ico|css|js|woff2?|ttf|pdf)(?:\?|$)', re.I)
 # Незарендеренные шаблонные переменные, попавшие в href (битый JS-шаблон).
@@ -75,7 +75,7 @@ def _clean_href(href: str, page_url: str, page_host: str) -> str:
     if low.startswith(('mailto:', 'tel:', 'javascript:')):
         return ''
     if any(j in low for j in _TEMPLATE_JUNK):
-        return ''                      # битый шаблон ${...}/{{...}} – не ссылка
+        return ''                      # битый шаблон ${...}/{{...}} - не ссылка
     if _ASSET_RE.search(low):
         return ''
     try:
@@ -106,7 +106,7 @@ def _looks_like_product(path: str) -> bool:
 
 
 def _is_facet_listing(path: str, known_paths: set[str]) -> bool:
-    """URL-фильтр вида <категория>/<характеристика>/<значение>/ – это
+    """URL-фильтр вида <категория>/<характеристика>/<значение>/ - это
     отфильтрованный листинг, а не карточка товара (так устроен ИМП). Узнаём по
     тому, что без последних 2 (или 4) сегментов остаётся известная категория/тег."""
     segs = [s for s in path.strip('/').split('/') if s]
@@ -135,7 +135,7 @@ def extract_product_paths(
 
     Берём ссылку из каждой карточки товара (контейнер card-product / card-item /
     catalog-product-card-item / listing-card). Так корректно ловятся и товары
-    ИМП, чей адрес – КОРНЕВОЙ slug (/list-otsinkovannyj-…/), а не путь под
+    ИМП, чей адрес - КОРНЕВОЙ slug (/list-otsinkovannyj-…/), а не путь под
     /catalog/. Известные категории/фильтры, /filter/, ассеты и битые шаблонные
     ссылки (${…}) отбрасываются.
     """
@@ -156,14 +156,14 @@ def extract_product_paths(
     chunks = _CARD_SPLIT_RE.split(html)
     found_cards = len(chunks) > 1
     for chunk in chunks[1:]:
-        # первая «товарная» ссылка в карточке – это сам товар (а не иконка/счётчик)
+        # первая «товарная» ссылка в карточке - это сам товар (а не иконка/счётчик)
         for m in _HREF_RE.finditer(chunk[:4000]):
             path = _clean_href(m.group(1), page_url, page_host)
             if path and _looks_like_product(path):
                 consider(path)
                 break
 
-    # Фоллбэк для листингов без распознанных карточек – по ссылкам /catalog/,
+    # Фоллбэк для листингов без распознанных карточек - по ссылкам /catalog/,
     # отбрасывая URL-фильтры (категория + /характеристика/значение/).
     if not found_cards:
         known = known_category_paths | known_filter_paths
@@ -197,7 +197,7 @@ async def collect_product_links(
     и собрать ссылки на товары.
 
     Сначала основной проход с заданной параллельностью. Часть категорий под
-    нагрузкой отдаёт таймаут/5xx – поэтому, если retry_failed=True, по упавшим
+    нагрузкой отдаёт таймаут/5xx - поэтому, если retry_failed=True, по упавшим
     делается второй, мягкий проход с низкой параллельностью: так возвращается
     почти всё, что отвалилось не из-за реального 404, а из-за нагрузки.
 
@@ -229,7 +229,7 @@ async def collect_product_links(
     }
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
 
-    # Транзиентные коды – повторяем. 404/403/410 – устойчивый результат, не ретраим.
+    # Транзиентные коды - повторяем. 404/403/410 - устойчивый результат, не ретраим.
     _RETRY_CODES = {429, 500, 502, 503, 504}
 
     async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
@@ -246,7 +246,7 @@ async def collect_product_links(
                                 html = await resp.text(errors='replace')
                                 break
                             if resp.status not in _RETRY_CODES:
-                                break       # 404/403 и т.п. – повторять бессмысленно
+                                break       # 404/403 и т.п. - повторять бессмысленно
                     except Exception:
                         pass
                     if attempt < max_attempts - 1:
@@ -276,7 +276,7 @@ async def collect_product_links(
             fetch_category(c, sem1, timeout1, failed_1, True) for c in category_paths
         ))
 
-        # ── Проход 2: добиваем упавшие – мягко, низкая параллельность ──
+        # ── Проход 2: добиваем упавшие - мягко, низкая параллельность ──
         failed_final = failed_1
         if retry_failed and failed_1:
             if log:

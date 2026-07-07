@@ -14,7 +14,7 @@ gsc_reindex.py
     2. (необязательно) python gsc_list_properties.py  # соберёт gsc_properties.json
 
     Список URL: файл urls.txt, по одному URL в строке. Это битые/проблемные
-    страницы (домен и поддомены) – например из отчёта чек-листа.
+    страницы (домен и поддомены) - например из отчёта чек-листа.
 
 Запуск:
     python gsc_reindex.py                       # читает urls.txt
@@ -25,7 +25,7 @@ gsc_reindex.py
 
 Важно про квоты Google:
     Ручной запрос индексирования лимитирован (~10-12 URL в сутки на ресурс).
-    При превышении GSC отвечает «превышена квота» – скрипт это поймает и
+    При превышении GSC отвечает «превышена квота» - скрипт это поймает и
     остановится по этому ресурсу.
 """
 
@@ -83,7 +83,7 @@ def _resolve_resource(url: str, valid: set) -> str | None:
     URL-префикс: origin (https://host/). Домен: sc-domain:host."""
     origin = _origin(url)
     if not valid:
-        return origin  # нет списка – доверяем origin
+        return origin  # нет списка - доверяем origin
     if origin in valid:
         return origin
     host = urlparse(url).netloc
@@ -166,7 +166,7 @@ async def reindex_url(page, url: str, dry_run: bool) -> dict:
         elif outcome == 'quota':
             res['status'] = 'quota'
             res['message'] = 'превышена квота на ресурсе'
-            _log('  квота исчерпана – остановка по ресурсу', 'warn')
+            _log('  квота исчерпана - остановка по ресурсу', 'warn')
         else:
             res['status'] = 'warn'
             res['message'] = 'клик сделан, подтверждение не поймано'

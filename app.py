@@ -38,7 +38,7 @@ st.markdown(
         color: #5B5853 !important;
     }
 
-    /* Единые отступы контента от боковой панели – одинаково на всех вкладках */
+    /* Единые отступы контента от боковой панели - одинаково на всех вкладках */
     .block-container {
         padding-top: 2.6rem !important;
         max-width: 1280px !important;
@@ -70,12 +70,12 @@ st.markdown(
         background: #FFFFFF !important; border-radius: 10px !important;
         border-color: rgba(26,26,26,.14) !important; color: #1A1A1A !important;
     }
-    /* Числовые поля (Параметры выборки) – белые, чтобы не сливались с фоном */
+    /* Числовые поля (Параметры выборки) - белые, чтобы не сливались с фоном */
     [data-testid="stNumberInput"] input {
         background: #FFFFFF !important; border-radius: 10px !important;
         border-color: rgba(26,26,26,.14) !important; color: #1A1A1A !important;
     }
-    /* Кнопки-стрелки +/− – мягкие, в тон теме (не чёрные) */
+    /* Кнопки-стрелки +/- - мягкие, в тон теме (не чёрные) */
     [data-testid="stNumberInput"] button {
         background: #ECEAE4 !important;
         border: 1px solid rgba(26,26,26,.12) !important;
@@ -86,23 +86,23 @@ st.markdown(
     [data-testid="stNumberInput"] button:hover {
         background: #DEDBD4 !important;
     }
-    /* Иконки +/− – ТОЛЬКО сами степперы (по их testid), чтобы заливка не
+    /* Иконки +/- - ТОЛЬКО сами степперы (по их testid), чтобы заливка не
        попадала на значок подсказки «?», который тоже лежит в <button>. */
     [data-testid="stNumberInputStepUp"] svg, [data-testid="stNumberInputStepUp"] svg path,
     [data-testid="stNumberInputStepDown"] svg, [data-testid="stNumberInputStepDown"] svg path {
         fill: #1A1A1A !important; stroke: none !important;
     }
 
-    /* Значок подсказки «?» убираем совсем – он выглядел «кружком в кружке» и
-       размазанно, а подписи полей и так понятны. Если где-то нужна подсказка –
+    /* Значок подсказки «?» убираем совсем - он выглядел «кружком в кружке» и
+       размазанно, а подписи полей и так понятны. Если где-то нужна подсказка -
        вынесем текстом, а не иконкой. */
     [data-testid="stTooltipIcon"] { display: none !important; }
-    /* Английская техподсказка «Press Enter to apply» у полей ввода – прячем,
+    /* Английская техподсказка «Press Enter to apply» у полей ввода - прячем,
        значение применяется по Enter или клику мимо поля. */
     [data-testid="InputInstructions"] { display: none !important; }
     .stTextArea textarea { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important; }
 
-    /* Карточки-контейнеры (с рамкой) – белые, чтобы блоки не сливались с фоном */
+    /* Карточки-контейнеры (с рамкой) - белые, чтобы блоки не сливались с фоном */
     [data-testid="stVerticalBlockBorderWrapper"] {
         background: #FFFFFF !important;
         border: 1px solid #DEDBD4 !important;
@@ -141,12 +141,12 @@ st.markdown(
     div[data-baseweb="popover"] [role="option"] * {
         color: #1A1A1A !important; background: transparent !important;
     }
-    /* Список – одна белая рамка, без «матрёшки» вложенных рамок popover */
+    /* Список - одна белая рамка, без «матрёшки» вложенных рамок popover */
     div[data-baseweb="popover"] ul, div[data-baseweb="popover"] [role="listbox"] {
         background: #FFFFFF !important; border: 1px solid #DEDBD4 !important;
         border-radius: 8px !important; box-shadow: 0 8px 24px rgba(26,26,26,.12) !important;
     }
-    /* Наведение / выбранная опция – мягкая подсветка, текст остаётся тёмным */
+    /* Наведение / выбранная опция - мягкая подсветка, текст остаётся тёмным */
     div[data-baseweb="popover"] li:hover, div[data-baseweb="popover"] [role="option"]:hover,
     div[data-baseweb="popover"] li[aria-selected="true"],
     div[data-baseweb="popover"] [role="option"][aria-selected="true"] {

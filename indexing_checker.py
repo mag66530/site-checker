@@ -1,22 +1,22 @@
 """
-indexing_checker.py – проверка индексации страниц (пункт 1.7 чек-листа).
+indexing_checker.py - проверка индексации страниц (пункт 1.7 чек-листа).
 
-Эталон – robots.txt сайта: он говорит, что должно быть закрыто от индексации.
+Эталон - robots.txt сайта: он говорит, что должно быть закрыто от индексации.
 Проверяем СОГЛАСОВАННОСТЬ сигналов индексации между собой:
 
-  • Страница из выборки (главная/каталог/категория/фильтр/товар/тех.) – это
+  • Страница из выборки (главная/каталог/категория/фильтр/товар/тех.) - это
     SEO-страница, она должна быть ОТКРЫТА:
-      – закрыта Disallow в robots.txt        → баг
-      – <meta name="robots" … noindex>       → баг (противоречит robots)
-      – заголовок X-Robots-Tag: noindex      → баг
-      – rel=canonical на URL, закрытый в robots → баг (канонизируем в «никуда»)
-      – rel=canonical на ДРУГОЙ открытый URL → предупреждение (для фильтров
+      - закрыта Disallow в robots.txt        → баг
+      - <meta name="robots" … noindex>       → баг (противоречит robots)
+      - заголовок X-Robots-Tag: noindex      → баг
+      - rel=canonical на URL, закрытый в robots → баг (канонизируем в «никуда»)
+      - rel=canonical на ДРУГОЙ открытый URL → предупреждение (для фильтров
         каноникл на категорию бывает намеренным)
   • Кросс-проверка sitemap ↔ robots: URL из sitemap (= «хочу в индекс»),
     но закрыт Disallow → противоречие, баг.
 
 Правила разбираются для групп User-agent: * / Yandex / Googlebot по стандарту:
-wildcard «*», якорь «$», выигрывает самое ДЛИННОЕ правило, при равенстве – Allow.
+wildcard «*», якорь «$», выигрывает самое ДЛИННОЕ правило, при равенстве - Allow.
 """
 import re
 from dataclasses import dataclass, field
@@ -87,7 +87,7 @@ def parse_robots(text: str, host: str = '') -> RobotsInfo:
             continue
         if key in ('allow', 'disallow'):
             if not current_agents:
-                continue                    # правило вне группы – игнор
+                continue                    # правило вне группы - игнор
             if key == 'disallow' and not val:
                 continue                    # пустой Disallow = «всё можно»
             if not val:
@@ -120,7 +120,7 @@ def robots_verdict(info: RobotsInfo, url: str):
     """Закрыт ли URL в robots.txt хоть для одного из AGENTS.
 
     Возвращает (disallowed: bool, rule: str|None, agent: str|None).
-    Выигрывает самое длинное правило; при равной длине – Allow."""
+    Выигрывает самое длинное правило; при равной длине - Allow."""
     if not info or not info.ok:
         return False, None, None
     sp = urlsplit(url)
@@ -190,7 +190,7 @@ def _find_meta_robots(html: str):
 
 
 def _find_canonicals(html: str) -> list:
-    """href ВСЕХ rel=canonical на странице (валидно – ровно один)."""
+    """href ВСЕХ rel=canonical на странице (валидно - ровно один)."""
     out = []
     for m in _CANONICAL_RE.finditer(html[:200_000]):
         hm = _HREF_RE.search(m.group(0))
@@ -211,7 +211,7 @@ def _norm_url(u: str) -> str:
 
 
 def _x_robots_noindex(headers: dict):
-    """(значение X-Robots-Tag, есть ли noindex). headers – ключи в lower."""
+    """(значение X-Robots-Tag, есть ли noindex). headers - ключи в lower."""
     val = (headers or {}).get('x-robots-tag')
     if not val:
         return None, False
@@ -227,8 +227,8 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
     Ошибка = РАСХОЖДЕНИЕ с robots.txt:
       • в robots страница открыта, а на ней noindex (meta / X-Robots-Tag);
       • canonical ведёт на URL, закрытый в robots.
-    Закрыта в robots + noindex = согласовано (так задумано) – молчим.
-    Закрыта в robots без noindex = тоже задумано (robots прав) – молчим;
+    Закрыта в robots + noindex = согласовано (так задумано) - молчим.
+    Закрыта в robots без noindex = тоже задумано (robots прав) - молчим;
     противоречия «в sitemap, но под Disallow» ловит отдельная кросс-проверка.
     Возвращает dict для CheckResult.indexing."""
     out = {
@@ -243,7 +243,7 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
     }
     issues, warnings = out['issues'], out['warnings']
 
-    # 1. robots.txt – ЭТАЛОН. Disallow сам по себе не ошибка: так задумано.
+    # 1. robots.txt - ЭТАЛОН. Disallow сам по себе не ошибка: так задумано.
     closed_by_robots = False
     if robots is not None and robots.ok:
         dis, rule, agent = robots_verdict(robots, url)
@@ -252,11 +252,11 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         out['robots_agent'] = agent
         closed_by_robots = dis
     elif robots is not None and robots.fetched and robots.status != 200:
-        warnings.append(f'robots.txt отдаёт {robots.status} – правила не применяются')
+        warnings.append(f'robots.txt отдаёт {robots.status} - правила не применяются')
     elif robots is not None and not robots.fetched:
         warnings.append('robots.txt не удалось скачать')
 
-    # 2. meta robots (в т.ч. name=yandex / name=googlebot) – сверяем с robots:
+    # 2. meta robots (в т.ч. name=yandex / name=googlebot) - сверяем с robots:
     # noindex на открытой в robots странице = расхождение = ошибка;
     # noindex на закрытой в robots = согласовано, молчим.
     if html:
@@ -267,7 +267,7 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
             issues.append('расхождение с robots.txt: в robots страница открыта, '
                           'но на ней noindex (meta robots)')
 
-    # 3. X-Robots-Tag – так же сверяем с robots
+    # 3. X-Robots-Tag - так же сверяем с robots
     x_val, x_noidx = _x_robots_noindex(headers)
     out['x_robots'] = x_val
     out['x_robots_noindex'] = x_noidx
@@ -275,9 +275,9 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         issues.append('расхождение с robots.txt: в robots страница открыта, '
                       'но на ней noindex (заголовок X-Robots-Tag)')
 
-    # 4. canonical – «верно настроен rel=canonical»:
+    # 4. canonical - «верно настроен rel=canonical»:
     #    ровно один тег; указывает на себя; не на чужой хост; не на URL,
-    #    закрытый в robots. Отсутствие тега – предупреждение.
+    #    закрытый в robots. Отсутствие тега - предупреждение.
     if html:
         canons = _find_canonicals(html)
         out['canonical'] = canons[0] if canons else None
@@ -286,7 +286,7 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
             warnings.append('нет rel="canonical" на странице')
         else:
             if len(canons) >= 2:
-                issues.append('несколько rel="canonical" на странице – '
+                issues.append('несколько rel="canonical" на странице - '
                               'поисковики игнорируют такой сигнал')
             canon = canons[0]
             try:
@@ -299,10 +299,10 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                 _can_host = (urlsplit(canon).netloc or '').lower().removeprefix('www.')
                 if _can_host and _can_host != _page_host:
                     # Канонизация на другой домен/поддомен: страница города
-                    # отдаёт свой вес чужому хосту – выпадает из поиска.
+                    # отдаёт свой вес чужому хосту - выпадает из поиска.
                     issues.append('canonical ведёт на другой домен/поддомен')
                 else:
-                    # Каноникл на закрытый robots'ом URL – канонизируем
+                    # Каноникл на закрытый robots'ом URL - канонизируем
                     # «в никуда» (robots того же хоста).
                     if robots is not None and robots.ok:
                         c_dis, _c_rule, _ = robots_verdict(robots, canon)

@@ -1,12 +1,12 @@
 """
-Тесты content_checker – структурная проверка страниц.
+Тесты content_checker - структурная проверка страниц.
 
 Сценарии из правки заказчика:
   • листинг / раздел / пустой раздел различаются и проверяются по-разному;
   • в разделах нет товарных столбцов (карточек, цен, кнопок, пагинации);
   • цена разделена: «есть вообще» (обязательная) и «в рублях»/«по запросу»;
-  • кнопка заказа обязательна как «хотя бы одна из», сами кнопки – справочно;
-  • плитка тегов «Часто ищут» – присутствие фиксируется, отсутствие не баг.
+  • кнопка заказа обязательна как «хотя бы одна из», сами кнопки - справочно;
+  • плитка тегов «Часто ищут» - присутствие фиксируется, отсутствие не баг.
 """
 import pytest
 
@@ -59,9 +59,9 @@ def _by_key(result):
 
 
 def test_header_footer_all_present():
-    """Полные шапка и подвал – все 8 элементов найдены, багов нет.
+    """Полные шапка и подвал - все 8 элементов найдены, багов нет.
 
-    Шапка/подвал – сквозные блоки, проверяются только на главной ('main')."""
+    Шапка/подвал - сквозные блоки, проверяются только на главной ('main')."""
     r = check_content(COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER, 'main')
     b = _by_key(r)
     for key in ('hdr_phone', 'hdr_callback', 'hdr_request', 'hdr_city',
@@ -134,14 +134,14 @@ def test_listing_price_request_only():
     html = COMMON + CARD_PRICE_REQUEST + FORM_NF + SMU_MARKER
     r = check_content(html, 'category')
     b = _by_key(r)
-    assert b['price'].present, '«по запросу» – это тоже цена, не баг'
+    assert b['price'].present, '«по запросу» - это тоже цена, не баг'
     assert not b['price_real'].present, 'рублёвой цены нет'
     assert b['price_request'].present
     assert not b['price_real'].required and not b['price_request'].required
 
 
 def test_listing_no_order_buttons_is_bug():
-    """Нет НИ «В корзину», НИ «Купить в 1 клик» → «Кнопка заказа» – баг."""
+    """Нет НИ «В корзину», НИ «Купить в 1 клик» → «Кнопка заказа» - баг."""
     html = (
         COMMON
         + '<div class="catalog-product-card-item"><span>1 200 ₽</span></div>'
@@ -152,7 +152,7 @@ def test_listing_no_order_buttons_is_bug():
     assert not b['btn_order'].present
     assert b['btn_order'].required
     assert any(bug.key == 'btn_order' for bug in r.bugs)
-    # Сами кнопки – справочные столбцы, не баги
+    # Сами кнопки - справочные столбцы, не баги
     assert not b['btn_cart'].required and not b['btn_oneclick'].required
 
 
@@ -183,7 +183,7 @@ def test_section_has_no_product_columns():
 
 
 def test_empty_section_is_bug():
-    """«Раздел пуст.» без товаров и подкатегорий – это баг."""
+    """«Раздел пуст.» без товаров и подкатегорий - это баг."""
     html = COMMON + '<p>Раздел пуст.</p>' + FORM_NF + SMU_MARKER
     r = check_content(html, 'category')
     assert r.page_kind == 'empty'
@@ -242,7 +242,7 @@ def test_form_nf_required_only_on_smu():
 
 
 def test_project_absent_elements_not_shown():
-    """У ИМП нет «Заказать звонок», у МПЭ – ещё и «Написать нам»:
+    """У ИМП нет «Заказать звонок», у МПЭ - ещё и «Написать нам»:
     этих столбцов в отчёте быть не должно (не ложный баг)."""
     imp = '<a href="https://inmetprom.ru/">inmetprom</a>'
     mpe = '<a href="https://mepen.ru/">mepen</a>'
@@ -278,7 +278,7 @@ def test_belarus_header_variant():
 
 
 def test_soft_404_detected():
-    """Страница отдала 200, но контент – «страница не найдена» → soft-404,
+    """Страница отдала 200, но контент - «страница не найдена» → soft-404,
     одна проблема (404), а не «нет цены»."""
     html = (COMMON + SMU_MARKER
             + '<h1>Страница не найдена</h1><p>Ошибка 404</p>')
@@ -311,11 +311,11 @@ def test_product_without_price_is_bug():
 
 def test_bottom_block_cards_without_price_is_bug():
     """Нижний блок карточки («С этим товаром покупают») с карточками, у которых
-    не видно цены, → баг rec_price. С ценой → ок. Без блока → N/A («–»)."""
+    не видно цены, → баг rec_price. С ценой → ок. Без блока → N/A («-»)."""
     main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
             + '<button class="add-to-cart-btn">В корзину</button>')
     card = '<div class="catalog-product-card-item"><a href="/c/t/">Товар 2</a>{}</div>'
-    # карточки снизу без цены → баг (блок есть, цены нет – пустые цены снизу)
+    # карточки снизу без цены → баг (блок есть, цены нет - пустые цены снизу)
     b = _by_key(check_content(main + '<div>С этим товаром покупают</div>'
                               + card.format(''), 'product'))
     assert b['rec_block'].present
@@ -324,16 +324,16 @@ def test_bottom_block_cards_without_price_is_bug():
     b2 = _by_key(check_content(main + '<div>Похожие товары</div>'
                                + card.format('<span>99 000 ₽</span>'), 'product'))
     assert b2['rec_block'].present and b2['rec_price'].present
-    # нижнего блока нет (как у МПЭ – их там нет по дизайну) → проверять нечего:
-    # «Цены в нижних блоках» становится необязательным и в отчёте даёт «–», а не ✓.
+    # нижнего блока нет (как у МПЭ - их там нет по дизайну) → проверять нечего:
+    # «Цены в нижних блоках» становится необязательным и в отчёте даёт «-», а не ✓.
     b3 = _by_key(check_content(main + '<div>Характеристики</div>', 'product'))
     assert not b3['rec_block'].present
-    assert not b3['rec_price'].present and not b3['rec_price'].required   # → «–», не баг
+    assert not b3['rec_price'].present and not b3['rec_price'].required   # → «-», не баг
 
 
 def test_bottom_block_one_card_without_price_is_bug():
     """Покарточная проверка: если ХОТЯ БЫ у одной карточки снизу нет цены/«по
-    запросу» – баг, даже когда у соседних карточек цена есть."""
+    запросу» - баг, даже когда у соседних карточек цена есть."""
     main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
             + '<button class="add-to-cart-btn">В корзину</button>')
     good = ('<div class="catalog-product-card-item"><a href="/c/t1/">Товар 1</a>'
@@ -351,7 +351,7 @@ def test_bottom_block_one_card_without_price_is_bug():
 
 
 def test_cards_stub_photo_is_warning_with_name():
-    """Заглушка «нет фото» – жёлтое ПРЕДУПРЕЖДЕНИЕ (warn), не красный баг; в note
+    """Заглушка «нет фото» - жёлтое ПРЕДУПРЕЖДЕНИЕ (warn), не красный баг; в note
     попадает название товара из alt картинки."""
     main = (COMMON + SMU_MARKER + '<div class="cost-val">100 ₽</div>'
             '<button class="add-to-cart-btn">В корзину</button>')
@@ -366,7 +366,7 @@ def test_cards_stub_photo_is_warning_with_name():
 
 def test_catalog_root_photos_not_bug_without_product_cards():
     """Корень каталога: заглушки picture.missing у плиток РАЗДЕЛОВ (карточек
-    товаров нет) НЕ считаются багом «Фото товаров» – пункт необязателен («–»).
+    товаров нет) НЕ считаются багом «Фото товаров» - пункт необязателен («-»).
     Раньше из-за этого на каждом корне каталога МПЭ ложно горел «Фото: БАГ»."""
     tiles = ''.join(f'<a href="/catalog/razdel-{i}/"><img src="/img/picture.missing.webp"></a>'
                     for i in range(8))
@@ -377,7 +377,7 @@ def test_catalog_root_photos_not_bug_without_product_cards():
 
 
 def test_catalog_root_photos_warn_with_product_cards():
-    """Если на корне каталога ЕСТЬ карточки товаров и у части заглушка – это
+    """Если на корне каталога ЕСТЬ карточки товаров и у части заглушка - это
     жёлтое предупреждение с числом (не красный баг)."""
     cards = ('<div class="catalog-product-card-item"><a href="/c/t1/">Т1</a>'
              '<img src="/img/picture.missing.webp"><span>100 ₽</span></div>'
@@ -421,13 +421,13 @@ def test_tech_pages_checked_like_others():
 
 
 def test_tech_page_missing_h1_and_text_is_bug():
-    """Тех. страница без H1 и без собственного текста – баги (оба обязательны).
-    Крошки – справочно: их отсутствие на служебной странице багом не считаем."""
+    """Тех. страница без H1 и без собственного текста - баги (оба обязательны).
+    Крошки - справочно: их отсутствие на служебной странице багом не считаем."""
     r = check_content('<html><body>Политика конфиденциальности</body></html>', 'tech')
     b = _by_key(r)
     assert not b['h1'].present and not b['content_text'].present
     assert not b['breadcrumbs'].present
-    assert r.bug_count == 2          # H1 + текст (крошки – не обязательны)
+    assert r.bug_count == 2          # H1 + текст (крошки - не обязательны)
     bug_keys = {bb.key for bb in r.bugs}
     assert 'h1' in bug_keys and 'content_text' in bug_keys
     assert 'breadcrumbs' not in bug_keys
@@ -435,13 +435,13 @@ def test_tech_page_missing_h1_and_text_is_bug():
 
 def test_search_page_h1_not_required():
     """Страница результатов поиска (/search/) не обязана иметь H1: на /search/
-    H1 справочный, отсутствие – не баг; на обычной тех. странице – баг."""
+    H1 справочный, отсутствие - не баг; на обычной тех. странице - баг."""
     long_text = 'Результаты поиска по запросу. ' * 20   # контентный текст есть
     box = '<input type="search">'                        # строка поиска (обязат. на /search/)
     html = f'<header><a href="tel:1">т</a></header><div>{box}{long_text}</div>'
     rs = _by_key(check_content(html, 'tech', url='https://inmetprom.ru/search/'))
-    assert not rs['h1'].present and not rs['h1'].required        # «–», не баг
-    # Контроль: на обычной тех. странице («О компании») H1 обязателен – его нет
+    assert not rs['h1'].present and not rs['h1'].required        # «-», не баг
+    # Контроль: на обычной тех. странице («О компании») H1 обязателен - его нет
     # → баг. Картинку добавляем, чтобы единственным багом остался именно H1.
     about = f'<header><a href="tel:1">т</a></header><div><img src="/a.jpg" alt="фото">{long_text}</div>'
     ra = check_content(about, 'tech', url='https://inmetprom.ru/about/')
@@ -481,7 +481,7 @@ def test_tech_required_spec_blocks_are_bugs():
 
 def test_tech_per_page_profiles():
     """Профиль тех. страницы зависит от адреса: вакансии / поиск / услуги.
-    Спец-блоки справочные – багов не дают."""
+    Спец-блоки справочные - багов не дают."""
     base = '<h1>Заголовок</h1><p>' + ('Текст страницы. ' * 20) + '</p>'
     vac = check_content(base + '<div>Открытые вакансии</div><a>Узнать подробнее</a>',
                         'tech', url='https://inmetprom.ru/vakansii/')
@@ -545,7 +545,7 @@ def test_extract_content_links_limit():
 
 
 def test_footer_address_mikrorayon():
-    """Адрес без улицы (нефтяные города): «микрорайон 16А, 63» – это адрес,
+    """Адрес без улицы (нефтяные города): «микрорайон 16А, 63» - это адрес,
     а не отсутствие адреса (раньше ложно горело багом «нет адреса»)."""
     html = ('<header><a href="tel:+74951234567">тел</a></header>'
             '<div class="breadcrumb">x</div><h1>Главная</h1>'
@@ -585,14 +585,14 @@ def test_hidden_price_button_is_bug():
 
 def test_breadcrumbs_not_faked_by_css_link():
     """Крошки не должны «находиться» по ссылке на стиль
-    (/bitrix/.../breadcrumb/.../style.css). Если самих крошек нет – это баг."""
+    (/bitrix/.../breadcrumb/.../style.css). Если самих крошек нет - это баг."""
     css_link = ('<link href="/bitrix/components/bitrix/breadcrumb/templates/'
                 '.default/style.min.css" rel="stylesheet">')
     # крошек на странице нет, остался только CSS-линк → баг
     no_crumbs = (css_link + SMU_MARKER + '<h1>Категория</h1>'
                  + CARD_WITH_PRICE * 3 + FORM_NF)
     b = _by_key(check_content(no_crumbs, 'category'))
-    assert not b['breadcrumbs'].present, 'крошки по CSS-ссылке – ложный ✓'
+    assert not b['breadcrumbs'].present, 'крошки по CSS-ссылке - ложный ✓'
     # реальные крошки (class или schema) → present
     with_crumbs = (css_link + SMU_MARKER
                    + '<div class="bx-breadcrumb" itemtype="http://schema.org/BreadcrumbList">'
@@ -603,7 +603,7 @@ def test_breadcrumbs_not_faked_by_css_link():
 
 
 def test_mpe_listing_is_recognized():
-    """Листинг МПЭ – другой шаблон (card-item + schema Product, цена в
+    """Листинг МПЭ - другой шаблон (card-item + schema Product, цена в
     .price-row, кнопка «в корзину» в .add). Должен распознаваться как листинг
     и проверяться: карточки/цена/кнопка. Форма «Не нашли» на МПЭ не требуется."""
     cards = ''.join(
@@ -620,7 +620,7 @@ def test_mpe_listing_is_recognized():
     b = _by_key(r)
     assert b['product_cards'].present and b['product_cards'].count == 6
     assert b['price'].present and b['btn_order'].present
-    # форму «Не нашли что искали» на МПЭ не требуем – её не должно быть в багах
+    # форму «Не нашли что искали» на МПЭ не требуем - её не должно быть в багах
     assert not any(bug.key == 'form_nf' for bug in r.bugs)
 
 
@@ -638,8 +638,8 @@ def test_disabled_class_alone_does_not_hide():
             + '<i class="an-ico an-ico-one-click"></i><span>Купить в один клик</span></div>'
             + '</div></div>' + FORM_NF)
     b = _by_key(check_content(html, 'category'))
-    assert b['btn_order'].present, 'видимая кнопка «в один клик» – заказ есть, не баг'
-    assert b['price'].present       # «по запросу» – цена есть
+    assert b['btn_order'].present, 'видимая кнопка «в один клик» - заказ есть, не баг'
+    assert b['price'].present       # «по запросу» - цена есть
 
 
 def test_visible_price_button_ok():
@@ -666,10 +666,10 @@ def test_css_display_none_hides_price_button_listing():
     css = parse_hidden_selectors(
         '.cost-val,[class*="cost-"]{display:none!important}'
         '.card-item-add-to-cart-block{display:none!important}')
-    # без CSS – всё «видно», багов по цене/кнопке нет
+    # без CSS - всё «видно», багов по цене/кнопке нет
     b0 = _by_key(check_content(html, 'category'))
     assert b0['price'].present and b0['btn_order'].present
-    # с CSS-скрытием – цена и кнопка считаются невидимыми → баг с пояснением
+    # с CSS-скрытием - цена и кнопка считаются невидимыми → баг с пояснением
     b = _by_key(check_content(html, 'category', css_hidden=css))
     assert not b['price'].present and 'не видит' in b['price'].note
     assert not b['btn_order'].present and 'не видит' in b['btn_order'].note
@@ -688,11 +688,11 @@ def test_css_hidden_ancestor_qualified_not_overhide():
             + FORM_NF)
     css = parse_hidden_selectors('.catalog-list .cost-val{display:none}')
     b = _by_key(check_content(html, 'category', css_hidden=css))
-    assert b['price'].present, 'цена не под .catalog-list – прятать нельзя'
+    assert b['price'].present, 'цена не под .catalog-list - прятать нельзя'
 
 
 def test_parse_hidden_selectors_basics():
-    """display:none/visibility:hidden ловим; видимые правила и @media – нет."""
+    """display:none/visibility:hidden ловим; видимые правила и @media - нет."""
     from content_checker import parse_hidden_selectors
     assert len(parse_hidden_selectors('.a{display:none}')) == 1
     assert len(parse_hidden_selectors('.a{visibility:hidden}')) == 1
@@ -729,7 +729,7 @@ def test_every_block_has_description():
 
 def test_phone_formats_and_footer_above_tag():
     """МПЭ-кейс: телефон в tel: без «+» и формате «+7 (495)»; контакты подвала
-    свёрстаны ВЫШЕ тега <footer> (внутри него – только меню)."""
+    свёрстаны ВЫШЕ тега <footer> (внутри него - только меню)."""
     html = (
         '<header><a href="tel:74957991438">7 (495) 799-14-38</a>'
         'Заявка Выберите город</header>'
@@ -750,7 +750,7 @@ def test_phone_formats_and_footer_above_tag():
 def test_header_footer_only_on_main():
     """Сквозные блоки шапки/подвала проверяются только на главной.
 
-    На категории/листинге/товаре/каталоге их в отчёте быть не должно –
+    На категории/листинге/товаре/каталоге их в отчёте быть не должно -
     иначе одна и та же ошибка размножится на сотни строк."""
     hf_keys = {'hdr_phone', 'hdr_callback', 'hdr_request', 'hdr_city',
                'ftr_phone', 'ftr_email', 'ftr_writeus', 'ftr_address'}
@@ -758,7 +758,7 @@ def test_header_footer_only_on_main():
     for tc in ('category', 'product', 'catalog'):
         keys = {b.key for b in check_content(html, tc).blocks}
         assert not (keys & hf_keys), f'шапка/подвал не должны проверяться на {tc}'
-    # А на главной – должны
+    # А на главной - должны
     main_keys = {b.key for b in check_content(html, 'main').blocks}
     assert hf_keys <= main_keys, 'на главной шапка/подвал обязаны быть'
 

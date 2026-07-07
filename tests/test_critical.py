@@ -1,4 +1,4 @@
-"""Тесты critical – выделение критических ошибок прогона (п.4.3)."""
+"""Тесты critical - выделение критических ошибок прогона (п.4.3)."""
 import types
 
 from critical import analyze, is_availability_down, for_city
@@ -56,7 +56,7 @@ def test_kp_mismatch_only_bug_fields():
 
 
 def test_empty_section_separate_category():
-    """Пустой раздел – отдельная тема «Пустой раздел», а не «Нельзя купить»."""
+    """Пустой раздел - отдельная тема «Пустой раздел», а не «Нельзя купить»."""
     s = analyze([_r(content=_content(page_kind='empty'))])
     assert any('пустой' in it.detail for it in s.others['empty'])
     assert not s.others['cannot_buy']          # в «нельзя купить» его нет
@@ -90,13 +90,13 @@ def test_total_and_formatters():
     ]
     s = analyze(rs)
     assert s.total == 4 and s.has_availability
-    alert = format_critical_alert('СМУ – Стальметурал', s.availability)
+    alert = format_critical_alert('СМУ - Стальметурал', s.availability)
     # без эмодзи и длинных тире, группировка по городу, конкретная ошибка
-    assert '🔴' not in alert and '—' not in alert
+    assert '🔴' not in alert and '-' not in alert
     assert 'Упала доступность' in alert and 'СМУ' in alert
     assert '<b>Москва</b>' in alert and 'Главная: сервер не отвечает (5xx)' in alert
     block = format_critical_block(s)
-    assert '🔴' not in block and '—' not in block
+    assert '🔴' not in block and '-' not in block
     # КРАТКАЯ сводка по темам: тема + количество, без перечисления каждой ссылки
     assert 'Критические (4)' in block
     assert 'Сервер недоступен: <b>2</b>' in block      # server_error + timeout

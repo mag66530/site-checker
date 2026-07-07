@@ -1,5 +1,5 @@
 """
-Страница «Проверка форм» – фоновый прогон отправки форм на сайтах проекта.
+Страница «Проверка форм» - фоновый прогон отправки форм на сайтах проекта.
 
 Сделана по образцу страницы «Автокликеры»: кнопка стартует отдельный процесс
 (forms_run.py) и сразу освобождает интерфейс. Движок открывает реальный Chrome
@@ -7,9 +7,9 @@
 пишется в log_forms.xlsx.
 
 Окружение:
-  • Локально (streamlit run app.py) – работает.
-  • Облако по ссылке – недоступно (нет браузера и движка на сервере).
-  • Свой сервер (в планах) – заработает так же.
+  • Локально (streamlit run app.py) - работает.
+  • Облако по ссылке - недоступно (нет браузера и движка на сервере).
+  • Свой сервер (в планах) - заработает так же.
 """
 import csv
 import importlib.util
@@ -35,7 +35,7 @@ PID_FILE = ROOT / 'cache' / 'forms.pid'
 
 def _load_cities(project: str):
     """Справочник городов проекта: список dict {country, city, url, mail}.
-    Пусто, если файла нет. Первый город – основной сайт (Москва)."""
+    Пусто, если файла нет. Первый город - основной сайт (Москва)."""
     project = CITIES_FROM.get(project, project)
     f = ROOT / 'forms_tester' / 'projects' / project / 'cities.csv'
     if not f.exists():
@@ -70,7 +70,7 @@ def _host(url: str) -> str:
 
 def _main_domains(cities):
     """Основной домен каждой страны: строка справочника с самым «коротким» хостом
-    (без поддомена-города: mepen.kz, а не aktau.mepen.kz). Порядок стран – как в csv."""
+    (без поддомена-города: mepen.kz, а не aktau.mepen.kz). Порядок стран - как в csv."""
     best = {}
     for c in cities:
         h = _host(c['url'])
@@ -86,12 +86,12 @@ def _main_domains(cities):
     return out
 
 PROJECTS = {
-    'smu': {'name': 'СМУ – Стальметурал', 'domain': 'stalmetural.ru'},
-    'imp': {'name': 'ИМП – Инметпром', 'domain': 'inmetprom.ru'},
-    'mpe': {'name': 'МПЭ – Мепэн', 'domain': 'mepen.ru'},
+    'smu': {'name': 'СМУ - Стальметурал', 'domain': 'stalmetural.ru'},
+    'imp': {'name': 'ИМП - Инметпром', 'domain': 'inmetprom.ru'},
+    'mpe': {'name': 'МПЭ - Мепэн', 'domain': 'mepen.ru'},
     # Быстрая проверка ТОЛЬКО оформления заказа через корзину (Мепэн).
-    'mpe_cart': {'name': 'МПЭ – Корзина', 'domain': 'mepen.ru'},
-    'avia': {'name': 'АПС – Авиапромсталь', 'domain': 'aviastal.ru'},
+    'mpe_cart': {'name': 'МПЭ - Корзина', 'domain': 'mepen.ru'},
+    'avia': {'name': 'АПС - Авиапромсталь', 'domain': 'aviastal.ru'},
 }
 
 # Проекты-варианты берут справочник городов у «родителя» (свой config.py,
@@ -100,12 +100,12 @@ CITIES_FROM = {
     'mpe_cart': 'mpe',
 }
 
-# Полный текст-подсказка (раньше был большим жёлтым блоком, теперь – в «❓»).
+# Полный текст-подсказка (раньше был большим жёлтым блоком, теперь - в «❓»).
 HELP_TEXT = (
     'Проверка открывает реальный браузер (Playwright) на ЭТОМ компьютере: '
     'заполняет формы на сайтах проекта и отправляет заявки. Работает, когда '
     'приложение запущено **локально** (`streamlit run app.py`). В облаке по '
-    'ссылке недоступно. После переноса на свой сервер – заработает.'
+    'ссылке недоступно. После переноса на свой сервер - заработает.'
 )
 
 
@@ -159,8 +159,8 @@ def _deps_ready() -> tuple[bool, list[str]]:
 
 
 def _launch_background(args: list[str], log_path: Path, extra_env: dict | None = None):
-    """Запустить процесс в фоне, вывод – в файл. UI не блокируется.
-    extra_env – доп. переменные окружения (например, логин/пароль админки);
+    """Запустить процесс в фоне, вывод - в файл. UI не блокируется.
+    extra_env - доп. переменные окружения (например, логин/пароль админки);
     они передаются только дочернему процессу и на диск не пишутся."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
@@ -186,7 +186,7 @@ def _launch_background(args: list[str], log_path: Path, extra_env: dict | None =
 
 def _project_has_admin(project: str) -> bool:
     """True, если у проекта настроены АДМИН_ЗОНЫ (есть проверка админки). Пока
-    это только СМУ; ИМП/МПЭ устроены иначе — для них раздел не показываем."""
+    это только СМУ; ИМП/МПЭ устроены иначе - для них раздел не показываем."""
     p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
     try:
         spec = importlib.util.spec_from_file_location(f'cfg_adm_{project}', p)
@@ -199,7 +199,7 @@ def _project_has_admin(project: str) -> bool:
 
 def _count_expected(project: str) -> int:
     """Сколько форм ожидается проверить (для шкалы прогресса). Best-effort:
-    считаем включённые формы/модалки + шаги-формы в сценариях. Если не вышло – 0."""
+    считаем включённые формы/модалки + шаги-формы в сценариях. Если не вышло - 0."""
     p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
     try:
         spec = importlib.util.spec_from_file_location(f'cfg_count_{project}', p)
@@ -297,7 +297,7 @@ def _list_forms(project: str):
     return out
 
 
-# Где искать форму НА странице (для подсказки «?»). Ключ – имя формы, как в отчёте.
+# Где искать форму НА странице (для подсказки «?»). Ключ - имя формы, как в отчёте.
 # Если формы нет в словаре, подсказка не показывается.
 _FORM_WHERE = {
     # СМУ
@@ -342,7 +342,7 @@ _FORM_WHERE = {
 
 
 def _rows_done(xlsx: Path):
-    """Сколько форм уже записано в лог (строки минус шапка). None – не прочиталось."""
+    """Сколько форм уже записано в лог (строки минус шапка). None - не прочиталось."""
     if not xlsx.exists():
         return 0
     try:
@@ -383,12 +383,17 @@ with _qh:
         st.markdown(HELP_TEXT)
 
 # ── Выбор проекта ────────────────────────────────────────────────────
+# По умолчанию проект НЕ выбран - чтобы ничего не запускалось случайно.
 pid_key = st.selectbox('Проект', list(PROJECTS.keys()),
-                       format_func=lambda k: PROJECTS[k]['name'])
+                       format_func=lambda k: PROJECTS[k]['name'],
+                       index=None, placeholder='- выберите проект -')
+if not pid_key:
+    st.info('Выберите проект, чтобы настроить и запустить проверку форм.')
+    st.stop()
 proj = PROJECTS[pid_key]
 st.markdown(
     f"Будут проверены формы сайта **{proj['name']}** (`{proj['domain']}`): "
-    'обратная связь, заявки, расчёты, оформление заказа и т.п. – по настройкам '
+    'обратная связь, заявки, расчёты, оформление заказа и т.п. - по настройкам '
     'проекта.'
 )
 
@@ -409,7 +414,7 @@ _all_form_names = [f['name'] for f in _all_forms]
 _MODE_OPTIONS = ['Основные домены (по странам)', 'Выбрать города', 'Случайные города']
 _FORMS_MODE_OPTIONS = ['Все формы', 'Выбрать формы']
 # Запоминаются ТОЛЬКО настройки «Случайных городов» (числа по странам).
-# Остальные галочки каждый заход начинаются с дефолта – так предсказуемее.
+# Остальные галочки каждый заход начинаются с дефолта - так предсказуемее.
 _RND_FILE = ROOT / 'cache' / 'forms' / pid_key / 'random_cities.json'
 
 
@@ -467,7 +472,7 @@ if not st.session_state.get(f'fc_rnd_loaded_{pid_key}'):
             pass
 
 # Подсказки «?» на этой странице нужны (в app.py они выключены глобально).
-# Английскую техподсказку «Press Enter to apply» у числовых полей прячем –
+# Английскую техподсказку «Press Enter to apply» у числовых полей прячем -
 # значение и так применяется по Enter или клику мимо поля.
 st.markdown(
     '<style>[data-testid="stTooltipIcon"], [data-testid="stTooltipHoverTarget"] '
@@ -478,13 +483,13 @@ st.markdown(
 
 # ── Домены и поддомены ───────────────────────────────────────────────
 # Домен = основной сайт страны (mepen.ru, mepen.kz…); поддомен = город на
-# этом домене (spb.mepen.ru). Без справочника городов – только основной сайт.
+# этом домене (spb.mepen.ru). Без справочника городов - только основной сайт.
 if _cities:
     _example_sub = _host(_cities[1]['url']) if len(_cities) > 1 else ''
     st.subheader(
         'Домены и поддомены',
-        help='Домен – основной сайт страны (например ' + _host(_mains[0]['url']) + '). '
-             'Поддомен – город на этом домене (например ' + _example_sub + '). '
+        help='Домен - основной сайт страны (например ' + _host(_mains[0]['url']) + '). '
+             'Поддомен - город на этом домене (например ' + _example_sub + '). '
              'Заявка с каждого выбранного сайта должна прийти на свою почту из справочника.',
     )
     st.session_state.setdefault(f'fc_mode_{pid_key}', _MODE_OPTIONS[0])
@@ -495,14 +500,14 @@ if _cities:
     )
 
     if _mode == 'Основные домены (по странам)':
-        # Одна строка на страну: галочка «Страна – домен». Галочки уже стоят.
+        # Одна строка на страну: галочка «Страна - домен». Галочки уже стоят.
         def _mk(country):
             return f'fc_main_{pid_key}_{country}'
         for c in _mains:                       # дефолт: все страны включены
             if _mk(c['country']) not in st.session_state:
                 st.session_state[_mk(c['country'])] = True
 
-        # Список доменов СЛЕВА, кнопка-переключатель СПРАВА (в той же строке –
+        # Список доменов СЛЕВА, кнопка-переключатель СПРАВА (в той же строке -
         # без пустого пространства над списком). «Снять все», если всё отмечено,
         # иначе «Выбрать все».
         _all_on = all(st.session_state.get(_mk(c['country']), True) for c in _mains)
@@ -516,7 +521,7 @@ if _cities:
         _sel = []
         with _left:
             for c in _mains:
-                _lbl = (f"{_COUNTRY_FLAG.get(c['country'], '🏳')} **{c['country']}** – "
+                _lbl = (f"{_COUNTRY_FLAG.get(c['country'], '🏳')} **{c['country']}** - "
                         f"`{_host(c['url'])}`")
                 _hlp = f"Главный сайт страны, город: {c['city']}."
                 if c.get('mail'):
@@ -528,7 +533,7 @@ if _cities:
 
     elif _mode == 'Случайные города':
         # Один экран: сверху общее число (само распределяется по странам),
-        # ниже строки стран с числом справа. Правишь число у страны – общее
+        # ниже строки стран с числом справа. Правишь число у страны - общее
         # пересчитывается. Основной домен страны всегда идёт первым.
         _tkey = f'fc_rnd_total_{pid_key}'
 
@@ -546,8 +551,8 @@ if _cities:
             _rnd_save()
 
         def _apply_recommended_rnd():
-            """Рекомендованный сценарий случайной проверки: Россия – 2 (Москва +
-            случайный поддомен), остальные страны – по 1 (их основные домены)."""
+            """Рекомендованный сценарий случайной проверки: Россия - 2 (Москва +
+            случайный поддомен), остальные страны - по 1 (их основные домены)."""
             for k in _groups:
                 st.session_state[_ckey(k)] = min(2 if k == 'Россия' else 1,
                                                  len(_groups[k]))
@@ -559,8 +564,8 @@ if _cities:
             st.session_state[_tkey] = min(7, len(_all_names))
             _apply_total()
 
-        # Поле «сколько всего» и кнопка рекомендованного – в одной строке рядом,
-        # кнопка выровнена по нижнему краю поля. Звезда ★ текстовая – рисуется
+        # Поле «сколько всего» и кнопка рекомендованного - в одной строке рядом,
+        # кнопка выровнена по нижнему краю поля. Звезда ★ текстовая - рисуется
         # цветом текста сайта (эмодзи ⭐ всегда жёлтая).
         # ВАЖНО: значение поля _tkey нельзя менять после его отрисовки, поэтому
         # кнопка работает через колбэк on_click (он выполняется ДО отрисовки полей).
@@ -570,14 +575,14 @@ if _cities:
                 'Сколько всего доменов/поддоменов проверить',
                 min_value=0, max_value=len(_all_names), step=1,
                 key=_tkey, on_change=_apply_total,
-                help='Введи число и нажми Enter (или кликни по пустому месту) – '
+                help='Введи число и нажми Enter (или кликни по пустому месту) - '
                      'оно применится и само распределится по странам ниже, начиная '
-                     'с России. Число любой страны можно поправить вручную – общее '
+                     'с России. Число любой страны можно поправить вручную - общее '
                      'пересчитается.')
         _rec.button('★ Рекомендованный сценарий', use_container_width=True,
                     key=f'fc_rnd_rec_{pid_key}', on_click=_apply_recommended_rnd,
-                    help='Поставит рекомендованные числа: Россия – 2, остальные '
-                         'страны – по 1 (основной домен каждой страны + случайный '
+                    help='Поставит рекомендованные числа: Россия - 2, остальные '
+                         'страны - по 1 (основной домен каждой страны + случайный '
                          'поддомен России).')
 
         _counts = {}
@@ -585,7 +590,7 @@ if _cities:
             _row_l, _row_n, _row_c = st.columns([3, 1, 0.9], vertical_alignment='center')
             _dom = _host(_main_by_country.get(_country, {}).get('url', ''))
             _row_l.markdown(
-                f"{_COUNTRY_FLAG.get(_country, '🏳')} **{_country}** – `{_dom}`")
+                f"{_COUNTRY_FLAG.get(_country, '🏳')} **{_country}** - `{_dom}`")
             if _ckey(_country) not in st.session_state:
                 st.session_state[_ckey(_country)] = 0
             _counts[_country] = int(_row_n.number_input(
@@ -594,7 +599,7 @@ if _cities:
                 label_visibility='collapsed'))
             _row_c.caption(f'из {len(_names)}')
 
-        # Сборка списка: основной домен страны первым, остальное – случайно.
+        # Сборка списка: основной домен страны первым, остальное - случайно.
         _parts = []
         for _country, _names in _groups.items():
             _k = int(_counts.get(_country, 0) or 0)
@@ -610,12 +615,12 @@ if _cities:
             _chosen_cities += _pick
             _parts.append(f"**{_country}**: {', '.join(_pick)}")
         if _chosen_cities:
-            st.caption(f'Выбрано {len(_chosen_cities)} – ' + ' · '.join(_parts) +
+            st.caption(f'Выбрано {len(_chosen_cities)} - ' + ' · '.join(_parts) +
                        '. Случайные города пересоберутся при запуске.')
         st.caption('Числа запоминаются для этого проекта и подставятся при '
                    'следующем заходе.')
 
-    else:  # Выбрать города – СЕТКА ЧЕКБОКСОВ по странам
+    else:  # Выбрать города - СЕТКА ЧЕКБОКСОВ по странам
         _main_cities = {c['city'] for c in _mains}
 
         def _ck(city):
@@ -658,8 +663,8 @@ _cities_none = bool(_cities) and not _chosen_cities
 
 # ── Формы ────────────────────────────────────────────────────────────
 # Список форм проекта (в порядке прогона) уже собран выше (_all_forms).
-# По умолчанию – все; можно выбрать только нужные. Имена совпадают с отчётом.
-_chosen_forms = list(_all_form_names)     # по умолчанию – все формы
+# По умолчанию - все; можно выбрать только нужные. Имена совпадают с отчётом.
+_chosen_forms = list(_all_form_names)     # по умолчанию - все формы
 if _all_forms:
     st.subheader('Формы')
     _fmode = st.radio(
@@ -671,7 +676,7 @@ if _all_forms:
     if _fmode == 'Выбрать формы':
         def _fk(name):
             return f'ff_cb_{pid_key}_{name}'
-        # дефолт – все отмечены (один раз на проект)
+        # дефолт - все отмечены (один раз на проект)
         if not st.session_state.get(f'ff_init_{pid_key}'):
             for nm in _all_form_names:
                 st.session_state[_fk(nm)] = True
@@ -688,15 +693,15 @@ if _all_forms:
             st.rerun()
 
         # Группировка по СТРАНИЦЕ сайта (без техназваний: Главная_расчёты и
-        # Главная – это одна «Главная»). Всё в карточке с рамкой, между
-        # группами тонкая линия. Подсказка «?» – где форма НА странице
+        # Главная - это одна «Главная»). Всё в карточке с рамкой, между
+        # группами тонкая линия. Подсказка «?» - где форма НА странице
         # (шапка/подвал/кнопка-окно), только если она есть в _FORM_WHERE.
         def _pg_group(page):
             return (page or '').split('_')[0] or 'Прочее'
 
         def _disp_name(nm):
             """Имя формы для показа: без уточнения в скобках на конце
-            («Обратная связь (Контакты)» – показываем «Обратная связь»,
+            («Обратная связь (Контакты)» - показываем «Обратная связь»,
             уточнение живёт в подсказке «?»). В отчёт и фильтр идёт полное имя."""
             _b = re.sub(r'\s*\([^()]*\)\s*$', '', nm).strip()
             return _b or nm
@@ -736,7 +741,7 @@ _forms_none = bool(_all_forms) and len(_chosen_forms) == 0
 
 # ── Запуск ──────────────────────────────────────────────────────────
 # ── Проверка админки: отдельный блок, как у форм (проверять/не проверять) ──
-# Логин/пароль вводятся здесь и передаются проверке через окружение — на диск
+# Логин/пароль вводятся здесь и передаются проверке через окружение - на диск
 # ничего не пишется и никуда не отправляется.
 _admin_env: dict[str, str] = {}
 _admin_on = True
@@ -749,7 +754,7 @@ if _project_has_admin(pid_key):
         st.caption(
             'После прогона тест зайдёт в «Уведомления с форм» и в отчёте (лист '
             '«Логи», колонка «Статус в админке») отметит, какие заявки реально '
-            'долетели. Логин/пароль нужны только для входа — нигде не сохраняются '
+            'долетели. Логин/пароль нужны только для входа - нигде не сохраняются '
             'и никуда не отправляются.')
         _al = st.text_input('Логин админки', key=f'fc_admin_login_{pid_key}')
         _ap = st.text_input('Пароль админки', type='password',
@@ -757,7 +762,7 @@ if _project_has_admin(pid_key):
         if _al.strip() and _ap:
             _admin_env = {'ADMIN_LOGIN': _al.strip(), 'ADMIN_PASSWORD': _ap}
         else:
-            st.caption('⚠️ Введите логин и пароль — без них админка не проверится.')
+            st.caption('⚠️ Введите логин и пароль - без них админка не проверится.')
 
 st.subheader('Запуск проверки')
 
@@ -765,28 +770,42 @@ st.session_state.setdefault(f'fc_clear_{pid_key}', True)
 st.session_state.setdefault(f'fc_show_{pid_key}', False)
 clear_log = st.checkbox('Очищать лог Excel перед прогоном', key=f'fc_clear_{pid_key}')
 show_browser = st.checkbox('Показывать окно браузера', key=f'fc_show_{pid_key}')
-st.caption('По умолчанию браузер работает скрыто (headless) – окно не '
+st.caption('По умолчанию браузер работает скрыто (headless) - окно не '
            'показывается, отчёт всё равно формируется. Включи галочку выше, '
            'если хочешь видеть, как он заполняет формы.')
 
-st.caption('Запуск фоновый – интерфейс сразу свободен. Можно уйти в чек-листы '
+st.caption('Запуск фоновый - интерфейс сразу свободен. Можно уйти в чек-листы '
            'и работать параллельно, проверка крутится сама. Заявки '
-           'отправляются по-настоящему (формы оформления заказа – без отправки).')
+           'отправляются по-настоящему (формы оформления заказа - без отправки).')
 
 _alive = _pid_alive(_read_pid())
 
+
+@st.cache_resource(show_spinner=False)
+def _ensure_browser_forms():
+    import browser_setup
+    return browser_setup.ensure_browser()
+
+
+# В облаке при первом заходе доустанавливаем Chromium (до минуты). Локально -
+# мгновенно (браузер уже стоит). Пока идёт прогон - не трогаем.
+_browser_ok = True
+if not _alive:
+    with st.spinner('Готовлю браузер (первый запуск в облаке - до минуты)…'):
+        _browser_ok, _browser_msg = _ensure_browser_forms()
+
 if _forms_none:
-    st.warning('Не выбрано ни одной формы – отметь хотя бы одну, чтобы запустить.')
+    st.warning('Не выбрано ни одной формы - отметь хотя бы одну, чтобы запустить.')
 if _cities_none:
-    st.warning('Не выбрано ни одного домена/города – отметь хотя бы один, чтобы запустить.')
+    st.warning('Не выбрано ни одного домена/города - отметь хотя бы один, чтобы запустить.')
 
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
     if st.button('▶ Запустить проверку', use_container_width=True,
-                 disabled=_alive or _forms_none or _cities_none):
+                 disabled=_alive or _forms_none or _cities_none or not _browser_ok):
         ready, _missing = _deps_ready()
         if not ready:
-            # Движка нет в этом окружении (типично для облака по ссылке) –
+            # Движка нет в этом окружении (типично для облака по ссылке) -
             # не запускаем, показываем понятную инструкцию ниже. Заодно сбрасываем
             # прогресс и старый лог, чтобы не висел результат прошлого запуска.
             st.session_state['forms_dep_error'] = _missing
@@ -844,19 +863,21 @@ with _cancel_col:
 
 # ── Понятная ошибка: движок не установлен (показываем ТОЛЬКО после клика) ──
 if not _alive and st.session_state.get('forms_dep_error'):
-    st.error('Не получилось запустить проверку – в этом окружении нет браузера и нужных библиотек.')
+    st.error('Не получилось запустить проверку - в этом окружении нет нужных библиотек.')
     st.markdown(
-        'Проверка форм работает **только локально** (на твоём компьютере) или на '
-        'своём сервере с браузером – **в облачной версии по ссылке она недоступна**.\n\n'
-        '**Чтобы запустить на своём компьютере:**\n'
-        '1. Открой терминал в папке проекта и запусти приложение локально:\n'
-        '   `streamlit run app.py`\n'
-        '2. Один раз установи движок (там же, в терминале):\n'
-        '   `pip install -r requirements-local.txt`\n'
-        '3. И браузер для него:\n'
-        '   `playwright install chromium`\n'
-        '4. Обнови страницу и снова нажми «Запустить проверку».'
+        'Обычно так бывает, если приложение развёрнуто без браузерных зависимостей. '
+        'В облаке (Streamlit Cloud) нужны `playwright`, `requests`, `beautifulsoup4` '
+        'в `requirements.txt` и системные библиотеки Chromium в `packages.txt` - '
+        'после перезапуска приложения браузер доустановится сам.\n\n'
+        '**Локально** (на своём компьютере):\n'
+        '1. `pip install -r requirements-local.txt`\n'
+        '2. `playwright install chromium`\n'
+        '3. `streamlit run app.py`, затем снова «Запустить проверку».'
     )
+if not _alive and not _browser_ok:
+    st.warning(f'Браузер ещё не готов: {_browser_msg}. Если это первый запуск в '
+               'облаке - подождите минуту и обновите страницу; иначе проверьте '
+               'requirements.txt (playwright) и packages.txt.')
 
 st.divider()
 
@@ -870,35 +891,69 @@ _run_proj = st.session_state.get('forms_project')      # какой проект
 _this = (_run_proj == _sel)                            # выбранный == запущенный
 xlsx = ROOT / 'cache' / 'forms' / _sel / 'log_forms.xlsx'
 
+# Готовность определяем ПО ЛОГУ (движок пишет «✅ ВСЁ ГОТОВО»), а не только по
+# «жив ли процесс»: в облаке PID может «висеть» после завершения, из-за чего
+# прогресс-бар не переключался на «готово». Живой лог - надёжный признак.
+_log_txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore') if LOG_FILE.exists() else ''
+_done_by_log = ('✅ ВСЁ ГОТОВО' in _log_txt or 'ОТМЕНЕНО' in _log_txt
+                or '✗ Ошибка' in _log_txt)
+
+
+def _forms_done_live(txt: str) -> int:
+    """Сколько форм уже отработало - считаем по живому логу (обновляется сразу,
+    в отличие от Excel, который движок сохраняет в конце). Строки-итоги форм
+    начинаются с ✅/❌ и содержат « - УСПЕШНО/ОШИБКА», плюс «поля заполнены»."""
+    n = 0
+    for ln in txt.splitlines():
+        s = ln.strip()
+        if (s.startswith(('✅', '❌')) and (' - УСПЕШНО' in s or ' - ОШИБКА' in s)) \
+                or 'поля заполнены (без отправки)' in s \
+                or (s.startswith('🔎') and ' - УСПЕШНО' in s):
+            n += 1
+    return n
+
+
 if _this and st.session_state.get('forms_started'):
     st.caption(f'Последний запуск: {st.session_state["forms_started"]}')
 
-if _alive and _this:
-    # Идёт проверка ВЫБРАННОГО проекта – живой прогресс
+if _alive and _this and not _done_by_log:
+    # Идёт проверка ВЫБРАННОГО проекта - живой прогресс
     _ts = st.session_state.get('forms_started_ts')
     _elapsed = int(time.time() - _ts) if _ts else None
     _mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
-    _done = _rows_done(xlsx)
-    # Если при запуске сохранили ожидаемое число форм (учитывает выбор форм) – берём его.
+    # Прогресс по живому логу (обновляется сразу); подстраховка - строки Excel.
+    _done = _forms_done_live(_log_txt)
+    _xl = _rows_done(xlsx)
+    if _xl and _xl > _done:
+        _done = _xl
     _total = st.session_state.get('forms_expected_total') \
         or _count_expected(_sel) * st.session_state.get('forms_cities_n', 1)
 
-    if _total and _done is not None:
-        st.progress(min(_done / _total, 0.99), text=f'Проверено форм: {_done} из ~{_total}')
+    if _total:
+        st.progress(min(_done / max(_total, 1), 0.99),
+                    text=f'Проверено форм: {_done} из ~{_total}')
     else:
         st.progress(min(0.95, (_elapsed or 0) / 90.0), text='Идёт проверка…')
 
     st.caption(f'⏳ Идёт… {_mmss}. Обычно занимает от пары до нескольких минут '
-               '(зависит от числа форм). Страница обновляется сама – можно уйти '
+               '(зависит от числа форм). Страница обновляется сама - можно уйти '
                'на другие вкладки, прогон не прервётся.')
     with st.expander('Подробный лог', expanded=True):
-        _txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore') if LOG_FILE.exists() else ''
-        st.code('\n'.join(_txt.splitlines()[-300:]) or '…', language='text')
+        st.code('\n'.join(_log_txt.splitlines()[-300:]) or '…', language='text')
     time.sleep(2)
     st.rerun()
 
+elif _alive and _this and _done_by_log:
+    # Процесс ещё числится живым (в облаке PID «висит»), но лог говорит «готово».
+    # Снимаем зависший PID и перерисовываем - дальше сработает ветка результата.
+    try:
+        PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+    st.rerun()
+
 elif _alive and not _this:
-    # Идёт проверка ДРУГОГО проекта – не путаем
+    # Идёт проверка ДРУГОГО проекта - не путаем
     st.info(f'Сейчас идёт проверка проекта «{PROJECTS[_run_proj]["name"]}». '
             'Переключи выбор проекта на него, чтобы видеть прогресс.')
     time.sleep(2)
@@ -934,7 +989,7 @@ else:
         _date = datetime.fromtimestamp(xlsx.stat().st_mtime).strftime('%d.%m.%Y')
         _fname = f'{_sel.capitalize()}-{_date}.xlsx'   # напр. Mpe-23.06.2026.xlsx
         st.caption(f'Лог проекта {PROJECTS[_sel]["name"]} '
-                   '– дата, страница, форма, статус и комментарий с причиной (если не сработало).')
+                   '- дата, страница, форма, статус и комментарий с причиной (если не сработало).')
         st.download_button(
             f'⬇ Скачать {_fname}',
             data=xlsx.read_bytes(),

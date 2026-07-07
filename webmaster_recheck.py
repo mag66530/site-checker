@@ -35,7 +35,7 @@ SITES_URL = 'https://webmaster.yandex.ru/sites/'
 LOG_FILE = Path('webmaster_recheck_log.json')
 
 # Селекторы (реальные классы Я.Вебмастера, из DevTools)
-# Берём ВСЕ блоки: ошибки и рекомендации – где есть кнопка «Проверить», кликаем.
+# Берём ВСЕ блоки: ошибки и рекомендации - где есть кнопка «Проверить», кликаем.
 SEL_PROBLEM = '.DiagnosisChecklistProblem'
 SEL_STATUS_INPROGRESS = '.DiagnosisChecklistProblemTitle-Status_status_IN_PROGRESS'
 SEL_CHEVRON = '.DiagnosisChecklistProblem-Chevron'
@@ -44,7 +44,7 @@ SEL_TITLE = '.DiagnosisChecklistAccordion-TitleContainer, .DiagnosisChecklistPro
 SEL_LINKS = 'a.link_theme_normal, a[class*="link"], button'
 TXT_CHECKING = 'Проверяем сайт на ошибку'
 # Жмём ТОЛЬКО кнопку «Проверить». Ссылка «Проверьте» уводит на robots.txt
-# и ломает обход – её игнорируем (TXT_SKIP_LINK).
+# и ломает обход - её игнорируем (TXT_SKIP_LINK).
 TXT_CHECK_BTN = ('Проверить',)
 TXT_SKIP_LINK = 'Проверьте'
 
@@ -98,9 +98,9 @@ async def _collect_sites(page) -> list[str]:
         idx = href.find('/site/')
         tail = href[idx + len('/site/'):]
         site_id = tail.split('/')[0]
-        # Реальный id сайта – это закодированный хост (есть точка/двоеточие):
+        # Реальный id сайта - это закодированный хост (есть точка/двоеточие):
         # https:vladimir.mepen.ru:443. Навигационные ссылки вида /site/dashboard/
-        # такого не содержат – отсеиваем.
+        # такого не содержат - отсеиваем.
         if '.' not in site_id and ':' not in site_id:
             continue
         root = f'https://webmaster.yandex.ru/site/{site_id}/'
@@ -116,7 +116,7 @@ async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
         try:
             resp = await page.goto(url, wait_until='domcontentloaded')
         except Exception as e:
-            _log(f'goto упал ({e}) – пауза {delay}с', 'warn')
+            _log(f'goto упал ({e}) - пауза {delay}с', 'warn')
             await asyncio.sleep(delay)
             delay = min(delay * 2, 300)
             continue
@@ -124,12 +124,12 @@ async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
         status = resp.status if resp else 0
         head = (await page.inner_text('body'))[:300]
         if status == 429 or 'Too many requests' in head or 'Слишком много запросов' in head:
-            _log(f'⚠ 429 (слишком много запросов) – пауза {delay}с (попытка {i+1})', 'warn')
+            _log(f'⚠ 429 (слишком много запросов) - пауза {delay}с (попытка {i+1})', 'warn')
             await asyncio.sleep(delay)
             delay = min(delay * 2, 300)
             continue
         return True
-    _log('429 не прошёл после ретраев – пропускаю сайт', 'error')
+    _log('429 не прошёл после ретраев - пропускаю сайт', 'error')
     return False
 
 
@@ -157,10 +157,10 @@ async def _process_problems(page, dry_run: bool) -> dict:
     _log(f'  URL страницы: {page.url}')
     _log(f'  блоков (ошибки + рекомендации): {len(problems)}')
 
-    # Если блоков нет – разведка: показываем классы с «Diagnostic»/«Problem»
+    # Если блоков нет - разведка: показываем классы с «Diagnostic»/«Problem»
     # и ссылки/элементы со словом «ошиб», чтобы поймать реальные селекторы.
     if not problems:
-        _log('  блоков нет – дамп кандидатов:')
+        _log('  блоков нет - дамп кандидатов:')
         try:
             classes = await page.eval_on_selector_all(
                 '*',
@@ -197,10 +197,10 @@ async def _process_problems(page, dry_run: bool) -> dict:
             in_progress = await prob.query_selector(SEL_STATUS_INPROGRESS)
             if in_progress or TXT_CHECKING in txt:
                 stat['checking'] += 1
-                _log('      статус «Проверяем» – пропуск', 'warn')
+                _log('      статус «Проверяем» - пропуск', 'warn')
                 continue
 
-            # раскрыть аккордеон – пробуем шеврон, затем заголовок
+            # раскрыть аккордеон - пробуем шеврон, затем заголовок
             for sel in (SEL_CHEVRON, SEL_TITLE):
                 el = await prob.query_selector(sel)
                 if el:
@@ -218,7 +218,7 @@ async def _process_problems(page, dry_run: bool) -> dict:
                 bt = (await a.inner_text()).strip()
                 if bt:
                     link_texts.append(bt)
-                # «Проверьте» (ведёт на robots.txt) – пропускаем
+                # «Проверьте» (ведёт на robots.txt) - пропускаем
                 if TXT_SKIP_LINK.lower() in bt.lower():
                     continue
                 if bt and any(k.lower() in bt.lower() for k in TXT_CHECK_BTN):
@@ -226,7 +226,7 @@ async def _process_problems(page, dry_run: bool) -> dict:
                     break
             if btn is None:
                 stat['no_button'] += 1
-                # Дамп ссылок блока – чтобы увидеть реальный текст кнопки
+                # Дамп ссылок блока - чтобы увидеть реальный текст кнопки
                 _log(f'      кнопки нет. Ссылки/кнопки блока: {link_texts[:12]}', 'warn')
                 continue
 
@@ -293,7 +293,7 @@ async def run(single_site: str | None, dry_run: bool, limit: int,
                 _log(f'  сайт упал: {e}', 'error')
                 entries.append({'site': site, 'error': str(e)})
             _save_log(entries)
-            # Пауза между сайтами с джиттером – снижает риск 429
+            # Пауза между сайтами с джиттером - снижает риск 429
             if si < len(sites) - 1:
                 await asyncio.sleep(4 + random.random() * 4)
 
@@ -310,7 +310,7 @@ async def run(single_site: str | None, dry_run: bool, limit: int,
 def parse_args():
     ap = argparse.ArgumentParser(description='Автокликер «Проверить» в Я.Вебмастере')
     ap.add_argument('--project', default=None,
-                    help='проект: smu|mpe|imp – сайты из catalogs/<pid>-subdomains.csv')
+                    help='проект: smu|mpe|imp - сайты из catalogs/<pid>-subdomains.csv')
     ap.add_argument('--site', default=None, help='один сайт (URL корня /site/<id>/)')
     ap.add_argument('--dry-run', action='store_true', help='не кликать, только лог')
     ap.add_argument('--limit', type=int, default=0, help='максимум сайтов')

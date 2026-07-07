@@ -1,11 +1,11 @@
 """
-text_checker.py – поиск битых переменных в видимом тексте страницы.
+text_checker.py - поиск битых переменных в видимом тексте страницы.
 
 Точная копия логики из Node.js версии:
-  - {{...}}            – незаменённые шаблонные подстановки
-  - %name%             – Битрикс-стиль (мин 3 символа имени!)
-  - undefined          – отдельным словом
-  - [object Object]    – артефакт склейки JSON
+  - {{...}}            - незаменённые шаблонные подстановки
+  - %name%             - Битрикс-стиль (мин 3 символа имени!)
+  - undefined          - отдельным словом
+  - [object Object]    - артефакт склейки JSON
 
 Перед поиском удаляем из HTML то, что не видит пользователь:
   - <script>, <style>, HTML-комментарии
@@ -19,7 +19,7 @@ from dataclasses import dataclass
 # Паттерны: имя → regex
 BUILTIN_PATTERNS = {
     '{{...}}':         re.compile(r'\{\{[^{}\n]{1,80}\}\}'),
-    # Имя минимум 3 символа – это исключает URL-кодировку (%XX, ровно 2 hex)
+    # Имя минимум 3 символа - это исключает URL-кодировку (%XX, ровно 2 hex)
     '%переменная%':    re.compile(r'%[a-zA-Zа-яА-Я_][a-zA-Zа-яА-Я0-9_]{2,40}%'),
     'undefined':       re.compile(r'(^|[^\w])undefined([^\w]|$)'),
     '[object Object]': re.compile(r'\[object Object\]'),
@@ -51,7 +51,7 @@ def strip_non_visible(html: str) -> str:
     html = re.sub(r'<script\b[^>]*>[\s\S]*?</script>', ' ', html, flags=re.IGNORECASE)
     html = re.sub(r'<style\b[^>]*>[\s\S]*?</style>', ' ', html, flags=re.IGNORECASE)
     html = re.sub(r'<!--[\s\S]*?-->', ' ', html)
-    # Значения атрибутов с URL/inline-стилями – там кодировка
+    # Значения атрибутов с URL/inline-стилями - там кодировка
     html = re.sub(
         r'''\s(?:href|src|srcset|action|style|data-[\w-]+)\s*=\s*(?:"[^"]*"|'[^']*')''',
         ' ', html, flags=re.IGNORECASE,

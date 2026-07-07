@@ -8,7 +8,7 @@ gsc_save_session.py
 
 Что делает:
     1. Запускает реальный Chrome с отдельной папкой профиля (gsc_chrome_profile/)
-       – нет конфликтов с основным Chrome
+       - нет конфликтов с основным Chrome
     2. Ты логинишься в Google один раз
     3. Cookies сохраняются в gsc_session.json для gsc_reindex.py
     4. При повторных запусках Chrome уже авторизован (cookies в папке профиля)
@@ -183,7 +183,7 @@ async def main():
 
         await browser.close()  # отключиться от CDP, Chrome остаётся открытым
 
-    # Не убиваем Chrome – пусть пользователь закроет сам
+    # Не убиваем Chrome - пусть пользователь закроет сам
     print()
     print('Chrome можно закрыть вручную.')
 

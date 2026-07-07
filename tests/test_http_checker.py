@@ -1,4 +1,4 @@
-"""Тесты http_checker – классификация статусов и оценка скорости."""
+"""Тесты http_checker - классификация статусов и оценка скорости."""
 import sys
 sys.path.insert(0, '/home/claude/site-checker-py')
 
@@ -41,7 +41,7 @@ def test_classify_errors():
 
 
 def test_should_retry():
-    """Ретраим только то, что может стать ОК. 4xx – устойчивый."""
+    """Ретраим только то, что может стать ОК. 4xx - устойчивый."""
     assert should_retry(STATUS.TIMEOUT) is True
     assert should_retry(STATUS.NETWORK) is True
     assert should_retry(STATUS.SERVER_ERROR) is True
@@ -49,7 +49,7 @@ def test_should_retry():
     assert should_retry(STATUS.REDIRECT) is False
     assert should_retry(STATUS.NOT_FOUND) is False
     assert should_retry(STATUS.CLIENT_ERROR) is False
-    print('✓ Логика ретраев: 5xx/timeout/network – да, 4xx – нет')
+    print('✓ Логика ретраев: 5xx/timeout/network - да, 4xx - нет')
 
 
 def test_rate_speed():
@@ -65,7 +65,7 @@ def test_rate_speed():
     print('✓ Оценка скорости: fast/normal/slow/very_slow')
 
 
-# ── «Ссылки реально открываются» (404) – check_content_links ──────────
+# ── «Ссылки реально открываются» (404) - check_content_links ──────────
 
 
 import asyncio
@@ -103,11 +103,11 @@ class _FakeSession:
 
 def test_check_content_links_flags_only_internal_404():
     html = (
-        '<header><a href="/in-header/">h</a></header>'      # шапка – не звоним
+        '<header><a href="/in-header/">h</a></header>'      # шапка - не звоним
         '<main>'
         '<a href="/ok/">ok</a>'
         '<a href="/dead/">dead</a>'
-        '<a href="https://other.com/ext/">внешний</a>'      # внешний – не звоним
+        '<a href="https://other.com/ext/">внешний</a>'      # внешний - не звоним
         '<a href="#x">a</a><a href="mailto:a@b.ru">m</a>'
         '</main>'
     )
@@ -125,7 +125,7 @@ def test_check_content_links_flags_only_internal_404():
 
 
 def test_check_content_links_head_to_get_fallback():
-    """Сервер не поддерживает HEAD (405) – перепроверяем GET и ловим 404."""
+    """Сервер не поддерживает HEAD (405) - перепроверяем GET и ловим 404."""
     html = '<main><a href="/x/">x</a></main>'
     sess = _FakeSession(head_codes={'https://shop.ru/x/': 405},
                         get_codes={'https://shop.ru/x/': 404})
@@ -135,7 +135,7 @@ def test_check_content_links_head_to_get_fallback():
 
 
 def test_check_content_links_403_not_broken():
-    """403 (доступ закрыт) – не «битая ссылка»: страница существует."""
+    """403 (доступ закрыт) - не «битая ссылка»: страница существует."""
     html = '<main><a href="/secret/">s</a><a href="/ok/">o</a></main>'
     sess = _FakeSession(head_codes={'https://shop.ru/secret/': 403,
                                     'https://shop.ru/ok/': 200})

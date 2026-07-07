@@ -2,7 +2,7 @@
 gsc_validate_fixes.py
 =====================
 Автоматически запускает «Проверить исправление» по причинам неиндексирования
-в Google Search Console – для всех ресурсов (домены и поддомены).
+в Google Search Console - для всех ресурсов (домены и поддомены).
 
 Поток (проверен на живом GSC):
     ресурс → Индексирование/Страницы → таблица причин (tr[data-rowid]) →
@@ -24,7 +24,7 @@ gsc_validate_fixes.py
 
 Логика статусов:
     Обрабатываем только причины со статусом «Не начато».
-    «Идёт проверка»/«Пройдена»/«Не удалось» – пропускаем (уже запускались).
+    «Идёт проверка»/«Пройдена»/«Не удалось» - пропускаем (уже запускались).
 """
 
 import argparse
@@ -50,7 +50,7 @@ STATUS_NOT_STARTED = 'Не начато'
 STATUS_ERROR = 'Ошибка'
 # Обрабатываем эти статусы (каждый своим путём)
 STATUS_PROCESS = (STATUS_NOT_STARTED, STATUS_ERROR)
-# Все известные статусы – чтобы читать значение из ячейки «Проверка» точно
+# Все известные статусы - чтобы читать значение из ячейки «Проверка» точно
 # (а не ловить слово «Ошибка» внутри названия причины «Ошибка сервера (5xx)»).
 KNOWN_STATUSES = (
     'Не начато', 'Ошибка', 'Отсутствует', 'Идёт проверка', 'Начата',
@@ -86,7 +86,7 @@ async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
         try:
             resp = await page.goto(url, wait_until='domcontentloaded')
         except Exception as e:
-            _log(f'goto упал ({e}) – пауза {delay}с', 'warn')
+            _log(f'goto упал ({e}) - пауза {delay}с', 'warn')
             await asyncio.sleep(delay)
             delay = min(delay * 2, 300)
             continue
@@ -94,12 +94,12 @@ async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
         status = resp.status if resp else 0
         head = (await page.inner_text('body'))[:300]
         if status == 429 or 'Too many requests' in head or 'Слишком много запросов' in head:
-            _log(f'⚠ 429 (слишком много запросов) – пауза {delay}с (попытка {i+1})', 'warn')
+            _log(f'⚠ 429 (слишком много запросов) - пауза {delay}с (попытка {i+1})', 'warn')
             await asyncio.sleep(delay)
             delay = min(delay * 2, 300)
             continue
         return True
-    _log('429 не прошёл после ретраев – пропускаю ресурс', 'error')
+    _log('429 не прошёл после ретраев - пропускаю ресурс', 'error')
     return False
 
 
@@ -108,7 +108,7 @@ async def _open_report(page, rid: str) -> bool:
     if not ok:
         return False
     await page.wait_for_timeout(3000)
-    # Скроллим до конца – второй блок «Проблемы с представлением страниц
+    # Скроллим до конца - второй блок «Проблемы с представлением страниц
     # в результатах поиска» подгружается ниже.
     for _ in range(6):
         await page.mouse.wheel(0, 1600)
@@ -119,7 +119,7 @@ async def _open_report(page, rid: str) -> bool:
 
 def _status_from_text(txt: str) -> str:
     """Статус столбца «Проверка». Ищем в части строки ПОСЛЕ источника
-    («Сайт»/«Системы Google») – там название причины уже отрезано, поэтому
+    («Сайт»/«Системы Google») - там название причины уже отрезано, поэтому
     слово «Ошибка» из названия «Ошибка сервера (5xx)» не мешает.
     Бейдж может содержать иконку/дату ('error Ошибка', 'Ошибка 11.06.2026'),
     поэтому ищем подстрокой, а не точным равенством."""
@@ -139,7 +139,7 @@ async def _read_reasons(page) -> list[dict]:
     for tr in await page.query_selector_all('tr[data-rowid]'):
         try:
             # rowid повторяется между блоками (обработанные/представление) и
-            # между фильтрами — читаем только ВИДИМЫЕ строки текущего вида.
+            # между фильтрами - читаем только ВИДИМЫЕ строки текущего вида.
             if not await tr.is_visible():
                 continue
             rid = await tr.get_attribute('data-rowid')
@@ -176,13 +176,13 @@ async def _validate_error(page, rid: str, reason: dict, dry_run: bool) -> dict:
         except Exception:
             res['status'] = 'no_button'
             res['message'] = 'кнопки «Подробности» нет'
-            _log(f'  {reason["name"][:50]} (Ошибка) – нет «Подробности»', 'warn')
+            _log(f'  {reason["name"][:50]} (Ошибка) - нет «Подробности»', 'warn')
             return res
 
         if dry_run:
             res['status'] = 'dry_run'
             res['message'] = '«Ошибка»: «Подробности» найдена, клик пропущен'
-            _log(f'  [DRY RUN] {reason["name"][:50]} (Ошибка) – путь есть', 'ok')
+            _log(f'  [DRY RUN] {reason["name"][:50]} (Ошибка) - путь есть', 'ok')
             return res
 
         await details.click()
@@ -217,7 +217,7 @@ async def _validate_error(page, rid: str, reason: dict, dry_run: bool) -> dict:
 
 
 async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
-    # Статус «Ошибка» – отдельный путь (Подробности → Начать новую проверку)
+    # Статус «Ошибка» - отдельный путь (Подробности → Начать новую проверку)
     if reason['status'] == STATUS_ERROR:
         return await _validate_error(page, rid, reason, dry_run)
 
@@ -226,7 +226,7 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
     try:
         # Клик по ВИДИМОЙ строке (tr). rowid повторяется между блоками →
         # берём видимую по имени причины (имя уникально). span внутри не
-        # кликабелен — кликаем сам tr.
+        # кликабелен - кликаем сам tr.
         row = page.locator('tr[data-rowid]:visible',
                            has_text=reason['name']).first
         await row.click(timeout=8000)
@@ -239,13 +239,13 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
         except Exception:
             res['status'] = 'no_button'
             res['message'] = 'кнопки «Проверить исправление» нет (проверка недоступна)'
-            _log(f'  {reason["name"][:50]} – кнопки нет', 'warn')
+            _log(f'  {reason["name"][:50]} - кнопки нет', 'warn')
             return res
 
         if dry_run:
             res['status'] = 'dry_run'
             res['message'] = 'кнопка найдена, клик пропущен'
-            _log(f'  [DRY RUN] {reason["name"][:50]} – кнопка есть', 'ok')
+            _log(f'  [DRY RUN] {reason["name"][:50]} - кнопка есть', 'ok')
             return res
 
         await btn.click()
@@ -285,12 +285,12 @@ async def _validate_one(page, rid: str, reason: dict, dry_run: bool) -> dict:
 
 async def _switch_filter(page, data_value: str) -> bool:
     """Переключить фильтр страниц отчёта GSC.
-    Кликаем именно стрелку-дропдаун фильтра (div.e2CuFe.mJra4.eU809d) — рядом
+    Кликаем именно стрелку-дропдаун фильтра (div.e2CuFe.mJra4.eU809d) - рядом
     с текстом «Все обработанные страницы», НЕ иконку бокового меню. Затем
     выбираем пункт по data-value. True если переключили."""
     async def _click_visible(selector: str, timeout: int = 4000) -> bool:
         """Кликнуть первый ВИДИМЫЙ элемент по селектору (в DOM бывают скрытые
-        дубли). Таймауты + фоллбэк на нативный JS-клик — без 30с-зависаний."""
+        дубли). Таймауты + фоллбэк на нативный JS-клик - без 30с-зависаний."""
         els = await page.query_selector_all(selector)
         if not els:
             return False
@@ -322,7 +322,7 @@ async def _switch_filter(page, data_value: str) -> bool:
         await page.wait_for_timeout(3000)
         return True
     except Exception as e:
-        _log(f'  фильтр {data_value}: переключение не удалось — {e}', 'warn')
+        _log(f'  фильтр {data_value}: переключение не удалось - {e}', 'warn')
         return False
 
 
@@ -342,11 +342,11 @@ async def process_resource(page, rid: str, dry_run: bool,
     _dist = Counter(r['status'] for r in reasons)
     _log(f'  причин в отчёте: {len(reasons)}; статусы: {dict(_dist)}')
 
-    processed = set()   # общее для обоих фильтров — не кликать причину дважды
+    processed = set()   # общее для обоих фильтров - не кликать причину дважды
 
     async def _loop(filter_value: str = None):
         """Прокликать все необработанные причины текущего фильтра.
-        filter_value — переустанавливать фильтр перед каждым чтением (т.к.
+        filter_value - переустанавливать фильтр перед каждым чтением (т.к.
         _open_report перезагружает отчёт и сбрасывает фильтр на дефолтный)."""
         first = True
         while True:
@@ -356,7 +356,7 @@ async def process_resource(page, rid: str, dry_run: bool,
             if filter_value:
                 ok = await _switch_filter(page, filter_value)
                 if first and not ok:
-                    _log('  фильтр не переключился — пропуск')
+                    _log('  фильтр не переключился - пропуск')
                     return
             first = False
             reasons = await _read_reasons(page)
@@ -372,10 +372,10 @@ async def process_resource(page, rid: str, dry_run: bool,
             if res['status'] in ('ok', 'dry_run'):
                 done_counter[0] += 1
 
-            # Небольшая пауза между причинами – снижает риск 429
+            # Небольшая пауза между причинами - снижает риск 429
             await asyncio.sleep(2 + random.random() * 2)
 
-            # Возврат к отчёту для следующей причины (сбросит фильтр —
+            # Возврат к отчёту для следующей причины (сбросит фильтр -
             # на следующей итерации переустановим)
             if not await _open_report(page, rid):
                 return
@@ -420,7 +420,7 @@ async def run(resources: list, dry_run: bool, limit: int):
             except Exception as e:
                 _log(f'Ресурс {rid} упал: {e}', 'error')
             _save_log(all_entries)
-            # Пауза между ресурсами с джиттером – снижает риск 429
+            # Пауза между ресурсами с джиттером - снижает риск 429
             if idx < len(resources) - 1:
                 await asyncio.sleep(4 + random.random() * 4)
 
@@ -436,7 +436,7 @@ async def run(resources: list, dry_run: bool, limit: int):
 
 def _resources_from_project(pid: str) -> list:
     """Ресурсы GSC из списка поддоменов проекта (catalogs/<pid>-subdomains.csv).
-    Каждый URL-префикс домена/поддомена – это ресурс GSC. Ничего собирать не надо."""
+    Каждый URL-префикс домена/поддомена - это ресурс GSC. Ничего собирать не надо."""
     import csv
     csv_path = Path(__file__).parent / 'catalogs' / f'{pid}-subdomains.csv'
     if not csv_path.exists():
@@ -478,7 +478,7 @@ def parse_args():
     ap = argparse.ArgumentParser(
         description='Авто-«Проверить исправление» в Google Search Console')
     ap.add_argument('--project', default=None,
-                    help='проект: smu|mpe|imp – ресурсы из catalogs/<pid>-subdomains.csv')
+                    help='проект: smu|mpe|imp - ресурсы из catalogs/<pid>-subdomains.csv')
     ap.add_argument('--resource', default=None, help='один ресурс (resource_id)')
     ap.add_argument('--filter', default=None,
                     help='фильтр подстрокой (только для фоллбэка gsc_properties.json)')

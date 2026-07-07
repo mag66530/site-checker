@@ -35,7 +35,7 @@ def normalize_phone_for_submit(phone: str) -> str:
 def response_indicates_captcha_block(text: str) -> bool:
     """
     Текст ответа явно указывает на ошибку/блокировку по капче.
-    Не использует подстроку «captcha» по всему HTML – в разметке часто есть recaptcha/hcaptcha в скриптах без ошибки отправки.
+    Не использует подстроку «captcha» по всему HTML - в разметке часто есть recaptcha/hcaptcha в скриптах без ошибки отправки.
     """
     t = (text or "").lower()
     if "капч" in t and any(
@@ -69,7 +69,7 @@ def response_indicates_captcha_block(text: str) -> bool:
 
 
 def response_indicates_form_error(text: str) -> str:
-    """Если страница ПОСЛЕ отправки/оформления показывает явную ошибку – возвращает
+    """Если страница ПОСЛЕ отправки/оформления показывает явную ошибку - возвращает
     её краткое описание, иначе пустую строку. Фразы специфичны (не подсказки полей),
     чтобы не было ложных срабатываний.
     """
@@ -119,7 +119,7 @@ def _resolve_form_field_token(
     """
     Значение токена из «поля» формы.
     Известные ключи: ПОЧТА, ТЕЛЕФОН, ИМЯ, КОММЕНТАРИЙ, ГОРОД, ИМЯ_ТЕСТА (и email/phone/…).
-    Любая другая непустая строка – буквальное значение для поля.
+    Любая другая непустая строка - буквальное значение для поля.
     """
     if token is None:
         return ""
@@ -152,8 +152,8 @@ def _resolve_form_field_token(
 
 def _apply_container_expand(scope, форма_config: dict):
     """
-    расширить_контейнер / expand_container: row | form | none (пусто – без расширения).
-    Например, css попал на .bx-soa-customer, а textarea – в соседней колонке: укажите row или css: div.row.
+    расширить_контейнер / expand_container: row | form | none (пусто - без расширения).
+    Например, css попал на .bx-soa-customer, а textarea - в соседней колонке: укажите row или css: div.row.
     """
     mode = (
         форма_config.get("расширить_контейнер") or форма_config.get("expand_container") or ""
@@ -186,7 +186,7 @@ def _pw_fill_named_field(scope, name_attr: str, value: str) -> bool:
     if n == 0:
         return False
     # bx-soa (и др.) держат СКРЫТЫЕ копии полей с тем же name (шаблоны). Берём
-    # ВИДИМУЮ копию, иначе заполняли скрытую – на экране поле оставалось пустым.
+    # ВИДИМУЮ копию, иначе заполняли скрытую - на экране поле оставалось пустым.
     el = None
     for _j in range(min(n, 12)):
         cand = loc.nth(_j)
@@ -417,14 +417,14 @@ def _normalize_scenario_click_css_selector(s: str) -> str:
 def _playwright_form_css_selector(форма_config: dict) -> str:
     """CSS-селектор формы для page.locator (или пусто, если тип «text»).
     Один токен class: form.X матчит любой токен в class (в т.ч. an-row calculation-order).
-    Для «короткой» формы в конфиге пишут class: calculation-order – тогда :not(.an-row),
+    Для «короткой» формы в конфиге пишут class: calculation-order - тогда :not(.an-row),
     чтобы не сливалась со второй формой an-row calculation-order.
-    Один токен (кроме calculation-order): form.token – как CSS-класс (подходит и при class="row col-md-12").
+    Один токен (кроме calculation-order): form.token - как CSS-класс (подходит и при class="row col-md-12").
     Несколько слов: form.a.b.c как раньше.
-    Ключ «css» – произвольный CSS-селектор (должен находить форму или её корень).
-    Ключ «name» – атрибут name (CSS [name="..."]), часто поле Bitrix; для контейнера заказа
+    Ключ «css» - произвольный CSS-селектор (должен находить форму или её корень).
+    Ключ «name» - атрибут name (CSS [name="..."]), часто поле Bitrix; для контейнера заказа
     лучше «css» (например .bx-soa-customer), если по name попадает один input.
-    Ключ «text» – не CSS; возвращает пусто (см. отправить_форму_через_playwright).
+    Ключ «text» - не CSS; возвращает пусто (см. отправить_форму_через_playwright).
     """
     if "text" in форма_config and str(форма_config.get("text", "")).strip():
         return ""
@@ -457,8 +457,8 @@ def _playwright_form_css_selector(форма_config: dict) -> str:
 
 def _alternate_form_root_selector(sel: str) -> str | None:
     """
-    Многие сайты без <form>: блоки в div / section. Тогда form.* не матчится – пробуем div.*.
-    form[attr] (например data-source) – то же: div[attr].
+    Многие сайты без <form>: блоки в div / section. Тогда form.* не матчится - пробуем div.*.
+    form[attr] (например data-source) - то же: div[attr].
     """
     if sel.startswith("form.") or sel.startswith("form#"):
         return "div" + sel[4:]
@@ -516,12 +516,12 @@ _MODAL_TRIGGER_PREFIXES = frozenset(
 def _parse_modal_trigger(raw: str) -> tuple[str, str]:
     """
     Триггер модалки в конфиге:
-    - без префикса или data-source: – значение в атрибуте data-source (как раньше);
-    - text: – подпись кнопки/ссылки (роль button/link);
-    - css: – произвольный CSS-селектор Playwright;
-    - id: – id элемента;
-    - class: – класс(ы) на button/a;
-    - name: – атрибут name (например name:ORDER_PROP_3).
+    - без префикса или data-source: - значение в атрибуте data-source (как раньше);
+    - text: - подпись кнопки/ссылки (роль button/link);
+    - css: - произвольный CSS-селектор Playwright;
+    - id: - id элемента;
+    - class: - класс(ы) на button/a;
+    - name: - атрибут name (например name:ORDER_PROP_3).
     Префикс срабатывает только если он из известного списка (строка «foo:bar» без префикса остаётся целиком для data-source).
     """
     s = (raw or "").strip()
@@ -543,7 +543,7 @@ def format_modal_selector_type(raw: str | None) -> str:
 
 
 def format_modal_value_for_log(raw: str | None) -> str:
-    """Колонка «Значение типа»: только значение без префикса «class:» и т.п. (тип – в колонке «Тип»)."""
+    """Колонка «Значение типа»: только значение без префикса «class:» и т.п. (тип - в колонке «Тип»)."""
     return _parse_modal_trigger(raw or "")[1]
 
 
@@ -567,7 +567,7 @@ def _find_modal_opener(page, kind: str, val: str):
         return None
 
     def _fallback_by_id_or_hash():
-        """Если data-source не сработал – часто в конфиге указан id кнопки/ссылки (без префикса id:)."""
+        """Если data-source не сработал - часто в конфиге указан id кнопки/ссылки (без префикса id:)."""
         id_esc = val.replace('"', '\\"')
         for sel in (f'[id="{id_esc}"]', f"#{val}"):
             try:
@@ -687,7 +687,7 @@ def _find_modal_root(page):
 
 
 def _modal_scope_for_fill(page, modal):
-    """Область, в которой реально есть поля (часто modal – пустой #form-callback)."""
+    """Область, в которой реально есть поля (часто modal - пустой #form-callback)."""
     try:
         if modal.count():
             n = modal.locator(
@@ -732,7 +732,7 @@ def _fill_modal_fields(
             pass
         return False
 
-    # Имя – типовые name + Bitrix / произвольные
+    # Имя - типовые name + Bitrix / произвольные
     name_sels = tuple(
         f'input[name="{nm}"]'
         for nm in (
@@ -862,16 +862,16 @@ def _fill_modal_fields(
 
     if имя_теста and not filled_name:
         print(
-            "      ⚠️ Модалка: не удалось заполнить имя – откройте DevTools и проверьте name/placeholder полей."
+            "      ⚠️ Модалка: не удалось заполнить имя - откройте DevTools и проверьте name/placeholder полей."
         )
     if телефон and not filled_phone:
         print(
-            "      ⚠️ Модалка: не удалось заполнить телефон – проверьте name/placeholder или укажите ТЕЛЕФОН в конфиге."
+            "      ⚠️ Модалка: не удалось заполнить телефон - проверьте name/placeholder или укажите ТЕЛЕФОН в конфиге."
         )
 
 
 def _click_modal_submit(modal):
-    """Отправка формы в модалке – несколько типовых вариантов кнопки."""
+    """Отправка формы в модалке - несколько типовых вариантов кнопки."""
     for sel in (
         "button.form__submit",
         "button[type='submit']",
@@ -905,7 +905,7 @@ def _click_modal_submit(modal):
 
 
 def _label_has_policy_link(locator) -> bool:
-    """В label часто ссылка на политику – клик по label открывает страницу, а не чекбокс."""
+    """В label часто ссылка на политику - клик по label открывает страницу, а не чекбокс."""
     try:
         return locator.locator("a[href]").count() > 0
     except Exception:
@@ -975,7 +975,7 @@ def _click_checkbox_via_label_or_js(box, page):
 def _playwright_check_consent_checkboxes(form_locator, page):
     """
     Отмечает обязательные чекбоксы (152-ФЗ и т.д.).
-    Bitrix/кастомные темы часто скрывают input – кликаем по label, иначе force/check + JS.
+    Bitrix/кастомные темы часто скрывают input - кликаем по label, иначе force/check + JS.
     """
     boxes = form_locator.locator("input[type='checkbox'][required]")
     n = boxes.count()
@@ -1046,7 +1046,7 @@ def _ensure_modal_consent(scope, page):
         except Exception:
             pass
 
-    # Не кликаем по произвольным label с текстом «политик…» – там часто <a href>, открывается страница политики.
+    # Не кликаем по произвольным label с текстом «политик…» - там часто <a href>, открывается страница политики.
     # Только чекбоксы внутри label с подходящим текстом (без клика по ссылке).
     for pattern in (r"соглас", r"персональн", r"обработк"):
         try:
@@ -1065,7 +1065,7 @@ def _ensure_modal_consent(scope, page):
         except Exception:
             pass
 
-    # Последний проход: неотмеченные чекбоксы в форме модалки (часто один – согласие)
+    # Последний проход: неотмеченные чекбоксы в форме модалки (часто один - согласие)
     try:
         form = scope.locator("form").last
         if not form.count():
@@ -1125,14 +1125,14 @@ def _interpret_response_status(result: requests.Response) -> str:
     if "спасибо" in text or "успешно" in text or "принят" in text:
         return "УСПЕШНО"
     if result.status_code == 200:
-        return "УСПЕШНО (статус 200) – проверьте админку (возможна ложная успешность)"
+        return "УСПЕШНО (статус 200) - проверьте админку (возможна ложная успешность)"
     return f"ОШИБКА (статус {result.status_code})"
 
 
 def scenario_blocks_from_page(страница: dict) -> list:
     """
     Список сценариев на странице: [{'название', 'включено', 'шаги'}, ...].
-    Поддержка: ключ «сценарии»; иначе legacy – плоский список шагов в «шаги».
+    Поддержка: ключ «сценарии»; иначе legacy - плоский список шагов в «шаги».
     """
     if "сценарии" in страница and страница["сценарии"] is not None:
         cs = страница["сценарии"] or []
@@ -1179,7 +1179,7 @@ def prep_steps_from_page(страница: dict) -> list:
     Шаги «подготовки» страницы (ключ «подготовка», алиас «prep»).
 
     Это best-effort действия сразу после загрузки страницы: снять оверлей
-    (например подтверждение города), навести на карточку и т.п. – то, что
+    (например подтверждение города), навести на карточку и т.п. - то, что
     раньше было зашито в коде под конкретные сайты. Возвращает только
     включённые шаги с нормализованным действием (пауза / клик / наведение).
     """
@@ -1219,7 +1219,7 @@ LOG_KEYS_ORDER = [
     "название", "имя", "телефон", "почта", "почта_получателя", "статус", "комментарий",
 ]
 
-# Отдельный лист «Цели» (Яндекс.Метрика): свои колонки – форма/кнопка + идентификатор цели.
+# Отдельный лист «Цели» (Яндекс.Метрика): свои колонки - форма/кнопка + идентификатор цели.
 GOAL_HEADERS = [
     "Дата", "Время", "Город", "Страница", "Форма / кнопка",
     "Цель (идентификатор)", "URL", "Статус", "Комментарий",
@@ -1239,9 +1239,9 @@ def _строка_это_цель(row: dict) -> bool:
 def _status_clean_reason(raw: str):
     """Из «сырого» статуса делает (короткое_слово, причина).
 
-    Короткое слово – Успешно / Заполнено / Ошибка (без скобок и деталей).
+    Короткое слово - Успешно / Заполнено / Ошибка (без скобок и деталей).
     Причина заполняется только когда что-то не сработало (идёт в «Комментарий»),
-    при успехе – пустая строка.
+    при успехе - пустая строка.
     """
     s = (raw or "").strip()
     up = s.upper()
@@ -1262,12 +1262,12 @@ def _status_clean_reason(raw: str):
     if up.startswith("НЕ СРАБОТАЛА"):
         return "Не сработала", detail
     if up.startswith("ФОРМА НЕ НАЙДЕНА"):
-        return "Ошибка", "Форма не найдена на странице – изменился селектор или она не загрузилась"
+        return "Ошибка", "Форма не найдена на странице - изменился селектор или она не загрузилась"
     if up.startswith("НЕТ СЕЛЕКТОРА ФОРМЫ"):
         return "Ошибка", "Не задан селектор формы в настройках"
     if up.startswith("ОШИБКА"):
         if "КАПЧА" in up:
-            return "Ошибка", "Форма защищена капчей – заявка не отправилась"
+            return "Ошибка", "Форма защищена капчей - заявка не отправилась"
         if "CSRF" in up:
             return "Ошибка", "Сайт отклонил отправку (неверный токен сессии)"
         if "СООБЩЕНИЕ НА СТРАНИЦЕ" in d or "ТЕКСТ НА СТРАНИЦЕ" in d:
@@ -1284,14 +1284,14 @@ def _status_clean_reason(raw: str):
             return "Ошибка", "Сервер ответил ошибкой"
         if up.startswith("ОШИБКА API"):
             return "Ошибка", "Сервер вернул ошибку (API)"
-        # деталь – просто селектор (нет пробелов, есть . # или это form/div):
+        # деталь - просто селектор (нет пробелов, есть . # или это form/div):
         # значит форму не нашли (часто из-за того, что страница не успела загрузиться)
         if detail and " " not in detail and re.fullmatch(r"[\w .#>:\[\]='\"\-]+", detail) \
                 and any(ch in detail for ch in ".#[") :
             return "Ошибка", f"Форма не найдена или страница не успела загрузиться: {detail}"
         if "НЕ НАЙДЕН" in d or "НЕТ ЭЛЕМЕНТОВ" in d:
             return "Ошибка", "Форма не найдена или страница не успела загрузиться"
-        return "Ошибка", detail or "Не удалось отправить – подробности в подробном логе"
+        return "Ошибка", detail or "Не удалось отправить - подробности в подробном логе"
     # запасной случай: короткое слово без скобок/деталей
     base = re.split(r"[(:（]", s, 1)[0].strip()
     return (base.capitalize() if base else s), ""
@@ -1320,8 +1320,8 @@ def init_excel_log(path: str, очистить: bool = True) -> None:
 
 def append_log_row(path: str, row: dict) -> None:
     """Добавляет строку в конец файла. Строки форм/сценариев идут на лист «Логи»,
-    строки целей Метрики – на отдельный лист «Цели». Колонку «Статус» красит:
-    зелёный – Успешно/Заполнено/Зафиксирована, красный – Ошибка."""
+    строки целей Метрики - на отдельный лист «Цели». Колонку «Статус» красит:
+    зелёный - Успешно/Заполнено/Зафиксирована, красный - Ошибка."""
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
     wb = load_workbook(path)
@@ -1364,7 +1364,7 @@ def append_log_row(path: str, row: dict) -> None:
 
 # --- Уровень 1 (админка): запись реально отправленных форм для сверки ---
 # После прогона forms_run сверяет этот список с «Уведомлениями с форм» в админке
-# (admin_check.выполнить_проверку). Пишем только реальные отправки форм — без
+# (admin_check.выполнить_проверку). Пишем только реальные отправки форм - без
 # целей Метрики и без проверок корзины/оформления заказа.
 SUBMITTED_FORMS_FILE = "submitted_forms.json"
 
@@ -1454,10 +1454,10 @@ def write_summary_sheet(path: str, время_прогона: str = "") -> None:
                 dom_cities[dom].add(city)
 
     # Лист «Сводка»: ТОЛЬКО таблица (Домен · Город(а) · Почта для проверки заявок).
-    # Готовое сообщение/счётчики/время – по просьбе убраны из отчёта.
+    # Готовое сообщение/счётчики/время - по просьбе убраны из отчёта.
     if "Сводка" in wb.sheetnames:
         del wb["Сводка"]
-    sm = wb.create_sheet("Сводка", 0)       # первым листом – чтобы сразу видеть
+    sm = wb.create_sheet("Сводка", 0)       # первым листом - чтобы сразу видеть
 
     hdr_fill = PatternFill("solid", fgColor="EEF3FB")
     for col, title in ((1, "Домен"), (2, "Город(а)"), (3, "Почта для проверки заявок")):
@@ -1509,7 +1509,7 @@ def write_summary_sheet(path: str, время_прогона: str = "") -> None:
             gw.freeze_panes = "A2"
         except Exception:
             pass
-        # разделение по городам – как в «Логах» (город в колонке 3)
+        # разделение по городам - как в «Логах» (город в колонке 3)
         prev = None
         for r in range(2, gw.max_row + 1):
             cur = str(gw.cell(r, 3).value or "").strip()
@@ -1541,8 +1541,8 @@ def _значение_формы_для_имени(fc: dict):
 
 def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
              город="", почта_получателя=""):
-    # headless=True – браузер работает скрыто (окно не показывается); False – видимый.
-    # город / почта_получателя – для прогона по поддоменам (городам): метка города
+    # headless=True - браузер работает скрыто (окно не показывается); False - видимый.
+    # город / почта_получателя - для прогона по поддоменам (городам): метка города
     # и почта, на которую должна прийти заявка (пишутся в одноимённые колонки лога).
     # Всегда читаем актуальный config.py с диска (после «Сохранить» в редакторе иначе остаётся кэш).
     import importlib
@@ -1572,7 +1572,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         ФОРМЫ_ЧЕРЕЗ_REQUESTS = False
 
     # Сопоставление наших названий форм с типом в админке (Уровень 1). Может
-    # отсутствовать — тогда сверка идёт по совпадению названия.
+    # отсутствовать - тогда сверка идёт по совпадению названия.
     try:
         from config import АДМИН_ТИПЫ as _АДМИН_ТИПЫ
     except ImportError:
@@ -1580,7 +1580,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     _АДМИН_ТИПЫ = _АДМИН_ТИПЫ or {}
 
     # Выбор форм из интерфейса: если задан список ТОЛЬКО_ФОРМЫ (имена сценариев/
-    # форм/модалок), гоняем ТОЛЬКО их. Пусто/не задано – гоняем все формы, как раньше.
+    # форм/модалок), гоняем ТОЛЬКО их. Пусто/не задано - гоняем все формы, как раньше.
     try:
         from config import ТОЛЬКО_ФОРМЫ as _ТОЛЬКО_ФОРМЫ
     except ImportError:
@@ -1588,7 +1588,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     _только_формы = {str(x).strip() for x in (_ТОЛЬКО_ФОРМЫ or []) if str(x).strip()}
 
     def _форма_выбрана(название) -> bool:
-        """True, если форму нужно гнать. Если фильтр не задан – гоним всё."""
+        """True, если форму нужно гнать. Если фильтр не задан - гоним всё."""
         if not _только_формы:
             return True
         return str(название or "").strip() in _только_формы
@@ -1608,7 +1608,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
     телефон_отправки = normalize_phone_for_submit(ТЕЛЕФОН)
     # Город прогона (из forms_run, напр. «Бишкек») имеет приоритет; токен «ГОРОД»/«city»
-    # в полях форм (Город доставки и т.п.) берёт именно его. Фоллбэк – config.ГОРОД.
+    # в полях форм (Город доставки и т.п.) берёт именно его. Фоллбэк - config.ГОРОД.
     ГОРОД = (город or "").strip() or (getattr(config, "ГОРОД", "") or "")
 
     print("=" * 60)
@@ -1662,15 +1662,15 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         row.setdefault("почта", ПОЧТА)
         # Статус -> короткое слово; причина неудачи -> в «Комментарий».
         # (Колонка «Комментарий» теперь показывает ПОЧЕМУ не сработало, а при
-        # успехе остаётся пустой – тестовый текст комментария в отчёт не пишем.)
+        # успехе остаётся пустой - тестовый текст комментария в отчёт не пишем.)
         _clean, _reason = _status_clean_reason(str(row.get("статус", "")))
         row["статус"] = _clean
-        # «комментарий_готовый» – если задан явно, пишем его как есть (этап падения
-        # сценария, «формы нет на домене» и т.п.); иначе – авто-причина по статусу.
+        # «комментарий_готовый» - если задан явно, пишем его как есть (этап падения
+        # сценария, «формы нет на домене» и т.п.); иначе - авто-причина по статусу.
         row["комментарий"] = (данные.get("комментарий_готовый") or _reason)
         row.pop("комментарий_готовый", None)
         # Уровень 1 (админка): запоминаем реально отправленные формы. Берём только
-        # успешные отправки форм/модалок — не цели Метрики (тип «ЦЕЛЬ», тип_селектора
+        # успешные отправки форм/модалок - не цели Метрики (тип «ЦЕЛЬ», тип_селектора
         # «цель») и не проверки корзины/оформления (тип_селектора «сценарий»).
         try:
             if (row.get("статус") == "Успешно"
@@ -1702,12 +1702,12 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
     def _лог_форма_отсутствует(тип_страницы, url, cfg_obj, название):
         """Пишет строку «Нет на сайте» с понятным комментарием (форма не существует
-        в этом домене – не ошибка)."""
+        в этом домене - не ошибка)."""
         коммент = (cfg_obj or {}).get("нет_коммент") or "Данной формы нет на сайте в этом домене"
         print(f"   ⏭️ «{название}»: {коммент}")
         записать_в_excel({
-            "тип": "–", "страница": тип_страницы, "url": url,
-            "тип_селектора": "–", "ид": название, "название": название, "имя": название,
+            "тип": "-", "страница": тип_страницы, "url": url,
+            "тип_селектора": "-", "ид": название, "название": название, "имя": название,
             "статус": "Нет на сайте", "комментарий_готовый": коммент,
         })
 
@@ -1861,7 +1861,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             ).strip():
                 print(
                     "      ⚠️ Поле hash пустое (на сайте его часто подставляет JS). "
-                    "Если заявка не доходит – смотрите вкладку Network при ручной отправке "
+                    "Если заявка не доходит - смотрите вкладку Network при ручной отправке "
                     "или используйте сценарий Playwright для этой формы."
                 )
 
@@ -1915,7 +1915,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
     def _goto_with_retry(page, url, *, attempts=3, wait_ms=2500):
         """Переход с повтором при обрыве соединения (антибот/лимит сайта).
-        Меньше попыток/паузы + умеренный таймаут – прогон быстрее; сценарий/форма
+        Меньше попыток/паузы + умеренный таймаут - прогон быстрее; сценарий/форма
         ещё раз повторятся на верхнем уровне, так что попыток суммарно хватает."""
         last = None
         for i in range(attempts):
@@ -1943,7 +1943,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         if not u or u == "about:blank" or u.startswith("about:"):
             _goto_with_retry(page, base_url)
             page.wait_for_timeout(2000)
-        # Снятие оверлеев (подтверждение города и т.п.) – через ключ «подготовка»
+        # Снятие оверлеев (подтверждение города и т.п.) - через ключ «подготовка»
         # в конфиге страницы, см. _run_page_prep (раньше здесь был хардкод mepen.ru).
 
     def _resolve_scenario_url(page, base_url: str, href) -> str:
@@ -1971,7 +1971,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
         Раньше под это были зашиты site-specific костыли (оверлей города на
         mepen.ru, наведение на карточку на «Листинге»). Теперь шаги берутся из
-        конфига страницы (ключ «подготовка»). Любая ошибка гасится – прогон не
+        конфига страницы (ключ «подготовка»). Любая ошибка гасится - прогон не
         падает из-за подготовки.
         """
         pg = next(
@@ -2023,7 +2023,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             loc.hover()
                             page.wait_for_timeout(400)
                             print(f"      🧹 Подготовка: наведение {sel!r}")
-                # неизвестное действие в «подготовке» – тихо пропускаем
+                # неизвестное действие в «подготовке» - тихо пропускаем
             except Exception as e:
                 print(f"      ⚠️ Подготовка ({act}): {e}")
 
@@ -2040,7 +2040,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     ):
         """
         Заполнение и отправка формы на уже открытой странице.
-        initial_url: если задан – сначала переход; иначе считаем, что нужная страница уже загружена.
+        initial_url: если задан - сначала переход; иначе считаем, что нужная страница уже загружена.
         """
         nctx = название_контекста if название_контекста is not None else название
         имя_теста = имя_теста_из_конфига(
@@ -2111,7 +2111,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         break
 
             print(
-                f"      Селектор: {sel_desc!r} – найдено форм: {n_match}, берём №{idx + 1}"
+                f"      Селектор: {sel_desc!r} - найдено форм: {n_match}, берём №{idx + 1}"
             )
             if n_match == 0:
                 tried_txt = ", ".join(repr(t) for t in _expand_form_selector_fallbacks(sel))
@@ -2119,8 +2119,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     "Нет элементов по селектору. Перепробованы варианты: "
                     f"{tried_txt}. "
                     "Уточните ключ «css» в конфиге (например div.row, .bx-soa-customer), "
-                    "проверьте классы в DevTools (для второй формы – «an-row calculation-order», не только "
-                    "«calculation-order»). Если блок подгружается по AJAX – добавьте шаг «перейти»/«пауза» перед формой."
+                    "проверьте классы в DevTools (для второй формы - «an-row calculation-order», не только "
+                    "«calculation-order»). Если блок подгружается по AJAX - добавьте шаг «перейти»/«пауза» перед формой."
                 )
             if idx >= n_match:
                 raise RuntimeError(
@@ -2133,7 +2133,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _root_tag = form.evaluate("el => el.tagName.toLowerCase()")
             except Exception:
                 _root_tag = ""
-            # Селектор по name может указывать на одно поле – поднимаемся к <form>, если есть.
+            # Селектор по name может указывать на одно поле - поднимаемся к <form>, если есть.
             if _root_tag in ("input", "textarea", "select"):
                 anc = form.locator("xpath=ancestor::form[1]")
                 if anc.count() > 0:
@@ -2165,7 +2165,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     f"{'да' if форма_config.get('дозаполнить_по_признакам') else 'нет'})"
                 )
                 for _aname, _tok in _ffmap.items():
-                    # «Ссылка на товар» (product-link) – СКРЫТОЕ поле. Заполняем его
+                    # «Ссылка на товар» (product-link) - СКРЫТОЕ поле. Заполняем его
                     # напрямую через JS строго по name, иначе обычный fill из-за
                     # одинаковых id у fio/e-mail/phone «протекал» URL-ом в телефон.
                     if _aname == "product-link":
@@ -2260,7 +2260,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             pass
                 if not phone_filled and телефон_отправки:
                     print(
-                        "      ⚠️ Поле телефона не найдено по типовым name/type – проверьте разметку формы."
+                        "      ⚠️ Поле телефона не найдено по типовым name/type - проверьте разметку формы."
                     )
 
                 if ПОЧТА:
@@ -2293,7 +2293,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # Многошаговые формы (например, Bitrix-чекаут): только заполнить поля,
             # а саму отправку делает отдельный шаг сценария «клик» («Далее»/«Оформить заказ»).
             if not cfg_enabled(форма_config.get("отправлять", True)):
-                print(f"   ✍️ {название} – поля заполнены (без отправки).")
+                print(f"   ✍️ {название} - поля заполнены (без отправки).")
                 записать_в_excel(
                     {
                         "тип": "PLAYWRIGHT-FORM",
@@ -2311,7 +2311,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 return True
 
             # Кнопка отправки: по умолчанию стандартные submit-кнопки; если у сайта
-            # своя (например button.send у Авиапромсталь) – задаётся ключом «кнопка_css».
+            # своя (например button.send у Авиапромсталь) - задаётся ключом «кнопка_css».
             _btn_css = str(форма_config.get("кнопка_css") or "").strip()
             sub = form.locator(
                 _btn_css or "button[type='submit'], input[type='submit'], button.btn"
@@ -2322,9 +2322,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 sub.click(timeout=5000)
             except Exception:
                 # Кнопку видно, но её перекрывает другой элемент (баг вёрстки
-                # на части доменов): кликаем принудительно – обработчик сайта
+                # на части доменов): кликаем принудительно - обработчик сайта
                 # срабатывает так же, как при обычном клике.
-                print("      ↻ Обычный клик по кнопке перекрыт – кликаем принудительно (force)")
+                print("      ↻ Обычный клик по кнопке перекрыт - кликаем принудительно (force)")
                 sub.click(timeout=5000, force=True)
             page.wait_for_timeout(2500)
 
@@ -2342,7 +2342,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             ):
                 статус = "ОШИБКА (сообщение на странице)"
             else:
-                статус = "УСПЕШНО (Playwright – как ручная отправка)"
+                статус = "УСПЕШНО (Playwright - как ручная отправка)"
 
             записать_в_excel(
                 {
@@ -2392,7 +2392,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         "статус": _г_статус, "код": "ym",
                     }
                 )
-                print(f"   🎯 Цель «{_цель_имя}» – {_г_статус}")
+                print(f"   🎯 Цель «{_цель_имя}» - {_г_статус}")
             return True
 
         except Exception as e:
@@ -2439,7 +2439,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         log_url = page.url or url_for_excel
 
         try:
-            # Наведение на карточку и прочая «подготовка» страницы – из конфига
+            # Наведение на карточку и прочая «подготовка» страницы - из конфига
             # (ключ «подготовка»). Раньше тут был хардкод под страницу «Листинг».
             _run_page_prep(page, страница)
 
@@ -2523,11 +2523,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             return False
 
     # ── Пул браузера: ОДИН Chromium/контекст на весь прогон (переиспользуется) ──
-    # Раньше браузер запускался на каждую форму/сценарий – очень медленно. Теперь
+    # Раньше браузер запускался на каждую форму/сценарий - очень медленно. Теперь
     # запускаем один раз, на каждую форму открываем новую вкладку. При сбое контекста
-    # (обрыв соединения и т.п.) – пересоздаём и повторяем.
-    # goals – пойманные цели Яндекс.Метрики за прогон: [{"цель", "время"}].
-    # Каждый reachGoal уходит запросом на mc.yandex.* с page-url=goal://домен/цель –
+    # (обрыв соединения и т.п.) - пересоздаём и повторяем.
+    # goals - пойманные цели Яндекс.Метрики за прогон: [{"цель", "время"}].
+    # Каждый reachGoal уходит запросом на mc.yandex.* с page-url=goal://домен/цель -
     # перехватываем эти запросы, шаг «проверить_цель» ищет цель в списке.
     _pw = {"play": None, "browser": None, "context": None, "goals": []}
 
@@ -2547,9 +2547,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
     def _отчёт_сработавших_целей(ts, страница, log_url, seen, контекст=""):
         """АВТООПРЕДЕЛЕНИЕ: пишет в отчёт строку по КАЖДОЙ цели Метрики,
-        сработавшей с момента ts (кроме уже записанных – через seen). Так видно,
+        сработавшей с момента ts (кроме уже записанных - через seen). Так видно,
         какая цель реально фиксируется на форме/кнопке, даже если в конфиге цель
-        не задана. Не нужно знать имена целей заранее – прогон их показывает."""
+        не задана. Не нужно знать имена целей заранее - прогон их показывает."""
         _есть = False
         for g in _цели_с(ts):
             gнэйм = g["цель"]
@@ -2557,7 +2557,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 continue
             seen.add(gнэйм)
             _есть = True
-            _подпись = f"Сработала цель: {gнэйм}" + (f" — {контекст}" if контекст else "")
+            _подпись = f"Сработала цель: {gнэйм}" + (f" - {контекст}" if контекст else "")
             записать_в_excel(
                 {
                     "тип": "ЦЕЛЬ (Метрика)",
@@ -2573,7 +2573,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     "код": "ym-auto",
                 }
             )
-            print(f"   🎯 Сработала цель: {gнэйм}" + (f" — {контекст}" if контекст else ""))
+            print(f"   🎯 Сработала цель: {gнэйм}" + (f" - {контекст}" if контекст else ""))
         return _есть
 
     def _shared_context():
@@ -2632,7 +2632,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         _pw["play"] = None
 
     def _open_page():
-        """Новая вкладка в общем контексте; если контекст умер – пересоздать и повторить."""
+        """Новая вкладка в общем контексте; если контекст умер - пересоздать и повторить."""
         try:
             return _shared_context().new_page()
         except Exception:
@@ -2652,7 +2652,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     def отправить_форму_через_playwright(url, форма_config, название):
         """
         Отправка формы через Chromium: как у живого пользователя (JS, hash, AJAX Bitrix).
-        Ручная отправка с почтой менеджера совпадает с этим путём; requests без JS – нет.
+        Ручная отправка с почтой менеджера совпадает с этим путём; requests без JS - нет.
         """
         страница = определить_страницу(url)
         имя_теста = имя_теста_из_конфига(
@@ -2701,7 +2701,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     ):
         """Один сеанс браузера: цепочка шагов (пауза, переход, клик, форма, модалка)."""
         if not шаги:
-            print("   ⚠️ Сценарий пуст – пропуск.")
+            print("   ⚠️ Сценарий пуст - пропуск.")
             return
         if ФОРМЫ_ЧЕРЕЗ_REQUESTS:
             print(
@@ -2734,11 +2734,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         print(f"   ⚠️ Шаг {i + 1}: ожидался словарь, пропуск.")
                         continue
                     if not cfg_enabled(step.get("включено", True)):
-                        print(f"   ⏭️ Шаг {i + 1}: отключён в конфиге – пропуск.")
+                        print(f"   ⏭️ Шаг {i + 1}: отключён в конфиге - пропуск.")
                         continue
 
                     act = _нормализовать_действие_шага(step)
-                    # Запоминаем текущий шаг – чтобы при падении сказать, на чём встали.
+                    # Запоминаем текущий шаг - чтобы при падении сказать, на чём встали.
                     _шаг_цель = (step.get("css") or step.get("selector")
                                  or step.get("url") or step.get("href") or "")
                     _тек_шаг_инфо = f"шаг {i + 1} «{act}»" + (f" {_шаг_цель}" if _шаг_цель else "")
@@ -2754,7 +2754,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     elif act == "перейти":
                         href = step.get("url") or step.get("href")
                         if not href:
-                            print(f"   ⚠️ Шаг {i + 1}: «перейти» без url/href – пропуск.")
+                            print(f"   ⚠️ Шаг {i + 1}: «перейти» без url/href - пропуск.")
                             continue
                         dest = _resolve_scenario_url(page, base_url, href)
                         print(f"   🔗 Шаг {i + 1}: переход → {dest}")
@@ -2765,7 +2765,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         css = step.get("css") or step.get("selector")
                         if not css:
                             print(
-                                f"   ⚠️ Шаг {i + 1}: «клик» без css/selector – пропуск."
+                                f"   ⚠️ Шаг {i + 1}: «клик» без css/selector - пропуск."
                             )
                             continue
                         raw = str(css).strip()
@@ -2797,7 +2797,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         css = step.get("css") or step.get("selector")
                         if not css:
                             print(
-                                f"   ⚠️ Шаг {i + 1}: «наведение» без css/selector – пропуск."
+                                f"   ⚠️ Шаг {i + 1}: «наведение» без css/selector - пропуск."
                             )
                             continue
                         raw = str(css).strip()
@@ -2813,7 +2813,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         page.wait_for_timeout(400)
 
                     elif act in ("заполнить_по_метке", "fill_by_label", "поле_по_метке"):
-                        # Заполнение поля по ВИДИМОЙ подписи (label) – для форм, где
+                        # Заполнение поля по ВИДИМОЙ подписи (label) - для форм, где
                         # имена полей рисуются в JS (bx-soa): get_by_label, затем
                         # запасной вариант по placeholder. Не падаем, если поля нет.
                         метка = str(step.get("метка") or step.get("label") or "").strip()
@@ -2823,7 +2823,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             почта=ПОЧТА, имя=ИМЯ, комментарий=КОММЕНТАРИЙ, город=ГОРОД,
                         )
                         if not метка or not str(_val).strip():
-                            print(f"   ⚠️ Шаг {i + 1}: «заполнить_по_метке» без метки/значения – пропуск.")
+                            print(f"   ⚠️ Шаг {i + 1}: «заполнить_по_метке» без метки/значения - пропуск.")
                             continue
                         _filled = False
                         _esc = метка.replace('"', '\\"')
@@ -2841,7 +2841,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             except Exception:  # noqa: BLE001
                                 continue
                         print(
-                            f"   ✏️ Шаг {i + 1}: поле по метке «{метка}» – "
+                            f"   ✏️ Шаг {i + 1}: поле по метке «{метка}» - "
                             f"{'заполнено' if _filled else 'НЕ найдено'}"
                         )
 
@@ -2881,7 +2881,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         )
                         if val is None or str(val).strip() == "":
                             print(
-                                f"   ⚠️ Шаг {i + 1}: «модалка» без значения – пропуск."
+                                f"   ⚠️ Шаг {i + 1}: «модалка» без значения - пропуск."
                             )
                             continue
                         nav = step.get("url") or step.get("href")
@@ -2967,7 +2967,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 "код": "browser",
                             }
                         )
-                        print(f"   🔎 Шаг {i + 1}: проверка «{nm}» – {статус}")
+                        print(f"   🔎 Шаг {i + 1}: проверка «{nm}» - {статус}")
 
                     elif act in ("проверить_цель", "check_goal"):
                         # Проверка цели Яндекс.Метрики: ждём, пока перехватчик
@@ -3018,14 +3018,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 "код": "ym",
                             }
                         )
-                        print(f"   🎯 Шаг {i + 1}: цель «{цель}» – {статус}")
+                        print(f"   🎯 Шаг {i + 1}: цель «{цель}» - {статус}")
 
                     elif act in ("проверить_корзину", "check_cart"):
                         # Проверка: реально ли товар попал в корзину. На СНГ-доменах
-                        # кнопка «Добавить в корзину» – баг разработчиков: клик ничего
-                        # не делает, корзина остаётся пустой. Признак «товар в корзине» –
+                        # кнопка «Добавить в корзину» - баг разработчиков: клик ничего
+                        # не делает, корзина остаётся пустой. Признак «товар в корзине» -
                         # наличие кнопки оформления (Bitrix рисует её только при товаре).
-                        # Если корзина пуста – пишем понятный комментарий и МЯГКО
+                        # Если корзина пуста - пишем понятный комментарий и МЯГКО
                         # завершаем сценарий (без «прервался на шаг…»).
                         nm = (
                             step.get("название")
@@ -3057,7 +3057,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 есть_товар = False
                         if есть_товар:
                             print(
-                                f"   🛒 Шаг {i + 1}: корзина не пуста – продолжаем оформление."
+                                f"   🛒 Шаг {i + 1}: корзина не пуста - продолжаем оформление."
                             )
                         else:
                             log_url = page.url or base_url
@@ -3078,7 +3078,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                     "код": "cart-broken",
                                 }
                             )
-                            print(f"   🛒 Шаг {i + 1}: корзина пуста – {коммент}")
+                            print(f"   🛒 Шаг {i + 1}: корзина пуста - {коммент}")
                             return
 
                     else:
@@ -3121,11 +3121,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             "название": cap,
                             "имя": имя_лог,
                             "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_лог,
-                            "статус": "УСПЕШНО (только клик; tel/mailto – проверьте ОС/браузер)",
+                            "статус": "УСПЕШНО (только клик; tel/mailto - проверьте ОС/браузер)",
                             "код": "click-only",
                         }
                     )
-                    print(f"   ✅ «{cap}» – строка в Excel (клик без формы)")
+                    print(f"   ✅ «{cap}» - строка в Excel (клик без формы)")
 
             except Exception as _e_step:  # noqa: BLE001
                 # Прокидываем наверх с указанием, на каком шаге упали.
@@ -3145,7 +3145,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     print(f"📞 Телефон для отправки (цифры): {телефон_отправки or '(пусто)'}")
     if not телефон_отправки:
         print(
-            "⚠️ ВНИМАНИЕ: ТЕЛЕФОН в config пустой – поля телефона не заполняются, "
+            "⚠️ ВНИМАНИЕ: ТЕЛЕФОН в config пустой - поля телефона не заполняются, "
             "заявка часто не принимается. Укажите номер в конфиге и сохраните."
         )
     print(f"✉️ Почта: {ПОЧТА}")
@@ -3157,7 +3157,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     print(f"💬 Комментарий: {КОММЕНТАРИЙ if КОММЕНТАРИЙ else '(имя теста)'}")
     print(
         f"📋 Формы на странице: "
-        f"{'requests (быстро, без JS)' if ФОРМЫ_ЧЕРЕЗ_REQUESTS else 'Playwright (как в браузере – заявки на почту)'}\n"
+        f"{'requests (быстро, без JS)' if ФОРМЫ_ЧЕРЕЗ_REQUESTS else 'Playwright (как в браузере - заявки на почту)'}\n"
     )
 
     for страница in СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ:
@@ -3170,21 +3170,21 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
         # Региональные страницы (форма есть только в конкретном городе/стране):
         # «только_города» ограничивает прогон списком городов. Если идёт прогон по
-        # городу не из списка – страницу пропускаем (иначе она тянулась бы в КАЖДЫЙ
+        # городу не из списка - страницу пропускаем (иначе она тянулась бы в КАЖДЫЙ
         # город: Хабаровск/СНГ попадали в отчёт там, где их не выбирали).
         только = страница.get("только_города")
         if только and (город or "").strip() not in только:
-            print(f"\n📄 Страница: {тип_страницы} – пропущена (только для: {', '.join(только)})")
+            print(f"\n📄 Страница: {тип_страницы} - пропущена (только для: {', '.join(только)})")
             continue
 
         кроме = страница.get("кроме_городов")
         if кроме and (город or "").strip() in кроме:
-            print(f"\n📄 Страница: {тип_страницы} – пропущена для города {город} (есть отдельный блок)")
+            print(f"\n📄 Страница: {тип_страницы} - пропущена для города {город} (есть отдельный блок)")
             continue
 
         if not cfg_enabled(страница.get("включено", True)):
             print(f"\n{'='*50}")
-            print(f"📄 Страница: {тип_страницы} – не в прогоне (настройки сохранены, шаги не выполняются)")
+            print(f"📄 Страница: {тип_страницы} - не в прогоне (настройки сохранены, шаги не выполняются)")
             print(f"{'='*50}")
             continue
 
@@ -3229,7 +3229,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         if _попытка == 1:
                             print(f"   ↻ Сценарий «{cap}» упал ({str(_e)[:80]}), повтор…")
                 if _scn_err is not None:
-                    # Один упавший сценарий НЕ должен ронять весь прогон –
+                    # Один упавший сценарий НЕ должен ронять весь прогон -
                     # пишем ошибку в лог и идём к следующей форме.
                     print(f"   ❌ Сценарий «{cap}» прерван ошибкой: {_scn_err}")
                     try:
@@ -3255,13 +3255,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
         if есть_шаги and not с_вкл:
             print(
-                "   ⏭️ Сценарий (шаги) отключён для страницы – шаги не выполняются."
+                "   ⏭️ Сценарий (шаги) отключён для страницы - шаги не выполняются."
             )
 
         if not ф_вкл:
-            print("   ⏭️ Формы для страницы отключены – блок форм пропущен.")
+            print("   ⏭️ Формы для страницы отключены - блок форм пропущен.")
         if not м_вкл:
-            print("   ⏭️ Модалки для страницы отключены – блок модалок пропущен.")
+            print("   ⏭️ Модалки для страницы отключены - блок модалок пропущен.")
 
         for форма in страница.get("формы") or []:
             if stop_flag and stop_flag():
@@ -3279,7 +3279,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _лог_форма_отсутствует(тип_страницы, url, форма, форма.get("название", "?"))
                 continue
             # До 2 попыток: страница/форма иногда не доходит из-за обрыва соединения
-            # (анти-бот СНГ) – повтор обычно проходит.
+            # (анти-бот СНГ) - повтор обычно проходит.
             _frm_err = None
             for _попытка in (1, 2):
                 try:
@@ -3294,7 +3294,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     if _попытка == 1:
                         print(f"   ↻ Форма «{форма.get('название','?')}» упала ({str(_e)[:70]}), повтор…")
             if _frm_err is not None:
-                # Сбой одной формы НЕ должен ронять прогон – пишем ошибку и идём дальше.
+                # Сбой одной формы НЕ должен ронять прогон - пишем ошибку и идём дальше.
                 print(f"   ❌ Форма «{форма.get('название','?')}» прервана ошибкой: {_frm_err}")
                 try:
                     записать_в_excel(

@@ -1,4 +1,4 @@
-"""Тесты run_scheduled – сборка creds/params для автозапуска из окружения."""
+"""Тесты run_scheduled - сборка creds/params для автозапуска из окружения."""
 import run_scheduled as rs
 
 
