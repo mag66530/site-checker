@@ -94,14 +94,40 @@ ACTIONS = {
     'imp': {
         'страницы': [
             ('Главная',   'https://inmetprom.ru/',
-             ['[data-my-modal="#modal-callback"]', '.banner-fast-order__application']),
+             ['text="Да" >> visible=true',                 # модалка подтверждения города
+              '[data-my-modal="#modal-callback"]',
+              '.banner-fast-order__application',
+              'button:has-text("Оставить заявку"), button:has-text("Просчёт"), button:has-text("Заявка")',
+              'header a:has-text("Прайс"), a:has-text("Прайс-лист")',
+              'header a:has-text("Каталог")',
+              'header a:has-text("Акции"), a:has-text("Акции")',
+              'text=Написать нам',
+              'text=Звонок менеджеру, a:has-text("менеджеру")',
+              'text=Изменить город, text=Сменить город, [class*="city-change"], [class*="change-city"]']),
             ('Контакты',  'https://inmetprom.ru/contacts/', []),
-            ('Листинг',   'https://inmetprom.ru/catalog/listovoj-prokat/', ['text=Быстрый заказ']),
-            ('Товар',     'https://inmetprom.ru/list-gesti-0-2-mm-klass-1-gost-13345-85/', []),
+            ('Листинг',   'https://inmetprom.ru/catalog/listovoj-prokat/',
+             ['text=Быстрый заказ',
+              'text=В корзину, text=в корзину',
+              'a:has-text("Скачать прайс"), text=Скачать прайс',
+              '.tags a, [class*="tag"] a, [class*="tags"] a']),
+            ('Товар',     'https://inmetprom.ru/list-gesti-0-2-mm-klass-1-gost-13345-85/',
+             ['text=В корзину, text=в корзину',
+              'text=Быстрый заказ',
+              'text=Оставить отзыв, text=Написать отзыв, a:has-text("Отзыв")']),
+            ('Страница 404', 'https://inmetprom.ru/nesuschestvuyushaya-404-xyz/', []),
         ],
         'ожидаемые': [
-            'klik-na-tg-v-mobilke', 'klik-na-whatsapp-v-mobilke',
-            'click-telephone-utf-gorod',
+            'tel-shapka-gorod', 'klik-v-shapke-po-elektronnoy-pochte',
+            'klik-v-shapke-na-whatsapp', 'klik-na-tg-v-shapke',
+            'klik-na-prays-list-iz-shapki', 'klik-na-katalog-v-shapke',
+            'click-proschet', 'klik-na-aktsii', 'click-podval-gorod-nomer',
+            'klik-v-podvale-zvonok-menedzheru', 'click-podval-email',
+            'klik-v-podvale-po-napisat-nam', 'klik-na-tg-v-mobilke',
+            'klik-na-whatsapp-v-mobilke', 'click-telephone-utf-gorod',
+            'izmenit_gorod', 'click_yes_confirm', 'bystryy-zakaz-katalog',
+            'bystryy-zakaz-listing', 'v-cart-listing', 'listing-skachat-prays-list',
+            'listing-klik-po-tegam', 'v-cart-kartochka', 'bistrii-zakaz-cartochka',
+            'klik-tel', '404error',
         ],
     },
     'mpe': {
@@ -375,6 +401,14 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                     except Exception:
                         el.click(timeout=2000, force=True)
                     page.wait_for_timeout(600)
+                    # клик мог быть по ссылке-переходу (Каталог/Акции/Прайс в шапке):
+                    # цель сработала, а нам нужно вернуться, чтобы кликать дальше.
+                    if page.url != url:
+                        try:
+                            page.go_back(wait_until='domcontentloaded', timeout=15000)
+                        except Exception:
+                            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                        page.wait_for_timeout(600)
                     page.keyboard.press('Escape')
                     page.wait_for_timeout(200)
                 except Exception:
