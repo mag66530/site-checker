@@ -206,6 +206,9 @@ with c1:
         PID_FILE.write_text(str(proc.pid), encoding='utf-8')
         st.session_state['goals_started'] = datetime.now().strftime('%H:%M:%S')
         st.session_state['goals_selected'] = list(_selected)
+        # Подпись прогона: проект + выбранные сайты. По ней прячем устаревший
+        # прогресс, если пользователь сменил проект или набор галочек.
+        st.session_state['goals_run_sig'] = f'{_base}|{",".join(sorted(_selected))}'
         st.rerun()
 with c2:
     if st.button('⛔ Отменить', use_container_width=True, disabled=not _alive):
@@ -233,6 +236,12 @@ if LOG_FILE.is_file():
 # (бывает в облаке), финальная строка лога = завершено.
 _done = ('ВСЁ ГОТОВО' in log_txt) or ('✗' in log_txt and 'СТАРТ' in log_txt)
 _running = _alive and not _done
+
+# Прогресс от СТАРОГО прогона (другой проект / другой набор галочек / прошлая
+# сессия) не показываем - только живой прогон или завершение ЭТОГО выбора.
+_cur_sig = f'{_base}|{",".join(sorted(_selected))}'
+if not _running and st.session_state.get('goals_run_sig') != _cur_sig:
+    log_txt = ''
 
 # Прогресс: движок пишет «СТРАНА i/N», «ПРОГРЕСС x/y», «цель: X», «ФОРМЫ: …».
 import re as _re
