@@ -327,6 +327,7 @@ _BUG_PHRASES = {
     'photos': 'нет фото у части товаров',
     'h1': 'нет заголовка H1',
     'breadcrumbs': 'нет хлебных крошек',
+    'img_alt': 'картинки без alt',
     'content_text': 'нет текста на странице',
     'rec_price': 'нет цен в нижних блоках',
     'form_nf': 'нет формы «Не нашли что искали»',
@@ -362,10 +363,14 @@ def _problem_text(r):
             bugs = []
             for b in content.bugs:
                 phrase = _BUG_PHRASES.get(b.key, b.label)
-                if b.key == 'photos' and getattr(b, 'count', None):
+                if b.key in ('photos', 'img_alt') and getattr(b, 'count', None):
                     phrase += f' ({b.count})'
                 if getattr(b, 'note', ''):
-                    phrase += f' ({b.note})'
+                    # У картинок без alt пояснение - список адресов: через «:»
+                    if b.key == 'img_alt':
+                        phrase += f': {b.note}'
+                    else:
+                        phrase += f' ({b.note})'
                 bugs.append(phrase)
             if bugs:
                 parts.append(', '.join(bugs))

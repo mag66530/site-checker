@@ -496,6 +496,48 @@ def _d_breadcrumbs(c: _Ctx):
     return bool(_RE_BREADCRUMB.search(c.html_lower)), None
 
 
+# Все <img> страницы должны иметь атрибут alt. Пустой alt="" – легален
+# (стандарт: декоративные картинки помечают именно пустым alt). Баг – только
+# полное ОТСУТСТВИЕ атрибута. data-alt= и т.п. не считаются (перед alt не
+# должно быть буквы/дефиса). Комментарии вырезаем – в них бывает вёрстка.
+_RE_IMG_TAG = re.compile(r'<img\b[^>]*>', re.I)
+_RE_HTML_COMMENT = re.compile(r'<!--.*?-->', re.S)
+_RE_ALT_ATTR = re.compile(r'(?<![\w-])alt\s*(?==|\s|/|>)', re.I)
+
+
+_RE_IMG_SRC = re.compile(
+    r'(?:data-src|src)\s*=\s*(?:["\']([^"\']+)["\']|([^\s>"\']+))', re.I)
+
+
+def _imgs_no_alt_srcs(html: str) -> list:
+    """Адреса (src) всех <img> БЕЗ атрибута alt - для списка в отчёте."""
+    out = []
+    for tag in _RE_IMG_TAG.findall(_RE_HTML_COMMENT.sub(' ', html or '')):
+        if _RE_ALT_ATTR.search(tag[4:]):         # [4:] отрезает сам «<img»
+            continue
+        m = _RE_IMG_SRC.search(tag)
+        src = ((m.group(1) or m.group(2) or '').strip() if m else '') or '[без src]'
+        if src.startswith('data:'):
+            src = '[inline-картинка]'
+        else:
+            # Короче: только путь, без домена (домен = сама страница)
+            try:
+                from urllib.parse import urlsplit as _us
+                _sp = _us(src)
+                if _sp.netloc:
+                    src = _sp.path or src
+            except Exception:
+                pass
+        out.append(src)
+    return out
+
+
+def _d_img_alt(c: _Ctx):
+    """present = у всех <img> есть alt; count = сколько картинок БЕЗ alt."""
+    missing = len(_imgs_no_alt_srcs(c.html))
+    return missing == 0, (missing or None)
+
+
 # ── Шапка: обязательные элементы (проверяются ВНУТРИ региона шапки) ──
 # По требованию: в шапке должны быть телефон, «заказать звонок»,
 # «оставить заявку» и выбор города.
@@ -904,6 +946,7 @@ BLOCK_DESCRIPTIONS = {
     'tech_links':    'Рабочие ссылки в контенте (настоящие адреса, не «#» / javascript:void). Число = сколько.',
     'h1':            'Непустой тег <h1>. Проверяется наличие, не текст. Число = сколько H1 на странице.',
     'breadcrumbs':   'Хлебные крошки: микроразметка BreadcrumbList или класс breadcrumb в вёрстке.',
+    'img_alt':       'У всех <img> страницы есть атрибут alt. Пустой alt="" допустим (декоративные картинки). Число = сколько картинок БЕЗ атрибута alt.',
     'hdr_phone':     'Телефон в шапке: номер +7… внутри региона <header>. Обязателен.',
     'hdr_callback':  'Кнопка «Заказать звонок» (или «обратный звонок») в шапке. Обязательна.',
     'hdr_request':   'Запрос-CTA в шапке: «Оставить заявку» / «Заявка» / «Быстрый заказ». Обязателен.',
@@ -973,6 +1016,7 @@ _FOOTER = [
 _TOP = [
     _b('breadcrumbs', 'Хлебные крошки',   True,  _d_breadcrumbs),
     _b('h1',          'Заголовок H1',     True,  _d_h1),
+    _b('img_alt',     'Alt у картинок',   True,  _d_img_alt),
 ]
 _BOTTOM = [
     _b('h2',          'Подзаголовки H2',  False, _d_h2),
@@ -1156,9 +1200,10 @@ def extract_content_links(html: str, limit: int = 60) -> list[str]:
 
 
 _TECH = [
-    _b('content_text', 'Текст',          True,  _d_content_text),
-    _b('breadcrumbs',  'Хлебные крошки', False, _d_breadcrumbs),
-    _b('h1',           'Заголовок H1',   True,  _d_h1),
+    _b('content_text', 'Текст',           True,  _d_content_text),
+    _b('breadcrumbs',  'Хлебные крошки',  False, _d_breadcrumbs),
+    _b('h1',           'Заголовок H1',    True,  _d_h1),
+    _b('img_alt',      'Alt у картинок',  True,  _d_img_alt),
 ]
 
 # Спец-блоки тех. страниц. Часть - ОБЯЗАТЕЛЬНЫЕ (баг, если нет): надёжные и
@@ -1213,9 +1258,10 @@ def _tech_profile_for(url: str) -> list:
 # странице. Шапка и подвал обязательны, H1 на главной строго не требуем.
 _MAIN_PROFILE = [
     *_HEADER,
-    _b('h1',     'Заголовок H1', False, _d_h1),
-    _b('forms',  'Формы',        False, _d_forms),
-    _b('search', 'Поиск',        False, _d_search),
+    _b('h1',      'Заголовок H1',   False, _d_h1),
+    _b('img_alt', 'Alt у картинок', True,  _d_img_alt),
+    _b('forms',   'Формы',          False, _d_forms),
+    _b('search',  'Поиск',          False, _d_search),
     *_FOOTER,
 ]
 
@@ -1461,6 +1507,13 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
                 note = 'в коде есть, но покупатель не видит (скрыто стилями/disabled)'
         if _photo_warn:
             note = _photo_names        # названия товаров с заглушкой
+        # «Alt у картинок»: в пояснение - адреса картинок без alt (компактно,
+        # первые 3 + «и ещё N», чтобы не растягивать отчёт).
+        if blk.key == 'img_alt' and required and not present:
+            _srcs = _imgs_no_alt_srcs(ctx.html)
+            note = '; '.join(_srcs[:3])
+            if len(_srcs) > 3:
+                note += f' и ещё {len(_srcs) - 3}'
         result.blocks.append(BlockResult(
             key=blk.key,
             label=blk.label,

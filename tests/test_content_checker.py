@@ -443,7 +443,7 @@ def test_search_page_h1_not_required():
     assert not rs['h1'].present and not rs['h1'].required        # «-», не баг
     # Контроль: на обычной тех. странице («О компании») H1 обязателен - его нет
     # → баг. Картинку добавляем, чтобы единственным багом остался именно H1.
-    about = f'<header><a href="tel:1">т</a></header><div><img src="/a.jpg">{long_text}</div>'
+    about = f'<header><a href="tel:1">т</a></header><div><img src="/a.jpg" alt="фото">{long_text}</div>'
     ra = check_content(about, 'tech', url='https://inmetprom.ru/about/')
     assert _by_key(ra)['h1'].required and not _by_key(ra)['h1'].present
     assert ra.bug_count == 1 and ra.bugs[0].key == 'h1'         # только H1
@@ -489,11 +489,29 @@ def test_tech_per_page_profiles():
     sr = check_content(base + '<input type="search">', 'tech',
                        url='https://inmetprom.ru/search/')
     assert _by_key(sr)['tech_search'].present
-    us = check_content(base + '<img src="a.jpg"><a href="/uslugi/x/">Услуга</a>', 'tech',
+    us = check_content(base + '<img src="a.jpg" alt="услуга"><a href="/uslugi/x/">Услуга</a>', 'tech',
                        url='https://inmetprom.ru/uslugi-metalloobrabotki/')
     bk = _by_key(us)
     assert bk['tech_images'].present and bk['tech_links'].present
     assert vac.bug_count == 0 and sr.bug_count == 0 and us.bug_count == 0
+
+
+def test_img_alt_required_everywhere():
+    """Все <img> должны иметь атрибут alt. Пустой alt="" – легален
+    (декоративные), data-alt не считается, комментарии не считаются."""
+    base = '<div class="breadcrumb">x</div><h1>T</h1>'
+    bad = check_content(
+        base + '<img src="a.jpg" alt="Фото"><img src="b.jpg" alt="">'
+               '<img src="c.jpg"><img src="d.jpg" data-alt="x">'
+               '<!-- <img src="e.jpg"> -->', 'custom')
+    blk = _by_key(bad)['img_alt']
+    assert not blk.present and blk.count == 2      # c.jpg и d.jpg – без alt
+    assert 'img_alt' in {b.key for b in bad.bugs}
+
+    ok = check_content(
+        base + '<img src="a.jpg" alt="Фото"><img alt src="b.jpg">', 'custom')
+    assert _by_key(ok)['img_alt'].present
+    assert 'img_alt' not in {b.key for b in ok.bugs}
 
 
 def test_extract_content_links_filters_and_dedup():
