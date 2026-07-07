@@ -158,7 +158,7 @@ st.divider()
 # ── Формы внутри целей ───────────────────────────────────────────────
 _with_forms = st.checkbox(
     'Сначала прогнать формы (чтобы поймать цели отправки форм)',
-    key=f'gc_forms_{_base}', value=False)
+    key=f'gc_forms_{_base}', value=True)
 st.caption('Если включено - перед проверкой целей отправятся тестовые заявки через '
            '«Проверку форм» (реальные заявки на почту), и цели отправки форм '
            'попадут в отчёт как «Сработала (формы)». Формы гоняются по основному '
@@ -209,6 +209,13 @@ with c1:
                  disabled=_alive or not _bok or not _selected):
         WORK.mkdir(parents=True, exist_ok=True)
         LOG_FILE.write_text('', encoding='utf-8')
+        # Удаляем ПРОШЛЫЙ сводный отчёт, чтобы, пока идёт новый прогон, не
+        # показывался устаревший файл (частая путаница: выбрали 6 сайтов, а
+        # виден отчёт от прошлого прогона на 2).
+        try:
+            (WORK / 'goals_report.xlsx').unlink(missing_ok=True)
+        except Exception:
+            pass
         env = dict(os.environ)
         env['PYTHONIOENCODING'] = 'utf-8'
         env['PYTHONUNBUFFERED'] = '1'
@@ -280,6 +287,9 @@ if _running:
     else:
         st.progress(0.02, text='Запуск браузера…')
     st.markdown('**Статус:** ⏳ идёт проверка… (страница обновляется сама)')
+    st.caption('Один сайт - около 3-5 минут, все сразу - до 20 минут (плюс время '
+               'на прогон форм, если галочка включена). Можно уйти на другие '
+               'вкладки - прогон не прервётся.')
 elif 'ВСЁ ГОТОВО' in log_txt:
     st.progress(1.0, text=f'Готово · целей поймано: {_goals_hit}')
     st.markdown('**Статус:** ✅ завершено')
@@ -304,6 +314,16 @@ if not _running and _REPORT.is_file():
         data=_REPORT.read_bytes(),
         file_name=f'Цели-{_base}-{datetime.now().strftime("%d.%m.%Y")}.xlsx',
         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        use_container_width=True,
+    )
+
+# Лог прогона (txt) - для разбора, если что-то не поймалось.
+if not _running and log_txt.strip():
+    st.download_button(
+        '⬇ Скачать лог прогона (txt)',
+        data=log_txt.encode('utf-8'),
+        file_name=f'Цели-{_base}-log-{datetime.now().strftime("%d.%m.%Y")}.txt',
+        mime='text/plain',
         use_container_width=True,
     )
 
