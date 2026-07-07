@@ -457,18 +457,26 @@ def run_check(pid, params, creds, log, progress):
             _autoclick = _run_autoclicker(pid, params, log)
 
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
-        _notifs = (
-            load_notifications(pid, 'yandex_webmaster', _nd)
-            + load_notifications(pid, 'gsc', _nd)
-            + load_notifications(pid, 'ya_business', _nd)
-            + load_notifications(pid, 'twogis', _nd)
-            + load_notifications(pid, 'google_accounts', _nd)
-        )
-        _metrika_reports = load_reports_for_period(pid, _nd) or []
+        # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых
+        # галочках: выключил сбор - листов «Уведомления» / «404 из Метрики» /
+        # «Ошибки сервисов» в отчёте нет (раньше данные прошлых прогонов
+        # вылезали из кеша даже с выключенными галочками).
+        if params['fetch_notifications']:
+            _notifs = (
+                load_notifications(pid, 'yandex_webmaster', _nd)
+                + load_notifications(pid, 'gsc', _nd)
+                + load_notifications(pid, 'ya_business', _nd)
+                + load_notifications(pid, 'twogis', _nd)
+                + load_notifications(pid, 'google_accounts', _nd)
+            )
+            _service_issues = load_issues(pid) or None
+            # Почтовые 404-отчёты Метрики собираются вместе с почтой
+            _metrika_reports = load_reports_for_period(pid, _nd) or []
+        else:
+            _notifs, _service_issues, _metrika_reports = [], None, []
         if _today_404:                       # сегодняшние 404 (API) - первыми
             _metrika_reports = [_today_404] + list(_metrika_reports)
         _metrika_reports = _metrika_reports or None
-        _service_issues = load_issues(pid) or None
         build_report(
             project_name=cfg['name'], started_at_ms=started_ms,
             finished_at_ms=finished_ms,
