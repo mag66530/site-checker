@@ -71,13 +71,23 @@ ACTIONS = {
              ['.breadcrumbs a[href^="tel:"], [class*="breadcrumb"] a[href^="tel:"]',
               'button:has-text("Показать больше"), a:has-text("Показать больше")',
               'a:has-text("ко всем категориям"), a:has-text("всем категориям")']),
+            # Листинг (категория с карточками): корзина/срочный заказ/«не нашли».
+            ('Листинг',   'https://stalmetural.ru/catalog/izgotovlenie-pruzhin/',
+             ['.add-to-cart, .one-click-to-buy, text=В корзину, text=Добавить в корзину',
+              'text=Срочный заказ, text=Быстрый заказ',
+              'text=Не нашли что искали, text=Не нашли']),
+            # Первый товар открываем, чтобы он попал в «Ранее просмотренные» второго.
+            ('Товар (труба)', 'https://stalmetural.ru/catalog/truba-profilnaya/2972110-truba-profilnaya-100kh10-mm-gost-8639-82-kvadratnaya/',
+             ['.one-click-to-buy', 'text=Добавить в корзину, text=В корзину']),
             ('Товар',     'https://stalmetural.ru/catalog/izgotovlenie-pruzhin/1285453-izgotovlenie-pruzhin-rastyazheniya/',
              ['.one-click-to-buy', '#call-back-form-product',
               '.copy-btn:has(.an-ico-link-price)',
               '[class*="favorite"], [class*="favourite"], [class*="to-fav"], button:has(.an-ico-heart)',
               '[class*="share"], .an-ico-share, button:has-text("Поделиться")',
-              'text=Добавить в корзину']),
+              '.add-to-cart, text=Добавить в корзину, text=В корзину']),
             ('Доставка',  'https://stalmetural.ru/delivery/', ['#call-back-form-delivery']),
+            ('Вакансии',  'https://stalmetural.ru/vacancy/',
+             ['text=Откликнуться, text=Отклик, button:has-text("Откликнуться")']),
             # 404: несуществующий адрес - должна сработать цель 404error
             ('Страница 404', 'https://stalmetural.ru/nesuschestvuyushaya-404-xyz/', []),
         ],
@@ -117,6 +127,8 @@ ACTIONS = {
               'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]',
               'text=Оставить отзыв, text=Написать отзыв, a:has-text("Отзыв")',
               'text=Нужна консультация, [class*="konsultac"]']),
+            ('Вакансии',  'https://inmetprom.ru/vakansii/',
+             ['text=Узнать подробнее, text=Откликнуться, text=Интересует вакансия']),
             ('Страница 404', 'https://inmetprom.ru/nesuschestvuyushaya-404-xyz/', []),
         ],
         'ожидаемые': [
@@ -311,8 +323,19 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
         b = pw.chromium.launch(headless=headless,
                                args=["--disable-blink-features=AutomationControlled",
                                      "--no-sandbox"])
+        # Прикидываемся обычным Chrome: часть сайтов (напр. inmetprom.ru) отдаёт
+        # 403 «голому» headless-браузеру. Реальный User-Agent + заголовки часто
+        # снимают такую блокировку.
+        _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
         ctx = b.new_context(locale='ru-RU', viewport={'width': 1440, 'height': 900},
-                            ignore_https_errors=_via_driver)
+                            ignore_https_errors=_via_driver, user_agent=_UA,
+                            extra_http_headers={
+                                'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
+                                'Accept': ('text/html,application/xhtml+xml,'
+                                           'application/xml;q=0.9,image/avif,'
+                                           'image/webp,*/*;q=0.8'),
+                            })
         ctx.add_init_script(
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
         page = ctx.new_page()
