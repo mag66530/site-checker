@@ -175,10 +175,16 @@ def _план_для_домена(домен: str) -> dict:
     }
 
 
+def _базовый(pid: str) -> str:
+    """Базовый проект для суб-проекта страны: smu-uz → smu (формы и их конфиг
+    едины для всех стран проекта, лежат под базовым кодом)."""
+    return (pid or '').split('-')[0]
+
+
 def _формные_цели(pid: str) -> set[str]:
     """Идентификаторы целей, привязанных к ОТПРАВКЕ форм в конфиге форм-тестера
     (их не триггерим здесь, чтобы не слать заявки)."""
-    p = ROOT / 'forms_tester' / 'projects' / pid / 'config.py'
+    p = ROOT / 'forms_tester' / 'projects' / _базовый(pid) / 'config.py'
     if not p.is_file():
         return set()
     txt = p.read_text(encoding='utf-8')
@@ -187,7 +193,7 @@ def _формные_цели(pid: str) -> set[str]:
 
 def _результаты_форм(pid: str) -> dict[str, str]:
     """Статусы целей из последнего отчёта форм (лист «Цели»): идентификатор → статус."""
-    f = ROOT / 'cache' / 'forms' / pid / 'log_forms.xlsx'
+    f = ROOT / 'cache' / 'forms' / _базовый(pid) / 'log_forms.xlsx'
     out: dict[str, str] = {}
     if not f.is_file():
         return out
