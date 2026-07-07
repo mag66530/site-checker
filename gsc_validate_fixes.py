@@ -194,16 +194,55 @@ async def _validate_error(page, rid: str, reason: dict, dry_run: bool) -> dict:
             newcheck = page.get_by_text(NEW_CHECK_TEXT, exact=False).first
         try:
             await newcheck.wait_for(state='visible', timeout=8000)
-            await newcheck.click()
-            res['status'] = 'ok'
-            res['message'] = '«Ошибка»: новая проверка запущена'
-            _log(f'  ✓ (Ошибка) новая проверка: {reason["name"][:50]}', 'ok')
+            # Клик по span всплывёт до кнопки; в headless надёжнее force +
+            # JS-фоллбэк (span сам по себе может не быть click-таргетом).
+            try:
+                await newcheck.click(timeout=6000)
+            except Exception:
+                await newcheck.evaluate('e => e.click()')
+            await page.wait_for_timeout(2500)
+
+            # ПОДТВЕРЖДЕНИЕ в диалоге - без него проверка НЕ запускается
+            # (кнопка «Начать новую проверку» лишь открывает окно). Тот же
+            # набор кнопок, что в обычном пути.
+            _confirmed = False
+            for ok in ('НАЧАТЬ ПРОВЕРКУ', 'Начать проверку', 'ПОНЯТНО', 'OK',
+                       'Подтвердить', 'Готово'):
+                try:
+                    b = page.get_by_role('button', name=ok)
+                    if await b.is_visible(timeout=1500):
+                        await b.click()
+                        _confirmed = True
+                        break
+                except Exception:
+                    pass
+
+            await page.wait_for_timeout(2000)
+            body = await page.inner_text('body')
+            _started = ('роверка' in body and
+                        ('началась' in body or 'идёт' in body.lower()
+                         or 'Идёт проверка' in body))
+            if _started or _confirmed:
+                res['status'] = 'ok'
+                res['message'] = '«Ошибка»: новая проверка запущена'
+                _log(f'  ✓ (Ошибка) новая проверка: {reason["name"][:50]}', 'ok')
+            else:
+                res['status'] = 'ok'
+                res['message'] = '«Ошибка»: клик сделан (подтверждение не распознано)'
+                _log(f'  ✓ (Ошибка) клик сделан: {reason["name"][:50]}', 'ok')
         except Exception:
             res['status'] = 'warn'
             res['message'] = '«Ошибка»: кнопки «Начать новую проверку» нет'
             _log('  (Ошибка) нет «Начать новую проверку»', 'warn')
 
-        # Назад дважды к таблице причин
+        # Вернуться к таблице причин. Диалог мог остаться открытым - сначала
+        # закрываем Esc (иначе go_back не уводит со страницы и фильтр потом
+        # не переключается).
+        try:
+            await page.keyboard.press('Escape')
+            await page.wait_for_timeout(600)
+        except Exception:
+            pass
         await page.go_back()
         await page.wait_for_timeout(1500)
         await page.go_back()
@@ -314,10 +353,13 @@ async def _switch_filter(page, data_value: str) -> bool:
     try:
         # 1) стрелка-дропдаун фильтра (видимая)
         if not await _click_visible('div.e2CuFe.mJra4.eU809d'):
+            _log('  фильтр: стрелка-дропдаун не найдена (изменился layout GSC?)',
+                 'warn')
             return False
         await page.wait_for_timeout(1500)
         # 2) пункт меню по data-value (видимый из открытого дропдауна)
         if not await _click_visible(f'[data-value="{data_value}"]'):
+            _log(f'  фильтр: пункт [data-value={data_value}] не найден', 'warn')
             return False
         await page.wait_for_timeout(3000)
         return True

@@ -43,6 +43,13 @@ def _pid_alive(pid) -> bool:
             return str(pid) in out
         except Exception:
             return False
+    # Linux (облако): завершённый дочерний процесс висит зомби, пока его не
+    # приберут, - os.kill(pid, 0) для него успешен и статус «идёт» не гас.
+    # Сначала прибираем зомби, потом проверяем.
+    try:
+        os.waitpid(pid, os.WNOHANG)
+    except Exception:
+        pass
     try:
         os.kill(pid, 0)
         return True
@@ -244,11 +251,18 @@ do_wm = st.checkbox('Прокликать Вебмастер', value=False)
 st.caption('Запуск фоновый - интерфейс сразу свободен. Можно уйти в чек-листы '
            'и работать параллельно, кликер крутится сам.')
 
+# Завершение определяем и по PID, и по метке в логе: даже если процесс
+# «завис» в таблице процессов, «ВСЁ ГОТОВО» в логе = работа кончилась.
 _alive = _pid_alive(_read_pid())
+_log_txt = ''
+if LOG_FILE.exists():
+    _log_txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore')
+_done = (DONE_MARK in _log_txt) or ('ОТМЕНЕНО' in _log_txt)
+_running = _alive and not _done
 
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
-    if st.button('Запустить', use_container_width=True, disabled=_alive):
+    if st.button('Запустить', use_container_width=True, disabled=_running):
         if not do_gsc and not do_wm:
             st.info('Отметь хотя бы один пункт выше.')
         elif not _cdp and not _cloud_session:
@@ -283,7 +297,7 @@ with _run_col:
             st.session_state['autoclick_started'] = datetime.now().strftime('%H:%M:%S')
             st.rerun()
 with _cancel_col:
-    if st.button('⛔ Отменить', use_container_width=True, disabled=not _alive):
+    if st.button('⛔ Отменить', use_container_width=True, disabled=not _running):
         _kill_tree(_read_pid())
         try:
             PID_FILE.unlink(missing_ok=True)
@@ -302,16 +316,12 @@ if st.session_state.get('autoclick_started'):
 
 st.button('🔄 Обновить лог', use_container_width=True)  # просто перерисовка
 
-if _alive:
+if _running:
     st.markdown('**Статус:** ⏳ идёт…')
-elif LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
+elif _log_txt.strip():
     st.markdown('**Статус:** ✅ завершено / остановлено')
 
-if LOG_FILE.exists():
-    txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore')
-    if txt.strip():
-        st.code('\n'.join(txt.splitlines()[-300:]), language='text')
-    else:
-        st.caption('Лог пуст - кликер ещё не запускали.')
+if _log_txt.strip():
+    st.code('\n'.join(_log_txt.splitlines()[-300:]), language='text')
 else:
-    st.caption('Лог появится после запуска.')
+    st.caption('Лог пуст - кликер ещё не запускали.')
