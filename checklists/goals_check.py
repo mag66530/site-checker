@@ -43,6 +43,7 @@ PROJECTS = {
     'imp': [
         ('imp',    'Россия · inmetprom.ru'),
         ('imp-uz', 'Узбекистан · inmetprom.uz'),
+        ('imp-az', 'Азербайджан · inmetprom.az'),
         ('imp-kz', 'Казахстан · inmetprom.kz'),
         ('imp-kg', 'Кыргызстан · inmetprom.kg'),
         ('imp-rb', 'Беларусь · inmetprom.by'),
@@ -265,27 +266,20 @@ if log_txt:
     tail = '\n'.join(log_txt.splitlines()[-25:])
     st.code(tail or ' ', language=None)
 
-# ── Результаты: по отчёту на каждый выбранный сайт ───────────────────
-_итоговые = st.session_state.get('goals_selected') or _selected
-if not _running and _итоговые:
-    _готовые = [(p, ROOT / 'cache' / 'goals' / p / 'goals_report.xlsx')
-                for p in _итоговые]
-    _готовые = [(p, r) for p, r in _готовые if r.is_file()]
-    if _готовые:
-        st.subheader('Результаты (Excel)')
-        st.caption('По одному отчёту на сайт. Листы: «Сводка» и «Цели Метрики» '
-                   '(таблица со статусом и пояснением по каждой цели).')
-        _метки = {p: l for p, l in _варианты}
-        for p, r in _готовые:
-            _страна = _метки.get(p, p).split(' · ')[0]
-            st.download_button(
-                f'⬇ {PROJECTS[_base].split(" ")[0]} · {_страна}',
-                data=r.read_bytes(),
-                file_name=f'Цели-{p}-{datetime.now().strftime("%d.%m.%Y")}.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                key=f'dl_{p}',
-                use_container_width=True,
-            )
+# ── Результаты: один сводный отчёт (лист «Сводка» + лист целей на сайт) ──
+_REPORT = WORK / 'goals_report.xlsx'
+if not _running and _REPORT.is_file():
+    st.subheader('Результаты (Excel)')
+    st.caption('Один файл: лист «Сводка» (итоги по каждому сайту) и по отдельному '
+               'листу целей на каждый проверенный сайт (РФ, УЗ, …) со статусом и '
+               'пояснением по каждой цели.')
+    st.download_button(
+        f'⬇ Скачать сводный отчёт по целям ({PROJECTS[_base].split(" ")[0]})',
+        data=_REPORT.read_bytes(),
+        file_name=f'Цели-{_base}-{datetime.now().strftime("%d.%m.%Y")}.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        use_container_width=True,
+    )
 
 if _running:
     time.sleep(3)

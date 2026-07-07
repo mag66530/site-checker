@@ -37,19 +37,13 @@ def _прогнать_формы(base: str, show: bool) -> None:
         _stamp(f'ФОРМЫ: не удалось прогнать ({e}) - продолжаю без них')
 
 
-def _прогон_одной(pid: str, gt, headless: bool, stop, idx: int, всего: int) -> int:
-    каталог = gt.загрузить_каталог(pid)
-    if not каталог:
-        _stamp(f'✗ Нет каталога целей catalogs/goals-{pid}.json')
-        return 0
-    _stamp(f'СТРАНА {idx}/{всего}: {каталог.get("проект")} '
-           f'(счётчик {каталог.get("счётчик")}, целей: {len(каталог.get("цели", []))})')
-    прогон = gt.выполнить_прогон(pid, headless=headless, log=_stamp, stop=stop)
-    _stamp(f'  сработавших идентификаторов: {len(прогон["fired"])}')
-    out = ROOT / 'cache' / 'goals' / pid / 'goals_report.xlsx'
-    gt.построить_отчёт(pid, каталог, прогон, out)
-    _stamp(f'  отчёт: {out}')
-    return len(прогон['fired'])
+_МЕТКИ = {'': 'РФ', 'uz': 'УЗ', 'az': 'АЗ', 'az2': 'АЗ-перевод', 'am': 'АМ',
+          'kg': 'КГ', 'kz': 'КЗ', 'rb': 'РБ'}
+
+
+def _метка(pid: str) -> str:
+    suf = pid.split('-', 1)[1] if '-' in pid else ''
+    return _МЕТКИ.get(suf, suf.upper() or 'РФ')
 
 
 def main() -> int:
@@ -96,12 +90,30 @@ def main() -> int:
                 break
             _прогнать_формы(b, a.show_browser)
 
+    результаты = []
     поймано = 0
     for i, pid in enumerate(projects, 1):
         if stop and stop():
             _stamp('⛔ Остановлено')
             break
-        поймано += _прогон_одной(pid, gt, not a.show_browser, stop, i, len(projects))
+        каталог = gt.загрузить_каталог(pid)
+        if not каталог:
+            _stamp(f'✗ Нет каталога целей catalogs/goals-{pid}.json')
+            continue
+        _stamp(f'СТРАНА {i}/{len(projects)}: {каталог.get("проект")} '
+               f'(счётчик {каталог.get("счётчик")}, целей: {len(каталог.get("цели", []))})')
+        прогон = gt.выполнить_прогон(pid, headless=not a.show_browser,
+                                     log=_stamp, stop=stop)
+        _stamp(f'  сработавших идентификаторов: {len(прогон["fired"])}')
+        поймано += len(прогон['fired'])
+        результаты.append((pid, каталог, прогон, _метка(pid)))
+
+    # Один сводный отчёт: лист «Сводка» + по листу целей на каждый сайт.
+    base = gt._базовый(projects[0])
+    out = ROOT / 'cache' / 'goals' / base / 'goals_report.xlsx'
+    if результаты:
+        gt.построить_сводный_отчёт(результаты, out)
+        _stamp(f'Отчёт (сводный, {len(результаты)} лист(ов) целей): {out}')
 
     _stamp(f'Всего сработавших идентификаторов по сайтам: {поймано}')
     _stamp('✅ ВСЁ ГОТОВО')
