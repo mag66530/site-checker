@@ -351,10 +351,15 @@ def run_check(pid, params, creds, log, progress):
                                            audit_html_sitemap)
                 _sm_url = (cfg.get('sitemap_url')
                            or f'https://{_main.host}/sitemap.xml')
+                # «Услуги» (п.6): тех.пути проекта с ключами услуг/производства.
+                _svc_keys = ('uslug', 'service', 'proizvodstvo', 'rabot')
+                _services = [p for p in get_tech_paths(pid)
+                             if any(k in (p or '').lower() for k in _svc_keys)]
                 _audit = asyncio.run(audit_sitemap(
                     _sm_url, _main.host, proxy_url=proxy_url,
                     known_categories=src.categories,
-                    known_filters=src.filters))
+                    known_filters=src.filters,
+                    known_services=_services))
                 _audit['lastmod_analysis'] = analyze_lastmod(pid, _audit)
                 _audit.pop('lastmod_dates', None)   # в отчёт даты не тащим
                 _idx_summary['sitemap_audit'] = _audit
@@ -362,12 +367,15 @@ def run_check(pid, params, creds, log, progress):
                     f'URL {_audit.get("total", 0)}, '
                     f'битых URL {len(_audit.get("bad_urls") or [])}, '
                     f'lastmod у {_audit.get("with_lastmod", 0)}')
+                if _audit.get('index_types'):
+                    log(f'Sitemap-индекс: типы {", ".join(_audit["index_types"])}')
                 _mc = _audit.get('missing_catalog') or {}
                 _n_miss = (len(_mc.get('categories') or [])
-                           + len(_mc.get('filters') or []))
+                           + len(_mc.get('filters') or [])
+                           + len(_mc.get('services') or []))
                 if _n_miss:
-                    log(f'❌ Sitemap: не хватает {_n_miss} категорий/фильтров '
-                        f'из выгрузки каталога')
+                    log(f'❌ Sitemap: не хватает {_n_miss} категорий/фильтров/'
+                        f'услуг из выгрузки')
             except Exception as _e:
                 log(f'⚠ Sitemap-аудит: {_e}')
             # HTML-карта сайта (доп. чек-лист)

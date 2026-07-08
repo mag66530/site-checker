@@ -56,15 +56,37 @@ def _norm_path(p: str) -> str:
     return '/' + (p or '').strip().strip('/').lower() + '/'
 
 
+# Классификация дочерних sitemap по имени файла (доп. чек-лист, п.5):
+# индекс должен дробить карту по типам страниц. Ключи ищем в имени loc.
+_SM_TYPE_KEYS = (
+    ('категории', ('categ', 'catalog', 'razdel', 'section', 'rubric')),
+    ('фильтры',   ('filter', 'tag', 'teg', 'prop')),
+    ('товары',    ('product', 'goods', 'tovar', 'item', 'element', 'offer')),
+    ('услуги',    ('uslug', 'service', 'proizvodstvo', 'rabot')),
+)
+
+
+def _sitemap_type(loc: str) -> str:
+    """Тип дочернего sitemap по имени файла; не опознан → 'прочее'.
+    Слово «sitemap» вырезаем: оно содержит подстроку «item» и иначе
+    ловило бы каждый файл в «товары»."""
+    low = (loc or '').lower().replace('sitemap', '')
+    for name, keys in _SM_TYPE_KEYS:
+        if any(k in low for k in keys):
+            return name
+    return 'прочее'
+
+
 async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                         known_categories=None, known_filters=None,
-                        log=None) -> dict:
+                        known_services=None, log=None) -> dict:
     """Скачать sitemap (с обходом индекса) и проверить структуру записей.
 
     Возвращает {'files': n, 'total': n, 'bad_urls': [{'url','why'}, …],
                 'with_lastmod': n, 'with_changefreq': n, 'with_priority': n,
                 'lastmod_dates': {url: lastmod}, 'is_index': bool,
                 'file_stats': [{'url','urls','bytes'}], 'truncated': bool,
+                'index_children': [{'url','type'}], 'index_types': [str],
                 'missing_catalog': {...}|None, 'error': str|None}."""
     import aiohttp
     from urllib.parse import urlsplit
@@ -72,7 +94,8 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
     out = {'files': 0, 'total': 0, 'bad_urls': [],
            'with_lastmod': 0, 'with_changefreq': 0, 'with_priority': 0,
            'lastmod_dates': {}, 'is_index': False, 'file_stats': [],
-           'truncated': False, 'missing_catalog': None, 'error': None}
+           'truncated': False, 'index_children': [], 'index_types': [],
+           'missing_catalog': None, 'error': None}
     my_host = _norm_host(host)
     sm_paths = set()          # нормализованные пути всех URL из sitemap
     seen, queue = set(), [root_url]
@@ -106,7 +129,13 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                 if _RE_INDEX.search(xml):
                     if u == root_url:
                         out['is_index'] = True
-                    queue.extend(_RE_SM_LOC.findall(xml))
+                    _children = _RE_SM_LOC.findall(xml)
+                    for _ch in _children:
+                        _ch = (_ch or '').strip()
+                        if _ch:
+                            out['index_children'].append(
+                                {'url': _ch, 'type': _sitemap_type(_ch)})
+                    queue.extend(_children)
                     continue
                 _file_urls = 0
                 for block in _RE_URL_BLOCK.finditer(xml):
@@ -151,16 +180,22 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
             if queue:
                 out['truncated'] = True
 
-        # ── Полнота: категории/фильтры из выгрузки каталога есть в sitemap ──
+        # Типы, на которые разбит индекс (п.5) - по именам дочерних файлов
+        out['index_types'] = sorted(
+            {c['type'] for c in out['index_children']})
+
+        # ── Полнота: категории/фильтры/услуги из выгрузки есть в sitemap ──
         # Только при полном обходе: при упоре в лимиты «отсутствие» пути
         # ничего не значит - он мог быть в непрочитанной части.
-        if (known_categories or known_filters) and not out['truncated']:
+        if ((known_categories or known_filters or known_services)
+                and not out['truncated']):
             def _missing(paths):
                 return [p for p in (paths or [])
                         if _norm_path(p) not in sm_paths]
             out['missing_catalog'] = {
                 'categories': _missing(known_categories)[:50],
                 'filters': _missing(known_filters)[:50],
+                'services': _missing(known_services)[:50],
             }
     except Exception as e:
         out['error'] = str(e)
