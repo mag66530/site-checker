@@ -57,12 +57,14 @@ async def _fetch_all(domains, proxy, log):
     способом ходит через прокси, который у проектов вроде СМУ обязателен). Качает
     параллельно (до 6 сразу). Возвращает {domain: (html, ошибка)} и печатает
     прогресс «[i/N]»."""
+    import base64
     import aiohttp
     from urllib.parse import urlparse
 
-    # aiohttp НЕ берёт логин/пароль из URL прокси (иначе - 407 Proxy Auth Required):
-    # креды нужно передать явно через proxy_auth=BasicAuth. Разбираем proxy-URL.
-    proxy_clean, proxy_auth = None, None
+    # aiohttp НЕ берёт логин/пароль из URL прокси, а proxy_auth не долетает до
+    # CONNECT-туннеля (HTTPS) → 407. Надёжно: сами кладём заголовок
+    # Proxy-Authorization в proxy_headers (он уходит в CONNECT). Разбираем proxy-URL.
+    proxy_clean, proxy_headers = None, None
     if proxy:
         pr = urlparse(proxy)
         if pr.hostname:
@@ -70,7 +72,9 @@ async def _fetch_all(domains, proxy, log):
             proxy_clean = (f"{_scheme}://{pr.hostname}:{pr.port}" if pr.port
                            else f"{_scheme}://{pr.hostname}")
             if pr.username:
-                proxy_auth = aiohttp.BasicAuth(pr.username, pr.password or "")
+                _tok = base64.b64encode(
+                    f"{pr.username}:{pr.password or ''}".encode()).decode()
+                proxy_headers = {"Proxy-Authorization": f"Basic {_tok}"}
         else:
             proxy_clean = proxy
 
@@ -89,7 +93,7 @@ async def _fetch_all(domains, proxy, log):
             async with sem:
                 try:
                     async with s.get(f"https://{dom}/", proxy=proxy_clean,
-                                     proxy_auth=proxy_auth,
+                                     proxy_headers=proxy_headers,
                                      allow_redirects=True) as r:
                         if r.status >= 400:
                             err = f"HTTP {r.status}"
