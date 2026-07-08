@@ -1693,7 +1693,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             _hyg_bad = bool(_blanket or _assets_closed)
             ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
             c = ws.cell(row=row, column=2)
-            c.value = 'Гигиена robots.txt (доп. чек-лист)'
+            c.value = 'Гигиена robots.txt'
             c.font = _font(size=13, bold=True, color=C.err if _hyg_bad else C.ok)
             c.fill = _fill(C.accent_soft)
             c.alignment = _align(indent=1)
@@ -1714,8 +1714,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 if _missing:
                     _line(f'⚠ Нет отдельных групп User-agent: '
                           f'{", ".join(_missing)} - роботы работают по общей '
-                          f'группе «*» (не ошибка, но доп. чек-лист требует '
-                          f'раздельные).', C.warn)
+                          f'группе «*».', C.warn)
                 else:
                     _line('✅ Отдельные группы User-agent для Яндекса и Google '
                           'заданы.', C.ok)
@@ -1802,7 +1801,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             _mc = aud.get('missing_catalog') or {}
             _miss = ((_mc.get('categories') or [])
                      + (_mc.get('filters') or []))
-            _sec_title('Sitemap: структура записей (ТЗ 3.4.2 + доп. чек-лист)',
+            _sec_title('Sitemap: структура записей (ТЗ 3.4.2)',
                        bool(aud.get('error') or _bad_urls or _over_proto
                             or _miss))
             if aud.get('error'):
@@ -1818,8 +1817,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                           f'{max(aud.get("files", 1) - 1, 0)} файлов.', C.ok)
                 elif _tot > 10000:
                     _line(f'⚠ Записей {_tot}, но sitemap - одиночный файл '
-                          f'без индекса; доп. чек-лист требует индекс с '
-                          f'разбивкой по типам страниц.', C.warn)
+                          f'без индекса; нужен индекс-файл с разбивкой '
+                          f'по типам страниц.', C.warn)
                 else:
                     _line('✅ Одиночный sitemap - допустимо, страниц немного.',
                           C.ok)
@@ -1830,8 +1829,9 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                           f'протокола (50 000 / 50 МБ).', C.err, bold=True)
                 for f in _over_dop:
                     _line(f'⚠ {f.get("url", "")} - {f.get("urls", 0)} URL, '
-                          f'{f.get("bytes", 0) // 1048576} МБ: больше лимита '
-                          f'доп. чек-листа (10 000 / 10 МБ на файл).', C.warn)
+                          f'{f.get("bytes", 0) // 1048576} МБ: больше '
+                          f'рекомендуемого лимита (10 000 ссылок / 10 МБ '
+                          f'на файл).', C.warn)
                 if _fstats and not _over_proto and not _over_dop:
                     _line('✅ Лимиты на файл соблюдены (до 10 000 ссылок '
                           'и 10 МБ).', C.ok)
@@ -1912,8 +1912,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         hm = indexing_summary.get('html_sitemap')
         if hm is not None:
             _hm_junk = hm.get('junk_links') or []
-            _sec_title('HTML-карта сайта (доп. чек-лист)',
-                       bool(_hm_junk))
+            _sec_title('HTML-карта сайта', bool(_hm_junk))
             if hm.get('status') != 200:
                 _line(f'⚠ HTML-карта не найдена по типовым адресам '
                       f'(/sitemap/, /sitemap.html) - последний ответ '
@@ -1948,8 +1947,10 @@ def _issue_groups(pages, attr, key):
     return sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
 
 
-def _render_issue_groups(ws, row, groups, color, max_urls=100):
-    """Строка-проблема (текст + сколько страниц), под ней - город/тип/URL."""
+def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None):
+    """Строка-проблема (текст + сколько страниц), под ней - город/тип/URL.
+    extra(r) - необязательный текст в последнюю колонку (что нашлось на
+    странице), чтобы было видно контекст проблемы, а не только URL."""
     for text, rs in groups:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
@@ -1966,7 +1967,7 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100):
                 (r.city or '-', {'size': 9, 'color': C.text_muted}),
                 (r.type_label, {'size': 9, 'color': C.text_muted}),
                 (r.url, {'size': 9, 'color': C.accent, 'underline': 'single'}),
-                ('', {}),
+                (extra(r) if extra else '', {'size': 9, 'color': C.text_soft}),
             ], 2):
                 cell = ws.cell(row=row, column=ci)
                 cell.value = val
@@ -2160,6 +2161,18 @@ def _build_markup_sheet(wb, results):
     ws.row_dimensions[row].height = 26
     row += 2
 
+    # Что реально нашлось на странице - чтобы было видно: «нет разметки»
+    # значит нет НИ ОДНОГО типа из требуемых, а не «часть есть».
+    def _markup_found(r):
+        m = getattr(r, 'markup', None) or {}
+        bits = []
+        if m.get('micro_types'):
+            bits.append('microdata: ' + ', '.join(m['micro_types']))
+        if m.get('ld_types'):
+            bits.append('JSON-LD: ' + ', '.join(m['ld_types']))
+        return ('найдено на странице - ' + ' · '.join(bits)
+                if bits else 'Schema.org-разметки на странице нет вообще')
+
     _meta_section_title(ws, row, f'Проблемы разметки  ({len(bad)})',
                         C.err if bad else C.ok)
     row += 1
@@ -2169,13 +2182,15 @@ def _build_markup_sheet(wb, results):
         row += 2
     else:
         row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err)
+            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err,
+            extra=_markup_found)
 
     if warned:
         _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
         row += 1
         row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn)
+            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn,
+            extra=_markup_found)
 
 
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
@@ -3575,11 +3590,14 @@ def build_report(
             ws4.auto_filter.ref = f'A{hdr_row}:H{row_idx - 1}'
 
     # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 5: Уведомления (Вебмастер + GSC) - если есть данные
+    # ЛИСТ 5: Уведомления (Вебмастер + GSC) - если сбор включён
     # ═══════════════════════════════════════════════════════════════
-    # Лист «Уведомления» добавляем всегда (при пустых данных - заглушка).
+    # notifications=None - сбор уведомлений был ВЫКЛЮЧЕН, листа нет.
+    # notifications=[] - сбор включён, писем нет: лист с заглушкой
+    # («проверено, писем нет» - это результат, а не отсутствие проверки).
     # Сюда же идут ошибки из Вебмастера по API (секция «Вебмастер»).
-    _build_notifications_sheet(wb, notifications, service_issues)
+    if notifications is not None or service_issues:
+        _build_notifications_sheet(wb, notifications, service_issues)
 
     # ЛИСТ: «Автокликер» - итоги перекликивания ошибок (если запускался).
     _build_autoclick_sheet(wb, autoclick)

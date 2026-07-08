@@ -568,7 +568,10 @@ def run_check(pid, params, creds, log, progress):
             project_name=cfg['name'], started_at_ms=started_ms,
             finished_at_ms=finished_ms,
             selected_subdomains=plan.selected_subdomains, results=results,
-            output_path=report_path, notifications=_notifs or None,
+            # None = сбор выключен (листа «Уведомления» не будет);
+            # [] = сбор включён, писем нет (лист с заглушкой останется)
+            output_path=report_path,
+            notifications=(_notifs if params['fetch_notifications'] else None),
             metrika_reports=_metrika_reports,
             metrika_data_date=(_m404_disp if _today_404
                                else get_latest_available_date(pid)),
