@@ -1,240 +1,240 @@
-domain,city,phone_seo,phone_ad,phone_common,all_phones,email,address
-inmetprom.ru,Москва,+7 (499) 130-18-36,+7 (495) 755-38-06,+7 (495) 755-36-28,4957553628;9037553628;4957553806;9037553806;4991301836,msk@inmetprom.ru,"Рязанский проспект, 86/1с1"
-spb.inmetprom.ru,Санкт-Петербург,+7 (812) 703-86-99,+7 (812) 740-66-06,+7 (812) 983-53-36,8129835336;9602835336;8127406606;9052006606;8127038699,spb@inmetprom.ru,"набережная Обводного канала, 64к2"
-novosibirsk.inmetprom.ru,Новосибирск,+7 (383) 263-33-69,+7 (383) 263-15-58,+7 (383) 249-82-56,3832498256;9628298256;3832631558;9039001558;3832633369,nsk@inmetprom.ru,"Фабричная улица, 16"
-ekaterinburg.inmetprom.ru,Екатеринбург,+7 (343) 266-33-16,+7 (343) 266-33-79,+7 (343) 202-38-68,3432023868;9506313868;3432663379;9030863379;3432663316,ekb@inmetprom.ru,"переулок Автоматики, 4"
-kazan.inmetprom.ru,Казань,,,+7 (843) 253-28-86,8432532886;9033052886,kazan@inmetprom.ru,"Солдатская улица, 8"
-krasnoyarsk.inmetprom.ru,Красноярск,,,+7 (391) 296-81-18,3912968118;9059768118,krasnoyarsk@inmetprom.ru,"2-я Брянская улица, 59/6"
-nizhny-novgorod.inmetprom.ru,Нижний Новгород,+7 (831) 414-03-29,+7 (831) 414-02-66,+7 (831) 213-68-80,8312136880;9632306880;8314140266;9036010266;8314140329,nizhny-novgorod@inmetprom.ru,"Электровозная улица, 7"
-chelyabinsk.inmetprom.ru,Челябинск,+7 (351) 216-37-88,+7 (351) 216-30-85,+7 (351) 223-63-80,3512236380;9191236380;3512163085;9624853085;3512163788,chelyabinsk@inmetprom.ru,"1-я Потребительская улица, 12/2"
-ufa.inmetprom.ru,Уфа,,,+7 (347) 299-64-67,3472996467;9608006467,ufa@inmetprom.ru,"улица Шота Руставели, 49"
-samara.inmetprom.ru,Самара,+7 (846) 221-69-36,+7 (846) 221-03-39,+7 (846) 267-10-72,8462671072;9053001072;8462210339;9033010339;8462216936,samara@inmetprom.ru,"проезд Мальцева, 7"
-rostov-na-donu.inmetprom.ru,Ростов-на-Дону,,,+7 (863) 206-66-28,8632066628;9662066628,rostov@inmetprom.ru,"Очаковская улица, 39"
-krasnodar.inmetprom.ru,Краснодар,+7 (861) 944-16-88,+7 (861) 944-17-67,+7 (861) 944-64-28,8619446428;9034116428;8619441767;9034111767;8619441688,krasnodar@inmetprom.ru,"улица Коммунаров, 31/1"
-omsk.inmetprom.ru,Омск,,,+7 (381) 263-38-19,3812633819;9620583819,omsk@inmetprom.ru,"Кемеровская улица, 121"
-voronezh.inmetprom.ru,Воронеж,,,+7 (473) 251-63-88,4732516388;9036516388,voronezh@inmetprom.ru,"Московский проспект, 4"
-perm.inmetprom.ru,Пермь,+7 (342) 259-19-88,+7 (342) 259-27-70,+7 (342) 259-20-56,3422592056;9641902056;3422592770;9641902770;3422591988,perm@inmetprom.ru,"улица Чкалова, 9"
-volgograd.inmetprom.ru,Волгоград,,,+7 (844) 260-58-86,8442605886;9627595886,volgograd@inmetprom.ru,"улица Канунникова, 6/1"
-donetsk.inmetprom.ru,Донецк,,,+7 (903) 755-36-28,9037553628,doneck@inmetprom.ru,"улица Фёдора Зайцева, 46А"
-saratov.inmetprom.ru,Саратов,,,+7 (845) 253-12-30,8452531230;9033281230,saratov@inmetprom.ru,"Ново-Астраханское шоссе, 1"
-tyumen.inmetprom.ru,Тюмень,+7 (345) 253-13-19,+7 (345) 253-02-78,+7 (345) 253-32-49,3452533249;9634523249;3452530278;9634520278;3452531319,tyumen@inmetprom.ru,"улица 30 лет Победы, 38А"
-tolyatti.inmetprom.ru,Тольятти,,,+7 (848) 241-16-88,8482411688;9626111688,tolyatti@inmetprom.ru,"улица Автостроителей, 68А"
-mahachkala.inmetprom.ru,Махачкала,,,+7 (903) 755-36-28,9037553628,mahachkala@inmetprom.ru,"улица Эльзы Ибрагимовой, 2"
-barnaul.inmetprom.ru,Барнаул,,,+7 (385) 225-16-80,3852251680;9039476680,barnaul@inmetprom.ru,"проспект Калинина, 116/1"
-izhevsk.inmetprom.ru,Ижевск,,,+7 (341) 290-61-97,3412906197;9090606197,izhevsk@inmetprom.ru,"улица Азина, 1"
-habarovsk.inmetprom.ru,Хабаровск,,,+7 (421) 268-06-65,4212680665;9098020665,khabarovsk@inmetprom.ru,"Большая улица, 88"
-ulyanovsk.inmetprom.ru,Ульяновск,,,+7 (842) 273-00-16,8422730016;9053490016,ulianovsk@inmetprom.ru,"1-й переулок Мира, 2"
-irkutsk.inmetprom.ru,Иркутск,,,+7 (395) 293-06-68,3952930668;9642180668,irkutsk@inmetprom.ru,"Байкальская улица, 105А"
-vladivostok.inmetprom.ru,Владивосток,,,+7 (423) 254-01-18,4232540118;9025240118,vladivostok@inmetprom.ru,"Запорожская улица, 77"
-yaroslavl.inmetprom.ru,Ярославль,,,+7 (485) 259-50-88,4852595088;9066395088,yaroslavl@inmetprom.ru,"Полиграфическая улица, 27/97"
-sevastopol.inmetprom.ru,Севастополь,,,+7 (869) 288-98-68,8692889868,krym@inmetprom.ru,"улица Маршала Бирюзова, 42"
-stavropol.inmetprom.ru,Ставрополь,,,+7 (865) 269-28-86,8652692886;9064792886,stavropol@inmetprom.ru,"улица Доваторцев, 30Б"
-kemerovo.inmetprom.ru,Кемерово,,,+7 (384) 224-01-60,3842240160;9618660160,kemerovo@inmetprom.ru,"улица Шестакова, 6"
-tomsk.inmetprom.ru,Томск,,,+7 (382) 222-69-84,3822226984;9039556984,tomsk@inmetprom.ru,"Энергетическая улица, 6А"
-naberezhnye-chelny.inmetprom.ru,Набережные челны,,,+7 (855) 220-03-53,8552200353;9673790353,naberezhnye-chelny@inmetprom.ru,"Сармановский тракт, 56"
-orenburg.inmetprom.ru,Оренбург,,,+7 (353) 220-08-85,3532200885;9033600885,orenburg@inmetprom.ru,"улица Цвиллинга, 46"
-novokuznetsk.inmetprom.ru,Новокузнецк,,,+7 (384) 358-33-79,3843583379;9618663379,novokuzneck@inmetprom.ru,"Колхозный проезд, 1"
-ryazan.inmetprom.ru,Рязань,,,+7 (491) 299-06-88,4912990688;9038390688,ryazan@inmetprom.ru,"Московское шоссе, 39к5"
-cheboksary.inmetprom.ru,Чебоксары,,,+7 (835) 248-09-38,8352480938;9033220938,cheboksary@inmetprom.ru,"улица Правая Набережная Сугутки, 7"
-kaliningrad.inmetprom.ru,Калининград,,,+7 (401) 237-60-86,4012376086;9062376086,kaliningrad@inmetprom.ru,"Ленинский проспект, 131"
-penza.inmetprom.ru,Пенза,,,+7 (841) 230-08-89,8412300889;9033230889,penza@inmetprom.ru,"Московская улица, 29"
-lipetsk.inmetprom.ru,Липецк,,,+7 (474) 237-78-60,4742377860;9036437860,lipetsk@inmetprom.ru,"площадь Плеханова, 3"
-kirov.inmetprom.ru,Киров,,,+7 (833) 220-65-58,8332206558;9642506558,kirov@inmetprom.ru,"улица Володарского, 171"
-astrahan.inmetprom.ru,Астрахань,,,+7 (851) 269-02-93,8512690293;9033216293,astrahan@inmetprom.ru,"Бахтемирская улица, 5"
-tula.inmetprom.ru,Тула,,,+7 (487) 271-68-18,4872716818;9674316818,tula@inmetprom.ru,"улица Мосина, 2В"
-sochi.inmetprom.ru,Сочи,,,+7 (862) 291-73-66,8622917366;9667757366,sochi@inmetprom.ru,"Московская улица, 22"
-kursk.inmetprom.ru,Курск,,,+7 (471) 222-08-26,4712220826;9623800826,kursk@inmetprom.ru,"Верхняя Луговая улица, 24"
-ulan-ude.inmetprom.ru,Улан-Удэ,,,+7 (395) 293-06-68,3952930668;9642180668,ulan-ude@inmetprom.ru,"улица Кирова, 26"
-mariupol.inmetprom.ru,Мариуполь,,,+7 (903) 755-36-28,9037553628,mariupol@inmetprom.ru,"улица Апатова, 136"
-surgut.inmetprom.ru,Сургут,,,+7 (346) 270-58-68,3462705868;9088905868,surgut@inmetprom.ru,"улица 30 лет Победы, 44/А"
-tver.inmetprom.ru,Тверь,,,+7 (482) 241-76-67,4822417667;9036317667,tver@inmetprom.ru,"Старицкое шоссе, 15"
-lugansk.inmetprom.ru,Луганск,,,+7 (903) 755-36-28,9037553628,lugansk@inmetprom.ru,"Советская улица, 48"
-magnitogorsk.inmetprom.ru,Магнитогорск,,,+7 (351) 223-63-80,3512236380;9191236380,magnitogorsk@inmetprom.ru,"проспект Ленина, 89"
-bryansk.inmetprom.ru,Брянск,,,+7 (483) 237-08-81,4832370881;9051770881,bryansk@inmetprom.ru,"Красноармейская улица, 126"
-yakutsk.inmetprom.ru,Якутск,,,+7 (411) 224-02-16,4112240216;9681540216,yakutsk@inmetprom.ru,"улица Орджоникидзе, 20"
-nizhniy-tagil.inmetprom.ru,Нижний Тагил,,,+7 (343) 202-38-68,3432023868;9506313868,nizhniy-tagil@inmetprom.ru,"улица Ильича, 1"
-ivanovo.inmetprom.ru,Иваново,,,+7 (493) 234-31-96,4932343196;9051093196,ivanovo@inmetprom.ru,"Лежневская улица, 183"
-simferopol.inmetprom.ru,Симферополь,,,+7 (869) 288-98-68,8692889868,simferopol@inmetprom.ru,"Севастопольская улица, 62Б"
-vladimir.inmetprom.ru,Владимир,,,+7 (903) 755-36-28,9037553628,vladimir@inmetprom.ru,"улица Мира, 61А"
-chita.inmetprom.ru,Чита,,,+7 (302) 224-53-06,3022245306;9681605306,chita@inmetprom.ru,"улица 9 Января, 6"
-kaluga.inmetprom.ru,Калуга,,,+7 (484) 259-51-86,4842595186;9036365186,kaluga@inmetprom.ru,"улица Плеханова, 67"
-belgorod.inmetprom.ru,Белгород,,,+7 (472) 277-08-66,4722770866;9623070866,belgorod@inmetprom.ru,"улица Мичурина, 56"
-saransk.inmetprom.ru,Саранск,,,+7 (831) 213-68-80,8312136880;9632306880,saransk@inmetprom.ru,"улица Терешковой, 7А"
-volzhskiy.inmetprom.ru,Волжский,,,+7 (844) 260-58-86,8442605886;9627595886,volzhskiy@inmetprom.ru,"бульвар Профсоюзов, 30А"
-cherepovets.inmetprom.ru,Череповец,,,+7 (817) 256-95-88,8172569588;9636469588,cherepovets@inmetprom.ru,"улица Стройиндустрии, 4с2"
-vologda.inmetprom.ru,Вологда,,,+7 (817) 256-95-88,8172569588;9636469588,vologda@inmetprom.ru,"улица Герцена, 56"
-vladikavkaz.inmetprom.ru,Владикавказ,,,+7 (865) 269-28-86,8652692886;9064792886,vladikavkaz@inmetprom.ru,"Московская улица, 14"
-smolensk.inmetprom.ru,Смоленск,,,+7 (481) 263-02-69,4812630269;9036490269,smolensk@inmetprom.ru,"улица Чаплина, 12"
-kurgan.inmetprom.ru,Курган,,,+7 (352) 222-77-36,3522227736;9658657736,kurgan@inmetprom.ru,"Половинская улица, 10А"
-arhangelsk.inmetprom.ru,Архангельск,,,+7 (818) 246-01-69,8182460169;9095560169,arhangelsk@inmetprom.ru,"Троицкий проспект, 65"
-oryol.inmetprom.ru,Орёл,,,+7 (486) 278-01-69,4862780169;9036370169,orel@inmetprom.ru,"1-я Курская улица, 27"
-nizhnevartovsk.inmetprom.ru,Нижневартовск,,,+7 (346) 667-66-53,3466676653;9678976653,nizhnevartovsk@inmetprom.ru,"улица Кузоваткина, 5с8"
-sterlitamak.inmetprom.ru,Стерлитамак,,,+7 (347) 299-64-67,3472996467;9608006467,sterlitamak@inmetprom.ru,"Коммунистическая улица, 51"
-groznyy.inmetprom.ru,Грозный,,,+7 (865) 269-28-86,8652692886;9064792886,groznyy@inmetprom.ru,"проспект Ахмат-Хаджи Абдулхамидовича Кадырова, 224/1"
-murmansk.inmetprom.ru,Мурманск,,,+7 (815) 260-02-79,8152600279;9646800279,murmansk@inmetprom.ru,"улица Коминтерна, 5"
-kostroma.inmetprom.ru,Кострома,,,+7 (494) 230-02-13,4942300213;9036346213,kostroma@inmetprom.ru,"проспект Мира, 21"
-komsomolsk-na-amure.inmetprom.ru,Комсомольск-на-Амуре,,,+7 (421) 268-06-65,4212680665;9098020665,komsomolsk-na-amure@inmetprom.ru,"улица Парижской Коммуны, 28"
-petrozavodsk.inmetprom.ru,Петрозаводск,,,+7 (812) 983-53-36,8129835336;9602835336,petrozavodsk@inmetprom.ru,"Лесной проспект, 51"
-novorossiysk.inmetprom.ru,Новороссийск,,,+7 (861) 767-46-09,8617674609;9054774609,novorossijsk@inmetprom.ru,"Анапское шоссе, 15"
-tambov.inmetprom.ru,Тамбов,,,+7 (475) 243-53-79,4752435379;9641355379,tambov@inmetprom.ru,"Коммунальная улица, 21А"
-yoshkar-ola.inmetprom.ru,Йошкар-Ола,,,+7 (843) 253-28-86,8432532886;9033052886,yoshkar-ola@inmetprom.ru,"улица Чехова, 61"
-bratsk.inmetprom.ru,Братск,,,+7 (395) 293-06-68,3952930668;9642180668,bratsk@inmetprom.ru,"улица БЛПК, 9А"
-taganrog.inmetprom.ru,Таганрог,,,+7 (863) 206-66-28,8632066628;9662066628,taganrog@inmetprom.ru,"Октябрьская улица, 17"
-dzerzhinsk.inmetprom.ru,Дзержинск,,,+7 (831) 213-68-80,8312136880;9632306880,dzerzhinsk@inmetprom.ru,"проспект Ленинского Комсомола, 48"
-shahty.inmetprom.ru,Шахты,,,+7 (863) 206-66-28,8632066628;9662066628,shahty@inmetprom.ru,"Пролетарская улица, 188"
-nalchik.inmetprom.ru,Нальчик,,,+7 (865) 269-28-86,8652692886;9064792886,nalchik@inmetprom.ru,"улица Чернышевского, 180А"
-blagoveshchensk.inmetprom.ru,Благовещенск,,,+7 (416) 235-91-53,4162359153;9098169153,blagoveshchensk@inmetprom.ru,"Набережная улица, 32"
-orsk.inmetprom.ru,Орск,,,+7 (353) 220-08-85,3532200885;9033600885,orsk@inmetprom.ru,"улица Металлистов, 1"
-nizhnekamsk.inmetprom.ru,Нижнекамск,,,+7 (843) 253-28-86,8432532886;9033052886,nizhnekamsk@inmetprom.ru,"проспект Химиков, 45А"
-angarsk.inmetprom.ru,Ангарск,,,+7 (395) 293-06-68,3952930668;9642180668,angarsk@inmetprom.ru,"улица Чайковского, 1А"
-korolyov.inmetprom.ru,Королёв,,,+7 (495) 755-36-28,4957553628;9037553628,info@inmetprom.ru,"улица Богомолова, 3А"
-novgorod.inmetprom.ru,Великий Новгород,,,+7 (816) 268-61-86,8162686186;9633686186,velikij-novgorod@inmetprom.ru,"улица Химиков, 13"
-staryy-oskol.inmetprom.ru,Старый Оскол,,,+7 (472) 277-08-66,4722770866;9623070866,staryy-oskol@inmetprom.ru,"Комсомольский проспект, 73"
-syktyvkar.inmetprom.ru,Сыктывкар,,,+7 (821) 225-13-69,8212251369;9658601369,syktyvkar@inmetprom.ru,"Интернациональная улица, 131"
-balashiha.inmetprom.ru,Балашиха,,,+7 (495) 755-36-28,4957553628;9037553628,balashiha@inmetprom.ru,"Новая улица, 22А"
-prokopevsk.inmetprom.ru,Прокопьевск,,,+7 (384) 224-01-60,3842240160;9618660160,prokopevsk@inmetprom.ru,"Институтская улица, 106А"
-himki.inmetprom.ru,Химки,,,+7 (495) 755-36-28,4957553628;9037553628,himki@inmetprom.ru,"Московская улица, 14А"
-pskov.inmetprom.ru,Псков,,,+7 (812) 983-53-36,8129835336;9602835336,pskov@inmetprom.ru,"Индустриальная улица, 9/1к"
-biysk.inmetprom.ru,Бийск,,,+7 (385) 225-16-80,3852251680;9039476680,biysk@inmetprom.ru,"Советская улица, 212/2"
-engels.inmetprom.ru,Энгельс,,,+7 (845) 253-12-30,8452531230;9033281230,engels@inmetprom.ru,"проспект Фридриха Энгельса, 11А"
-rybinsk.inmetprom.ru,Рыбинск,,,+7 (485) 259-50-88,4852595088;9066395088,rybinsk@inmetprom.ru,"проспект Ленина, 156А"
-balakovo.inmetprom.ru,Балаково,,,+7 (845) 253-12-30,8452531230;9033281230,balakovo@inmetprom.ru,"улица Академика Жук, 10А"
-severodvinsk.inmetprom.ru,Северодвинск,,,+7 (818) 246-01-69,8182460169;9095560169,severodvinsk@inmetprom.ru,"улица Плюснина, 11"
-armavir.inmetprom.ru,Армавир,,,+7 (861) 944-64-28,8619446428;9034116428,armavir@inmetprom.ru,"улица Лавриненко, 100"
-podolsk.inmetprom.ru,Подольск,,,+7 (495) 755-36-28,4957553628;9037553628,podolsk@inmetprom.ru,"улица Клемента Готвальда, 6В"
-abakan.inmetprom.ru,Абакан,,,+7 (390) 231-32-36,3902313236;9639546236,abakan@inmetprom.ru,"улица Пушкина, 165"
-yuzhno-sahalinsk.inmetprom.ru,Южно-Сахалинск,,,+7 (424) 244-06-88,4242440688;9621200688,yuzhno-sahalinsk@inmetprom.ru,"Комсомольская улица, 259В"
-petropavlovsk-kamchatskiy.inmetprom.ru,Петропавловск-Камчатский,,,+7 (421) 268-06-65,4212680665;9098020665,petropavlovsk-kamchatskiy@inmetprom.ru,"улица Беринга, 115А"
-syzran.inmetprom.ru,Сызрань,,,+7 (846) 267-10-72,8462671072;9053001072,syzran@inmetprom.ru,"Советская улица, 34"
-norilsk.inmetprom.ru,Норильск,,,+7 (391) 296-81-18,3912968118;9059768118,norilsk@inmetprom.ru,"Ленинский проспект, 35"
-zlatoust.inmetprom.ru,Златоуст,,,+7 (351) 223-63-80,3512236380;9191236380,zlatoust@inmetprom.ru,"улица Скворцова, 7"
-kamensk-uralskiy.inmetprom.ru,Каменск-Уральский,,,+7 (343) 202-38-68,3432023868;9506313868,kamensk-uralskiy@inmetprom.ru,"4-я Пятилетка улица, 49"
-mytishchi.inmetprom.ru,Мытищи,,,+7 (495) 755-36-28,4957553628;9037553628,mytishchi@inmetprom.ru,"улица Колпакова, 24А"
-lyubertsy.inmetprom.ru,Люберцы,,,+7 (495) 755-36-28,4957553628;9037553628,lyubertsy@inmetprom.ru,"Новая улица, с9А"
-volgodonsk.inmetprom.ru,Волгодонск,,,+7 (863) 206-66-28,8632066628;9662066628,volgodonsk@inmetprom.ru,"Пионерская улица, 82"
-novocherkassk.inmetprom.ru,Новочеркасск,,,+7 (863) 206-66-28,8632066628;9662066628,novocherkassk@inmetprom.ru,"Харьковское шоссе, 7"
-nahodka.inmetprom.ru,Находка,,,+7 (423) 254-01-18,4232540118;9025240118,nahodka@inmetprom.ru,"Школьная улица, 6"
-ussuriysk.inmetprom.ru,Уссурийск,,,+7 (423) 254-01-18,4232540118;9025240118,ussuriysk@inmetprom.ru,"улица Некрасова, 252"
-berezniki.inmetprom.ru,Березники,,,+7 (342) 259-20-56,3422592056;9641902056,berezniki@inmetprom.ru,"улица Химиков, 7"
-salavat.inmetprom.ru,Салават,,,+7 (347) 299-64-67,3472996467;9608006467,salavat@inmetprom.ru,"бульвар Космонавтов, 40"
-elektrostal.inmetprom.ru,Электросталь,,,+7 (495) 755-36-28,4957553628;9037553628,elektrostal@inmetprom.ru,"проспект Ленина, 25"
-kerch.inmetprom.ru,Керчь,,,+7 (869) 288-98-68,8692889868,kerch@inmetprom.ru,"улица Кирова, 45"
-miass.inmetprom.ru,Миасс,,,+7 (351) 223-63-80,3512236380;9191236380,miass@inmetprom.ru,"улица Богдана Хмельницкого, 26А"
-melitopol.inmetprom.ru,Мелитополь,,,+7 (903) 755-36-28,9037553628,melitopol@inmetprom.ru,"улица Фрунзе, 25"
-pervouralsk.inmetprom.ru,Первоуральск,,,+7 (343) 202-38-68,3432023868;9506313868,pervouralsk@inmetprom.ru,"улица Ватутина, 72"
-rubtsovsk.inmetprom.ru,Рубцовск,,,+7 (385) 225-16-80,3852251680;9039476680,rubtsovsk@inmetprom.ru,"переулок Улежникова, 3Б"
-almetevsk.inmetprom.ru,Альметьевск,,,+7 (843) 253-28-86,8432532886;9033052886,almetevsk@inmetprom.ru,"улица Радищева, 45"
-kovrov.inmetprom.ru,Ковров,,,+7 (495) 755-36-28,4957553628;9037553628,kovrov@inmetprom.ru,"улица Абельмана, 16"
-kolomna.inmetprom.ru,Коломна,,,+7 (495) 755-36-28,4957553628;9037553628,kolomna@inmetprom.ru,"площадь Восстания, 7"
-maykop.inmetprom.ru,Майкоп,,,+7 (861) 944-64-28,8619446428;9034116428,maykop@inmetprom.ru,"Шоссейная улица, 74"
-pyatigorsk.inmetprom.ru,Пятигорск,,,+7 (865) 269-28-86,8652692886;9064792886,pyatigorsk@inmetprom.ru,"Оранжерейный проезд, 14"
-odintsovo.inmetprom.ru,Одинцово,,,+7 (495) 755-36-28,4957553628;9037553628,odintsovo@inmetprom.ru,"Садовая улица, 3Б"
-kopeysk.inmetprom.ru,Копейск,,,+7 (351) 223-63-80,3512236380;9191236380,kopeysk@inmetprom.ru,"проспект Славы, 10"
-hasavyurt.inmetprom.ru,Хасавюрт,,,+7 (495) 755-36-28,4957553628;9037553628,hasavyurt@inmetprom.ru,"улица Тотурбиева, 206"
-novomoskovsk.inmetprom.ru,Новомосковск,,,+7 (487) 271-68-18,4872716818;9674316818,novomoskovsk@inmetprom.ru,"улица Маяковского, 30"
-kislovodsk.inmetprom.ru,Кисловодск,,,+7 (865) 269-28-86,8652692886;9064792886,kislovodsk@inmetprom.ru,"проспект Победы, 33А"
-serpuhov.inmetprom.ru,Серпухов,,,+7 (495) 755-36-28,4957553628;9037553628,serpuhov@inmetprom.ru,"улица Пушечная, 16А"
-novocheboksarsk.inmetprom.ru,Новочебоксарск,,,+7 (835) 248-09-38,8352480938;9033220938,novocheboksarsk@inmetprom.ru,"Советская улица, 53А"
-nefteyugansk.inmetprom.ru,Нефтеюганск,,,+7 (346) 270-58-68,3462705868;9088905868,nefteyugansk@inmetprom.ru,"микрорайон 16А, 63"
-dimitrovgrad.inmetprom.ru,Димитровград,,,+7 (842) 273-00-16,8422730016;9053490016,dimitrovgrad@inmetprom.ru,"улица Богдана Хмельницкого, 100А"
-neftekamsk.inmetprom.ru,Нефтекамск,,,+7 (347) 299-64-67,3472996467;9608006467,neftekamsk@inmetprom.ru,"Новая улица, 1А"
-cherkessk.inmetprom.ru,Черкесск,,,+7 (865) 269-28-86,8652692886;9064792886,cherkessk@inmetprom.ru,"Фабричная улица, 212"
-orehovo-zuevo.inmetprom.ru,Орехово-Зуево,,,+7 (495) 755-36-28,4957553628;9037553628,orehovo-zuevo@inmetprom.ru,"Московская улица, 2"
-derbent.inmetprom.ru,Дербент,,,+7 (495) 755-36-28,4957553628;9037553628,derbent@inmetprom.ru,"проспект Агасиева, 27"
-kamyshin.inmetprom.ru,Камышин,,,+7 (844) 260-58-86,8442605886;9627595886,kamyshin@inmetprom.ru,"Текстильная улица, 44"
-nevinnomyssk.inmetprom.ru,Невинномысск,,,+7 (865) 269-28-86,8652692886;9064792886,nevinnomyssk@inmetprom.ru,"улица Энгельса, 99"
-krasnogorsk.inmetprom.ru,Красногорск,,,+7 (495) 755-36-28,4957553628;9037553628,krasnogorsk@inmetprom.ru,"Почтовая улица, 3"
-murom.inmetprom.ru,Муром,,,+7 (495) 755-36-28,4957553628;9037553628,murom@inmetprom.ru,"Привокзальная улица, 2"
-bataysk.inmetprom.ru,Батайск,,,+7 (863) 206-66-28,8632066628;9662066628,bataysk@inmetprom.ru,"улица Максима Горького, 356Е"
-novoshahtinsk.inmetprom.ru,Новошахтинск,,,+7 (863) 206-66-28,8632066628;9662066628,novoshahtinsk@inmetprom.ru,"проспект Ленина, 52"
-sergiev-posad.inmetprom.ru,Сергиев Посад,,,+7 (495) 755-36-28,4957553628;9037553628,sergiev-posad@inmetprom.ru,"Московское шоссе, 42"
-shchyolkovo.inmetprom.ru,Щёлково,,,+7 (495) 755-36-28,4957553628;9037553628,shchyolkovo@inmetprom.ru,"улица Неделина, 22"
-kyzyl.inmetprom.ru,Кызыл,,,+7 (391) 296-81-18,3912968118;9059768118,kyzyl@inmetprom.ru,"улица Тувинских Добровольцев, 29"
-oktyabrskiy.inmetprom.ru,Октябрьский,,,+7 (347) 299-64-67,3472996467;9608006467,oktyabrskiy@inmetprom.ru,"улица Девонская, 8/2"
-achinsk.inmetprom.ru,Ачинск,,,+7 (391) 296-81-18,3912968118;9059768118,achinsk@inmetprom.ru,"улица Назарова, 28Г"
-seversk.inmetprom.ru,Северск,,,+7 (382) 222-69-84,3822226984;9039556984,seversk@inmetprom.ru,"Первомайская улица, 5"
-novokuybyshevsk.inmetprom.ru,Новокуйбышевск,,,+7 (846) 267-10-72,8462671072;9053001072,novokuybyshevsk@inmetprom.ru,"улица Киевская, 36"
-elets.inmetprom.ru,Елец,,,+7 (474) 237-78-60,4742377860;9036437860,elets@inmetprom.ru,"улица Новолипецкая, 3"
-novyy-urengoy.inmetprom.ru,Новый Уренгой,,,+7 (903) 755-36-28,9037553628,novyj-urengoj@inmetprom.ru,"Ямальская улица, 19"
-evpatoriya.inmetprom.ru,Евпатория,,,+7 (869) 288-98-68,8692889868,evpatoriya@inmetprom.ru,"улица Фрунзе, 20"
-arzamas.inmetprom.ru,Арзамас,,,+7 (831) 213-68-80,8312136880;9632306880,arzamas@inmetprom.ru,"Парковая улица, 1И"
-obninsk.inmetprom.ru,Обнинск,,,+7 (484) 259-51-86,4842595186;9036365186,obninsk@inmetprom.ru,"проспект Карла Маркса, 70"
-kaspiysk.inmetprom.ru,Каспийск,,,+7 (495) 755-36-28,4957553628;9037553628,kaspiysk@inmetprom.ru,"улица Ленина, 51В"
-elista.inmetprom.ru,Элиста,,,+7 (865) 269-28-86,8652692886;9064792886,elista@inmetprom.ru,"улица Губаревича, 5"
-noyabrsk.inmetprom.ru,Ноябрьск,,,+7 (349) 641-10-56,3496411056;9678958056,noyabrsk@inmetprom.ru,"проспект Мира, 70А"
-pushkino.inmetprom.ru,Пушкино,,,+7 (495) 755-36-28,4957553628;9037553628,pushkino@inmetprom.ru,"Железнодорожная улица, 1"
-zhukovskiy.inmetprom.ru,Жуковский,,,+7 (495) 755-36-28,4957553628;9037553628,zhukovskiy@inmetprom.ru,"улица Гагарина, 85"
-artyom.inmetprom.ru,Артем,,,+7 (423) 254-01-18,4232540118;9025240118,artyom@inmetprom.ru,"Амурская улица, 9"
-mezhdurechensk.inmetprom.ru,Междуреченск,,,+7 (384) 224-01-60,3842240160;9618660160,mezhdurechensk@inmetprom.ru,"улица Кузнецкая, 5А"
-leninsk-kuznetskiy.inmetprom.ru,Ленинск-Кузнецкий,,,+7 (384) 224-01-60,3842240160;9618660160,leninsk-kuznetskiy@inmetprom.ru,"проспект Ленина, 59к1"
-sarapul.inmetprom.ru,Сарапул,,,+7 (341) 290-61-97,3412906197;9090606197,sarapul@inmetprom.ru,"улица Горького, 16"
-essentuki.inmetprom.ru,Ессентуки,,,+7 (865) 269-28-86,8652692886;9064792886,essentuki@inmetprom.ru,"Пятигорская улица, 139"
-votkinsk.inmetprom.ru,Воткинск,,,+7 (341) 290-61-97,3412906197;9090606197,votkinsk@inmetprom.ru,"улица Мира, 3"
-noginsk.inmetprom.ru,Ногинск,,,+7 (495) 755-36-28,4957553628;9037553628,noginsk@inmetprom.ru,"улица Климова, 50"
-tobolsk.inmetprom.ru,Тобольск,,,+7 (345) 253-32-49,3452533249;9634523249,tobolsk@inmetprom.ru,"микрорайон Центральный, 27"
-uhta.inmetprom.ru,Ухта,,,+7 (821) 225-13-69,8212251369;9658601369,uhta@inmetprom.ru,"Октябрьская улица, 17А"
-serov.inmetprom.ru,Серов,,,+7 (343) 202-38-68,3432023868;9506313868,serov@inmetprom.ru,"улица Ленина, 162Б"
-berdsk.inmetprom.ru,Бердск,,,+7 (383) 249-82-56,3832498256;9628298256,berdsk@inmetprom.ru,"Озёрная улица, 32к1"
-velikie-luki.inmetprom.ru,Великие Луки,,,+7 (812) 983-53-36,8129835336;9602835336,velikie-luki@inmetprom.ru,"улица Дружбы, 16"
-michurinsk.inmetprom.ru,Мичуринск,,,+7 (475) 243-53-79,4752435379;9641355379,michurinsk@inmetprom.ru,"улица Филиппова, 49Б"
-kiselyovsk.inmetprom.ru,Киселевск,,,+7 (384) 224-01-60,3842240160;9618660160,kiselyovsk@inmetprom.ru,"улица Ленина, 33"
-novotroitsk.inmetprom.ru,Новотроицк,,,+7 (353) 220-08-85,3532200885;9033600885,novotroitsk@inmetprom.ru,"Комсомольский проспект, 6"
-zelenodolsk.inmetprom.ru,Зеленодольск,,,+7 (843) 253-28-86,8432532886;9033052886,zelenodolsk@inmetprom.ru,"улица Чкалова, 4А"
-solikamsk.inmetprom.ru,Соликамск,,,+7 (342) 259-20-56,3422592056;9641902056,solikamsk@inmetprom.ru,"улица 20-летия Победы, 173В"
-ramenskoe.inmetprom.ru,Раменское,,,+7 (495) 755-36-28,4957553628;9037553628,ramenskoe@inmetprom.ru,"Красноармейская улица, 133Б"
-domodedovo.inmetprom.ru,Домодедово,,,+7 (495) 755-36-28,4957553628;9037553628,domodedovo@inmetprom.ru,"Станционная улица, 20Ак1"
-magadan.inmetprom.ru,Магадан,,,+7 (421) 268-06-65,4212680665;9098020665,magadan@inmetprom.ru,"улица Билибина, 2А"
-glazov.inmetprom.ru,Глазов,,,+7 (341) 290-61-97,3412906197;9090606197,glazov@inmetprom.ru,"улица Пряженникова, 67"
-zheleznogorsk.inmetprom.ru,Железногорск,,,+7 (391) 296-81-18,3912968118;9059768118,zheleznogorsk@inmetprom.ru,"улица Рокоссовского, 54"
-kansk.inmetprom.ru,Канск,,,+7 (391) 296-81-18,3912968118;9059768118,kansk@inmetprom.ru,"улица Горького, 51"
-nazran.inmetprom.ru,Назрань,,,+7 (865) 269-28-86,8652692886;9064792886,nazran@inmetprom.ru,"улица Тангиева, 4"
-dolgoprudnyy.inmetprom.ru,Долгопрудный,,,+7 (495) 755-36-28,4957553628;9037553628,dolgoprudnyy@inmetprom.ru,"Лихачёвский проезд, 8"
-kuznetsk.inmetprom.ru,Кузнецк,,,+7 (841) 230-08-89,8412300889;9033230889,kuznetsk@inmetprom.ru,"улица Калинина, 197"
-kineshma.inmetprom.ru,Кинешма,,,+7 (493) 234-31-96,4932343196;9051093196,kineshma@inmetprom.ru,"площадь Революции, 4"
-reutov.inmetprom.ru,Реутов,,,+7 (495) 755-36-28,4957553628;9037553628,reutov@inmetprom.ru,"Юбилейный проспект, 42"
-ust-ilimsk.inmetprom.ru,Усть-Илимск,,,+7 (395) 293-06-68,3952930668;9642180668,ust-ilimsk@inmetprom.ru,"улица Героев Труда, 39"
-usole-sibirskoe.inmetprom.ru,Усолье-Сибирское,,,+7 (395) 293-06-68,3952930668;9642180668,usole-sibirskoe@inmetprom.ru,"Фестивальный проезд, 9"
-kirovo-chepetsk.inmetprom.ru,Кирово-Чепецк,,,+7 (833) 220-65-58,8332206558;9642506558,kirovo-chepetsk@inmetprom.ru,"улица Алексея Некрасова, 29к2"
-hanty-mansiysk.inmetprom.ru,Ханты-Мансийск,,,+7 (346) 270-58-68,3462705868;9088905868,hanty-mansiysk@inmetprom.ru,"улица Мира, 13"
-belovo.inmetprom.ru,Белово,,,+7 (384) 224-01-60,3842240160;9618660160,belovo@inmetprom.ru,"Почтовый переулок, 49"
-anzhero-sudzhensk.inmetprom.ru,Анжеро-Судженск,,,+7 (384) 224-01-60,3842240160;9618660160,anzhero-sudzhensk@inmetprom.ru,"улица Софьи Перовской, 32"
-mihaylovsk.inmetprom.ru,Михайловск,,,+7 (865) 269-28-86,8652692886;9064792886,mihaylovsk@inmetprom.ru,"улица Гоголя, 123"
-vorkuta.inmetprom.ru,Воркута,,,+7 (821) 225-13-69,8212251369;9658601369,vorkuta@inmetprom.ru,"улица Ленина, 49"
-vidnoe.inmetprom.ru,Видное,,,+7 (495) 755-36-28,4957553628;9037553628,vidnoe@inmetprom.ru,"Северная промзона, вл4"
-asbest.inmetprom.ru,Асбест,,,+7 (343) 202-38-68,3432023868;9506313868,asbest@inmetprom.ru,"проспект Ленина, 16"
-cheremhovo.inmetprom.ru,Черемхово,,,+7 (395) 293-06-68,3952930668;9642180668,cheremhovo@inmetprom.ru,"Первомайская улица, 166"
-inmetprom.by,Минск,,,+375 (44) 588-81-48,445888148,minsk@inmetprom.by,"проспект Партизанский, 178/2"
-gomel.inmetprom.by,Гомель,,,+375 (44) 588-81-48,445888148,gomel@inmetprom.by,"улица Мазурова, 28В"
-brest.inmetprom.by,Брест,,,+375 (44) 588-81-48,445888148,brest@inmetprom.by,"Варшавское шоссе, 43"
-vitebsk.inmetprom.by,Витебск,,,+375 (44) 588-81-48,445888148,vitebsk@inmetprom.by,"улица Зеньковой, 1"
-grodno.inmetprom.by,Гродно,,,+375 (44) 588-81-48,445888148,grodno@inmetprom.by,"переулок Дзержинского, 9"
-mogilev.inmetprom.by,Могилев,,,+375 (44) 588-81-48,445888148,mogilev@inmetprom.by,"проспект Мира, 73"
-aktau.inmetprom.kz,Актау,,+7 (708) 211-47-03,+7 (708) 211-48-27,7082114827;7082114703,aktau@inmetprom.kz,"микрорайон 26-й, 58Б"
-aktobe.inmetprom.kz,Актобе,,+7 (708) 211-47-03,+7 (713) 273-61-01,7132736101;7082114703,aktobe@inmetprom.kz,"проспект Абилкайыр-хана, 44/3"
-almaty.inmetprom.kz,Алматы,,+7 (727) 317-27-00,+7 (727) 317-26-58,7273172658;7273172700,almaty@inmetprom.kz,"улица 24 Июня, 27"
-inmetprom.kz,Астана,,+7 (717) 278-53-04,+7 (717) 262-99-82,7172629982;7172785304,astana@inmetprom.kz,"улица Александра Бараева, 16"
-atyrau.inmetprom.kz,Атырау,,+7 (708) 211-47-03,+7 (712) 275-39-10,7122753910;7082114703,atyrau@inmetprom.kz,"​проспект Азаттык, 17"
-zhanaozen.inmetprom.kz,Жанаозен,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,zhanaozen@inmetprom.kz,"микрорайон Шанырак, 1/10"
-zhezkazgan.inmetprom.kz,Жезказган,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,zhezkazgan@inmetprom.kz,"​улица Желтоксан, 25"
-karaganda.inmetprom.kz,Караганда,,+7 (708) 211-47-03,+7 (721) 299-71-01,7212997101;7082114703,karaganda@inmetprom.kz,"Бытовая улица, 15/1"
-kokshetau.inmetprom.kz,Кокшетау,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,kokshetau@inmetprom.kz,"улица Ауельбекова, 139"
-kostanay.inmetprom.kz,Костанай,,+7 (708) 211-47-03,+7 (708) 211-47-54,7082114754;7082114703,kostanaj@inmetprom.kz,"​проспект Аль-Фараби, 74"
-kyzylorda.inmetprom.kz,Кызылорда,,+7 (708) 211-47-03,+7 (724) 292-51-04,7242925104;7082114703,kyzylorda@inmetprom.kz,"улица Мусирали Ажикожа, 89"
-pavlodar.inmetprom.kz,Павлодар,,+7 (708) 211-47-03,+7 (718) 278-23-03,7182782303;7082114703,pavlodar@inmetprom.kz,"​проспект Нурсултана Назарбаева, 21/1"
-petropavlovsk.inmetprom.kz,Петропавловск,,+7 (708) 211-47-03,+7 (708) 211-48-25,7082114825;7082114703,petropavlovsk@inmetprom.kz,"​улица Магжана Жумабаева, 109"
-semey.inmetprom.kz,Семей,,+7 (708) 211-47-03,+7 (708) 427-04-62,7084270462;7082114703,semej@inmetprom.kz,"площадь Абая, 5"
-taldykorgan.inmetprom.kz,Талдыкорган,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,taldykorgan@inmetprom.kz,"улица Акын Сара, 130а"
-taraz.inmetprom.kz,Тараз,,+7 (708) 211-47-03,+7 (726) 297-09-10,7262970910;7082114703,taraz@inmetprom.kz,"2-й проезд Рахимова, 1а"
-temirtau.inmetprom.kz,Темиртау,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,temirtau@inmetprom.kz,"​проспект Момышулы, 27а"
-turkestan.inmetprom.kz,Туркестан,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,turkestan@inmetprom.kz,"улица Султанбека Кожанова, 44"
-uralsk.inmetprom.kz,Уральск,,+7 (708) 211-47-03,+7 (708) 211-47-69,7082114769;7082114703,uralsk@inmetprom.kz,"​улица Жубана Молдагалиева, 18"
-ust-kamenogorsk.inmetprom.kz,Усть-Каменогорск,,+7 (708) 211-47-03,+7 (723) 291-04-20,7232910420;7082114703,ust-kamenogorsk@inmetprom.kz,"улица Кабанбай батыра, 49"
-shymkent.inmetprom.kz,Шымкент,,+7 (708) 211-47-03,+7 (725) 260-36-28,7252603628;7005678938;7082114703,shymkent@inmetprom.kz,"​улица Жандосова, 73"
-ekibastuz.inmetprom.kz,Экибастуз,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,ekibastuz@inmetprom.kz,"​улица Матросова, 6"
-namangan.inmetprom.uz,Наманган,,,+998 (90) 818-86-83,908188683,namangan@inmetprom.uz,"улица Хамрох, 96"
-samarkand.inmetprom.uz,Самарканд,,,+998 (90) 818-86-83,908188683,samarkand@inmetprom.uz,"улица Мухаммада Аль-Хорезми, 115а"
-inmetprom.uz,Ташкент,,,+998 (90) 818-86-83,908188683,tashkent@inmetprom.uz,"улица Бабура, 34"
-inmetprom.kg,Бишкек,,,+996 (77) 631-32-78,,bishkek@inmetprom.kg,"Гражданская улица, 53"
-dzhalal-abad.inmetprom.kg,Джалал-Абад,,,+996 (77) 631-32-78,,dzhalal-abad@inmetprom.kg,"проспект Тумонбая, Байзакова, 34"
-karakol.inmetprom.kg,Каракол,,,+996 (77) 631-32-78,,karakol@inmetprom.kg,"улица Жусаева, 146"
-osh.inmetprom.kg,Ош,,,+996 (77) 631-32-78,,osh@inmetprom.kg,"проспект Абсамата Масалиева, 78"
+domain,city,phone_seo,phone_ad,phone_common,all_phones,email,address,country,telegram,whatsapp
+inmetprom.ru,Москва,+7 (499) 130-18-36,+7 (495) 755-38-06,+7 (495) 755-36-28,4957553628;9037553628;4957553806;9037553806;4991301836,msk@inmetprom.ru,"Рязанский проспект, 86/1с1",Россия,imp_manager5,7 (903) 755-38-06
+spb.inmetprom.ru,Санкт-Петербург,+7 (812) 703-86-99,+7 (812) 740-66-06,+7 (812) 983-53-36,8129835336;9602835336;8127406606;9052006606;8127038699,spb@inmetprom.ru,"набережная Обводного канала, 64к2",Россия,imp_manager7,7 (906) 237-60-86
+novosibirsk.inmetprom.ru,Новосибирск,+7 (383) 263-33-69,+7 (383) 263-15-58,+7 (383) 249-82-56,3832498256;9628298256;3832631558;9039001558;3832633369,nsk@inmetprom.ru,"Фабричная улица, 16",Россия,imp_manager2,7 (963) 452-32-49
+ekaterinburg.inmetprom.ru,Екатеринбург,+7 (343) 266-33-16,+7 (343) 266-33-79,+7 (343) 202-38-68,3432023868;9506313868;3432663379;9030863379;3432663316,ekb@inmetprom.ru,"переулок Автоматики, 4",Россия,imp_manager9,7 (962) 611-16-88
+kazan.inmetprom.ru,Казань,,,+7 (843) 253-28-86,8432532886;9033052886,kazan@inmetprom.ru,"Солдатская улица, 8",Россия,imp_manager6,7 (963) 230-68-80
+krasnoyarsk.inmetprom.ru,Красноярск,,,+7 (391) 296-81-18,3912968118;9059768118,krasnoyarsk@inmetprom.ru,"2-я Брянская улица, 59/6",Россия,imp_manager2,7 (963) 452-32-49
+nizhny-novgorod.inmetprom.ru,Нижний Новгород,+7 (831) 414-03-29,+7 (831) 414-02-66,+7 (831) 213-68-80,8312136880;9632306880;8314140266;9036010266;8314140329,nizhny-novgorod@inmetprom.ru,"Электровозная улица, 7",Россия,imp_manager6,7 (963) 230-68-80
+chelyabinsk.inmetprom.ru,Челябинск,+7 (351) 216-37-88,+7 (351) 216-30-85,+7 (351) 223-63-80,3512236380;9191236380;3512163085;9624853085;3512163788,chelyabinsk@inmetprom.ru,"1-я Потребительская улица, 12/2",Россия,imp_manager4,7 (919) 123-63-80
+ufa.inmetprom.ru,Уфа,,,+7 (347) 299-64-67,3472996467;9608006467,ufa@inmetprom.ru,"улица Шота Руставели, 49",Россия,imp_manager9,7 (962) 611-16-88
+samara.inmetprom.ru,Самара,+7 (846) 221-69-36,+7 (846) 221-03-39,+7 (846) 267-10-72,8462671072;9053001072;8462210339;9033010339;8462216936,samara@inmetprom.ru,"проезд Мальцева, 7",Россия,imp_manager9,7 (962) 611-16-88
+rostov-na-donu.inmetprom.ru,Ростов-на-Дону,,,+7 (863) 206-66-28,8632066628;9662066628,rostov@inmetprom.ru,"Очаковская улица, 39",Россия,imp_manager8,7 (903) 411-64-28
+krasnodar.inmetprom.ru,Краснодар,+7 (861) 944-16-88,+7 (861) 944-17-67,+7 (861) 944-64-28,8619446428;9034116428;8619441767;9034111767;8619441688,krasnodar@inmetprom.ru,"улица Коммунаров, 31/1",Россия,imp_manager8,7 (903) 411-64-28
+omsk.inmetprom.ru,Омск,,,+7 (381) 263-38-19,3812633819;9620583819,omsk@inmetprom.ru,"Кемеровская улица, 121",Россия,imp_manager2,7 (963) 452-32-49
+voronezh.inmetprom.ru,Воронеж,,,+7 (473) 251-63-88,4732516388;9036516388,voronezh@inmetprom.ru,"Московский проспект, 4",Россия,imp_manager5,7 (903) 755-38-06
+perm.inmetprom.ru,Пермь,+7 (342) 259-19-88,+7 (342) 259-27-70,+7 (342) 259-20-56,3422592056;9641902056;3422592770;9641902770;3422591988,perm@inmetprom.ru,"улица Чкалова, 9",Россия,imp_manager3,7 (909) 060-61-97
+volgograd.inmetprom.ru,Волгоград,,,+7 (844) 260-58-86,8442605886;9627595886,volgograd@inmetprom.ru,"улица Канунникова, 6/1",Россия,imp_manager8,7 (903) 411-64-28
+donetsk.inmetprom.ru,Донецк,,,+7 (903) 755-36-28,9037553628,doneck@inmetprom.ru,"улица Фёдора Зайцева, 46А",Россия,imp_manager8,7 (903) 411-64-28
+saratov.inmetprom.ru,Саратов,,,+7 (845) 253-12-30,8452531230;9033281230,saratov@inmetprom.ru,"Ново-Астраханское шоссе, 1",Россия,imp_manager9,7 (962) 611-16-88
+tyumen.inmetprom.ru,Тюмень,+7 (345) 253-13-19,+7 (345) 253-02-78,+7 (345) 253-32-49,3452533249;9634523249;3452530278;9634520278;3452531319,tyumen@inmetprom.ru,"улица 30 лет Победы, 38А",Россия,imp_manager2,7 (963) 452-32-49
+tolyatti.inmetprom.ru,Тольятти,,,+7 (848) 241-16-88,8482411688;9626111688,tolyatti@inmetprom.ru,"улица Автостроителей, 68А",Россия,imp_manager9,7 (962) 611-16-88
+mahachkala.inmetprom.ru,Махачкала,,,+7 (903) 755-36-28,9037553628,mahachkala@inmetprom.ru,"улица Эльзы Ибрагимовой, 2",Россия,imp_manager8,7 (903) 411-64-28
+barnaul.inmetprom.ru,Барнаул,,,+7 (385) 225-16-80,3852251680;9039476680,barnaul@inmetprom.ru,"проспект Калинина, 116/1",Россия,imp_manager2,7 (963) 452-32-49
+izhevsk.inmetprom.ru,Ижевск,,,+7 (341) 290-61-97,3412906197;9090606197,izhevsk@inmetprom.ru,"улица Азина, 1",Россия,imp_manager3,7 (909) 060-61-97
+habarovsk.inmetprom.ru,Хабаровск,,,+7 (421) 268-06-65,4212680665;9098020665,khabarovsk@inmetprom.ru,"Большая улица, 88",Россия,imp_manager2,7 (963) 452-32-49
+ulyanovsk.inmetprom.ru,Ульяновск,,,+7 (842) 273-00-16,8422730016;9053490016,ulianovsk@inmetprom.ru,"1-й переулок Мира, 2",Россия,imp_manager6,7 (963) 230-68-80
+irkutsk.inmetprom.ru,Иркутск,,,+7 (395) 293-06-68,3952930668;9642180668,irkutsk@inmetprom.ru,"Байкальская улица, 105А",Россия,imp_manager2,7 (963) 452-32-49
+vladivostok.inmetprom.ru,Владивосток,,,+7 (423) 254-01-18,4232540118;9025240118,vladivostok@inmetprom.ru,"Запорожская улица, 77",Россия,imp_manager2,7 (963) 452-32-49
+yaroslavl.inmetprom.ru,Ярославль,,,+7 (485) 259-50-88,4852595088;9066395088,yaroslavl@inmetprom.ru,"Полиграфическая улица, 27/97",Россия,imp_manager9,7 (962) 611-16-88
+sevastopol.inmetprom.ru,Севастополь,,,+7 (869) 288-98-68,8692889868,krym@inmetprom.ru,"улица Маршала Бирюзова, 42",Россия,imp_manager8,7 (903) 411-64-28
+stavropol.inmetprom.ru,Ставрополь,,,+7 (865) 269-28-86,8652692886;9064792886,stavropol@inmetprom.ru,"улица Доваторцев, 30Б",Россия,imp_manager8,7 (903) 411-64-28
+kemerovo.inmetprom.ru,Кемерово,,,+7 (384) 224-01-60,3842240160;9618660160,kemerovo@inmetprom.ru,"улица Шестакова, 6",Россия,imp_manager2,7 (963) 452-32-49
+tomsk.inmetprom.ru,Томск,,,+7 (382) 222-69-84,3822226984;9039556984,tomsk@inmetprom.ru,"Энергетическая улица, 6А",Россия,imp_manager2,7 (963) 452-32-49
+naberezhnye-chelny.inmetprom.ru,Набережные челны,,,+7 (855) 220-03-53,8552200353;9673790353,naberezhnye-chelny@inmetprom.ru,"Сармановский тракт, 56",Россия,imp_manager6,7 (963) 230-68-80
+orenburg.inmetprom.ru,Оренбург,,,+7 (353) 220-08-85,3532200885;9033600885,orenburg@inmetprom.ru,"улица Цвиллинга, 46",Россия,imp_manager9,7 (962) 611-16-88
+novokuznetsk.inmetprom.ru,Новокузнецк,,,+7 (384) 358-33-79,3843583379;9618663379,novokuzneck@inmetprom.ru,"Колхозный проезд, 1",Россия,imp_manager2,7 (963) 452-32-49
+ryazan.inmetprom.ru,Рязань,,,+7 (491) 299-06-88,4912990688;9038390688,ryazan@inmetprom.ru,"Московское шоссе, 39к5",Россия,imp_manager5,7 (903) 755-38-06
+cheboksary.inmetprom.ru,Чебоксары,,,+7 (835) 248-09-38,8352480938;9033220938,cheboksary@inmetprom.ru,"улица Правая Набережная Сугутки, 7",Россия,imp_manager6,7 (963) 230-68-80
+kaliningrad.inmetprom.ru,Калининград,,,+7 (401) 237-60-86,4012376086;9062376086,kaliningrad@inmetprom.ru,"Ленинский проспект, 131",Россия,imp_manager7,7 (906) 237-60-86
+penza.inmetprom.ru,Пенза,,,+7 (841) 230-08-89,8412300889;9033230889,penza@inmetprom.ru,"Московская улица, 29",Россия,imp_manager6,7 (963) 230-68-80
+lipetsk.inmetprom.ru,Липецк,,,+7 (474) 237-78-60,4742377860;9036437860,lipetsk@inmetprom.ru,"площадь Плеханова, 3",Россия,imp_manager9,7 (962) 611-16-88
+kirov.inmetprom.ru,Киров,,,+7 (833) 220-65-58,8332206558;9642506558,kirov@inmetprom.ru,"улица Володарского, 171",Россия,imp_manager6,7 (963) 230-68-80
+astrahan.inmetprom.ru,Астрахань,,,+7 (851) 269-02-93,8512690293;9033216293,astrahan@inmetprom.ru,"Бахтемирская улица, 5",Россия,imp_manager8,7 (903) 411-64-28
+tula.inmetprom.ru,Тула,,,+7 (487) 271-68-18,4872716818;9674316818,tula@inmetprom.ru,"улица Мосина, 2В",Россия,imp_manager5,7 (903) 755-38-06
+sochi.inmetprom.ru,Сочи,,,+7 (862) 291-73-66,8622917366;9667757366,sochi@inmetprom.ru,"Московская улица, 22",Россия,imp_manager8,7 (903) 411-64-28
+kursk.inmetprom.ru,Курск,,,+7 (471) 222-08-26,4712220826;9623800826,kursk@inmetprom.ru,"Верхняя Луговая улица, 24",Россия,imp_manager5,7 (903) 755-38-06
+ulan-ude.inmetprom.ru,Улан-Удэ,,,+7 (395) 293-06-68,3952930668;9642180668,ulan-ude@inmetprom.ru,"улица Кирова, 26",Россия,imp_manager2,7 (963) 452-32-49
+mariupol.inmetprom.ru,Мариуполь,,,+7 (903) 755-36-28,9037553628,mariupol@inmetprom.ru,"улица Апатова, 136",Россия,imp_manager8,7 (903) 411-64-28
+surgut.inmetprom.ru,Сургут,,,+7 (346) 270-58-68,3462705868;9088905868,surgut@inmetprom.ru,"улица 30 лет Победы, 44/А",Россия,imp_manager2,7 (963) 452-32-49
+tver.inmetprom.ru,Тверь,,,+7 (482) 241-76-67,4822417667;9036317667,tver@inmetprom.ru,"Старицкое шоссе, 15",Россия,imp_manager6,7 (963) 230-68-80
+lugansk.inmetprom.ru,Луганск,,,+7 (903) 755-36-28,9037553628,lugansk@inmetprom.ru,"Советская улица, 48",Россия,imp_manager8,7 (903) 411-64-28
+magnitogorsk.inmetprom.ru,Магнитогорск,,,+7 (351) 223-63-80,3512236380;9191236380,magnitogorsk@inmetprom.ru,"проспект Ленина, 89",Россия,imp_manager4,7 (919) 123-63-80
+bryansk.inmetprom.ru,Брянск,,,+7 (483) 237-08-81,4832370881;9051770881,bryansk@inmetprom.ru,"Красноармейская улица, 126",Россия,imp_manager6,7 (963) 230-68-80
+yakutsk.inmetprom.ru,Якутск,,,+7 (411) 224-02-16,4112240216;9681540216,yakutsk@inmetprom.ru,"улица Орджоникидзе, 20",Россия,imp_manager2,7 (963) 452-32-49
+nizhniy-tagil.inmetprom.ru,Нижний Тагил,,,+7 (343) 202-38-68,3432023868;9506313868,nizhniy-tagil@inmetprom.ru,"улица Ильича, 1",Россия,imp_manager9,7 (962) 611-16-88
+ivanovo.inmetprom.ru,Иваново,,,+7 (493) 234-31-96,4932343196;9051093196,ivanovo@inmetprom.ru,"Лежневская улица, 183",Россия,imp_manager5,7 (903) 755-38-06
+simferopol.inmetprom.ru,Симферополь,,,+7 (869) 288-98-68,8692889868,simferopol@inmetprom.ru,"Севастопольская улица, 62Б",Россия,imp_manager8,7 (903) 411-64-28
+vladimir.inmetprom.ru,Владимир,,,+7 (903) 755-36-28,9037553628,vladimir@inmetprom.ru,"улица Мира, 61А",Россия,imp_manager5,7 (903) 755-38-06
+chita.inmetprom.ru,Чита,,,+7 (302) 224-53-06,3022245306;9681605306,chita@inmetprom.ru,"улица 9 Января, 6",Россия,imp_manager2,7 (963) 452-32-49
+kaluga.inmetprom.ru,Калуга,,,+7 (484) 259-51-86,4842595186;9036365186,kaluga@inmetprom.ru,"улица Плеханова, 67",Россия,imp_manager5,7 (903) 755-38-06
+belgorod.inmetprom.ru,Белгород,,,+7 (472) 277-08-66,4722770866;9623070866,belgorod@inmetprom.ru,"улица Мичурина, 56",Россия,imp_manager5,7 (903) 755-38-06
+saransk.inmetprom.ru,Саранск,,,+7 (831) 213-68-80,8312136880;9632306880,saransk@inmetprom.ru,"улица Терешковой, 7А",Россия,imp_manager6,7 (963) 230-68-80
+volzhskiy.inmetprom.ru,Волжский,,,+7 (844) 260-58-86,8442605886;9627595886,volzhskiy@inmetprom.ru,"бульвар Профсоюзов, 30А",Россия,imp_manager8,7 (903) 411-64-28
+cherepovets.inmetprom.ru,Череповец,,,+7 (817) 256-95-88,8172569588;9636469588,cherepovets@inmetprom.ru,"улица Стройиндустрии, 4с2",Россия,imp_manager5,7 (903) 755-38-06
+vologda.inmetprom.ru,Вологда,,,+7 (817) 256-95-88,8172569588;9636469588,vologda@inmetprom.ru,"улица Герцена, 56",Россия,imp_manager5,7 (903) 755-38-06
+vladikavkaz.inmetprom.ru,Владикавказ,,,+7 (865) 269-28-86,8652692886;9064792886,vladikavkaz@inmetprom.ru,"Московская улица, 14",Россия,imp_manager8,7 (903) 411-64-28
+smolensk.inmetprom.ru,Смоленск,,,+7 (481) 263-02-69,4812630269;9036490269,smolensk@inmetprom.ru,"улица Чаплина, 12",Россия,imp_manager5,7 (903) 755-38-06
+kurgan.inmetprom.ru,Курган,,,+7 (352) 222-77-36,3522227736;9658657736,kurgan@inmetprom.ru,"Половинская улица, 10А",Россия,imp_manager2,7 (963) 452-32-49
+arhangelsk.inmetprom.ru,Архангельск,,,+7 (818) 246-01-69,8182460169;9095560169,arhangelsk@inmetprom.ru,"Троицкий проспект, 65",Россия,imp_manager7,7 (906) 237-60-86
+oryol.inmetprom.ru,Орёл,,,+7 (486) 278-01-69,4862780169;9036370169,orel@inmetprom.ru,"1-я Курская улица, 27",Россия,imp_manager5,7 (903) 755-38-06
+nizhnevartovsk.inmetprom.ru,Нижневартовск,,,+7 (346) 667-66-53,3466676653;9678976653,nizhnevartovsk@inmetprom.ru,"улица Кузоваткина, 5с8",Россия,imp_manager2,7 (963) 452-32-49
+sterlitamak.inmetprom.ru,Стерлитамак,,,+7 (347) 299-64-67,3472996467;9608006467,sterlitamak@inmetprom.ru,"Коммунистическая улица, 51",Россия,imp_manager9,7 (962) 611-16-88
+groznyy.inmetprom.ru,Грозный,,,+7 (865) 269-28-86,8652692886;9064792886,groznyy@inmetprom.ru,"проспект Ахмат-Хаджи Абдулхамидовича Кадырова, 224/1",Россия,imp_manager8,7 (903) 411-64-28
+murmansk.inmetprom.ru,Мурманск,,,+7 (815) 260-02-79,8152600279;9646800279,murmansk@inmetprom.ru,"улица Коминтерна, 5",Россия,imp_manager7,7 (906) 237-60-86
+kostroma.inmetprom.ru,Кострома,,,+7 (494) 230-02-13,4942300213;9036346213,kostroma@inmetprom.ru,"проспект Мира, 21",Россия,imp_manager5,7 (903) 755-38-06
+komsomolsk-na-amure.inmetprom.ru,Комсомольск-на-Амуре,,,+7 (421) 268-06-65,4212680665;9098020665,komsomolsk-na-amure@inmetprom.ru,"улица Парижской Коммуны, 28",Россия,imp_manager2,7 (963) 452-32-49
+petrozavodsk.inmetprom.ru,Петрозаводск,,,+7 (812) 983-53-36,8129835336;9602835336,petrozavodsk@inmetprom.ru,"Лесной проспект, 51",Россия,imp_manager7,7 (906) 237-60-86
+novorossiysk.inmetprom.ru,Новороссийск,,,+7 (861) 767-46-09,8617674609;9054774609,novorossijsk@inmetprom.ru,"Анапское шоссе, 15",Россия,imp_manager8,7 (903) 411-64-28
+tambov.inmetprom.ru,Тамбов,,,+7 (475) 243-53-79,4752435379;9641355379,tambov@inmetprom.ru,"Коммунальная улица, 21А",Россия,imp_manager5,7 (903) 755-38-06
+yoshkar-ola.inmetprom.ru,Йошкар-Ола,,,+7 (843) 253-28-86,8432532886;9033052886,yoshkar-ola@inmetprom.ru,"улица Чехова, 61",Россия,imp_manager6,7 (963) 230-68-80
+bratsk.inmetprom.ru,Братск,,,+7 (395) 293-06-68,3952930668;9642180668,bratsk@inmetprom.ru,"улица БЛПК, 9А",Россия,imp_manager2,7 (963) 452-32-49
+taganrog.inmetprom.ru,Таганрог,,,+7 (863) 206-66-28,8632066628;9662066628,taganrog@inmetprom.ru,"Октябрьская улица, 17",Россия,imp_manager8,7 (903) 411-64-28
+dzerzhinsk.inmetprom.ru,Дзержинск,,,+7 (831) 213-68-80,8312136880;9632306880,dzerzhinsk@inmetprom.ru,"проспект Ленинского Комсомола, 48",Россия,imp_manager6,7 (963) 230-68-80
+shahty.inmetprom.ru,Шахты,,,+7 (863) 206-66-28,8632066628;9662066628,shahty@inmetprom.ru,"Пролетарская улица, 188",Россия,imp_manager8,7 (903) 411-64-28
+nalchik.inmetprom.ru,Нальчик,,,+7 (865) 269-28-86,8652692886;9064792886,nalchik@inmetprom.ru,"улица Чернышевского, 180А",Россия,imp_manager8,7 (903) 411-64-28
+blagoveshchensk.inmetprom.ru,Благовещенск,,,+7 (416) 235-91-53,4162359153;9098169153,blagoveshchensk@inmetprom.ru,"Набережная улица, 32",Россия,imp_manager2,7 (963) 452-32-49
+orsk.inmetprom.ru,Орск,,,+7 (353) 220-08-85,3532200885;9033600885,orsk@inmetprom.ru,"улица Металлистов, 1",Россия,imp_manager9,7 (962) 611-16-88
+nizhnekamsk.inmetprom.ru,Нижнекамск,,,+7 (843) 253-28-86,8432532886;9033052886,nizhnekamsk@inmetprom.ru,"проспект Химиков, 45А",Россия,imp_manager6,7 (963) 230-68-80
+angarsk.inmetprom.ru,Ангарск,,,+7 (395) 293-06-68,3952930668;9642180668,angarsk@inmetprom.ru,"улица Чайковского, 1А",Россия,imp_manager2,7 (963) 452-32-49
+korolyov.inmetprom.ru,Королёв,,,+7 (495) 755-36-28,4957553628;9037553628,info@inmetprom.ru,"улица Богомолова, 3А",Россия,imp_manager5,7 (903) 755-38-06
+novgorod.inmetprom.ru,Великий Новгород,,,+7 (816) 268-61-86,8162686186;9633686186,velikij-novgorod@inmetprom.ru,"улица Химиков, 13",Россия,imp_manager5,7 (903) 755-38-06
+staryy-oskol.inmetprom.ru,Старый Оскол,,,+7 (472) 277-08-66,4722770866;9623070866,staryy-oskol@inmetprom.ru,"Комсомольский проспект, 73",Россия,imp_manager5,7 (903) 755-38-06
+syktyvkar.inmetprom.ru,Сыктывкар,,,+7 (821) 225-13-69,8212251369;9658601369,syktyvkar@inmetprom.ru,"Интернациональная улица, 131",Россия,imp_manager9,7 (962) 611-16-88
+balashiha.inmetprom.ru,Балашиха,,,+7 (495) 755-36-28,4957553628;9037553628,balashiha@inmetprom.ru,"Новая улица, 22А",Россия,imp_manager5,7 (903) 755-38-06
+prokopevsk.inmetprom.ru,Прокопьевск,,,+7 (384) 224-01-60,3842240160;9618660160,prokopevsk@inmetprom.ru,"Институтская улица, 106А",Россия,imp_manager2,7 (963) 452-32-49
+himki.inmetprom.ru,Химки,,,+7 (495) 755-36-28,4957553628;9037553628,himki@inmetprom.ru,"Московская улица, 14А",Россия,imp_manager5,7 (903) 755-38-06
+pskov.inmetprom.ru,Псков,,,+7 (812) 983-53-36,8129835336;9602835336,pskov@inmetprom.ru,"Индустриальная улица, 9/1к",Россия,imp_manager7,7 (906) 237-60-86
+biysk.inmetprom.ru,Бийск,,,+7 (385) 225-16-80,3852251680;9039476680,biysk@inmetprom.ru,"Советская улица, 212/2",Россия,imp_manager2,7 (963) 452-32-49
+engels.inmetprom.ru,Энгельс,,,+7 (845) 253-12-30,8452531230;9033281230,engels@inmetprom.ru,"проспект Фридриха Энгельса, 11А",Россия,imp_manager9,7 (962) 611-16-88
+rybinsk.inmetprom.ru,Рыбинск,,,+7 (485) 259-50-88,4852595088;9066395088,rybinsk@inmetprom.ru,"проспект Ленина, 156А",Россия,imp_manager9,7 (962) 611-16-88
+balakovo.inmetprom.ru,Балаково,,,+7 (845) 253-12-30,8452531230;9033281230,balakovo@inmetprom.ru,"улица Академика Жук, 10А",Россия,imp_manager9,7 (962) 611-16-88
+severodvinsk.inmetprom.ru,Северодвинск,,,+7 (818) 246-01-69,8182460169;9095560169,severodvinsk@inmetprom.ru,"улица Плюснина, 11",Россия,imp_manager5,7 (903) 755-38-06
+armavir.inmetprom.ru,Армавир,,,+7 (861) 944-64-28,8619446428;9034116428,armavir@inmetprom.ru,"улица Лавриненко, 100",Россия,imp_manager8,7 (903) 411-64-28
+podolsk.inmetprom.ru,Подольск,,,+7 (495) 755-36-28,4957553628;9037553628,podolsk@inmetprom.ru,"улица Клемента Готвальда, 6В",Россия,imp_manager5,7 (903) 755-38-06
+abakan.inmetprom.ru,Абакан,,,+7 (390) 231-32-36,3902313236;9639546236,abakan@inmetprom.ru,"улица Пушкина, 165",Россия,imp_manager2,7 (963) 452-32-49
+yuzhno-sahalinsk.inmetprom.ru,Южно-Сахалинск,,,+7 (424) 244-06-88,4242440688;9621200688,yuzhno-sahalinsk@inmetprom.ru,"Комсомольская улица, 259В",Россия,imp_manager2,7 (963) 452-32-49
+petropavlovsk-kamchatskiy.inmetprom.ru,Петропавловск-Камчатский,,,+7 (421) 268-06-65,4212680665;9098020665,petropavlovsk-kamchatskiy@inmetprom.ru,"улица Беринга, 115А",Россия,imp_manager2,7 (963) 452-32-49
+syzran.inmetprom.ru,Сызрань,,,+7 (846) 267-10-72,8462671072;9053001072,syzran@inmetprom.ru,"Советская улица, 34",Россия,imp_manager9,7 (962) 611-16-88
+norilsk.inmetprom.ru,Норильск,,,+7 (391) 296-81-18,3912968118;9059768118,norilsk@inmetprom.ru,"Ленинский проспект, 35",Россия,imp_manager2,7 (963) 452-32-49
+zlatoust.inmetprom.ru,Златоуст,,,+7 (351) 223-63-80,3512236380;9191236380,zlatoust@inmetprom.ru,"улица Скворцова, 7",Россия,imp_manager4,7 (919) 123-63-80
+kamensk-uralskiy.inmetprom.ru,Каменск-Уральский,,,+7 (343) 202-38-68,3432023868;9506313868,kamensk-uralskiy@inmetprom.ru,"4-я Пятилетка улица, 49",Россия,imp_manager9,7 (962) 611-16-88
+mytishchi.inmetprom.ru,Мытищи,,,+7 (495) 755-36-28,4957553628;9037553628,mytishchi@inmetprom.ru,"улица Колпакова, 24А",Россия,imp_manager5,7 (903) 755-38-06
+lyubertsy.inmetprom.ru,Люберцы,,,+7 (495) 755-36-28,4957553628;9037553628,lyubertsy@inmetprom.ru,"Новая улица, с9А",Россия,imp_manager5,7 (903) 755-38-06
+volgodonsk.inmetprom.ru,Волгодонск,,,+7 (863) 206-66-28,8632066628;9662066628,volgodonsk@inmetprom.ru,"Пионерская улица, 82",Россия,imp_manager8,7 (903) 411-64-28
+novocherkassk.inmetprom.ru,Новочеркасск,,,+7 (863) 206-66-28,8632066628;9662066628,novocherkassk@inmetprom.ru,"Харьковское шоссе, 7",Россия,imp_manager8,7 (903) 411-64-28
+nahodka.inmetprom.ru,Находка,,,+7 (423) 254-01-18,4232540118;9025240118,nahodka@inmetprom.ru,"Школьная улица, 6",Россия,imp_manager2,7 (963) 452-32-49
+ussuriysk.inmetprom.ru,Уссурийск,,,+7 (423) 254-01-18,4232540118;9025240118,ussuriysk@inmetprom.ru,"улица Некрасова, 252",Россия,imp_manager2,7 (963) 452-32-49
+berezniki.inmetprom.ru,Березники,,,+7 (342) 259-20-56,3422592056;9641902056,berezniki@inmetprom.ru,"улица Химиков, 7",Россия,imp_manager3,7 (909) 060-61-97
+salavat.inmetprom.ru,Салават,,,+7 (347) 299-64-67,3472996467;9608006467,salavat@inmetprom.ru,"бульвар Космонавтов, 40",Россия,imp_manager9,7 (962) 611-16-88
+elektrostal.inmetprom.ru,Электросталь,,,+7 (495) 755-36-28,4957553628;9037553628,elektrostal@inmetprom.ru,"проспект Ленина, 25",Россия,imp_manager5,7 (903) 755-38-06
+kerch.inmetprom.ru,Керчь,,,+7 (869) 288-98-68,8692889868,kerch@inmetprom.ru,"улица Кирова, 45",Россия,imp_manager8,7 (903) 411-64-28
+miass.inmetprom.ru,Миасс,,,+7 (351) 223-63-80,3512236380;9191236380,miass@inmetprom.ru,"улица Богдана Хмельницкого, 26А",Россия,imp_manager4,7 (919) 123-63-80
+melitopol.inmetprom.ru,Мелитополь,,,+7 (903) 755-36-28,9037553628,melitopol@inmetprom.ru,"улица Фрунзе, 25",Россия,imp_manager8,7 (903) 411-64-28
+pervouralsk.inmetprom.ru,Первоуральск,,,+7 (343) 202-38-68,3432023868;9506313868,pervouralsk@inmetprom.ru,"улица Ватутина, 72",Россия,imp_manager9,7 (962) 611-16-88
+rubtsovsk.inmetprom.ru,Рубцовск,,,+7 (385) 225-16-80,3852251680;9039476680,rubtsovsk@inmetprom.ru,"переулок Улежникова, 3Б",Россия,imp_manager2,7 (963) 452-32-49
+almetevsk.inmetprom.ru,Альметьевск,,,+7 (843) 253-28-86,8432532886;9033052886,almetevsk@inmetprom.ru,"улица Радищева, 45",Россия,imp_manager6,7 (963) 230-68-80
+kovrov.inmetprom.ru,Ковров,,,+7 (495) 755-36-28,4957553628;9037553628,kovrov@inmetprom.ru,"улица Абельмана, 16",Россия,imp_manager5,7 (903) 755-38-06
+kolomna.inmetprom.ru,Коломна,,,+7 (495) 755-36-28,4957553628;9037553628,kolomna@inmetprom.ru,"площадь Восстания, 7",Россия,imp_manager5,7 (903) 755-38-06
+maykop.inmetprom.ru,Майкоп,,,+7 (861) 944-64-28,8619446428;9034116428,maykop@inmetprom.ru,"Шоссейная улица, 74",Россия,imp_manager8,7 (903) 411-64-28
+pyatigorsk.inmetprom.ru,Пятигорск,,,+7 (865) 269-28-86,8652692886;9064792886,pyatigorsk@inmetprom.ru,"Оранжерейный проезд, 14",Россия,imp_manager8,7 (903) 411-64-28
+odintsovo.inmetprom.ru,Одинцово,,,+7 (495) 755-36-28,4957553628;9037553628,odintsovo@inmetprom.ru,"Садовая улица, 3Б",Россия,imp_manager5,7 (903) 755-38-06
+kopeysk.inmetprom.ru,Копейск,,,+7 (351) 223-63-80,3512236380;9191236380,kopeysk@inmetprom.ru,"проспект Славы, 10",Россия,imp_manager4,7 (919) 123-63-80
+hasavyurt.inmetprom.ru,Хасавюрт,,,+7 (495) 755-36-28,4957553628;9037553628,hasavyurt@inmetprom.ru,"улица Тотурбиева, 206",Россия,imp_manager5,7 (903) 755-38-06
+novomoskovsk.inmetprom.ru,Новомосковск,,,+7 (487) 271-68-18,4872716818;9674316818,novomoskovsk@inmetprom.ru,"улица Маяковского, 30",Россия,imp_manager5,7 (903) 755-38-06
+kislovodsk.inmetprom.ru,Кисловодск,,,+7 (865) 269-28-86,8652692886;9064792886,kislovodsk@inmetprom.ru,"проспект Победы, 33А",Россия,imp_manager8,7 (903) 411-64-28
+serpuhov.inmetprom.ru,Серпухов,,,+7 (495) 755-36-28,4957553628;9037553628,serpuhov@inmetprom.ru,"улица Пушечная, 16А",Россия,imp_manager5,7 (903) 755-38-06
+novocheboksarsk.inmetprom.ru,Новочебоксарск,,,+7 (835) 248-09-38,8352480938;9033220938,novocheboksarsk@inmetprom.ru,"Советская улица, 53А",Россия,imp_manager5,7 (903) 755-38-06
+nefteyugansk.inmetprom.ru,Нефтеюганск,,,+7 (346) 270-58-68,3462705868;9088905868,nefteyugansk@inmetprom.ru,"микрорайон 16А, 63",Россия,imp_manager2,7 (963) 452-32-49
+dimitrovgrad.inmetprom.ru,Димитровград,,,+7 (842) 273-00-16,8422730016;9053490016,dimitrovgrad@inmetprom.ru,"улица Богдана Хмельницкого, 100А",Россия,imp_manager6,7 (963) 230-68-80
+neftekamsk.inmetprom.ru,Нефтекамск,,,+7 (347) 299-64-67,3472996467;9608006467,neftekamsk@inmetprom.ru,"Новая улица, 1А",Россия,imp_manager9,7 (962) 611-16-88
+cherkessk.inmetprom.ru,Черкесск,,,+7 (865) 269-28-86,8652692886;9064792886,cherkessk@inmetprom.ru,"Фабричная улица, 212",Россия,imp_manager8,7 (903) 411-64-28
+orehovo-zuevo.inmetprom.ru,Орехово-Зуево,,,+7 (495) 755-36-28,4957553628;9037553628,orehovo-zuevo@inmetprom.ru,"Московская улица, 2",Россия,imp_manager5,7 (903) 755-38-06
+derbent.inmetprom.ru,Дербент,,,+7 (495) 755-36-28,4957553628;9037553628,derbent@inmetprom.ru,"проспект Агасиева, 27",Россия,imp_manager5,7 (903) 755-38-06
+kamyshin.inmetprom.ru,Камышин,,,+7 (844) 260-58-86,8442605886;9627595886,kamyshin@inmetprom.ru,"Текстильная улица, 44",Россия,imp_manager8,7 (903) 411-64-28
+nevinnomyssk.inmetprom.ru,Невинномысск,,,+7 (865) 269-28-86,8652692886;9064792886,nevinnomyssk@inmetprom.ru,"улица Энгельса, 99",Россия,imp_manager8,7 (903) 411-64-28
+krasnogorsk.inmetprom.ru,Красногорск,,,+7 (495) 755-36-28,4957553628;9037553628,krasnogorsk@inmetprom.ru,"Почтовая улица, 3",Россия,imp_manager5,7 (903) 755-38-06
+murom.inmetprom.ru,Муром,,,+7 (495) 755-36-28,4957553628;9037553628,murom@inmetprom.ru,"Привокзальная улица, 2",Россия,imp_manager5,7 (903) 755-38-06
+bataysk.inmetprom.ru,Батайск,,,+7 (863) 206-66-28,8632066628;9662066628,bataysk@inmetprom.ru,"улица Максима Горького, 356Е",Россия,imp_manager8,7 (903) 411-64-28
+novoshahtinsk.inmetprom.ru,Новошахтинск,,,+7 (863) 206-66-28,8632066628;9662066628,novoshahtinsk@inmetprom.ru,"проспект Ленина, 52",Россия,imp_manager8,7 (903) 411-64-28
+sergiev-posad.inmetprom.ru,Сергиев Посад,,,+7 (495) 755-36-28,4957553628;9037553628,sergiev-posad@inmetprom.ru,"Московское шоссе, 42",Россия,imp_manager5,7 (903) 755-38-06
+shchyolkovo.inmetprom.ru,Щёлково,,,+7 (495) 755-36-28,4957553628;9037553628,shchyolkovo@inmetprom.ru,"улица Неделина, 22",Россия,imp_manager5,7 (903) 755-38-06
+kyzyl.inmetprom.ru,Кызыл,,,+7 (391) 296-81-18,3912968118;9059768118,kyzyl@inmetprom.ru,"улица Тувинских Добровольцев, 29",Россия,imp_manager2,7 (963) 452-32-49
+oktyabrskiy.inmetprom.ru,Октябрьский,,,+7 (347) 299-64-67,3472996467;9608006467,oktyabrskiy@inmetprom.ru,"улица Девонская, 8/2",Россия,imp_manager9,7 (962) 611-16-88
+achinsk.inmetprom.ru,Ачинск,,,+7 (391) 296-81-18,3912968118;9059768118,achinsk@inmetprom.ru,"улица Назарова, 28Г",Россия,imp_manager2,7 (963) 452-32-49
+seversk.inmetprom.ru,Северск,,,+7 (382) 222-69-84,3822226984;9039556984,seversk@inmetprom.ru,"Первомайская улица, 5",Россия,imp_manager2,7 (963) 452-32-49
+novokuybyshevsk.inmetprom.ru,Новокуйбышевск,,,+7 (846) 267-10-72,8462671072;9053001072,novokuybyshevsk@inmetprom.ru,"улица Киевская, 36",Россия,imp_manager9,7 (962) 611-16-88
+elets.inmetprom.ru,Елец,,,+7 (474) 237-78-60,4742377860;9036437860,elets@inmetprom.ru,"улица Новолипецкая, 3",Россия,imp_manager9,7 (962) 611-16-88
+novyy-urengoy.inmetprom.ru,Новый Уренгой,,,+7 (903) 755-36-28,9037553628,novyj-urengoj@inmetprom.ru,"Ямальская улица, 19",Россия,imp_manager2,7 (963) 452-32-49
+evpatoriya.inmetprom.ru,Евпатория,,,+7 (869) 288-98-68,8692889868,evpatoriya@inmetprom.ru,"улица Фрунзе, 20",Россия,imp_manager8,7 (903) 411-64-28
+arzamas.inmetprom.ru,Арзамас,,,+7 (831) 213-68-80,8312136880;9632306880,arzamas@inmetprom.ru,"Парковая улица, 1И",Россия,imp_manager6,7 (963) 230-68-80
+obninsk.inmetprom.ru,Обнинск,,,+7 (484) 259-51-86,4842595186;9036365186,obninsk@inmetprom.ru,"проспект Карла Маркса, 70",Россия,imp_manager5,7 (903) 755-38-06
+kaspiysk.inmetprom.ru,Каспийск,,,+7 (495) 755-36-28,4957553628;9037553628,kaspiysk@inmetprom.ru,"улица Ленина, 51В",Россия,imp_manager5,7 (903) 755-38-06
+elista.inmetprom.ru,Элиста,,,+7 (865) 269-28-86,8652692886;9064792886,elista@inmetprom.ru,"улица Губаревича, 5",Россия,imp_manager8,7 (903) 411-64-28
+noyabrsk.inmetprom.ru,Ноябрьск,,,+7 (349) 641-10-56,3496411056;9678958056,noyabrsk@inmetprom.ru,"проспект Мира, 70А",Россия,imp_manager2,7 (963) 452-32-49
+pushkino.inmetprom.ru,Пушкино,,,+7 (495) 755-36-28,4957553628;9037553628,pushkino@inmetprom.ru,"Железнодорожная улица, 1",Россия,imp_manager5,7 (903) 755-38-06
+zhukovskiy.inmetprom.ru,Жуковский,,,+7 (495) 755-36-28,4957553628;9037553628,zhukovskiy@inmetprom.ru,"улица Гагарина, 85",Россия,imp_manager5,7 (903) 755-38-06
+artyom.inmetprom.ru,Артем,,,+7 (423) 254-01-18,4232540118;9025240118,artyom@inmetprom.ru,"Амурская улица, 9",Россия,imp_manager2,7 (963) 452-32-49
+mezhdurechensk.inmetprom.ru,Междуреченск,,,+7 (384) 224-01-60,3842240160;9618660160,mezhdurechensk@inmetprom.ru,"улица Кузнецкая, 5А",Россия,imp_manager2,7 (963) 452-32-49
+leninsk-kuznetskiy.inmetprom.ru,Ленинск-Кузнецкий,,,+7 (384) 224-01-60,3842240160;9618660160,leninsk-kuznetskiy@inmetprom.ru,"проспект Ленина, 59к1",Россия,imp_manager2,7 (963) 452-32-49
+sarapul.inmetprom.ru,Сарапул,,,+7 (341) 290-61-97,3412906197;9090606197,sarapul@inmetprom.ru,"улица Горького, 16",Россия,imp_manager3,7 (909) 060-61-97
+essentuki.inmetprom.ru,Ессентуки,,,+7 (865) 269-28-86,8652692886;9064792886,essentuki@inmetprom.ru,"Пятигорская улица, 139",Россия,imp_manager8,7 (903) 411-64-28
+votkinsk.inmetprom.ru,Воткинск,,,+7 (341) 290-61-97,3412906197;9090606197,votkinsk@inmetprom.ru,"улица Мира, 3",Россия,imp_manager3,7 (909) 060-61-97
+noginsk.inmetprom.ru,Ногинск,,,+7 (495) 755-36-28,4957553628;9037553628,noginsk@inmetprom.ru,"улица Климова, 50",Россия,imp_manager5,7 (903) 755-38-06
+tobolsk.inmetprom.ru,Тобольск,,,+7 (345) 253-32-49,3452533249;9634523249,tobolsk@inmetprom.ru,"микрорайон Центральный, 27",Россия,imp_manager2,7 (963) 452-32-49
+uhta.inmetprom.ru,Ухта,,,+7 (821) 225-13-69,8212251369;9658601369,uhta@inmetprom.ru,"Октябрьская улица, 17А",Россия,imp_manager5,7 (903) 755-38-06
+serov.inmetprom.ru,Серов,,,+7 (343) 202-38-68,3432023868;9506313868,serov@inmetprom.ru,"улица Ленина, 162Б",Россия,imp_manager9,7 (962) 611-16-88
+berdsk.inmetprom.ru,Бердск,,,+7 (383) 249-82-56,3832498256;9628298256,berdsk@inmetprom.ru,"Озёрная улица, 32к1",Россия,imp_manager2,7 (963) 452-32-49
+velikie-luki.inmetprom.ru,Великие Луки,,,+7 (812) 983-53-36,8129835336;9602835336,velikie-luki@inmetprom.ru,"улица Дружбы, 16",Россия,imp_manager7,7 (906) 237-60-86
+michurinsk.inmetprom.ru,Мичуринск,,,+7 (475) 243-53-79,4752435379;9641355379,michurinsk@inmetprom.ru,"улица Филиппова, 49Б",Россия,imp_manager5,7 (903) 755-38-06
+kiselyovsk.inmetprom.ru,Киселевск,,,+7 (384) 224-01-60,3842240160;9618660160,kiselyovsk@inmetprom.ru,"улица Ленина, 33",Россия,imp_manager2,7 (963) 452-32-49
+novotroitsk.inmetprom.ru,Новотроицк,,,+7 (353) 220-08-85,3532200885;9033600885,novotroitsk@inmetprom.ru,"Комсомольский проспект, 6",Россия,imp_manager9,7 (962) 611-16-88
+zelenodolsk.inmetprom.ru,Зеленодольск,,,+7 (843) 253-28-86,8432532886;9033052886,zelenodolsk@inmetprom.ru,"улица Чкалова, 4А",Россия,imp_manager6,7 (963) 230-68-80
+solikamsk.inmetprom.ru,Соликамск,,,+7 (342) 259-20-56,3422592056;9641902056,solikamsk@inmetprom.ru,"улица 20-летия Победы, 173В",Россия,imp_manager3,7 (909) 060-61-97
+ramenskoe.inmetprom.ru,Раменское,,,+7 (495) 755-36-28,4957553628;9037553628,ramenskoe@inmetprom.ru,"Красноармейская улица, 133Б",Россия,imp_manager5,7 (903) 755-38-06
+domodedovo.inmetprom.ru,Домодедово,,,+7 (495) 755-36-28,4957553628;9037553628,domodedovo@inmetprom.ru,"Станционная улица, 20Ак1",Россия,imp_manager5,7 (903) 755-38-06
+magadan.inmetprom.ru,Магадан,,,+7 (421) 268-06-65,4212680665;9098020665,magadan@inmetprom.ru,"улица Билибина, 2А",Россия,imp_manager2,7 (963) 452-32-49
+glazov.inmetprom.ru,Глазов,,,+7 (341) 290-61-97,3412906197;9090606197,glazov@inmetprom.ru,"улица Пряженникова, 67",Россия,imp_manager3,7 (909) 060-61-97
+zheleznogorsk.inmetprom.ru,Железногорск,,,+7 (391) 296-81-18,3912968118;9059768118,zheleznogorsk@inmetprom.ru,"улица Рокоссовского, 54",Россия,imp_manager2,7 (963) 452-32-49
+kansk.inmetprom.ru,Канск,,,+7 (391) 296-81-18,3912968118;9059768118,kansk@inmetprom.ru,"улица Горького, 51",Россия,imp_manager2,7 (963) 452-32-49
+nazran.inmetprom.ru,Назрань,,,+7 (865) 269-28-86,8652692886;9064792886,nazran@inmetprom.ru,"улица Тангиева, 4",Россия,imp_manager8,7 (903) 411-64-28
+dolgoprudnyy.inmetprom.ru,Долгопрудный,,,+7 (495) 755-36-28,4957553628;9037553628,dolgoprudnyy@inmetprom.ru,"Лихачёвский проезд, 8",Россия,imp_manager5,7 (903) 755-38-06
+kuznetsk.inmetprom.ru,Кузнецк,,,+7 (841) 230-08-89,8412300889;9033230889,kuznetsk@inmetprom.ru,"улица Калинина, 197",Россия,imp_manager6,7 (963) 230-68-80
+kineshma.inmetprom.ru,Кинешма,,,+7 (493) 234-31-96,4932343196;9051093196,kineshma@inmetprom.ru,"площадь Революции, 4",Россия,imp_manager5,7 (903) 755-38-06
+reutov.inmetprom.ru,Реутов,,,+7 (495) 755-36-28,4957553628;9037553628,reutov@inmetprom.ru,"Юбилейный проспект, 42",Россия,imp_manager5,7 (903) 755-38-06
+ust-ilimsk.inmetprom.ru,Усть-Илимск,,,+7 (395) 293-06-68,3952930668;9642180668,ust-ilimsk@inmetprom.ru,"улица Героев Труда, 39",Россия,imp_manager2,7 (963) 452-32-49
+usole-sibirskoe.inmetprom.ru,Усолье-Сибирское,,,+7 (395) 293-06-68,3952930668;9642180668,usole-sibirskoe@inmetprom.ru,"Фестивальный проезд, 9",Россия,imp_manager2,7 (963) 452-32-49
+kirovo-chepetsk.inmetprom.ru,Кирово-Чепецк,,,+7 (833) 220-65-58,8332206558;9642506558,kirovo-chepetsk@inmetprom.ru,"улица Алексея Некрасова, 29к2",Россия,imp_manager6,7 (963) 230-68-80
+hanty-mansiysk.inmetprom.ru,Ханты-Мансийск,,,+7 (346) 270-58-68,3462705868;9088905868,hanty-mansiysk@inmetprom.ru,"улица Мира, 13",Россия,imp_manager2,7 (963) 452-32-49
+belovo.inmetprom.ru,Белово,,,+7 (384) 224-01-60,3842240160;9618660160,belovo@inmetprom.ru,"Почтовый переулок, 49",Россия,imp_manager2,7 (963) 452-32-49
+anzhero-sudzhensk.inmetprom.ru,Анжеро-Судженск,,,+7 (384) 224-01-60,3842240160;9618660160,anzhero-sudzhensk@inmetprom.ru,"улица Софьи Перовской, 32",Россия,imp_manager2,7 (963) 452-32-49
+mihaylovsk.inmetprom.ru,Михайловск,,,+7 (865) 269-28-86,8652692886;9064792886,mihaylovsk@inmetprom.ru,"улица Гоголя, 123",Россия,imp_manager8,7 (903) 411-64-28
+vorkuta.inmetprom.ru,Воркута,,,+7 (821) 225-13-69,8212251369;9658601369,vorkuta@inmetprom.ru,"улица Ленина, 49",Россия,imp_manager5,7 (903) 755-38-06
+vidnoe.inmetprom.ru,Видное,,,+7 (495) 755-36-28,4957553628;9037553628,vidnoe@inmetprom.ru,"Северная промзона, вл4",Россия,imp_manager5,7 (903) 755-38-06
+asbest.inmetprom.ru,Асбест,,,+7 (343) 202-38-68,3432023868;9506313868,asbest@inmetprom.ru,"проспект Ленина, 16",Россия,imp_manager9,7 (962) 611-16-88
+cheremhovo.inmetprom.ru,Черемхово,,,+7 (395) 293-06-68,3952930668;9642180668,cheremhovo@inmetprom.ru,"Первомайская улица, 166",Россия,imp_manager2,7 (963) 452-32-49
+inmetprom.by,Минск,,,+375 (44) 588-81-48,445888148,minsk@inmetprom.by,"проспект Партизанский, 178/2",Беларусь,imp_by,375 (44) 588-81-48
+gomel.inmetprom.by,Гомель,,,+375 (44) 588-81-48,445888148,gomel@inmetprom.by,"улица Мазурова, 28В",Беларусь,imp_by,375 (44) 588-81-48
+brest.inmetprom.by,Брест,,,+375 (44) 588-81-48,445888148,brest@inmetprom.by,"Варшавское шоссе, 43",Беларусь,imp_by,375 (44) 588-81-48
+vitebsk.inmetprom.by,Витебск,,,+375 (44) 588-81-48,445888148,vitebsk@inmetprom.by,"улица Зеньковой, 1",Беларусь,imp_by,375 (44) 588-81-48
+grodno.inmetprom.by,Гродно,,,+375 (44) 588-81-48,445888148,grodno@inmetprom.by,"переулок Дзержинского, 9",Беларусь,imp_by,375 (44) 588-81-48
+mogilev.inmetprom.by,Могилев,,,+375 (44) 588-81-48,445888148,mogilev@inmetprom.by,"проспект Мира, 73",Беларусь,imp_by,375 (44) 588-81-48
+aktau.inmetprom.kz,Актау,,+7 (708) 211-47-03,+7 (708) 211-48-27,7082114827;7082114703,aktau@inmetprom.kz,"микрорайон 26-й, 58Б",Казахстан,imp_kz,7 (700) 567-89-38
+aktobe.inmetprom.kz,Актобе,,+7 (708) 211-47-03,+7 (713) 273-61-01,7132736101;7082114703,aktobe@inmetprom.kz,"проспект Абилкайыр-хана, 44/3",Казахстан,imp_kz,7 (700) 567-89-38
+almaty.inmetprom.kz,Алматы,,+7 (727) 317-27-00,+7 (727) 317-26-58,7273172658;7273172700,almaty@inmetprom.kz,"улица 24 Июня, 27",Казахстан,imp_kz,7 (700) 567-89-38
+inmetprom.kz,Астана,,+7 (717) 278-53-04,+7 (717) 262-99-82,7172629982;7172785304,astana@inmetprom.kz,"улица Александра Бараева, 16",Казахстан,imp_kz,7 (700) 567-89-38
+atyrau.inmetprom.kz,Атырау,,+7 (708) 211-47-03,+7 (712) 275-39-10,7122753910;7082114703,atyrau@inmetprom.kz,"​проспект Азаттык, 17",Казахстан,imp_kz,7 (700) 567-89-38
+zhanaozen.inmetprom.kz,Жанаозен,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,zhanaozen@inmetprom.kz,"микрорайон Шанырак, 1/10",Казахстан,imp_kz,7 (700) 567-89-38
+zhezkazgan.inmetprom.kz,Жезказган,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,zhezkazgan@inmetprom.kz,"​улица Желтоксан, 25",Казахстан,imp_kz,7 (700) 567-89-38
+karaganda.inmetprom.kz,Караганда,,+7 (708) 211-47-03,+7 (721) 299-71-01,7212997101;7082114703,karaganda@inmetprom.kz,"Бытовая улица, 15/1",Казахстан,imp_kz,7 (700) 567-89-38
+kokshetau.inmetprom.kz,Кокшетау,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,kokshetau@inmetprom.kz,"улица Ауельбекова, 139",Казахстан,imp_kz,7 (700) 567-89-38
+kostanay.inmetprom.kz,Костанай,,+7 (708) 211-47-03,+7 (708) 211-47-54,7082114754;7082114703,kostanaj@inmetprom.kz,"​проспект Аль-Фараби, 74",Казахстан,imp_kz,7 (700) 567-89-38
+kyzylorda.inmetprom.kz,Кызылорда,,+7 (708) 211-47-03,+7 (724) 292-51-04,7242925104;7082114703,kyzylorda@inmetprom.kz,"улица Мусирали Ажикожа, 89",Казахстан,imp_kz,7 (700) 567-89-38
+pavlodar.inmetprom.kz,Павлодар,,+7 (708) 211-47-03,+7 (718) 278-23-03,7182782303;7082114703,pavlodar@inmetprom.kz,"​проспект Нурсултана Назарбаева, 21/1",Казахстан,imp_kz,7 (700) 567-89-38
+petropavlovsk.inmetprom.kz,Петропавловск,,+7 (708) 211-47-03,+7 (708) 211-48-25,7082114825;7082114703,petropavlovsk@inmetprom.kz,"​улица Магжана Жумабаева, 109",Казахстан,imp_kz,7 (700) 567-89-38
+semey.inmetprom.kz,Семей,,+7 (708) 211-47-03,+7 (708) 427-04-62,7084270462;7082114703,semej@inmetprom.kz,"площадь Абая, 5",Казахстан,imp_kz,7 (700) 567-89-38
+taldykorgan.inmetprom.kz,Талдыкорган,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,taldykorgan@inmetprom.kz,"улица Акын Сара, 130а",Казахстан,imp_kz,7 (700) 567-89-38
+taraz.inmetprom.kz,Тараз,,+7 (708) 211-47-03,+7 (726) 297-09-10,7262970910;7082114703,taraz@inmetprom.kz,"2-й проезд Рахимова, 1а",Казахстан,imp_kz,7 (700) 567-89-38
+temirtau.inmetprom.kz,Темиртау,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,temirtau@inmetprom.kz,"​проспект Момышулы, 27а",Казахстан,imp_kz,7 (700) 567-89-38
+turkestan.inmetprom.kz,Туркестан,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,turkestan@inmetprom.kz,"улица Султанбека Кожанова, 44",Казахстан,imp_kz,7 (700) 567-89-38
+uralsk.inmetprom.kz,Уральск,,+7 (708) 211-47-03,+7 (708) 211-47-69,7082114769;7082114703,uralsk@inmetprom.kz,"​улица Жубана Молдагалиева, 18",Казахстан,imp_kz,7 (700) 567-89-38
+ust-kamenogorsk.inmetprom.kz,Усть-Каменогорск,,+7 (708) 211-47-03,+7 (723) 291-04-20,7232910420;7082114703,ust-kamenogorsk@inmetprom.kz,"улица Кабанбай батыра, 49",Казахстан,imp_kz,7 (700) 567-89-38
+shymkent.inmetprom.kz,Шымкент,,+7 (708) 211-47-03,+7 (725) 260-36-28,7252603628;7005678938;7082114703,shymkent@inmetprom.kz,"​улица Жандосова, 73",Казахстан,imp_kz,7 (700) 567-89-38
+ekibastuz.inmetprom.kz,Экибастуз,,+7 (708) 211-47-03,+7 (708) 211-47-65,7082114765;7082114703,ekibastuz@inmetprom.kz,"​улица Матросова, 6",Казахстан,imp_kz,7 (700) 567-89-38
+namangan.inmetprom.uz,Наманган,,,+998 (90) 818-86-83,908188683,namangan@inmetprom.uz,"улица Хамрох, 96",Узбекистан,imp_uzb,998 (90) 818-86-83
+samarkand.inmetprom.uz,Самарканд,,,+998 (90) 818-86-83,908188683,samarkand@inmetprom.uz,"улица Мухаммада Аль-Хорезми, 115а",Узбекистан,imp_uzb,998 (90) 818-86-83
+inmetprom.uz,Ташкент,,,+998 (90) 818-86-83,908188683,tashkent@inmetprom.uz,"улица Бабура, 34",Узбекистан,imp_uzb,998 (90) 818-86-83
+inmetprom.kg,Бишкек,,,+996 (77) 631-32-78,,bishkek@inmetprom.kg,"Гражданская улица, 53",Киргизия,imp_kg,996 (77) 631-32-78
+dzhalal-abad.inmetprom.kg,Джалал-Абад,,,+996 (77) 631-32-78,,dzhalal-abad@inmetprom.kg,"проспект Тумонбая, Байзакова, 34",Киргизия,imp_kg,996 (77) 631-32-78
+karakol.inmetprom.kg,Каракол,,,+996 (77) 631-32-78,,karakol@inmetprom.kg,"улица Жусаева, 146",Киргизия,imp_kg,996 (77) 631-32-78
+osh.inmetprom.kg,Ош,,,+996 (77) 631-32-78,,osh@inmetprom.kg,"проспект Абсамата Масалиева, 78",Киргизия,imp_kg,996 (77) 631-32-78
