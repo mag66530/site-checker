@@ -241,6 +241,21 @@ def main() -> int:
                 )
             except Exception as e:  # noqa: BLE001
                 _stamp(f'⚠️ Проверка письма о заказе не выполнена: {e}')
+
+        # ── Пункт 2.12: cookie-уведомление + ссылка на политику + живочат ──
+        # Открываем главную каждого проверенного города свежим контекстом (без
+        # cookie = «новый пользователь») и пишем результат в «Логи». Тихо
+        # пропускается, если у проекта нет городов/URL.
+        if not (stop and stop()):
+            try:
+                import privacy_check
+                _города_212 = [(c, u) for (c, u, _m) in run_cities if u]
+                if _города_212:
+                    privacy_check.выполнить_проверку(
+                        _города_212, excel_path='log_forms.xlsx',
+                        show=a.show_browser, log=_stamp)
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠️ Проверка 2.12 (cookie/чат) не выполнена: {e}')
     except SystemExit as e:
         rc = int(e.code) if isinstance(e.code, int) else 1
     except Exception as e:
