@@ -1967,6 +1967,83 @@ def _build_layout_sheet(wb, results):
             ws, row, _issue_groups(warned, 'layout', 'warnings'), C.warn)
 
 
+# ── Лист «Разметка» (п.1.12, ТЗ 3.5: Schema.org + OpenGraph) ────────
+
+
+def _build_markup_sheet(wb, results):
+    """Лист микроразметки: OG-теги и Schema.org-типы на основных типах
+    страниц. Добавляется только если проверка выполнялась."""
+    checked = [r for r in results if getattr(r, 'markup', None)]
+    if not checked:
+        return
+
+    bad = [r for r in checked if r.markup.get('issues')]
+    warned = [r for r in checked if (not r.markup.get('issues')
+                                     and r.markup.get('warnings'))]
+    has_bugs = bool(bad)
+
+    ws = wb.create_sheet('Разметка')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 18
+    ws.column_dimensions['C'].width = 14
+    ws.column_dimensions['D'].width = 62
+    ws.column_dimensions['E'].width = 60
+    ws.column_dimensions['F'].width = 3
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Микроразметка и OpenGraph (п.1.12)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('ТЗ 3.5: OpenGraph (og:url/title/description/image/type - все '
+               'обязательны) и Schema.org на основных типах страниц: данные '
+               'компании (Organization/LocalBusiness) везде, хлебные крошки '
+               '(BreadcrumbList) на вложенных, листинги (OfferCatalog/ItemList/'
+               'CollectionPage), на товаре - Product, характеристики '
+               '(PropertyValue), фото (itemprop=image). Основной формат - '
+               'microdata: тип только в JSON-LD = предупреждение. Цена не '
+               'размечена = предупреждение (товары «по запросу»). Валидность '
+               'полей проверяют инструменты Яндекса/Google - тут наличие и '
+               'полнота.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 68
+
+    row = 5
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Проверено страниц: {len(checked)} · с багами разметки: '
+               f'{len(bad)} · с предупреждениями: {len(warned)}')
+    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 26
+    row += 2
+
+    _meta_section_title(ws, row, f'Проблемы разметки  ({len(bad)})',
+                        C.err if bad else C.ok)
+    row += 1
+    if not bad:
+        _meta_ok_line(ws, row, '✅ OG-теги и обязательная Schema.org-разметка '
+                               'на месте у всех проверенных страниц.')
+        row += 2
+    else:
+        row = _render_issue_groups(
+            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err)
+
+    if warned:
+        _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
+        row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn)
+
+
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
 
 _META_FIELD_LABEL = {'title': 'title', 'description': 'description', 'h1': 'H1'}
@@ -2705,6 +2782,9 @@ def build_report(
 
     # Вёрстка (п.1.11): нет viewport / битые CSS
     layout_bad_pages = [r for r in results if getattr(r, 'has_layout_issues', False)]
+
+    # Разметка (п.1.12): OG/Schema.org
+    markup_bad_pages = [r for r in results if getattr(r, 'has_markup_issues', False)]
     _mdups = (meta_summary or {}).get('duplicates') or {}
     meta_dup_groups = (len(_mdups.get('same_city') or [])
                        + len(_mdups.get('cross_city') or [])
@@ -2819,6 +2899,11 @@ def build_report(
                          f'{len(layout_bad_pages)} '
                          f'{_plural_pages(len(layout_bad_pages))} - '
                          f'см. лист «Вёрстка».')
+    if markup_bad_pages:
+        summary_text += (f'\nРазметка: проблемы (OG/Schema.org) на '
+                         f'{len(markup_bad_pages)} '
+                         f'{_plural_pages(len(markup_bad_pages))} - '
+                         f'см. лист «Разметка».')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -2870,6 +2955,7 @@ def build_report(
         ('Метаданные', 'если есть лист - title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
         ('Заголовки и мета', 'если есть лист - единственность title/description/H1, дубли H2 и заголовки вне текста.'),
         ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media) и переходы из меню шапки.'),
+        ('Разметка', 'если есть лист - OpenGraph-теги и Schema.org (крошки, компания, товар, цены, фото).'),
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
@@ -2904,6 +2990,9 @@ def build_report(
 
     # ─── Лист вёрстки (п.1.11) - если проверка выполнялась ──────────
     _build_layout_sheet(wb, results)
+
+    # ─── Лист разметки (п.1.12) - если проверка выполнялась ─────────
+    _build_markup_sheet(wb, results)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

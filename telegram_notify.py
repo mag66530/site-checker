@@ -74,6 +74,7 @@ def format_summary_message(
     meta_issues_pages: int = 0,           # страниц с проблемами метаданных (п.1.8)
     meta_duplicates: int = 0,             # групп дублей title/description/H1 + URL (п.1.8)
     layout_issues_pages: int = 0,         # страниц с проблемами вёрстки (п.1.11)
+    markup_issues_pages: int = 0,         # страниц с проблемами разметки (п.1.12)
 ) -> str:
     """
     Сформировать текст сообщения для Telegram.
@@ -88,7 +89,7 @@ def format_summary_message(
         or metrika_pages_count > 0 or content_bugs_count > 0
         or indexing_issues_pages > 0 or meta_issues_pages > 0
         or meta_duplicates > 0 or layout_issues_pages > 0
-        or bool(critical_block)
+        or markup_issues_pages > 0 or bool(critical_block)
     )
 
     # Короткое имя проекта: "СМУ - Стальметурал" → "СМУ".
@@ -138,6 +139,10 @@ def format_summary_message(
     # Вёрстка (п.1.11): нет viewport / битые CSS
     if layout_issues_pages > 0:
         lines.append(f'Проблемы вёрстки (viewport/CSS): <b>{layout_issues_pages}</b> страниц')
+
+    # Разметка (п.1.12): OG/Schema.org
+    if markup_issues_pages > 0:
+        lines.append(f'Проблемы разметки (OG/Schema): <b>{markup_issues_pages}</b> страниц')
 
     # 404 из Метрики
     if metrika_pages_count > 0:

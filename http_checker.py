@@ -214,6 +214,11 @@ class CheckResult:
     layout: Optional[dict] = None
     has_layout_issues: bool = False
 
+    # п.1.12 (ТЗ 3.5) - микроразметка Schema.org и OpenGraph
+    # | None - не проверяли / нерелевантный тип страницы
+    markup: Optional[dict] = None
+    has_markup_issues: bool = False
+
     checked_at: Optional[str] = None
 
 
@@ -485,6 +490,7 @@ async def check_one(
     check_region: bool = False,
     check_cis: bool = False,
     check_layout: bool = False,
+    check_markup: bool = False,
     region_ctx=None,            # RegionContext из region_checker.py
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
@@ -669,6 +675,16 @@ async def check_one(
             except Exception:
                 pass
 
+    # п.1.12 (ТЗ 3.5): микроразметка Schema.org + OpenGraph. Только основные
+    # типы страниц (+ контакты); сам чекер вернёт None для нерелевантных.
+    markup = None
+    if check_markup and is_ok and a['body_text']:
+        try:
+            from schema_checker import check_markup as _check_markup
+            markup = _check_markup(a['body_text'], task.type_code, task.url)
+        except Exception:
+            markup = None
+
     # п.1.3.1 + 1.3.2 (та же галочка 1.8): единственность title/description/H1,
     # дубли H2 и «текстовость» заголовков (h2-h6 не в шапке/подвале/меню).
     meta_unique = None
@@ -719,6 +735,8 @@ async def check_one(
         has_meta_unique_issues=bool(meta_unique and meta_unique.get('issues')),
         layout=layout,
         has_layout_issues=bool(layout and layout.get('issues')),
+        markup=markup,
+        has_markup_issues=bool(markup and markup.get('issues')),
         checked_at=None,
     )
 
@@ -743,6 +761,7 @@ async def run_batch(
     check_region: bool = False,
     check_cis: bool = False,
     check_layout: bool = False,
+    check_markup: bool = False,
     region_ctx=None,            # RegionContext из region_checker.build_region_context
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
@@ -842,6 +861,7 @@ async def run_batch(
                     check_region=check_region,
                     check_cis=check_cis,
                     check_layout=check_layout,
+                    check_markup=check_markup,
                     region_ctx=region_ctx,
                     proxy_url=proxy_url,
                     kp_map=kp_map,
