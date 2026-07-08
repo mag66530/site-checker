@@ -1485,7 +1485,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     _aud_mc = (((indexing_summary or {}).get('sitemap_audit') or {})
                .get('missing_catalog') or {})
     _aud_missing = ((_aud_mc.get('categories') or [])
-                    + (_aud_mc.get('filters') or []))
+                    + (_aud_mc.get('filters') or [])
+                    + (_aud_mc.get('services') or []))
     _hm_junk_top = (((indexing_summary or {}).get('html_sitemap') or {})
                     .get('junk_links') or [])
     has_bugs = bool(bad or sm_dis or _blanket or _assets_closed
@@ -1806,7 +1807,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                               or f.get('bytes', 0) > 10 * 1024 * 1024)]
             _mc = aud.get('missing_catalog') or {}
             _miss = ((_mc.get('categories') or [])
-                     + (_mc.get('filters') or []))
+                     + (_mc.get('filters') or [])
+                     + (_mc.get('services') or []))
             _sec_title('Sitemap: структура записей (ТЗ 3.4.2)',
                        bool(aud.get('error') or _bad_urls or _over_proto
                             or _miss))
@@ -1818,9 +1820,23 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                       f'с changefreq: {aud.get("with_changefreq", 0)} · '
                       f'с priority: {aud.get("with_priority", 0)}', C.text_muted)
                 # структура: индекс или одиночный файл
+                _itypes = aud.get('index_types') or []
+                # опознанные типы (без «прочее») - по ним судим о разбивке
+                _named = [t for t in _itypes if t != 'прочее']
                 if aud.get('is_index'):
                     _line(f'✅ Sitemap - индекс-файл, внутри '
-                          f'{max(aud.get("files", 1) - 1, 0)} файлов.', C.ok)
+                          f'{len(aud.get("index_children") or [])} файлов.',
+                          C.ok)
+                    if _named:
+                        _line(f'Разбивка по типам: {", ".join(_named)}'
+                              + (' + прочие' if 'прочее' in _itypes else '')
+                              + '.', C.text_muted)
+                    # разбивки по типам нет (всё «прочее» / один тип), а
+                    # каталог большой - предупреждение (п.5)
+                    if _tot > 10000 and len(_named) < 2:
+                        _line('⚠ Индекс не разбит по типам страниц '
+                              '(категории/фильтры/товары в отдельные файлы) - '
+                              'при большом каталоге так рекомендуется.', C.warn)
                 elif _tot > 10000:
                     _line(f'⚠ Записей {_tot}, но sitemap - одиночный файл '
                           f'без индекса; нужен индекс-файл с разбивкой '
@@ -1853,21 +1869,21 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 for name, _n in _fld_missing:
                     _line(f'⚠ Ни у одной записи нет <{name}> - ТЗ требует '
                           f'заполнять.', C.warn)
-                # полнота: категории/фильтры из выгрузки каталога
+                # полнота: категории/фильтры/услуги из выгрузки каталога
                 if aud.get('truncated'):
-                    _line('- Полнота (категории/фильтры в sitemap) не '
+                    _line('- Полнота (категории/фильтры/услуги в sitemap) не '
                           'проверена: обход упёрся в лимит файлов/записей.',
                           C.text_muted)
                 elif _miss:
-                    _line(f'❌ В sitemap нет {len(_miss)} категорий/фильтров '
-                          f'из выгрузки каталога - страницы не попадут в '
-                          f'индекс:', C.err, bold=True)
+                    _line(f'❌ В sitemap нет {len(_miss)} важных ссылок '
+                          f'(категории/фильтры/услуги) из выгрузки - страницы '
+                          f'не попадут в индекс:', C.err, bold=True)
                     for _p in _miss[:20]:
                         _line(_p, C.err)
                     if len(_miss) > 20:
                         _line(f'… и ещё {len(_miss) - 20}', C.text_muted)
                 elif aud.get('missing_catalog') is not None:
-                    _line('✅ Все категории и фильтры из выгрузки каталога '
+                    _line('✅ Все категории, фильтры и услуги из выгрузки '
                           'есть в sitemap.', C.ok)
             row += 1
 
@@ -3138,7 +3154,8 @@ def build_report(
     _idx_mc = (((indexing_summary or {}).get('sitemap_audit') or {})
                .get('missing_catalog') or {})
     _idx_missing = ((_idx_mc.get('categories') or [])
-                    + (_idx_mc.get('filters') or []))
+                    + (_idx_mc.get('filters') or [])
+                    + (_idx_mc.get('services') or []))
     _idx_hm_junk = (((indexing_summary or {}).get('html_sitemap') or {})
                     .get('junk_links') or [])
     if (indexing_bad_pages or indexing_sitemap_conflicts
@@ -3155,8 +3172,8 @@ def build_report(
         if _idx_assets:
             _idx_bits.append(f'{len(_idx_assets)} файлов .css/.js закрыты в robots.txt')
         if _idx_missing:
-            _idx_bits.append(f'{len(_idx_missing)} категорий/фильтров каталога '
-                             f'нет в sitemap')
+            _idx_bits.append(f'{len(_idx_missing)} важных ссылок '
+                             f'(категории/фильтры/услуги) нет в sitemap')
         if _idx_hm_junk:
             _idx_bits.append(f'{len(_idx_hm_junk)} служебных ссылок в HTML-карте')
         summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
