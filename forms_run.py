@@ -212,6 +212,22 @@ def main() -> int:
                     )
             except Exception as e:  # noqa: BLE001
                 _stamp(f'⚠️ Проверка админки не выполнена: {e}')
+
+        # ── Пункт 2.9: письмо об оформлении заказа приходит покупателю ──
+        # Заказ(ы) оформлены на почту покупателя (её задаёт страница через
+        # ORDER_BUYER_EMAIL). Если заданы креды тестового ящика (ORDER_MAIL_*) -
+        # заходим по IMAP и подтверждаем письмо; иначе (своя почта) - напоминаем
+        # проверить вручную. Без почты покупателя блок тихо пропускается.
+        if not (stop and stop()):
+            try:
+                import order_mail_check
+                order_mail_check.выполнить_проверку(
+                    orders_path='placed_orders.json',
+                    excel_path='log_forms.xlsx',
+                    log=_stamp,
+                )
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠️ Проверка письма о заказе не выполнена: {e}')
     except SystemExit as e:
         rc = int(e.code) if isinstance(e.code, int) else 1
     except Exception as e:
