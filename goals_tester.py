@@ -413,6 +413,13 @@ def _план_имп_для_домена(домен: str) -> dict:
              ['.footer-manager-call', '.footer-email']),
             ('Каталог',   d + '/catalog/',
              ['.add-to-cart-btn', 'text=Быстрый заказ, [class*="fast-order"]']),
+            # РЕАЛЬНЫЙ ЛИСТИНГ (категория с товарами): тут живут корзинные цели
+            # v-cart-listing / bistrii-zakaz-* (на корне каталога их нет). Категории
+            # armatura/reshetchatyj-nastil есть на всех доменах ИМП.
+            ('Листинг',   d + '/catalog/armatura/',
+             ['.add-to-cart-btn, button:has-text("В корзину")',
+              'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]',
+              '.tags a, [class*="tag"] a']),
             ('Акции',     d + '/specials/',
              ['.add-to-cart-btn, button:has-text("В корзину")',
               'text=Быстрый заказ, [class*="fast-order"]']),
