@@ -1398,6 +1398,43 @@ def record_submitted_form(rec: dict) -> None:
         pass
 
 
+# --- Пункт 2.9 (письмо покупателю): запись оформленных заказов для сверки ---
+# После прогона forms_run сверяет этот список с почтой покупателя (ПОЧТА):
+# order_mail_check заходит в ящик и проверяет, что письмо-подтверждение заказа
+# реально пришло. Пишем только успешно оформленные заказы (шаг «проверить»
+# с флагом "заказ": True, завершившийся успехом).
+PLACED_ORDERS_FILE = "placed_orders.json"
+
+
+def reset_placed_orders() -> None:
+    """Удаляет файл заказов (в начале свежего прогона, вместе с очисткой Excel)."""
+    try:
+        if os.path.exists(PLACED_ORDERS_FILE):
+            os.remove(PLACED_ORDERS_FILE)
+    except Exception:
+        pass
+
+
+def record_placed_order(rec: dict) -> None:
+    """Дописывает один оформленный заказ в placed_orders.json (список)."""
+    import json as _json
+    data = []
+    try:
+        if os.path.exists(PLACED_ORDERS_FILE):
+            with open(PLACED_ORDERS_FILE, encoding="utf-8") as fh:
+                data = _json.load(fh)
+            if not isinstance(data, list):
+                data = []
+    except Exception:
+        data = []
+    data.append(rec)
+    try:
+        with open(PLACED_ORDERS_FILE, "w", encoding="utf-8") as fh:
+            _json.dump(data, fh, ensure_ascii=False)
+    except Exception:
+        pass
+
+
 def write_summary_sheet(path: str, время_прогона: str = "") -> None:
     """Пересобирает лист «Сводка» в логе: готовое сообщение (сколько форм
     отправлено и на какие домены) + таблица «Домен → Города → Почта для
@@ -1554,6 +1591,16 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     importlib.reload(config)
     from config import ТЕЛЕФОН, ПОЧТА, ИМЯ, КОММЕНТАРИЙ, СТРАНИЦЫ, СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ
 
+    # Пункт 2.9: почту покупателя можно переопределить из интерфейса (окружение
+    # ORDER_BUYER_EMAIL) - чтобы заказ (и заявки) уходили на РЕАЛЬНУЮ почту, куда
+    # придёт письмо-подтверждение: тестовый ящик с IMAP (автопроверка) или своя
+    # рабочая почта (проверка вручную). Пусто - остаётся ПОЧТА из config.
+    _buyer_email = (os.environ.get("ORDER_BUYER_EMAIL") or "").strip()
+    if _buyer_email:
+        ПОЧТА = _buyer_email
+        print(f"✉️ Почта покупателя из интерфейса: {ПОЧТА} "
+              f"(на неё уйдёт заказ и придёт письмо-подтверждение).")
+
     # Переопределение ссылок под конкретный город (СНГ-домены: другой каталог).
     try:
         from config import URL_ПО_ГОРОДУ as _URL_OVERRIDES
@@ -1649,6 +1696,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         init_excel_log(EXCEL_ФАЙЛ, ОЧИСТИТЬ_EXCEL)
         if ОЧИСТИТЬ_EXCEL:
             reset_submitted_forms()
+            reset_placed_orders()
 
     def записать_в_excel(данные):
         # Постоянные колонки (дата/время/телефон/почта) подставляются здесь,
@@ -2983,6 +3031,19 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         # подтвердить url-цели (оформленный заказ / страница «спасибо»),
                         # на которые обычный прогон целей не попадает.
                         print(f"   🔗 URL сценария: {log_url}")
+                        # Пункт 2.9: финальный шаг оформления заказа помечается
+                        # «заказ»: True. Если он прошёл успешно - фиксируем заказ,
+                        # чтобы forms_run потом проверил письмо-подтверждение покупателю.
+                        if cfg_enabled(step.get("заказ", False)) and str(статус).startswith("УСПЕШНО"):
+                            record_placed_order({
+                                "город": город,
+                                "почта": ПОЧТА,
+                                "домен": log_url,
+                                "название": nm,
+                                "ts": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                            })
+                            print(f"   🧾 Заказ зафиксирован для проверки письма покупателю "
+                                  f"({ПОЧТА}).")
 
                     elif act in ("проверить_цель", "check_goal"):
                         # Проверка цели Яндекс.Метрики: ждём, пока перехватчик
