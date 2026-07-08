@@ -426,22 +426,38 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
         _код_части.append(html.lower())
         try:
             import requests as _rq
+            from concurrent.futures import ThreadPoolExecutor
             host = re.sub(r'^https?://', '', base_url).split('/')[0].split(':')[0]
             base_host = '.'.join(host.split('.')[-2:])   # stalmetural.ru
             srcs = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', html)
+            _to_fetch = []
             for src in srcs[:40]:
                 u = src if src.startswith('http') else urljoin(base_url, src)
-                # берём JS с того же домена/поддоменов (там и живут reachGoal)
+                # берём JS с того же домена/поддоменов (там и живут reachGoal),
+                # пропускаем очевидные библиотеки (в них целей нет)
                 if base_host not in u or u in _seen_js:
                     continue
-                _seen_js.add(u)
-                try:
-                    js = _rq.get(u, timeout=15, headers={'User-Agent': 'Mozilla/5.0'},
-                                 verify=os.environ.get('REQUESTS_CA_BUNDLE', True)).text
-                    привязки.update(_re_reach.findall(js))
-                    _код_части.append(js.lower())
-                except Exception:
+                if re.search(r'(jquery|bootstrap|swiper|slick|popper|fancybox|'
+                             r'owl\.carousel|lazyload|polyfill)', u, re.I):
                     continue
+                _seen_js.add(u)
+                _to_fetch.append(u)
+
+            def _fetch_js(u):
+                try:
+                    return _rq.get(u, timeout=6,
+                                   headers={'User-Agent': 'Mozilla/5.0'},
+                                   verify=os.environ.get('REQUESTS_CA_BUNDLE', True)).text
+                except Exception:
+                    return ''
+            # ПАРАЛЛЕЛЬНО (раньше 40 файлов по 15с последовательно = до 2 мин на
+            # страницу; теперь пул потоков + таймаут 6с = секунды).
+            if _to_fetch:
+                with ThreadPoolExecutor(max_workers=8) as _ex:
+                    for js in _ex.map(_fetch_js, _to_fetch):
+                        if js:
+                            привязки.update(_re_reach.findall(js))
+                            _код_части.append(js.lower())
         except Exception:
             pass
 
@@ -1100,9 +1116,11 @@ def _классифицировать(pid: str, каталог: dict, прого
                           'отдельного goal-сигнала в трафике нет, но действие '
                           'совершено, и в Метрике цель зачтётся')
                 счёт['ok'] += 1
-            elif _особое and (not _код_надёжен or _привязана(g) == 'есть'):
-                # reachGoal в коде есть (или код непрозрачен), но цель срабатывает
-                # только на особое действие, которого автотест не делает.
+            elif _особое:
+                # Цель срабатывает только на особое действие (купон, оплата, избранное,
+                # скачивание и т.п.), которого автотест не делает. Ставим ПЕРЕД «нет в
+                # коде»: reachGoal купона грузится в ленивом чанке корзины, которого мы
+                # не касаемся - это не «нет в коде», а «нужно спец-действие».
                 способ, статус, цвет = 'спец-действие', 'Нужно спец-действие', GREY
                 _прив = f"; reachGoal в коде: {_привязана(g)}" if _код_надёжен else ''
                 детали = (f'нужно {_особое} - автотест этот шаг не выполняет '
@@ -1115,11 +1133,6 @@ def _классифицировать(pid: str, каталог: dict, прого
                 детали = ('reachGoal этой цели НЕ найден в коде сайта - цель создана '
                           'в Метрике, но сайт её не отправляет')
                 счёт['no_code'] += 1
-            elif _особое:
-                способ, статус, цвет = 'спец-действие', 'Нужно спец-действие', GREY
-                детали = (f'нужно {_особое} - автотест этот шаг не выполняет '
-                          '(можно добавить отдельным сценарием)')
-                счёт['special'] += 1
             else:
                 # Код непрозрачен (GTM/бандл) или действие не входило в прогон.
                 способ, статус, цвет = 'вручную', 'Не проверено', GREY
