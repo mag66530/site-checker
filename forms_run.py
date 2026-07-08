@@ -210,6 +210,19 @@ def main() -> int:
                         submitted_path='submitted_forms.json',
                         show=a.show_browser, log=_stamp,
                     )
+                    # ── Пункт 2.11: заказы из корзины → список «Заказы» админки ──
+                    # Тот же логин и зоны, но другой раздел (sale_order.php).
+                    # Тихо пропустится без оформленных заказов/кредов.
+                    try:
+                        import order_admin_check
+                        order_admin_check.выполнить_проверку(
+                            str(проект_дир), зоны,
+                            orders_path='placed_orders.json',
+                            excel_path='log_forms.xlsx',
+                            show=a.show_browser, log=_stamp,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        _stamp(f'⚠️ Проверка заказов в админке не выполнена: {e}')
             except Exception as e:  # noqa: BLE001
                 _stamp(f'⚠️ Проверка админки не выполнена: {e}')
 

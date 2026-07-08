@@ -1677,7 +1677,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             ws.row_dimensions[row].height = 24
             row += 1
             if not junk:
-                _line('✅ Пагинация, сортировки, поиск, корзина, сравнение, '
+                _line('✅ Пагинация, сортировки, метки UTM/печати, AJAX-попапы, '
+                      'служебные экшены и каталоги, поиск, корзина, сравнение, '
                       'оформление заказа, личный кабинет и админ. панель '
                       'закрыты в robots.txt (или не существуют на сайте).', C.ok)
             else:
@@ -1719,6 +1720,10 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 else:
                     _line('✅ Отдельные группы User-agent для Яндекса и Google '
                           'заданы.', C.ok)
+                # прочие роботы = группа «*» (правила для всех остальных)
+                if not _ua.get('star'):
+                    _line('⚠ Нет группы User-agent: * - для прочих роботов '
+                          '(кроме Яндекса/Google) правил не задано.', C.warn)
             # 3. CSS/JS открыты для роботов
             _n_assets = indexing_summary.get('assets_checked', 0)
             if _assets_closed:
