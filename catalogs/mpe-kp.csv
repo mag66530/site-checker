@@ -1,161 +1,161 @@
-domain,city,phone_seo,phone_ad,phone_common,all_phones,email,address
-mepen.ru,Москва,,,7 (495) 799-14-38,4957991438,moscow@mepen.ru,"1-й Институтский проезд, 1с4"
-spb.mepen.ru,Санкт-Петербург,,,7 (812) 986-43-98,8129864398,spb@mepen.ru,"Гаванская улица, 4"
-nsk.mepen.ru,Новосибирск,,,7 (383) 249-87-18,3832498718,novosibirsk@mepen.ru,"улица Бородина, 58"
-ekb.mepen.ru,Екатеринбург,,,7 (343) 200-82-88,3432008288,ekaterinburg@mepen.ru,"улица Сибирский тракт, 57"
-kazan.mepen.ru,Казань,,,7 (843) 253-28-66,8432532866,kzn@mepen.ru,"улица Габдуллы Тукая, 82"
-nizhniy-novgorod.mepen.ru,Нижний Новгород,,,7 (831) 414-40-89,8314144089,novgorod@mepen.ru,"Ракетная улица, 9Б"
-chel.mepen.ru,Челябинск,,,7 (351) 216-65-34,3512166534,chelyabinsk@mepen.ru,"Советская улица, 16А"
-krasnoyarsk.mepen.ru,Красноярск,,,7 (391) 271-74-08,3912717408,krasnoyarsk@mepen.ru,"Северное шоссе, 25"
-omsk.mepen.ru,Омск,,,7 (381) 263-38-21,3812633821,omsk@mepen.ru,"4-я улица Челюскинцев, 1А"
-rostov.mepen.ru,Ростов-на-Дону,,,7 (863) 301-06-79,8633010679,rostov@mepen.ru,"улица Вавилова, 60"
-samara.mepen.ru,Самара,,,7 (846) 267-01-06,8462670106,samara@mepen.ru,"Заводское шоссе, 15"
-ufa.mepen.ru,Уфа,,,7 (347) 299-67-11,3472996711,ufa@mepen.ru,"улица 50 лет СССР, 39к11"
-voronezh.mepen.ru,Воронеж,,,7 (473) 251-60-09,4732516009,vrn@mepen.ru,"улица Солдатское Поле, 285/5"
-perm.mepen.ru,Пермь,,,7 (342) 259-20-47,3422592047,perm@mepen.ru,"улица Докучаева, 50/2"
-volgograd.mepen.ru,Волгоград,,,7 (844) 260-50-66,8442605066,volgograd@mepen.ru,"Горнополянский разъезд, 3"
-krasnodar.mepen.ru,Краснодар,,,7 (861) 944-64-08,8619446408,krasnodar@mepen.ru,"Путевая улица, 1"
-saratov.mepen.ru,Саратов,,,7 (845) 253-12-32,8452531232,saratov@mepen.ru,"Фабричная улица, 1Ас1"
-tyumen.mepen.ru,Тюмень,,,7 (345) 238-75-68,3452387568,tumen@mepen.ru,"улица 50 лет Октября, 180"
-toluatty.mepen.ru,Тольятти,,,7 (848) 241-16-06,8482411606,tlt@mepen.ru,"Новозаводская улица, 2Б"
-izhevsk.mepen.ru,Ижевск,,,7 (341) 290-62-13,3412906213,izhevsk@mepen.ru,"улица Телегина, 30"
-barnaul.mepen.ru,Барнаул,,,7 (385) 225-29-52,3852252952,barnaul@mepen.ru,"проспект Калинина, 116"
-ulyanovsk.mepen.ru,Ульяновск,,,7 (842) 273-00-68,8422730068,ulyanovsk@mepen.ru,"улица Кирова, 59Б"
-irkutsk.mepen.ru,Иркутск,,,7 (395) 257-93-89,3952579389,irkutsk@mepen.ru,"Трактовая улица, 1/3к3"
-khabarovsk.mepen.ru,Хабаровск,,,7 (421) 268-01-66,4212680166,khabarovsk@mepen.ru,"улица Кирова, 1Б"
-vladivostok.mepen.ru,Владивосток,,,7 (423) 254-00-16,4232540016,vladivostok@mepen.ru,"Щитовая улица, 19А"
-mahachkala.mepen.ru,Махачкала,,,7 (872) 221-58-68,8722215868,mahachkala@mepen.ru,"проспект Али-Гаджи Акушинского, 335"
-yaroslavl.mepen.ru,Ярославль,,,7 (485) 259-58-86,4852595886,yaroslavl@mepen.ru,"проспект Машиностроителей, 64"
-orenburg.mepen.ru,Оренбург,,,7 (353) 220-06-88,3532200688,oren@mepen.ru,"Северная улица, 40"
-tomsk.mepen.ru,Томск,,,7 (382) 222-59-85,3822225985,tomsk@mepen.ru,"улица Смирнова, 9"
-kemerovo.mepen.ru,Кемерово,,,7 (384) 224-02-58,3842240258,kemerovo@mepen.ru,"Кузнецкий проспект, 33Г"
-novokuznetsk.mepen.ru,Новокузнецк,,,7 (384) 320-99-68,3843209968,novokuznetsk@mepen.ru,"Ильинское шоссе, 35/1"
-ryazan.mepen.ru,Рязань,,,7 (491) 299-06-80,4912990680,ryazan@mepen.ru,"улица Зубковой, 27к3"
-astrahan.mepen.ru,Астрахань,,,7 (851) 269-03-88,8512690388,astrahan@mepen.ru,"8-я Железнодорожная улица, 59к1"
-naberezhnye-chelny.mepen.ru,Набережные Челны,,,7 (855) 220-03-38,8552200338,nabchelny@mepen.ru,"проспект Сююмбике, 40"
-balashiha.mepen.ru,Балашиха,,,7 (495) 799-14-38,4957991438,balashiha@mepen.ru,"проспект Ленина, 2"
-penza.mepen.ru,Пенза,,,7 (841) 230-06-61,8412300661,penza@mepen.ru,"улица 65-летия Победы, 12"
-kirov.mepen.ru,Киров,,,7 (833) 220-56-88,8332205688,kirov@mepen.ru,"Слобода Корчёмкино, 10"
-lipeck.mepen.ru,Липецк,,,7 (474) 237-71-10,4742377110,lipeck@mepen.ru,"улица Гагарина, 125"
-cheboksary.mepen.ru,Чебоксары,,,7 (835) 248-03-30,8352480330,cheboksary@mepen.ru,"улица Фёдора Гладкова, 32"
-kaliningrad.mepen.ru,Калининград,,,7 (401) 237-55-06,4012375506,kaliningrad@mepen.ru,"проспект Московский, 268"
-tula.mepen.ru,Тула,,,7 (487) 238-58-86,4872385886,tula@mepen.ru,"улица Чмутова, 164Г"
-kursk.mepen.ru,Курск,,,7 (471) 222-08-66,4712220866,kursk@mepen.ru,"проспект Ленинского Комсомола, 49"
-stavropol.mepen.ru,Ставрополь,,,7 (865) 269-30-08,8652693008,stavropol@mepen.ru,"Биологическая улица, 20"
-ulan-ude.mepen.ru,Улан-Удэ,,,7 (301) 239-03-88,3012390388,ulanude@mepen.ru,"улица Терешковой, 2А"
-tver.mepen.ru,Тверь,,,7 (482) 241-71-16,4822417116,tver@mepen.ru,"Дружинная улица, 5"
-magnitogorsk.mepen.ru,Магнитогорск,,,7 (351) 939-31-16,3519393116,magnitogorsk@mepen.ru,"Советская улица, 86А"
-bryansk.mepen.ru,Брянск,,,7 (483) 237-08-66,4832370866,bryansk@mepen.ru,"улица Калинина, 160"
-ivanovo.mepen.ru,Иваново,,,7 (493) 234-36-60,4932343660,ivanovo@mepen.ru,"улица Парижской Коммуны, 24"
-belgorod.mepen.ru,Белгород,,,7 (472) 277-06-86,4722770686,belgorod@mepen.ru,"Корочанская улица, 409А"
-surgut.mepen.ru,Сургут,,,7 (346) 278-66-87,3462786687,surgut@mepen.ru,"улица Профсоюзов, 45"
-arkhangelsk.mepen.ru,Архангельск,,,7 (818) 246-06-68,8182460668,arkh@mepen.ru,"Советская улица, 32"
-vladimir.mepen.ru,Владимир,,,7 (800) 700-56-38,8007005638,vladimir@mepen.ru,"улица Гагарина, 13"
-nizhniy-tagil.mepen.ru,Нижний Тагил,,,7 (343) 200-82-88,3432008288,nizhniy-tagil@mepen.ru,"проспект Мира, 12"
-chita.mepen.ru,Чита,,,7 (302) 224-56-63,3022245663,chita@mepen.ru,"улица Карла Маркса, 29А"
-kaluga.mepen.ru,Калуга,,,7 (484) 259-56-01,4842595601,kaluga@mepen.ru,"Дорожная улица, 31"
-simferopol.mepen.ru,Симферополь,,,7 (365) 288-58-68,3652885868,simferopol@mepen.ru,"Аэрофлотская улица, 12"
-yakutsk.mepen.ru,Якутск,,,7 (411) 224-08-80,4112240880,ykt@mepen.ru,"Автодорожная улица, 53/1"
-volzhsky.mepen.ru,Волжский,,,7 (844) 260-50-86,8442605086,volzhskij@mepen.ru,"проспект имени Ленина, 309"
-saransk.mepen.ru,Саранск,,,7 (834) 231-16-68,8342311668,saransk@mepen.ru,"улица Комарова, 1"
-smolensk.mepen.ru,Смоленск,,,7 (481) 263-00-60,4812630060,smolensk@mepen.ru,"улица Фрунзе, 64"
-cherepovets.mepen.ru,Череповец,,,7 (817) 255-66-60,8172556660,cherepovets@mepen.ru,"проспект Победы, 28"
-vologda.mepen.ru,Вологда,,,7 (817) 255-66-60,8172556660,vologda@mepen.ru,"улица Гагарина, 90"
-kurgan.mepen.ru,Курган,,,7 (352) 222-86-60,3522228660;9658688660,kurgan@mepen.ru,"Советская улица, 148"
-vladikavkaz.mepen.ru,Владикавказ,,,7 (800) 700-56-38,8007005638,vladikavkaz@mepen.ru,"Иристонская улица, 72"
-groznyy.mepen.ru,Грозный,,,7 (800) 700-56-38,8007005638,groznyy@mepen.ru,"улица Допризывников, 2А"
-orel.mepen.ru,Орёл,,,7 (486) 278-07-76,4862780776,orel@mepen.ru,"переулок Южный, 2Б"
-podolsk.mepen.ru,Подольск,,,7 (495) 799-14-38,4957991438,podolsk@mepen.ru,"Большая Зеленовская улица, 62/2"
-tambov.mepen.ru,Тамбов,,,7 (475) 243-53-36,4752435336,tambov@mepen.ru,"Бригадная улица, 3"
-yoshkar-ola.mepen.ru,Йошкар-Ола,,,7 (800) 700-56-38,8007005638,y-ola@mepen.ru,"улица Палантая, 63Б"
-murmansk.mepen.ru,Мурманск,,,7 (815) 260-06-86,8152600686,murmansk@mepen.ru,"проспект Кольский, 101"
-nizhnevartovsk.mepen.ru,Нижневартовск,,,7 (346) 623-93-88,3466239388,nizhnevartovsk@mepen.ru,"улица Кузоваткина, 5с8"
-novorossiysk.mepen.ru,Новороссийск,,,7 (861) 944-64-08,8619446408,novorossiysk@mepen.ru,"улица Мира, 1литО"
-petrozavodsk.mepen.ru,Петрозаводск,,,7 (800) 700-56-38,8007005638,petrozavodsk@mepen.ru,"Заводская улица, 10А"
-kostroma.mepen.ru,Кострома,,,7 (800) 700-56-38,8007005638,kostroma@mepen.ru,"улица Евгения Ермакова, 1к3"
-mytishchi.mepen.ru,Мытищи,,,7 (495) 799-14-38,4957991438,mytishchi@mepen.ru,"Коммунистическая улица, 23"
-syktyvkar.mepen.ru,Сыктывкар,,,7 (800) 700-56-38,8007005638,syktyvkar@mepen.ru,"улица Морозова, 51/1"
-taganrog.mepen.ru,Таганрог,,,7 (863) 301-06-79,8633010679,taganrog@mepen.ru,"Котлостроительная улица, 37-19"
-nalchik.mepen.ru,Нальчик,,,7 (800) 700-56-38,8007005638,nalchik@mepen.ru,"проспект Кулиева, 10А"
-bratsk.mepen.ru,Братск,,,7 (395) 257-93-89,3952579389,bratsk@mepen.ru,"улица Подбельского, 43"
-lyubercy.mepen.ru,Люберцы,,,7 (495) 799-14-38,4957991438,lyubercy@mepen.ru,"проспект Октябрьский, 131"
-engels.mepen.ru,Энгельс,,,7 (845) 253-12-32,8452531232,engels@mepen.ru,"улица Тельмана, 156"
-angarsk.mepen.ru,Ангарск,,,7 (395) 257-93-89,3952579389,angarsk@mepen.ru,"59-й квартал, 3"
-blagoveshchensk.mepen.ru,Благовещенск,,,7 (416) 235-98-33,4162359833,blagovechensk@mepen.ru,"улица Седова, 4/1"
-velikiy-novgorod.mepen.ru,Великий Новгород,,,7 (800) 700-56-38,8007005638,velikiy-novgorod@mepen.ru,"переулок Базовый, 13"
-pskov.mepen.ru,Псков,,,7 (800) 700-56-38,8007005638,pskov@mepen.ru,"улица 128-й Стрелковой Дивизии, 6"
-biysk.mepen.ru,Бийск,,,7 (385) 225-29-52,3852252952,biysk@mepen.ru,"улица Владимира Ленина, 264/1"
-yuzhno-sahalinsk.mepen.ru,Южно-Сахалинск,,,7 (424) 244-06-61,4242440661,sakhalinsk@mepen.ru,"проспект Победы, 4Б"
-balakovo.mepen.ru,Балаково,,,7 (845) 253-12-32,8452531232,balakovo@mepen.ru,"Вокзальная улица, 26/10"
-abakan.mepen.ru,Абакан,,,7 (390) 231-33-01,3902313301,abakan@mepen.ru,"Аскизская улица, 268 к1"
-norilsk.mepen.ru,Норильск,,,7 (391) 271-74-08,3912717408,norilsk@mepen.ru,"проспект Ленинский, 24"
-petropavlovsk-kamchatskiy.mepen.ru,Петропавловск-Камчатский,,,7 (800) 700-56-38,8007005638,petropavlovsk-kamchatskiy@mepen.ru,"проспект Рыбаков, 13"
-kamensk-uralskiy.mepen.ru,Каменск-Уральский,,,7 (343) 200-82-88,3432008288,kamensk@mepen.ru,"улица Белинского, 1"
-novocherkassk.mepen.ru,Новочеркасск,,,7 (863) 301-06-79,8633010679,novocherkassk@mepen.ru,"улица Маяковского, 59А"
-zlatoust.mepen.ru,Златоуст,,,7 (351) 216-65-34,3512166534,zlatoust@mepen.ru,"улица Карла Маркса, 19"
-domodedovo.mepen.ru,Домодедово,,,7 (495) 799-14-38,4957991438,domodedovo@mepen.ru,"Каширское шоссе, 4к1"
-kerch.mepen.ru,Керчь,,,7 (365) 288-58-68,3652885868,kerch@mepen.ru,"улица Свердлова, 12"
-kolpino.mepen.ru,Колпино,,,7 (812) 986-43-98,8129864398,kolpino@mepen.ru,"улица Веры Слуцкой, 23"
-miass.mepen.ru,Миасс,,,7 (351) 216-65-34,3512166534,miass@mepen.ru,"Тургоякское шоссе, 11/63"
-electrostal.mepen.ru,Электросталь,,,7 (495) 799-14-38,4957991438,electrostal@mepen.ru,"Комсомольская улица, 1"
-kolomna.mepen.ru,Коломна,,,7 (495) 799-14-38,4957991438,kolomna@mepen.ru,"Колхозная улица, 14"
-maykop.mepen.ru,Майкоп,,,7 (800) 700-56-38,8007005638,maykop@mepen.ru,"улица Чкалова, 74"
-odintsovo.mepen.ru,Одинцово,,,7 (495) 799-14-38,4957991438,odintsovo@mepen.ru,"улица Маршала Неделина, 2А"
-bataysk.mepen.ru,Батайск,,,7 (863) 301-06-79,8633010679,bataysk@mepen.ru,"улица Энгельса, 213/16"
-schelkovo.mepen.ru,Щелково,,,7 (495) 799-14-38,4957991438,schelkovo@mepen.ru,"Сиреневая улица, 9"
-dolgoprudniy.mepen.ru,Долгопрудный,,,7 (495) 799-14-38,4957991438,dolgoprudniy@mepen.ru,"Промышленный проезд, 14"
-kyzyl.mepen.ru,Кызыл,,,7 (800) 700-56-38,8007005638,kyzyl@mepen.ru,"Красноармейская улица, 233"
-nazran.mepen.ru,Назрань,,,7 (800) 700-56-38,8007005638,nazran@mepen.ru,"Станционная улица, 10"
-novocheboksarsk.mepen.ru,Новочебоксарск,,,7 (835) 248-03-30,8352480330,novocheboksarsk@mepen.ru,"улица 10-й Пятилетки, 24"
-novyy-urengoy.mepen.ru,Новый Уренгой,,,7 (800) 700-56-38,8007005638,novyy-urengoy@mepen.ru,"Индустриальная улица, 2"
-obninsk.mepen.ru,Обнинск,,,7 (484) 259-56-01,4842595601,obninsk@mepen.ru,"проспект Ленина, 137к4"
-orekhovo-zuevo.mepen.ru,Орехово-Зуево,,,7 (495) 799-14-38,4957991438,orekhovo-zuevo@mepen.ru,"улица Ленина, 97"
-pervouralsk.mepen.ru,Первоуральск,,,7 (343) 200-82-88,3432008288,pervouralsk@mepen.ru,"улица Ленина, 39А"
-cherkessk.mepen.ru,Черкесск,,,7 (800) 700-56-38,8007005638,cherkessk@mepen.ru,"Красноармейская улица, 39"
-dimitrovgrad.mepen.ru,Димитровград,,,7 (842) 273-00-68,8422730068,dimitrovgrad@mepen.ru,"улица 50 лет Октября, 39"
-zhukovskiy.mepen.ru,Жуковский,,,7 (495) 799-14-38,4957991438,zhukovskij@mepen.ru,"улица Мясищева, 24А"
-murom.mepen.ru,Муром,,,7 (800) 700-56-38,8007005638,murom@mepen.ru,"улица Ленина, 30"
-artem.mepen.ru,Артем,,,7 (423) 254-00-16,4232540016,artem@mepen.ru,"улица Фрунзе, 47/1"
-votkinsk.mepen.ru,Воткинск,,,7 (341) 290-62-13,3412906213,votkinsk@mepen.ru,"улица Ленина, 61"
-leninsk-kuzneckiy.mepen.ru,Ленинск-Кузнецкий,,,7 (384) 224-02-58,3842240258,leninsk-kuz@mepen.ru,"проспект Кирова, 21"
-noginsk.mepen.ru,Ногинск,,,7 (495) 799-14-38,4957991438,noginsk@mepen.ru,"улица Декабристов, 3Г"
-sergiyev-posad.mepen.ru,Сергиев Посад,,,7 (495) 799-14-38,4957991438,sergiyev-posad@mepen.ru,"Стахановская улица, 1А"
-hanty-mansiysk.mepen.ru,Ханты-Мансийск,,,7 (346) 231-06-68,3462310668,hman@mepen.ru,"новозаводская улица, 2Б"
-elista.mepen.ru,Элиста,,,7 (800) 700-56-38,8007005638,elista@mepen.ru,"улица Юрия Клыкова, 79А"
-voskresensk.mepen.ru,Воскресенск,,,7 (495) 799-14-38,4957991438,voskresensk@mepen.ru,"Федотовская улица, 22Б"
-magadan.mepen.ru,Магадан,,,7 (800) 700-56-38,8007005638,magadan@mepen.ru,"проспект Ленина, 30Б"
-ozersk.mepen.ru,Озерск,,,7 (351) 216-65-34,3512166534,ozersk@mepen.ru,"проспект Калинина, 1A"
-beloreck.mepen.ru,Белорецк,,,7 (347) 299-67-11,3472996711,beloretsk@mepen.ru,"улица П. Точисского, 25А"
-kurganinsk.mepen.ru,Курганинск,,,7 (861) 944-64-08,8619446408,kurganinsk@mepen.ru,"Первомайская улица, 3Ж"
-anadyr.mepen.ru,Анадырь,,,7 (800) 700-56-38,8007005638,anadyr@mepen.ru,"улица Отке, 22"
-myshkin.mepen.ru,Мышкин,,,7 (485) 259-58-86,4852595886,myshkin@mepen.ru,"улица Газовиков, 29/1"
-zheleznodorozhnyy.mepen.ru,Железнодорожный,,,7 (495) 799-14-38,4957991438,zheleznodorozhnyy@mepen.ru,"улица Некрасова, 4"
-almaty.mepen.kz,Алматы,,,7 (727) 354-08-98,7273540898,almaty@mepen.ru,"проспект Турара Рыскулова, 88"
-mepen.kz,Астана,,,7 (717) 262-58-85,7172625885,astana@mepen.kz,"улица Амангельды Иманова, 50"
-shymkent.mepen.kz,Шымкент,,,7 (725) 261-22-58,7252612258,shymkent@mepen.kz,"улица Толе би, 21а"
-aktobe.mepen.kz,Актобе,,,7 (713) 273-60-12,7132736012,aktobe@mepen.kz,"улица Жанкожа батыра, 28"
-karaganda.mepen.kz,Караганда,,,7 (721) 294-55-18,7212945518,karaganda@mepen.kz,"Асфальтная улица, 22"
-taraz.mepen.kz,Тараз,,,7 (726) 297-03-01,7262970301,taraz@mepen.kz,"улица Аскарова, 297в"
-semey.mepen.kz,Семей,,,7 (700) 567-89-68,7005678968,semei@mepen.kz,"18-я Загородная улица, 3а"
-pavlodar.mepen.kz,Павлодар,,,7 (718) 278-15-01,7182781501,pavlodar@mepen.kz,"Химкомбинатовская улица, 158"
-ustk.mepen.kz,Усть-Каменогорск,,,7 (723) 291-00-15,7232910015,ust-kamenogorsk@mepen.kz,"проспект Абая, 160/13"
-atyrau.mepen.kz,Атырау,,,7 (712) 275-39-01,7122753901,atiray@mepen.kz,"улица Кубаш Медеубаева, 22Б"
-uralsk.mepen.kz,Уральск,,,7 (708) 987-98-15,7089879815,uralsk@mepen.kz,"улица Азербайжана Мамбетова, 58/1"
-kostanay.mepen.kz,Костанай,,,7 (727) 354-08-98,7273540898,kostanay@mepen.kz,"Целинная улица, 22А"
-kyzylorda.mepen.kz,Кызылорда,,,7 (724) 292-50-01,7242925001,kizilorda@mepen.kz,"квартал Нур-Орда, 80"
-aktau.mepen.kz,Актау,,,7 (727) 354-08-98,7273540898,aktau@mepen.kz,"Микрорайон 19А, 32/1"
-petropavlovsk.mepen.kz,Петропавловск,,,7 (727) 354-08-98,7273540898,petropavl@mepen.kz,"Омское шоссе, 3/4"
-mepen.by,Минск,,,375 (29) 643-66-60,296436660,minsk@mepen.by,"Инженерная улица, дом 22"
-gomel.mepen.by,Гомель,,,,,gomel@mepen.by,
-mogilev.mepen.by,Могилев,,,,,mogilev@mepen.by,
-grodno.mepen.by,Гродно,,,,,grodno@mepen.by,
-vitebsk.mepen.by,Витебск,,,,,vitebsk@mepen.by,
-brest.mepen.by,Брест,,,,,brest@mepen.by,
-bobruisk.mepen.by,Бобруйск,,,,,bobruisk@mepen.by,
-borisov.mepen.by,Борисов,,,,,borisov@mepen.by,
-polotsk.mepen.by,Полоцк,,,,,polotsk@mepen.by,
-nesvizh.mepen.by,Несвиж,,,,,nesvij@mepen.by,
-kamenets.mepen.by,Каменец,,,,,kamenets@mepen.by,
-mepen.uz,Ташкент,,,998 (90) 006-84-48,900068448,tashkent@mepen.uz,"улица Шота Руставели, 12"
-mepen.kg,Бишкек,,,996 (22) 065-25-09,,bishkek@mepen.kg,"улица Токтогула, 125"
-mepen.az,Баку,,,994 (10) 236-76-89,,baku@mepen.az,"улица Джафара Джаббарли, 44"
+domain,city,phone_seo,phone_ad,phone_common,all_phones,email,address,country,telegram,whatsapp
+mepen.ru,Москва,,,7 (495) 799-14-38,4957991438,moscow@mepen.ru,"1-й Институтский проезд, 1с4",Россия,,
+spb.mepen.ru,Санкт-Петербург,,,7 (812) 986-43-98,8129864398,spb@mepen.ru,"Гаванская улица, 4",Россия,,
+nsk.mepen.ru,Новосибирск,,,7 (383) 249-87-18,3832498718,novosibirsk@mepen.ru,"улица Бородина, 58",Россия,,
+ekb.mepen.ru,Екатеринбург,,,7 (343) 200-82-88,3432008288,ekaterinburg@mepen.ru,"улица Сибирский тракт, 57",Россия,,
+kazan.mepen.ru,Казань,,,7 (843) 253-28-66,8432532866,kzn@mepen.ru,"улица Габдуллы Тукая, 82",Россия,,
+nizhniy-novgorod.mepen.ru,Нижний Новгород,,,7 (831) 414-40-89,8314144089,novgorod@mepen.ru,"Ракетная улица, 9Б",Россия,,
+chel.mepen.ru,Челябинск,,,7 (351) 216-65-34,3512166534,chelyabinsk@mepen.ru,"Советская улица, 16А",Россия,,
+krasnoyarsk.mepen.ru,Красноярск,,,7 (391) 271-74-08,3912717408,krasnoyarsk@mepen.ru,"Северное шоссе, 25",Россия,,
+omsk.mepen.ru,Омск,,,7 (381) 263-38-21,3812633821,omsk@mepen.ru,"4-я улица Челюскинцев, 1А",Россия,,
+rostov.mepen.ru,Ростов-на-Дону,,,7 (863) 301-06-79,8633010679,rostov@mepen.ru,"улица Вавилова, 60",Россия,,
+samara.mepen.ru,Самара,,,7 (846) 267-01-06,8462670106,samara@mepen.ru,"Заводское шоссе, 15",Россия,,
+ufa.mepen.ru,Уфа,,,7 (347) 299-67-11,3472996711,ufa@mepen.ru,"улица 50 лет СССР, 39к11",Россия,,
+voronezh.mepen.ru,Воронеж,,,7 (473) 251-60-09,4732516009,vrn@mepen.ru,"улица Солдатское Поле, 285/5",Россия,,
+perm.mepen.ru,Пермь,,,7 (342) 259-20-47,3422592047,perm@mepen.ru,"улица Докучаева, 50/2",Россия,,
+volgograd.mepen.ru,Волгоград,,,7 (844) 260-50-66,8442605066,volgograd@mepen.ru,"Горнополянский разъезд, 3",Россия,,
+krasnodar.mepen.ru,Краснодар,,,7 (861) 944-64-08,8619446408,krasnodar@mepen.ru,"Путевая улица, 1",Россия,,
+saratov.mepen.ru,Саратов,,,7 (845) 253-12-32,8452531232,saratov@mepen.ru,"Фабричная улица, 1Ас1",Россия,,
+tyumen.mepen.ru,Тюмень,,,7 (345) 238-75-68,3452387568,tumen@mepen.ru,"улица 50 лет Октября, 180",Россия,,
+toluatty.mepen.ru,Тольятти,,,7 (848) 241-16-06,8482411606,tlt@mepen.ru,"Новозаводская улица, 2Б",Россия,,
+izhevsk.mepen.ru,Ижевск,,,7 (341) 290-62-13,3412906213,izhevsk@mepen.ru,"улица Телегина, 30",Россия,,
+barnaul.mepen.ru,Барнаул,,,7 (385) 225-29-52,3852252952,barnaul@mepen.ru,"проспект Калинина, 116",Россия,,
+ulyanovsk.mepen.ru,Ульяновск,,,7 (842) 273-00-68,8422730068,ulyanovsk@mepen.ru,"улица Кирова, 59Б",Россия,,
+irkutsk.mepen.ru,Иркутск,,,7 (395) 257-93-89,3952579389,irkutsk@mepen.ru,"Трактовая улица, 1/3к3",Россия,,
+khabarovsk.mepen.ru,Хабаровск,,,7 (421) 268-01-66,4212680166,khabarovsk@mepen.ru,"улица Кирова, 1Б",Россия,,
+vladivostok.mepen.ru,Владивосток,,,7 (423) 254-00-16,4232540016,vladivostok@mepen.ru,"Щитовая улица, 19А",Россия,,
+mahachkala.mepen.ru,Махачкала,,,7 (872) 221-58-68,8722215868,mahachkala@mepen.ru,"проспект Али-Гаджи Акушинского, 335",Россия,,
+yaroslavl.mepen.ru,Ярославль,,,7 (485) 259-58-86,4852595886,yaroslavl@mepen.ru,"проспект Машиностроителей, 64",Россия,,
+orenburg.mepen.ru,Оренбург,,,7 (353) 220-06-88,3532200688,oren@mepen.ru,"Северная улица, 40",Россия,,
+tomsk.mepen.ru,Томск,,,7 (382) 222-59-85,3822225985,tomsk@mepen.ru,"улица Смирнова, 9",Россия,,
+kemerovo.mepen.ru,Кемерово,,,7 (384) 224-02-58,3842240258,kemerovo@mepen.ru,"Кузнецкий проспект, 33Г",Россия,,
+novokuznetsk.mepen.ru,Новокузнецк,,,7 (384) 320-99-68,3843209968,novokuznetsk@mepen.ru,"Ильинское шоссе, 35/1",Россия,,
+ryazan.mepen.ru,Рязань,,,7 (491) 299-06-80,4912990680,ryazan@mepen.ru,"улица Зубковой, 27к3",Россия,,
+astrahan.mepen.ru,Астрахань,,,7 (851) 269-03-88,8512690388,astrahan@mepen.ru,"8-я Железнодорожная улица, 59к1",Россия,,
+naberezhnye-chelny.mepen.ru,Набережные Челны,,,7 (855) 220-03-38,8552200338,nabchelny@mepen.ru,"проспект Сююмбике, 40",Россия,,
+balashiha.mepen.ru,Балашиха,,,7 (495) 799-14-38,4957991438,balashiha@mepen.ru,"проспект Ленина, 2",Россия,,
+penza.mepen.ru,Пенза,,,7 (841) 230-06-61,8412300661,penza@mepen.ru,"улица 65-летия Победы, 12",Россия,,
+kirov.mepen.ru,Киров,,,7 (833) 220-56-88,8332205688,kirov@mepen.ru,"Слобода Корчёмкино, 10",Россия,,
+lipeck.mepen.ru,Липецк,,,7 (474) 237-71-10,4742377110,lipeck@mepen.ru,"улица Гагарина, 125",Россия,,
+cheboksary.mepen.ru,Чебоксары,,,7 (835) 248-03-30,8352480330,cheboksary@mepen.ru,"улица Фёдора Гладкова, 32",Россия,,
+kaliningrad.mepen.ru,Калининград,,,7 (401) 237-55-06,4012375506,kaliningrad@mepen.ru,"проспект Московский, 268",Россия,,
+tula.mepen.ru,Тула,,,7 (487) 238-58-86,4872385886,tula@mepen.ru,"улица Чмутова, 164Г",Россия,,
+kursk.mepen.ru,Курск,,,7 (471) 222-08-66,4712220866,kursk@mepen.ru,"проспект Ленинского Комсомола, 49",Россия,,
+stavropol.mepen.ru,Ставрополь,,,7 (865) 269-30-08,8652693008,stavropol@mepen.ru,"Биологическая улица, 20",Россия,,
+ulan-ude.mepen.ru,Улан-Удэ,,,7 (301) 239-03-88,3012390388,ulanude@mepen.ru,"улица Терешковой, 2А",Россия,,
+tver.mepen.ru,Тверь,,,7 (482) 241-71-16,4822417116,tver@mepen.ru,"Дружинная улица, 5",Россия,,
+magnitogorsk.mepen.ru,Магнитогорск,,,7 (351) 939-31-16,3519393116,magnitogorsk@mepen.ru,"Советская улица, 86А",Россия,,
+bryansk.mepen.ru,Брянск,,,7 (483) 237-08-66,4832370866,bryansk@mepen.ru,"улица Калинина, 160",Россия,,
+ivanovo.mepen.ru,Иваново,,,7 (493) 234-36-60,4932343660,ivanovo@mepen.ru,"улица Парижской Коммуны, 24",Россия,,
+belgorod.mepen.ru,Белгород,,,7 (472) 277-06-86,4722770686,belgorod@mepen.ru,"Корочанская улица, 409А",Россия,,
+surgut.mepen.ru,Сургут,,,7 (346) 278-66-87,3462786687,surgut@mepen.ru,"улица Профсоюзов, 45",Россия,,
+arkhangelsk.mepen.ru,Архангельск,,,7 (818) 246-06-68,8182460668,arkh@mepen.ru,"Советская улица, 32",Россия,,
+vladimir.mepen.ru,Владимир,,,7 (800) 700-56-38,8007005638,vladimir@mepen.ru,"улица Гагарина, 13",Россия,,
+nizhniy-tagil.mepen.ru,Нижний Тагил,,,7 (343) 200-82-88,3432008288,nizhniy-tagil@mepen.ru,"проспект Мира, 12",Россия,,
+chita.mepen.ru,Чита,,,7 (302) 224-56-63,3022245663,chita@mepen.ru,"улица Карла Маркса, 29А",Россия,,
+kaluga.mepen.ru,Калуга,,,7 (484) 259-56-01,4842595601,kaluga@mepen.ru,"Дорожная улица, 31",Россия,,
+simferopol.mepen.ru,Симферополь,,,7 (365) 288-58-68,3652885868,simferopol@mepen.ru,"Аэрофлотская улица, 12",Россия,,
+yakutsk.mepen.ru,Якутск,,,7 (411) 224-08-80,4112240880,ykt@mepen.ru,"Автодорожная улица, 53/1",Россия,,
+volzhsky.mepen.ru,Волжский,,,7 (844) 260-50-86,8442605086,volzhskij@mepen.ru,"проспект имени Ленина, 309",Россия,,
+saransk.mepen.ru,Саранск,,,7 (834) 231-16-68,8342311668,saransk@mepen.ru,"улица Комарова, 1",Россия,,
+smolensk.mepen.ru,Смоленск,,,7 (481) 263-00-60,4812630060,smolensk@mepen.ru,"улица Фрунзе, 64",Россия,,
+cherepovets.mepen.ru,Череповец,,,7 (817) 255-66-60,8172556660,cherepovets@mepen.ru,"проспект Победы, 28",Россия,,
+vologda.mepen.ru,Вологда,,,7 (817) 255-66-60,8172556660,vologda@mepen.ru,"улица Гагарина, 90",Россия,,
+kurgan.mepen.ru,Курган,,,7 (352) 222-86-60,3522228660;9658688660,kurgan@mepen.ru,"Советская улица, 148",Россия,,
+vladikavkaz.mepen.ru,Владикавказ,,,7 (800) 700-56-38,8007005638,vladikavkaz@mepen.ru,"Иристонская улица, 72",Россия,,
+groznyy.mepen.ru,Грозный,,,7 (800) 700-56-38,8007005638,groznyy@mepen.ru,"улица Допризывников, 2А",Россия,,
+orel.mepen.ru,Орёл,,,7 (486) 278-07-76,4862780776,orel@mepen.ru,"переулок Южный, 2Б",Россия,,
+podolsk.mepen.ru,Подольск,,,7 (495) 799-14-38,4957991438,podolsk@mepen.ru,"Большая Зеленовская улица, 62/2",Россия,,
+tambov.mepen.ru,Тамбов,,,7 (475) 243-53-36,4752435336,tambov@mepen.ru,"Бригадная улица, 3",Россия,,
+yoshkar-ola.mepen.ru,Йошкар-Ола,,,7 (800) 700-56-38,8007005638,y-ola@mepen.ru,"улица Палантая, 63Б",Россия,,
+murmansk.mepen.ru,Мурманск,,,7 (815) 260-06-86,8152600686,murmansk@mepen.ru,"проспект Кольский, 101",Россия,,
+nizhnevartovsk.mepen.ru,Нижневартовск,,,7 (346) 623-93-88,3466239388,nizhnevartovsk@mepen.ru,"улица Кузоваткина, 5с8",Россия,,
+novorossiysk.mepen.ru,Новороссийск,,,7 (861) 944-64-08,8619446408,novorossiysk@mepen.ru,"улица Мира, 1литО",Россия,,
+petrozavodsk.mepen.ru,Петрозаводск,,,7 (800) 700-56-38,8007005638,petrozavodsk@mepen.ru,"Заводская улица, 10А",Россия,,
+kostroma.mepen.ru,Кострома,,,7 (800) 700-56-38,8007005638,kostroma@mepen.ru,"улица Евгения Ермакова, 1к3",Россия,,
+mytishchi.mepen.ru,Мытищи,,,7 (495) 799-14-38,4957991438,mytishchi@mepen.ru,"Коммунистическая улица, 23",Россия,,
+syktyvkar.mepen.ru,Сыктывкар,,,7 (800) 700-56-38,8007005638,syktyvkar@mepen.ru,"улица Морозова, 51/1",Россия,,
+taganrog.mepen.ru,Таганрог,,,7 (863) 301-06-79,8633010679,taganrog@mepen.ru,"Котлостроительная улица, 37-19",Россия,,
+nalchik.mepen.ru,Нальчик,,,7 (800) 700-56-38,8007005638,nalchik@mepen.ru,"проспект Кулиева, 10А",Россия,,
+bratsk.mepen.ru,Братск,,,7 (395) 257-93-89,3952579389,bratsk@mepen.ru,"улица Подбельского, 43",Россия,,
+lyubercy.mepen.ru,Люберцы,,,7 (495) 799-14-38,4957991438,lyubercy@mepen.ru,"проспект Октябрьский, 131",Россия,,
+engels.mepen.ru,Энгельс,,,7 (845) 253-12-32,8452531232,engels@mepen.ru,"улица Тельмана, 156",Россия,,
+angarsk.mepen.ru,Ангарск,,,7 (395) 257-93-89,3952579389,angarsk@mepen.ru,"59-й квартал, 3",Россия,,
+blagoveshchensk.mepen.ru,Благовещенск,,,7 (416) 235-98-33,4162359833,blagovechensk@mepen.ru,"улица Седова, 4/1",Россия,,
+velikiy-novgorod.mepen.ru,Великий Новгород,,,7 (800) 700-56-38,8007005638,velikiy-novgorod@mepen.ru,"переулок Базовый, 13",Россия,,
+pskov.mepen.ru,Псков,,,7 (800) 700-56-38,8007005638,pskov@mepen.ru,"улица 128-й Стрелковой Дивизии, 6",Россия,,
+biysk.mepen.ru,Бийск,,,7 (385) 225-29-52,3852252952,biysk@mepen.ru,"улица Владимира Ленина, 264/1",Россия,,
+yuzhno-sahalinsk.mepen.ru,Южно-Сахалинск,,,7 (424) 244-06-61,4242440661,sakhalinsk@mepen.ru,"проспект Победы, 4Б",Россия,,
+balakovo.mepen.ru,Балаково,,,7 (845) 253-12-32,8452531232,balakovo@mepen.ru,"Вокзальная улица, 26/10",Россия,,
+abakan.mepen.ru,Абакан,,,7 (390) 231-33-01,3902313301,abakan@mepen.ru,"Аскизская улица, 268 к1",Россия,,
+norilsk.mepen.ru,Норильск,,,7 (391) 271-74-08,3912717408,norilsk@mepen.ru,"проспект Ленинский, 24",Россия,,
+petropavlovsk-kamchatskiy.mepen.ru,Петропавловск-Камчатский,,,7 (800) 700-56-38,8007005638,petropavlovsk-kamchatskiy@mepen.ru,"проспект Рыбаков, 13",Россия,,
+kamensk-uralskiy.mepen.ru,Каменск-Уральский,,,7 (343) 200-82-88,3432008288,kamensk@mepen.ru,"улица Белинского, 1",Россия,,
+novocherkassk.mepen.ru,Новочеркасск,,,7 (863) 301-06-79,8633010679,novocherkassk@mepen.ru,"улица Маяковского, 59А",Россия,,
+zlatoust.mepen.ru,Златоуст,,,7 (351) 216-65-34,3512166534,zlatoust@mepen.ru,"улица Карла Маркса, 19",Россия,,
+domodedovo.mepen.ru,Домодедово,,,7 (495) 799-14-38,4957991438,domodedovo@mepen.ru,"Каширское шоссе, 4к1",Россия,,
+kerch.mepen.ru,Керчь,,,7 (365) 288-58-68,3652885868,kerch@mepen.ru,"улица Свердлова, 12",Россия,,
+kolpino.mepen.ru,Колпино,,,7 (812) 986-43-98,8129864398,kolpino@mepen.ru,"улица Веры Слуцкой, 23",Россия,,
+miass.mepen.ru,Миасс,,,7 (351) 216-65-34,3512166534,miass@mepen.ru,"Тургоякское шоссе, 11/63",Россия,,
+electrostal.mepen.ru,Электросталь,,,7 (495) 799-14-38,4957991438,electrostal@mepen.ru,"Комсомольская улица, 1",Россия,,
+kolomna.mepen.ru,Коломна,,,7 (495) 799-14-38,4957991438,kolomna@mepen.ru,"Колхозная улица, 14",Россия,,
+maykop.mepen.ru,Майкоп,,,7 (800) 700-56-38,8007005638,maykop@mepen.ru,"улица Чкалова, 74",Россия,,
+odintsovo.mepen.ru,Одинцово,,,7 (495) 799-14-38,4957991438,odintsovo@mepen.ru,"улица Маршала Неделина, 2А",Россия,,
+bataysk.mepen.ru,Батайск,,,7 (863) 301-06-79,8633010679,bataysk@mepen.ru,"улица Энгельса, 213/16",Россия,,
+schelkovo.mepen.ru,Щелково,,,7 (495) 799-14-38,4957991438,schelkovo@mepen.ru,"Сиреневая улица, 9",Россия,,
+dolgoprudniy.mepen.ru,Долгопрудный,,,7 (495) 799-14-38,4957991438,dolgoprudniy@mepen.ru,"Промышленный проезд, 14",Россия,,
+kyzyl.mepen.ru,Кызыл,,,7 (800) 700-56-38,8007005638,kyzyl@mepen.ru,"Красноармейская улица, 233",Россия,,
+nazran.mepen.ru,Назрань,,,7 (800) 700-56-38,8007005638,nazran@mepen.ru,"Станционная улица, 10",Россия,,
+novocheboksarsk.mepen.ru,Новочебоксарск,,,7 (835) 248-03-30,8352480330,novocheboksarsk@mepen.ru,"улица 10-й Пятилетки, 24",Россия,,
+novyy-urengoy.mepen.ru,Новый Уренгой,,,7 (800) 700-56-38,8007005638,novyy-urengoy@mepen.ru,"Индустриальная улица, 2",Россия,,
+obninsk.mepen.ru,Обнинск,,,7 (484) 259-56-01,4842595601,obninsk@mepen.ru,"проспект Ленина, 137к4",Россия,,
+orekhovo-zuevo.mepen.ru,Орехово-Зуево,,,7 (495) 799-14-38,4957991438,orekhovo-zuevo@mepen.ru,"улица Ленина, 97",Россия,,
+pervouralsk.mepen.ru,Первоуральск,,,7 (343) 200-82-88,3432008288,pervouralsk@mepen.ru,"улица Ленина, 39А",Россия,,
+cherkessk.mepen.ru,Черкесск,,,7 (800) 700-56-38,8007005638,cherkessk@mepen.ru,"Красноармейская улица, 39",Россия,,
+dimitrovgrad.mepen.ru,Димитровград,,,7 (842) 273-00-68,8422730068,dimitrovgrad@mepen.ru,"улица 50 лет Октября, 39",Россия,,
+zhukovskiy.mepen.ru,Жуковский,,,7 (495) 799-14-38,4957991438,zhukovskij@mepen.ru,"улица Мясищева, 24А",Россия,,
+murom.mepen.ru,Муром,,,7 (800) 700-56-38,8007005638,murom@mepen.ru,"улица Ленина, 30",Россия,,
+artem.mepen.ru,Артем,,,7 (423) 254-00-16,4232540016,artem@mepen.ru,"улица Фрунзе, 47/1",Россия,,
+votkinsk.mepen.ru,Воткинск,,,7 (341) 290-62-13,3412906213,votkinsk@mepen.ru,"улица Ленина, 61",Россия,,
+leninsk-kuzneckiy.mepen.ru,Ленинск-Кузнецкий,,,7 (384) 224-02-58,3842240258,leninsk-kuz@mepen.ru,"проспект Кирова, 21",Россия,,
+noginsk.mepen.ru,Ногинск,,,7 (495) 799-14-38,4957991438,noginsk@mepen.ru,"улица Декабристов, 3Г",Россия,,
+sergiyev-posad.mepen.ru,Сергиев Посад,,,7 (495) 799-14-38,4957991438,sergiyev-posad@mepen.ru,"Стахановская улица, 1А",Россия,,
+hanty-mansiysk.mepen.ru,Ханты-Мансийск,,,7 (346) 231-06-68,3462310668,hman@mepen.ru,"новозаводская улица, 2Б",Россия,,
+elista.mepen.ru,Элиста,,,7 (800) 700-56-38,8007005638,elista@mepen.ru,"улица Юрия Клыкова, 79А",Россия,,
+voskresensk.mepen.ru,Воскресенск,,,7 (495) 799-14-38,4957991438,voskresensk@mepen.ru,"Федотовская улица, 22Б",Россия,,
+magadan.mepen.ru,Магадан,,,7 (800) 700-56-38,8007005638,magadan@mepen.ru,"проспект Ленина, 30Б",Россия,,
+ozersk.mepen.ru,Озерск,,,7 (351) 216-65-34,3512166534,ozersk@mepen.ru,"проспект Калинина, 1A",Россия,,
+beloreck.mepen.ru,Белорецк,,,7 (347) 299-67-11,3472996711,beloretsk@mepen.ru,"улица П. Точисского, 25А",Россия,,
+kurganinsk.mepen.ru,Курганинск,,,7 (861) 944-64-08,8619446408,kurganinsk@mepen.ru,"Первомайская улица, 3Ж",Россия,,
+anadyr.mepen.ru,Анадырь,,,7 (800) 700-56-38,8007005638,anadyr@mepen.ru,"улица Отке, 22",Россия,,
+myshkin.mepen.ru,Мышкин,,,7 (485) 259-58-86,4852595886,myshkin@mepen.ru,"улица Газовиков, 29/1",Россия,,
+zheleznodorozhnyy.mepen.ru,Железнодорожный,,,7 (495) 799-14-38,4957991438,zheleznodorozhnyy@mepen.ru,"улица Некрасова, 4",Россия,,
+almaty.mepen.kz,Алматы,,,7 (727) 354-08-98,7273540898,almaty@mepen.ru,"проспект Турара Рыскулова, 88",Казахстан,,
+mepen.kz,Астана,,,7 (717) 262-58-85,7172625885,astana@mepen.kz,"улица Амангельды Иманова, 50",Казахстан,,
+shymkent.mepen.kz,Шымкент,,,7 (725) 261-22-58,7252612258,shymkent@mepen.kz,"улица Толе би, 21а",Казахстан,,
+aktobe.mepen.kz,Актобе,,,7 (713) 273-60-12,7132736012,aktobe@mepen.kz,"улица Жанкожа батыра, 28",Казахстан,,
+karaganda.mepen.kz,Караганда,,,7 (721) 294-55-18,7212945518,karaganda@mepen.kz,"Асфальтная улица, 22",Казахстан,,
+taraz.mepen.kz,Тараз,,,7 (726) 297-03-01,7262970301,taraz@mepen.kz,"улица Аскарова, 297в",Казахстан,,
+semey.mepen.kz,Семей,,,7 (700) 567-89-68,7005678968,semei@mepen.kz,"18-я Загородная улица, 3а",Казахстан,,
+pavlodar.mepen.kz,Павлодар,,,7 (718) 278-15-01,7182781501,pavlodar@mepen.kz,"Химкомбинатовская улица, 158",Казахстан,,
+ustk.mepen.kz,Усть-Каменогорск,,,7 (723) 291-00-15,7232910015,ust-kamenogorsk@mepen.kz,"проспект Абая, 160/13",Казахстан,,
+atyrau.mepen.kz,Атырау,,,7 (712) 275-39-01,7122753901,atiray@mepen.kz,"улица Кубаш Медеубаева, 22Б",Казахстан,,
+uralsk.mepen.kz,Уральск,,,7 (708) 987-98-15,7089879815,uralsk@mepen.kz,"улица Азербайжана Мамбетова, 58/1",Казахстан,,
+kostanay.mepen.kz,Костанай,,,7 (727) 354-08-98,7273540898,kostanay@mepen.kz,"Целинная улица, 22А",Казахстан,,
+kyzylorda.mepen.kz,Кызылорда,,,7 (724) 292-50-01,7242925001,kizilorda@mepen.kz,"квартал Нур-Орда, 80",Казахстан,,
+aktau.mepen.kz,Актау,,,7 (727) 354-08-98,7273540898,aktau@mepen.kz,"Микрорайон 19А, 32/1",Казахстан,,
+petropavlovsk.mepen.kz,Петропавловск,,,7 (727) 354-08-98,7273540898,petropavl@mepen.kz,"Омское шоссе, 3/4",Казахстан,,
+mepen.by,Минск,,,375 (29) 643-66-60,296436660,minsk@mepen.by,"Инженерная улица, дом 22",Беларусь,,
+gomel.mepen.by,Гомель,,,,,gomel@mepen.by,,Беларусь,,
+mogilev.mepen.by,Могилев,,,,,mogilev@mepen.by,,Беларусь,,
+grodno.mepen.by,Гродно,,,,,grodno@mepen.by,,Беларусь,,
+vitebsk.mepen.by,Витебск,,,,,vitebsk@mepen.by,,Беларусь,,
+brest.mepen.by,Брест,,,,,brest@mepen.by,,Беларусь,,
+bobruisk.mepen.by,Бобруйск,,,,,bobruisk@mepen.by,,Беларусь,,
+borisov.mepen.by,Борисов,,,,,borisov@mepen.by,,Беларусь,,
+polotsk.mepen.by,Полоцк,,,,,polotsk@mepen.by,,Беларусь,,
+nesvizh.mepen.by,Несвиж,,,,,nesvij@mepen.by,,Беларусь,,
+kamenets.mepen.by,Каменец,,,,,kamenets@mepen.by,,Беларусь,,
+mepen.uz,Ташкент,,,998 (90) 006-84-48,900068448,tashkent@mepen.uz,"улица Шота Руставели, 12",Узбекистан,,
+mepen.kg,Бишкек,,,996 (22) 065-25-09,,bishkek@mepen.kg,"улица Токтогула, 125",Киргизия,,
+mepen.az,Баку,,,994 (10) 236-76-89,,baku@mepen.az,"улица Джафара Джаббарли, 44",Азербайджан,,
