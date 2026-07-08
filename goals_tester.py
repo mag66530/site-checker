@@ -393,10 +393,43 @@ def _план_мпэ_для_домена(домен: str) -> dict:
     }
 
 
+def _план_имп_для_домена(домен: str) -> dict:
+    """План прогона ИМП для страны СНГ: структурные страницы (каталог, акции,
+    поиск) с ИМП-селекторами, домен подставляется. Цели ИМП - reachGoal в общем
+    бандле, поэтому важно зайти на те же разделы, что и на РФ, а НЕ гнать СМУ-шаблон
+    (страны ИМП раньше брали СМУ-план - отсюда «куча ошибок»)."""
+    d = (домен or '').rstrip('/')
+    if not d:
+        return {'страницы': []}
+    return {
+        'страницы': [
+            ('Главная',   d + '/',
+             ['[data-my-modal="#modal-callback"], .banner-fast-order__application',
+              'header a:has-text("Каталог"), a:has-text("Акции"), a:has-text("Прайс")',
+              {'цепочка': ['[data-my-modal="#city-modal-id"], .choose-city',
+                           '.city-modal__city:not(.active)']},
+              '.footer-manager-call, .footer-email, .footer-phone, footer .telephone-utf']),
+            ('Контакты',  d + '/contacts/',
+             ['.footer-manager-call', '.footer-email']),
+            ('Каталог',   d + '/catalog/',
+             ['.add-to-cart-btn', 'text=Быстрый заказ, [class*="fast-order"]']),
+            ('Акции',     d + '/specials/',
+             ['.add-to-cart-btn, button:has-text("В корзину")',
+              'text=Быстрый заказ, [class*="fast-order"]']),
+            ('Поиск',     d + '/search/?q=труба', []),
+            ('Страница 404', d + '/nesuschestvuyushaya-404-xyz/', []),
+        ],
+        'ожидаемые': ACTIONS['imp']['ожидаемые'],
+    }
+
+
 def _план_страна(pid: str, домен: str) -> dict:
     """Универсальный план для суб-проекта страны - по базовому проекту."""
-    if _базовый(pid) == 'mpe':
+    base = _базовый(pid)
+    if base == 'mpe':
         return _план_мпэ_для_домена(домен)
+    if base == 'imp':
+        return _план_имп_для_домена(домен)
     return _план_для_домена(домен)
 
 
