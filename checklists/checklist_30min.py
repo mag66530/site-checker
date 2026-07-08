@@ -1128,7 +1128,7 @@ if pid:
                              'формат microdata: тип только в JSON-LD = '
                              'предупреждение. Валидность полей - инструментами '
                              'Яндекса/Google вручную.')
-            st.checkbox('1.8  Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
+            st.checkbox('1.13  Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
                         key='c30_check_security',
                         help='Доп. чек-лист: HTTP-заголовки безопасности ответа. '
                              'Мягко - нет HSTS / X-Content-Type-Options / защиты '
