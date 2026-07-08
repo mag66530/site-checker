@@ -2680,6 +2680,123 @@ def _country_by_url(url: str) -> str:
 # ── Лист «Автокликер» ──────────────────────────────────────────────
 
 
+# ── Лист «Фильтрация» (доп. чек-лист: фильтры товаров работают) ────
+
+# Вердикт → (метка, цвет, это баг?)
+_FILTER_VERDICT = {
+    'ok':            ('✅ фильтр сузил выдачу',           'ok',  False),
+    'empty':         ('❌ пустая выдача после фильтра',   'err', True),
+    'not_narrowed':  ('❌ выдача не сузилась (дубль категории)', 'err', True),
+    'http_error':    ('❌ ошибка HTTP на фильтре',        'err', True),
+    'no_cards':      ('⚠ карточки не распознаны (проверить селектор card)', 'warn', False),
+    'filter_absent': ('⚠ селектор фильтра не найден',     'warn', False),
+    'config_error':  ('⚠ ошибка конфига кейса',           'warn', False),
+}
+
+
+def _build_filters_sheet(wb, filters_test):
+    """Лист «Фильтрация»: корректно ли работают фильтры товаров (живой
+    драйв в браузере по пер-проектным селекторам). Добавляется, только
+    если фильтр-тест запускался."""
+    if not filters_test:
+        return
+    cases = filters_test.get('cases') or []
+    _bad = sum(1 for c in cases
+               if _FILTER_VERDICT.get(c.get('verdict'), (None, None, False))[2])
+    ws = wb.create_sheet('Фильтрация')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if _bad else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 30   # Кейс
+    ws.column_dimensions['C'].width = 46   # Категория
+    ws.column_dimensions['D'].width = 40   # Вердикт
+    ws.column_dimensions['E'].width = 26   # Было → стало
+    ws.column_dimensions['F'].width = 3
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Фильтрация товаров'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('Проверка, что фильтр реально сужает список товаров. Браузер '
+               'открывает категорию, применяет фильтр по заданному селектору '
+               'и сравнивает число карточек. Баг: после фильтра пусто, '
+               'выдача не изменилась (фильтр не применился) или страница '
+               'отдала ошибку. Селекторы задаются на проект в '
+               'catalogs/filters-<проект>.json.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 44
+
+    row = 5
+    # Тест не выполнялся / нет конфига
+    if not filters_test.get('available') or not cases:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = filters_test.get('note') or (
+            'Фильтр-тест не выполнялся: не заданы селекторы фильтра для '
+            'проекта (catalogs/filters-<проект>.json).')
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True, vertical='top')
+        ws.row_dimensions[row].height = 44
+        return
+
+    _ok = sum(1 for c in cases if c.get('verdict') == 'ok')
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Кейсов проверено: {len(cases)} · работают: {_ok} · '
+               f'ошибок фильтрации: {_bad}')
+    c.font = _font(size=10, bold=True, color=C.err if _bad else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 26
+    row += 2
+
+    # Заголовки таблицы
+    _meta_table_header(ws, row, ['Кейс', 'Категория', 'Вердикт',
+                                 'Было → стало'])
+    row += 1
+    _CMAP = {'ok': C.ok, 'err': C.err, 'warn': C.warn}
+    for cs in cases:
+        label, ckey, _is_bad = _FILTER_VERDICT.get(
+            cs.get('verdict'), (cs.get('verdict') or '?', 'warn', False))
+        color = _CMAP.get(ckey, C.text_soft)
+        _b = cs.get('baseline')
+        _a = cs.get('after')
+        _ba = (f'{_b} → {_a}' if _b is not None and _a is not None
+               else (f'{_b} → -' if _b is not None else '-'))
+        ws.row_dimensions[row].height = 20
+        vals = [
+            (cs.get('name', ''), {'size': 10, 'color': C.text}),
+            (cs.get('category', ''), {'size': 9, 'color': C.accent,
+                                      'underline': 'single'}),
+            (label, {'size': 10, 'color': color, 'bold': _is_bad}),
+            (_ba, {'size': 10, 'color': C.text_muted}),
+        ]
+        for ci, (val, kw) in enumerate(vals, 2):
+            cell = ws.cell(row=row, column=ci)
+            cell.value = val
+            cell.font = _font(**kw)
+            cell.alignment = _align(wrap=True, vertical='top')
+            cell.border = _border(color=C.border_light)
+            if ci == 3 and val:
+                cell.hyperlink = val
+        row += 1
+        # деталь под строкой (если не «ok»)
+        if cs.get('verdict') != 'ok' and cs.get('detail'):
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = cs['detail']
+            c.font = _font(size=9, italic=True, color=C.text_muted)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 16
+            row += 1
+
+
 def _build_autoclick_sheet(wb, autoclick):
     """Итоги автокликера (перекликивание ошибок в Вебмастере/ГСК) - сводка
     по сайтам. Добавляется только если автокликер запускался."""
@@ -3018,6 +3135,7 @@ def build_report(
     autoclick: dict = None,        # итоги автокликера - добавит лист «Автокликер»
     indexing_summary: dict = None, # sitemap↔robots (п.1.7) - в лист «Индексация»
     meta_summary: dict = None,     # дубли мета/URL (п.1.8) - в лист «Метаданные»
+    filters_test: dict = None,     # итоги фильтр-теста - добавит лист «Фильтрация»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -3202,6 +3320,14 @@ def build_report(
                          f'{len(security_bad_pages)} '
                          f'{_plural_pages(len(security_bad_pages))} - '
                          f'см. лист «Безопасность».')
+    _filters_cases = (filters_test or {}).get('cases') or []
+    _filters_bad = sum(1 for c in _filters_cases
+                       if _FILTER_VERDICT.get(c.get('verdict'),
+                                              (None, None, False))[2])
+    if _filters_bad:
+        summary_text += (f'\nФильтрация: {_filters_bad} '
+                         f'{"фильтр" if _filters_bad == 1 else "фильтров"} '
+                         f'работают некорректно - см. лист «Фильтрация».')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -3735,6 +3861,9 @@ def build_report(
 
     # ЛИСТ: «Автокликер» - итоги перекликивания ошибок (если запускался).
     _build_autoclick_sheet(wb, autoclick)
+
+    # ЛИСТ: «Фильтрация» - работают ли фильтры товаров (если тест запускался).
+    _build_filters_sheet(wb, filters_test)
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)

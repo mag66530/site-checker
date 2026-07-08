@@ -6,6 +6,7 @@ runner_30min.py - логика прогона 30-мин чек-листа БЕЗ
 внутри Streamlit. Возвращает результаты, путь отчёта и т.п.
 """
 import asyncio
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -162,6 +163,44 @@ def _run_autoclicker(pid, params, log, session_b64=None):
     log(f'✓ Автокликер: сайтов {len(sites)}, '
         f'прокликано {sum(s.get("clicked", 0) for s in sites)}')
     return {'available': True, 'sites': sites}
+
+
+def _run_filters_test(pid, params, log, session_b64=None):
+    """Фильтр-тест товаров в браузере (доп. чек-лист). Отдельный процесс
+    filters_run.py (Playwright): локальный CDP-Chrome не нужен, каталог
+    публичный - гоняем свой headless. Возвращает dict для листа «Фильтрация»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    # В облаке нет локального Chrome - filters_run сам поднимет headless;
+    # флаг CCR_AGENT_PROXY_ENABLED (если есть) он учитывает сам.
+    args = [_sys.executable, 'filters_run.py', '--project', pid]
+    (root / 'cache').mkdir(exist_ok=True)
+    _res_file = root / 'cache' / f'filters_{pid}.json'
+    try:
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    log('Фильтр-тест товаров: запускаю браузер…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [фильтр] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        log(f'⚠ Фильтр-тест: {e}')
+        return {'available': True, 'cases': [], 'note': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'cases': [],
+                'note': f'результат фильтр-теста не прочитан: {e}'}
 
 
 def run_check(pid, params, creds, log, progress):
@@ -560,6 +599,11 @@ def run_check(pid, params, creds, log, progress):
                 pid, params, log,
                 session_b64=creds.get('autoclick_session'))
 
+        # ── Фильтр-тест товаров (доп. чек-лист) - тяжёлый браузер, по галочке ──
+        _filters_test = None
+        if params.get('check_filter_fn'):
+            _filters_test = _run_filters_test(pid, params, log)
+
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых
         # галочках: выключил сбор - листов «Уведомления» / «404 из Метрики» /
@@ -593,7 +637,8 @@ def run_check(pid, params, creds, log, progress):
             metrika_data_date=(_m404_disp if _today_404
                                else get_latest_available_date(pid)),
             service_issues=_service_issues, autoclick=_autoclick,
-            indexing_summary=_idx_summary, meta_summary=_meta_summary)
+            indexing_summary=_idx_summary, meta_summary=_meta_summary,
+            filters_test=_filters_test)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

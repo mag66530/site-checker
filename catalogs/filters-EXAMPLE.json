@@ -1,0 +1,13 @@
+{
+  "_comment": "Шаблон фильтр-теста. Скопировать в filters-<project_id>.json и заполнить под конкретный сайт. Селекторы смотреть в DevTools на живой категории. Тест включается галочкой «Проверять фильтрацию товаров (браузер)».",
+  "cases": [
+    {
+      "name": "Пример: категория — по параметру",
+      "category": "https://site.ru/catalog/nekaya-kategoriya/",
+      "card": ".catalog-item",
+      "filter": ".filter-block input[type=checkbox]",
+      "apply": ".filter-submit",
+      "wait_ms": 2500
+    }
+  ]
+}

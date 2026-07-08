@@ -653,6 +653,7 @@ def init_session():
         'c30_check_markup': True,      # пункт 1.12 - микроразметка Schema.org + OpenGraph
         'c30_check_security': True,    # доп. 1.8 - заголовки безопасности HTTP
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
+        'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -1183,6 +1184,13 @@ if pid:
                     help='Прозваниваем каждую внутреннюю ссылку в тексте тех. страниц '
                          '(оплата, доставка, контакты, политики и т.п.) и помечаем те, '
                          'что отдают 404/410. Дольше - по запросу на каждую ссылку.')
+        st.checkbox('Проверять фильтрацию товаров (браузер)',
+                    key='c30_check_filter_fn',
+                    help='Открывает категорию в браузере и применяет фильтр по '
+                         'заданным селекторам, проверяя что выдача сужается '
+                         '(не пусто, не дубль категории, без ошибок). Тяжёлый '
+                         'браузерный тест - по запросу. Селекторы задаются на '
+                         'проект в catalogs/filters-<проект>.json.')
 
         # ── Автокликер (локальный Chrome или облако с сессией) ──────
         _ck_ac = st.checkbox(
@@ -1265,6 +1273,7 @@ if pid:
         bool(st.session_state.get('c30_check_markup', True)),
         bool(st.session_state.get('c30_check_security', True)),
         bool(st.session_state.get('c30_check_links', False)),
+        bool(st.session_state.get('c30_check_filter_fn', False)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
 
@@ -1307,6 +1316,7 @@ if pid:
                 'check_markup': st.session_state.get('c30_check_markup', True),
                 'check_security': st.session_state.get('c30_check_security', True),
                 'check_links': st.session_state.get('c30_check_links', False),
+                'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
                 'fetch_metrika_404': st.session_state.get('c30_fetch_metrika_404', True),
