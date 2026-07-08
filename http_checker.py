@@ -38,6 +38,7 @@ from content_checker import check_content, ContentResult, parse_hidden_selectors
 class STATUS:
     OK = 'ok'
     REDIRECT = 'redirect'
+    REDIRECT_LOOP = 'redirect_loop'   # цикл или бесконечная цепочка = ошибка
     NOT_FOUND = 'not_found'
     CLIENT_ERROR = 'client_error'
     SERVER_ERROR = 'server_error'
@@ -108,6 +109,8 @@ def classify(http_code: Optional[int], error_kind: Optional[str]) -> str:
     """Классифицировать результат запроса."""
     if error_kind == 'timeout':
         return STATUS.TIMEOUT
+    if error_kind == 'redirect_loop':
+        return STATUS.REDIRECT_LOOP
     if error_kind and not http_code:
         return STATUS.NETWORK
     if not http_code:
@@ -249,6 +252,7 @@ async def _attempt_once(
 
     timeout = aiohttp.ClientTimeout(total=timeout_ms / 1000)
 
+    visited = {url}
     try:
         for hop in range(MAX_REDIRECTS + 1):
             try:
@@ -269,8 +273,18 @@ async def _attempt_once(
                         })
                         current_url = next_url
                         final_url = next_url
+                        # Циклический редирект: адрес уже был в цепочке
+                        if next_url in visited:
+                            error_kind = 'redirect_loop'
+                            error_message = (f'Циклический редирект: цепочка '
+                                             f'возвращается на {next_url}')
+                            break
+                        visited.add(next_url)
                         if hop == MAX_REDIRECTS:
-                            error_message = 'Превышен лимит редиректов'
+                            error_kind = 'redirect_loop'
+                            error_message = ('Превышен лимит редиректов '
+                                             f'({MAX_REDIRECTS}) - цепочка '
+                                             'не заканчивается')
                         continue
 
                     # Финальный ответ - читаем тело

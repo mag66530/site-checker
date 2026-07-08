@@ -26,6 +26,7 @@ _SERVER_DOWN = ('server_error', 'timeout', 'network_error')
 _STATUS_LABEL = {
     'not_found': '404 не найдена',
     'client_error': 'ошибка доступа',
+    'redirect_loop': 'циклический редирект',
     'server_error': 'сервер не отвечает (5xx)',
     'timeout': 'нет ответа (таймаут)',
     'network_error': 'нет соединения',

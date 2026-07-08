@@ -406,10 +406,13 @@ def run_check(pid, params, creds, log, progress):
                 _m_pages_bad = sum(1 for r in results
                                    if getattr(r, 'has_meta_issues', False)
                                    or getattr(r, 'has_meta_unique_issues', False))
+                _n_dup = sum(1 for d in _url_dups
+                             if d.get('problem') != 'not_301')
                 log(f'Метаданные: страниц с проблемами {_m_pages_bad}, '
                     f'дублей в городе {len(_dups["same_city"])}, '
                     f'межгородских {len(_dups["cross_city"])}, '
-                    f'дублей URL {len(_url_dups)}')
+                    f'дублей URL {_n_dup}, '
+                    f'временных редиректов {len(_url_dups) - _n_dup}')
             except Exception as _e:
                 log(f'⚠ Метаданные/дубли: {_e}')
 
@@ -641,7 +644,8 @@ def run_check(pid, params, creds, log, progress):
                     meta_duplicates=(
                         len((_meta_summary or {}).get('duplicates', {}).get('same_city', []))
                         + len((_meta_summary or {}).get('duplicates', {}).get('cross_city', []))
-                        + len((_meta_summary or {}).get('url_duplicates', []))),
+                        + sum(1 for d in (_meta_summary or {}).get('url_duplicates', [])
+                              if d.get('problem') != 'not_301')),
                     layout_issues_pages=sum(
                         1 for r in results
                         if getattr(r, 'has_layout_issues', False)),
