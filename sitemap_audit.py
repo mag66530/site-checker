@@ -11,6 +11,17 @@ sitemap_audit.py - аудит карты сайта (часть пункта 1.7
     «обновились» почти все даты - это динамическая генерация, а не
     реальные правки.
 
+Доп. чек-лист «Sitemap.xml»:
+  • лимиты на файл: >10 000 ссылок или >10 МБ = предупреждение (лимит
+    допа), >50 000 или >50 МБ = баг (нарушение протокола sitemap);
+  • структура: индекс-файл или одиночный; записей много (>10k), а
+    индекса нет = предупреждение;
+  • полнота: все категории/фильтры из CSV-выгрузки каталога должны быть
+    в sitemap - отсутствие = баг (проверяется только при ПОЛНОМ обходе,
+    без упора в лимиты MAX_SITEMAPS/MAX_ENTRIES);
+  • HTML-карта сайта (/sitemap/): существует и не содержит ссылок на
+    служебные страницы (корзина/ЛК/поиск/админка…).
+
 Sitemap-индекс обходится рекурсивно (лимит файлов). Работает по тому же
 адресу, что и загрузка товаров (sitemap_url проекта / robots).
 """
@@ -40,24 +51,37 @@ def _norm_host(h: str) -> str:
     return h[4:] if h.startswith('www.') else h
 
 
+def _norm_path(p: str) -> str:
+    """Нормализация пути для сверки каталог ↔ sitemap."""
+    return '/' + (p or '').strip().strip('/').lower() + '/'
+
+
 async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
+                        known_categories=None, known_filters=None,
                         log=None) -> dict:
     """Скачать sitemap (с обходом индекса) и проверить структуру записей.
 
     Возвращает {'files': n, 'total': n, 'bad_urls': [{'url','why'}, …],
                 'with_lastmod': n, 'with_changefreq': n, 'with_priority': n,
-                'lastmod_dates': {url: lastmod}, 'error': str|None}."""
+                'lastmod_dates': {url: lastmod}, 'is_index': bool,
+                'file_stats': [{'url','urls','bytes'}], 'truncated': bool,
+                'missing_catalog': {...}|None, 'error': str|None}."""
     import aiohttp
     from urllib.parse import urlsplit
     from sitemap import _sitemap_headers
     out = {'files': 0, 'total': 0, 'bad_urls': [],
            'with_lastmod': 0, 'with_changefreq': 0, 'with_priority': 0,
-           'lastmod_dates': {}, 'error': None}
+           'lastmod_dates': {}, 'is_index': False, 'file_stats': [],
+           'truncated': False, 'missing_catalog': None, 'error': None}
     my_host = _norm_host(host)
+    sm_paths = set()          # нормализованные пути всех URL из sitemap
     seen, queue = set(), [root_url]
     try:
         async with aiohttp.ClientSession(headers=_sitemap_headers()) as session:
-            while queue and out['files'] < MAX_SITEMAPS and out['total'] < MAX_ENTRIES:
+            while queue:
+                if out['files'] >= MAX_SITEMAPS or out['total'] >= MAX_ENTRIES:
+                    out['truncated'] = True
+                    break
                 u = queue.pop(0)
                 if u in seen:
                     continue
@@ -71,7 +95,8 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                                 out['error'] = f'sitemap отдаёт HTTP {r.status}'
                                 return out
                             continue
-                        xml = await r.text()
+                        data = await r.read()
+                        xml = data.decode('utf-8', errors='replace')
                 except Exception as e:
                     if not out['files']:
                         out['error'] = f'sitemap не скачался: {e}'
@@ -79,10 +104,14 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                     continue
                 out['files'] += 1
                 if _RE_INDEX.search(xml):
+                    if u == root_url:
+                        out['is_index'] = True
                     queue.extend(_RE_SM_LOC.findall(xml))
                     continue
+                _file_urls = 0
                 for block in _RE_URL_BLOCK.finditer(xml):
                     if out['total'] >= MAX_ENTRIES:
+                        out['truncated'] = True
                         break
                     b = block.group(1)
                     m = _RE_SM_LOC.search(b)
@@ -90,6 +119,11 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                     if not loc:
                         continue
                     out['total'] += 1
+                    _file_urls += 1
+                    try:
+                        sm_paths.add(_norm_path(urlsplit(loc).path))
+                    except Exception:
+                        pass
                     # ТЗ 3.4.2: правильный URL - абсолютный, https, свой хост
                     sp = urlsplit(loc)
                     if not sp.scheme:
@@ -112,8 +146,86 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                         out['with_changefreq'] += 1
                     if _RE_PRIORITY.search(b):
                         out['with_priority'] += 1
+                out['file_stats'].append(
+                    {'url': u, 'urls': _file_urls, 'bytes': len(data)})
+            if queue:
+                out['truncated'] = True
+
+        # ── Полнота: категории/фильтры из выгрузки каталога есть в sitemap ──
+        # Только при полном обходе: при упоре в лимиты «отсутствие» пути
+        # ничего не значит - он мог быть в непрочитанной части.
+        if (known_categories or known_filters) and not out['truncated']:
+            def _missing(paths):
+                return [p for p in (paths or [])
+                        if _norm_path(p) not in sm_paths]
+            out['missing_catalog'] = {
+                'categories': _missing(known_categories)[:50],
+                'filters': _missing(known_filters)[:50],
+            }
     except Exception as e:
         out['error'] = str(e)
+    return out
+
+
+# ── Доп. чек-лист: HTML-карта сайта ──────────────────────────────────
+
+# Служебные пути, которых не должно быть в HTML-карте (тот же смысл,
+# что «мусор» в robots): корзина/ЛК/поиск/сравнение/заказ/админка.
+_HTML_MAP_JUNK = ('/basket/', '/cart/', '/compare/', '/search/', '/auth/',
+                  '/personal/', '/order/', '/checkout/', '/bitrix/', '/admin/')
+_RE_HREF = re.compile(r'<a\b[^>]*href\s*=\s*["\']([^"\']+)["\']', re.I)
+
+
+async def audit_html_sitemap(host: str, *, proxy_url=None) -> dict:
+    """HTML-карта сайта (доп. чек-лист): существует по типовому адресу
+    и не содержит ссылок на служебные страницы.
+
+    Возвращает {'url': str|None, 'status': int|None,
+                'junk_links': [{'url','label'}], 'error': str|None}."""
+    import aiohttp
+    from urllib.parse import urlsplit, urljoin
+    from sitemap import _sitemap_headers
+    out = {'url': None, 'status': None, 'junk_links': [], 'error': None}
+    try:
+        async with aiohttp.ClientSession(headers=_sitemap_headers()) as session:
+            html = None
+            for path in ('/sitemap/', '/sitemap.html'):
+                u = f'https://{host}{path}'
+                try:
+                    async with session.get(
+                            u, timeout=aiohttp.ClientTimeout(total=30),
+                            allow_redirects=True, proxy=proxy_url) as r:
+                        if r.status == 200:
+                            out['url'], out['status'] = u, 200
+                            html = (await r.read()).decode(
+                                'utf-8', errors='replace')
+                            break
+                        if out['status'] is None:
+                            out['url'], out['status'] = u, r.status
+                except Exception as e:
+                    if out['error'] is None:
+                        out['error'] = str(e)
+            if html:
+                my_host = _norm_host(host)
+                seen = set()
+                for m in _RE_HREF.finditer(html):
+                    link = urljoin(out['url'], m.group(1).strip())
+                    sp = urlsplit(link)
+                    if _norm_host(sp.netloc) != my_host:
+                        continue
+                    p = (sp.path or '/').lower()
+                    if not p.endswith('/'):
+                        p += '/'
+                    for junk in _HTML_MAP_JUNK:
+                        if p.startswith(junk) and link not in seen:
+                            seen.add(link)
+                            out['junk_links'].append(
+                                {'url': link, 'label': junk})
+                            break
+                    if len(out['junk_links']) >= 20:
+                        break
+    except Exception as e:
+        out['error'] = out['error'] or str(e)
     return out
 
 

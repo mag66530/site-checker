@@ -1479,7 +1479,16 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     warned = [r for r in checked if (not r.indexing.get('issues')
                                      and r.indexing.get('warnings'))]
     sm_dis = (indexing_summary or {}).get('disallowed') or []
-    has_bugs = bool(bad or sm_dis)
+    _blanket = (indexing_summary or {}).get('blanket_disallow') or []
+    _assets_closed = (indexing_summary or {}).get('assets_closed') or []
+    _aud_mc = (((indexing_summary or {}).get('sitemap_audit') or {})
+               .get('missing_catalog') or {})
+    _aud_missing = ((_aud_mc.get('categories') or [])
+                    + (_aud_mc.get('filters') or []))
+    _hm_junk_top = (((indexing_summary or {}).get('html_sitemap') or {})
+                    .get('junk_links') or [])
+    has_bugs = bool(bad or sm_dis or _blanket or _assets_closed
+                    or _aud_missing or _hm_junk_top)
 
     ws = wb.create_sheet('Индексация')
     ws.sheet_view.showGridLines = False
@@ -1667,13 +1676,62 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             ws.row_dimensions[row].height = 24
             row += 1
             if not junk:
-                _line('✅ Пагинация, поиск, корзина, сравнение и личный кабинет '
+                _line('✅ Пагинация, сортировки, поиск, корзина, сравнение, '
+                      'оформление заказа, личный кабинет и админ. панель '
                       'закрыты в robots.txt (или не существуют на сайте).', C.ok)
             else:
                 _line('Эти страницы отвечают 200, но НЕ закрыты в robots - '
                       'мусор попадает в обход робота:', C.text_muted)
                 for j in junk:
                     _line(f'{j.get("label", "")}: {j.get("path", "")}', C.err)
+            row += 1
+
+        # ── Секция 4а: гигиена robots.txt (доп. чек-лист) ──
+        # Показываем только если проверка выполнялась (нет error и robots 200)
+        if not indexing_summary.get('error'):
+            _ua = indexing_summary.get('ua_groups')
+            _hyg_bad = bool(_blanket or _assets_closed)
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = 'Гигиена robots.txt'
+            c.font = _font(size=13, bold=True, color=C.err if _hyg_bad else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            # 1. Disallow: / - сайт закрыт целиком
+            if _blanket:
+                _grp = ', '.join(f'User-agent: {a}' for a in _blanket)
+                _line(f'❌ В robots.txt есть директива «Disallow: /» ({_grp}) - '
+                      f'сайт закрыт от индексации целиком.', C.err, bold=True)
+            else:
+                _line('✅ Директивы «Disallow: /» нет.', C.ok)
+            # 2. Отдельные группы User-agent для Яндекса и Google
+            if _ua:
+                _missing = [n for n, k in (('Yandex', 'yandex'),
+                                           ('Googlebot', 'google'))
+                            if not _ua.get(k)]
+                if _missing:
+                    _line(f'⚠ Нет отдельных групп User-agent: '
+                          f'{", ".join(_missing)} - роботы работают по общей '
+                          f'группе «*».', C.warn)
+                else:
+                    _line('✅ Отдельные группы User-agent для Яндекса и Google '
+                          'заданы.', C.ok)
+            # 3. CSS/JS открыты для роботов
+            _n_assets = indexing_summary.get('assets_checked', 0)
+            if _assets_closed:
+                _line(f'❌ Файлы .css/.js закрыты в robots.txt '
+                      f'({len(_assets_closed)} из {_n_assets}) - Google не '
+                      f'сможет отрендерить страницы:', C.err, bold=True)
+                for _a in _assets_closed[:10]:
+                    _line(f'{_a.get("url", "")}  (Disallow: {_a.get("rule", "")})',
+                          C.err)
+                if len(_assets_closed) > 10:
+                    _line(f'… и ещё {len(_assets_closed) - 10}', C.text_muted)
+            elif _n_assets:
+                _line(f'✅ Файлы .css/.js главной ({_n_assets} шт.) открыты '
+                      f'для роботов.', C.ok)
             row += 1
 
         # ── Секция 5: sitemap-директивы в robots (ТЗ 3.3.6) ──
@@ -1732,8 +1790,20 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                                   ('priority', 'with_priority'))
                 if _tot and aud.get(key, 0) == 0
             ]
+            # лимиты допа (10k/10МБ = предупр.) и протокола (50k/50МБ = баг)
+            _fstats = aud.get('file_stats') or []
+            _over_proto = [f for f in _fstats
+                           if f.get('urls', 0) > 50000
+                           or f.get('bytes', 0) > 50 * 1024 * 1024]
+            _over_dop = [f for f in _fstats if f not in _over_proto
+                         and (f.get('urls', 0) > 10000
+                              or f.get('bytes', 0) > 10 * 1024 * 1024)]
+            _mc = aud.get('missing_catalog') or {}
+            _miss = ((_mc.get('categories') or [])
+                     + (_mc.get('filters') or []))
             _sec_title('Sitemap: структура записей (ТЗ 3.4.2)',
-                       bool(aud.get('error') or _bad_urls))
+                       bool(aud.get('error') or _bad_urls or _over_proto
+                            or _miss))
             if aud.get('error'):
                 _line(f'⚠ Аудит не выполнен: {aud["error"]}', C.warn)
             else:
@@ -1741,6 +1811,30 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                       f'{_tot} · с lastmod: {aud.get("with_lastmod", 0)} · '
                       f'с changefreq: {aud.get("with_changefreq", 0)} · '
                       f'с priority: {aud.get("with_priority", 0)}', C.text_muted)
+                # структура: индекс или одиночный файл
+                if aud.get('is_index'):
+                    _line(f'✅ Sitemap - индекс-файл, внутри '
+                          f'{max(aud.get("files", 1) - 1, 0)} файлов.', C.ok)
+                elif _tot > 10000:
+                    _line(f'⚠ Записей {_tot}, но sitemap - одиночный файл '
+                          f'без индекса; нужен индекс-файл с разбивкой '
+                          f'по типам страниц.', C.warn)
+                else:
+                    _line('✅ Одиночный sitemap - допустимо, страниц немного.',
+                          C.ok)
+                # лимиты на файл
+                for f in _over_proto:
+                    _line(f'❌ {f.get("url", "")} - {f.get("urls", 0)} URL, '
+                          f'{f.get("bytes", 0) // 1048576} МБ: нарушен лимит '
+                          f'протокола (50 000 / 50 МБ).', C.err, bold=True)
+                for f in _over_dop:
+                    _line(f'⚠ {f.get("url", "")} - {f.get("urls", 0)} URL, '
+                          f'{f.get("bytes", 0) // 1048576} МБ: больше '
+                          f'рекомендуемого лимита (10 000 ссылок / 10 МБ '
+                          f'на файл).', C.warn)
+                if _fstats and not _over_proto and not _over_dop:
+                    _line('✅ Лимиты на файл соблюдены (до 10 000 ссылок '
+                          'и 10 МБ).', C.ok)
                 if _bad_urls:
                     _line(f'❌ Неправильные URL в sitemap ({len(_bad_urls)}):',
                           C.err, bold=True)
@@ -1753,6 +1847,22 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 for name, _n in _fld_missing:
                     _line(f'⚠ Ни у одной записи нет <{name}> - ТЗ требует '
                           f'заполнять.', C.warn)
+                # полнота: категории/фильтры из выгрузки каталога
+                if aud.get('truncated'):
+                    _line('- Полнота (категории/фильтры в sitemap) не '
+                          'проверена: обход упёрся в лимит файлов/записей.',
+                          C.text_muted)
+                elif _miss:
+                    _line(f'❌ В sitemap нет {len(_miss)} категорий/фильтров '
+                          f'из выгрузки каталога - страницы не попадут в '
+                          f'индекс:', C.err, bold=True)
+                    for _p in _miss[:20]:
+                        _line(_p, C.err)
+                    if len(_miss) > 20:
+                        _line(f'… и ещё {len(_miss) - 20}', C.text_muted)
+                elif aud.get('missing_catalog') is not None:
+                    _line('✅ Все категории и фильтры из выгрузки каталога '
+                          'есть в sitemap.', C.ok)
             row += 1
 
             # ── Секция 7: даты lastmod (ТЗ 3.4.3) ──
@@ -1798,6 +1908,29 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                         _line(f'✅ {s.get("url", "")} - без ошибок'
                               + (f', URL: {_n}' if _n else ''), C.ok)
 
+        # ── Секция 9: HTML-карта сайта (доп. чек-лист) ──
+        hm = indexing_summary.get('html_sitemap')
+        if hm is not None:
+            _hm_junk = hm.get('junk_links') or []
+            _sec_title('HTML-карта сайта', bool(_hm_junk))
+            if hm.get('status') != 200:
+                _line(f'⚠ HTML-карта не найдена по типовым адресам '
+                      f'(/sitemap/, /sitemap.html) - последний ответ '
+                      f'HTTP {hm.get("status") if hm.get("status") is not None else "нет"}'
+                      f'{"; " + hm["error"] if hm.get("error") else ""}. '
+                      f'Если карта живёт по другому адресу - проверить '
+                      f'руками.', C.warn)
+            elif _hm_junk:
+                _line(f'❌ {hm.get("url", "")} - в HTML-карте служебные '
+                      f'ссылки ({len(_hm_junk)}):', C.err, bold=True)
+                for j in _hm_junk[:15]:
+                    _line(f'{j.get("url", "")}', C.err)
+                if len(_hm_junk) > 15:
+                    _line(f'… и ещё {len(_hm_junk) - 15}', C.text_muted)
+            else:
+                _line(f'✅ {hm.get("url", "")} - существует, служебных '
+                      f'ссылок нет.', C.ok)
+
 
 # ── Группировка «одна проблема - одна строка + список URL» ─────────
 # Как на листе «Уведомления»: не плодим милион одинаковых строк, а
@@ -1814,8 +1947,10 @@ def _issue_groups(pages, attr, key):
     return sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
 
 
-def _render_issue_groups(ws, row, groups, color, max_urls=100):
-    """Строка-проблема (текст + сколько страниц), под ней - город/тип/URL."""
+def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None):
+    """Строка-проблема (текст + сколько страниц), под ней - город/тип/URL.
+    extra(r) - необязательный текст в последнюю колонку (что нашлось на
+    странице), чтобы было видно контекст проблемы, а не только URL."""
     for text, rs in groups:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
@@ -1832,7 +1967,7 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100):
                 (r.city or '-', {'size': 9, 'color': C.text_muted}),
                 (r.type_label, {'size': 9, 'color': C.text_muted}),
                 (r.url, {'size': 9, 'color': C.accent, 'underline': 'single'}),
-                ('', {}),
+                (extra(r) if extra else '', {'size': 9, 'color': C.text_soft}),
             ], 2):
                 cell = ws.cell(row=row, column=ci)
                 cell.value = val
@@ -2026,6 +2161,18 @@ def _build_markup_sheet(wb, results):
     ws.row_dimensions[row].height = 26
     row += 2
 
+    # Что реально нашлось на странице - чтобы было видно: «нет разметки»
+    # значит нет НИ ОДНОГО типа из требуемых, а не «часть есть».
+    def _markup_found(r):
+        m = getattr(r, 'markup', None) or {}
+        bits = []
+        if m.get('micro_types'):
+            bits.append('microdata: ' + ', '.join(m['micro_types']))
+        if m.get('ld_types'):
+            bits.append('JSON-LD: ' + ', '.join(m['ld_types']))
+        return ('найдено на странице - ' + ' · '.join(bits)
+                if bits else 'Schema.org-разметки на странице нет вообще')
+
     _meta_section_title(ws, row, f'Проблемы разметки  ({len(bad)})',
                         C.err if bad else C.ok)
     row += 1
@@ -2035,13 +2182,15 @@ def _build_markup_sheet(wb, results):
         row += 2
     else:
         row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err)
+            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err,
+            extra=_markup_found)
 
     if warned:
         _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
         row += 1
         row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn)
+            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn,
+            extra=_markup_found)
 
 
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
@@ -2875,7 +3024,16 @@ def build_report(
             f'\nВ контенте {total_content_bugs} проблем на {len(pages_with_content_bugs)} страницах '
             f'(нет цены, кнопок заказа или заголовка) - см. лист «Структура страниц».'
         )
-    if indexing_bad_pages or indexing_sitemap_conflicts:
+    _idx_blanket = (indexing_summary or {}).get('blanket_disallow') or []
+    _idx_assets = (indexing_summary or {}).get('assets_closed') or []
+    _idx_mc = (((indexing_summary or {}).get('sitemap_audit') or {})
+               .get('missing_catalog') or {})
+    _idx_missing = ((_idx_mc.get('categories') or [])
+                    + (_idx_mc.get('filters') or []))
+    _idx_hm_junk = (((indexing_summary or {}).get('html_sitemap') or {})
+                    .get('junk_links') or [])
+    if (indexing_bad_pages or indexing_sitemap_conflicts
+            or _idx_blanket or _idx_assets or _idx_missing or _idx_hm_junk):
         _idx_bits = []
         if indexing_bad_pages:
             _idx_bits.append(f'расхождения с robots.txt на {len(indexing_bad_pages)} '
@@ -2883,6 +3041,15 @@ def build_report(
         if indexing_sitemap_conflicts:
             _idx_bits.append(f'{indexing_sitemap_conflicts} путей каталога под Disallow '
                              f'в robots.txt')
+        if _idx_blanket:
+            _idx_bits.append('в robots.txt есть «Disallow: /» - сайт закрыт целиком')
+        if _idx_assets:
+            _idx_bits.append(f'{len(_idx_assets)} файлов .css/.js закрыты в robots.txt')
+        if _idx_missing:
+            _idx_bits.append(f'{len(_idx_missing)} категорий/фильтров каталога '
+                             f'нет в sitemap')
+        if _idx_hm_junk:
+            _idx_bits.append(f'{len(_idx_hm_junk)} служебных ссылок в HTML-карте')
         summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
                          + ' - см. лист «Индексация».')
     if meta_bad_pages or meta_dup_groups:
@@ -3423,11 +3590,14 @@ def build_report(
             ws4.auto_filter.ref = f'A{hdr_row}:H{row_idx - 1}'
 
     # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 5: Уведомления (Вебмастер + GSC) - если есть данные
+    # ЛИСТ 5: Уведомления (Вебмастер + GSC) - если сбор включён
     # ═══════════════════════════════════════════════════════════════
-    # Лист «Уведомления» добавляем всегда (при пустых данных - заглушка).
+    # notifications=None - сбор уведомлений был ВЫКЛЮЧЕН, листа нет.
+    # notifications=[] - сбор включён, писем нет: лист с заглушкой
+    # («проверено, писем нет» - это результат, а не отсутствие проверки).
     # Сюда же идут ошибки из Вебмастера по API (секция «Вебмастер»).
-    _build_notifications_sheet(wb, notifications, service_issues)
+    if notifications is not None or service_issues:
+        _build_notifications_sheet(wb, notifications, service_issues)
 
     # ЛИСТ: «Автокликер» - итоги перекликивания ошибок (если запускался).
     _build_autoclick_sheet(wb, autoclick)
