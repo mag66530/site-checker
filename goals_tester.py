@@ -645,9 +645,16 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
         def _на_запрос(req):
             u = req.url
             if 'mc.yandex' in u or 'mc.webvisor' in u:
-                m = _RE_GOAL.search(unquote(u))
-                if m:
-                    gid = m.group(1)
+                # goal://<домен>/<цель> бывает и в URL (GET), и в теле (POST /
+                # sendBeacon) - проверяем оба, иначе POST-цели (напр. findtome при
+                # отправке формы) не ловятся.
+                body = ''
+                try:
+                    if req.method == 'POST':
+                        body = req.post_data or ''
+                except Exception:
+                    body = ''
+                for gid in _RE_GOAL.findall(unquote(u) + ' ' + unquote(body)):
                     if gid not in fired:
                         fired.add(gid)
                         log(f"   🎯 цель: {gid}")

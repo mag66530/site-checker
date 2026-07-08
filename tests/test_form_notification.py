@@ -40,6 +40,30 @@ def test_нет_ложных_срабатываний():
         assert not t._текст_подтверждает_отправку(s), s
 
 
+def test_извлечь_цели_из_запроса_get_и_post():
+    # GET: goal:// закодирован в URL
+    u = ("https://mc.yandex.ru/watch/123?page-url="
+         "goal%3A%2F%2Fstalmetural.ru%2Ffindtome&x=1")
+    assert t._извлечь_цели_из_запроса(u) == ["findtome"]
+    # POST/sendBeacon: URL без goal, цель в ТЕЛЕ запроса (главный кейс фикса)
+    body = "page-url=goal%3A%2F%2Fstalmetural.ru%2Ffindtome&site-info="
+    assert t._извлечь_цели_из_запроса("https://mc.yandex.ru/watch/123", body) == ["findtome"]
+    # не запрос Метрики - пусто
+    assert t._извлечь_цели_из_запроса("https://stalmetural.ru/catalog/", body) == []
+    # уже раскодированный goal:// в URL
+    assert t._извлечь_цели_из_запроса(
+        "https://mc.webvisor.com/watch/1?p=goal://x.ru/zakaz-proscheta") == ["zakaz-proscheta"]
+
+
+def test_ссылка_ведёт_на_политику_2_13():
+    assert t.ссылка_ведёт_на_политику("/politika-obrabotki-personalnyh-dannyh/", "")
+    assert t.ссылка_ведёт_на_политику("#", "Политика обработки персональных данных")
+    assert t.ссылка_ведёт_на_политику("/x", "даю согласие на обработку")
+    assert t.ссылка_ведёт_на_политику("/privacy-policy", "подробнее")
+    assert not t.ссылка_ведёт_на_политику("/catalog/", "Каталог")
+    assert not t.ссылка_ведёт_на_политику("", "")
+
+
 def test_колонка_в_шапке_лога():
     # колонка 2.7 присутствует в заголовках и ключах лога, и они синхронны
     assert "Уведомление пользователю" in t.LOG_HEADERS
