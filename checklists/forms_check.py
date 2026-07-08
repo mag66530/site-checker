@@ -1052,6 +1052,27 @@ _log_txt = LOG_FILE.read_text(encoding='utf-8', errors='ignore') if LOG_FILE.exi
 _done_by_log = ('✅ ВСЁ ГОТОВО' in _log_txt or 'ОТМЕНЕНО' in _log_txt
                 or '✗ Ошибка' in _log_txt)
 
+# Итоги прогона форм для «Проверки целей»: пойманные цели + URL сценариев
+# (оформленный заказ). Пишем в cache/forms/<project>/, откуда отчёт целей их
+# подтягивает - так «Проверка целей» не шлёт формы сама, а берёт результат отсюда.
+if '✅ ВСЁ ГОТОВО' in _log_txt and not st.session_state.get('forms_synced_' + pid_key):
+    try:
+        import re as _re_sync
+        _base = pid_key.split('_')[0] if pid_key.startswith('mpe_') else pid_key
+        _g = set(_re_sync.findall(r'зафиксирована цель [«"]([\w\-.]+)[»"]', _log_txt))
+        _g |= set(_re_sync.findall(r'Сработала цель:\s*([\w\-.]+)', _log_txt))
+        _u = set(_re_sync.findall(r'(?:URL сценария:|переход →)\s*(https?://\S+)', _log_txt))
+        _d = ROOT / 'cache' / 'forms' / _base
+        _d.mkdir(parents=True, exist_ok=True)
+        (_d / 'fired_goals.json').write_text(
+            json.dumps(sorted(_g), ensure_ascii=False), encoding='utf-8')
+        (_d / 'fired_urls.json').write_text(
+            json.dumps(sorted(u.rstrip('.,;') for u in _u), ensure_ascii=False),
+            encoding='utf-8')
+        st.session_state['forms_synced_' + pid_key] = True
+    except Exception:
+        pass
+
 
 def _forms_done_live(txt: str) -> int:
     """Сколько форм уже отработало - считаем по живому логу (обновляется сразу,
