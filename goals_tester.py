@@ -393,6 +393,27 @@ def _план_мпэ_для_домена(домен: str) -> dict:
     }
 
 
+def _имп_товар_путь() -> str:
+    """Путь реальной карточки товара из каталога (catalogs/imp-products.csv).
+    На карточке товара живут корзинные цели, которых нет на листинге:
+    v-cart-kartochka, v-cart-kartochka-ranee-prosmotrennye, bistrii-zakaz-cartochka,
+    bistrii-zakaz-listing-img и т.д. Slug у товара КОРНЕВОЙ и один и тот же на всех
+    доменах ИМП, поэтому просто подставляем домен. Берём стабильный товар (арматура/
+    абразивы есть на всех странах); если каталога нет - надёжный фоллбэк."""
+    fallback = '/karbid-bora-f80-tu-u-24-1-00222226-047-2005/'
+    try:
+        import csv as _csv
+        путь = os.path.join(os.path.dirname(__file__), 'catalogs', 'imp-products.csv')
+        with open(путь, encoding='utf-8') as f:
+            for row in _csv.DictReader(f):
+                u = (row.get('url') or '').strip()
+                if u.startswith('/') and u.endswith('/') and len(u) > 12:
+                    return u
+    except Exception:
+        pass
+    return fallback
+
+
 def _план_имп_для_домена(домен: str) -> dict:
     """План прогона ИМП для страны СНГ: структурные страницы (каталог, акции,
     поиск) с ИМП-селекторами, домен подставляется. Цели ИМП - reachGoal в общем
@@ -420,6 +441,13 @@ def _план_имп_для_домена(домен: str) -> dict:
              ['.add-to-cart-btn, button:has-text("В корзину")',
               'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]',
               '.tags a, [class*="tag"] a']),
+            # РЕАЛЬНАЯ КАРТОЧКА ТОВАРА: тут живут цели «Товар.*» - v-cart-kartochka,
+            # v-cart-kartochka-ranee-prosmotrennye («ранее просмотренные»),
+            # bistrii-zakaz-cartochka, bistrii-zakaz-listing-img. На листинге и в
+            # каталоге их нет. Slug корневой, одинаков на всех доменах ИМП.
+            ('Товар',     d + _имп_товар_путь(),
+             ['.add-to-cart-btn, button:has-text("В корзину")',
+              'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]']),
             ('Акции',     d + '/specials/',
              ['.add-to-cart-btn, button:has-text("В корзину")',
               'text=Быстрый заказ, [class*="fast-order"]']),
