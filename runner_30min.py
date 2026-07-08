@@ -341,11 +341,14 @@ def run_check(pid, params, creds, log, progress):
         # ── Аудит sitemap (ТЗ 3.4.2/3.4.3, часть п.1.7) ──
         if _chk_idx and _main and _idx_summary is not None:
             try:
-                from sitemap_audit import audit_sitemap, analyze_lastmod
+                from sitemap_audit import (audit_sitemap, analyze_lastmod,
+                                           audit_html_sitemap)
                 _sm_url = (cfg.get('sitemap_url')
                            or f'https://{_main.host}/sitemap.xml')
                 _audit = asyncio.run(audit_sitemap(
-                    _sm_url, _main.host, proxy_url=proxy_url))
+                    _sm_url, _main.host, proxy_url=proxy_url,
+                    known_categories=src.categories,
+                    known_filters=src.filters))
                 _audit['lastmod_analysis'] = analyze_lastmod(pid, _audit)
                 _audit.pop('lastmod_dates', None)   # в отчёт даты не тащим
                 _idx_summary['sitemap_audit'] = _audit
@@ -353,8 +356,27 @@ def run_check(pid, params, creds, log, progress):
                     f'URL {_audit.get("total", 0)}, '
                     f'битых URL {len(_audit.get("bad_urls") or [])}, '
                     f'lastmod у {_audit.get("with_lastmod", 0)}')
+                _mc = _audit.get('missing_catalog') or {}
+                _n_miss = (len(_mc.get('categories') or [])
+                           + len(_mc.get('filters') or []))
+                if _n_miss:
+                    log(f'❌ Sitemap: не хватает {_n_miss} категорий/фильтров '
+                        f'из выгрузки каталога')
             except Exception as _e:
                 log(f'⚠ Sitemap-аудит: {_e}')
+            # HTML-карта сайта (доп. чек-лист)
+            try:
+                _hm = asyncio.run(audit_html_sitemap(
+                    _main.host, proxy_url=proxy_url))
+                _idx_summary['html_sitemap'] = _hm
+                if _hm.get('status') != 200:
+                    log(f'⚠ HTML-карта сайта не найдена '
+                        f'(HTTP {_hm.get("status")})')
+                elif _hm.get('junk_links'):
+                    log(f'❌ HTML-карта: служебных ссылок '
+                        f'{len(_hm["junk_links"])}')
+            except Exception as _e:
+                log(f'⚠ HTML-карта сайта: {_e}')
             # Статус sitemap в Яндекс.Вебмастере (ТЗ 3.4.4)
             _wm_tok = creds.get('webmaster_oauth')
             if _wm_tok:

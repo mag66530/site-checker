@@ -1481,7 +1481,14 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     sm_dis = (indexing_summary or {}).get('disallowed') or []
     _blanket = (indexing_summary or {}).get('blanket_disallow') or []
     _assets_closed = (indexing_summary or {}).get('assets_closed') or []
-    has_bugs = bool(bad or sm_dis or _blanket or _assets_closed)
+    _aud_mc = (((indexing_summary or {}).get('sitemap_audit') or {})
+               .get('missing_catalog') or {})
+    _aud_missing = ((_aud_mc.get('categories') or [])
+                    + (_aud_mc.get('filters') or []))
+    _hm_junk_top = (((indexing_summary or {}).get('html_sitemap') or {})
+                    .get('junk_links') or [])
+    has_bugs = bool(bad or sm_dis or _blanket or _assets_closed
+                    or _aud_missing or _hm_junk_top)
 
     ws = wb.create_sheet('Индексация')
     ws.sheet_view.showGridLines = False
@@ -1784,8 +1791,20 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                                   ('priority', 'with_priority'))
                 if _tot and aud.get(key, 0) == 0
             ]
-            _sec_title('Sitemap: структура записей (ТЗ 3.4.2)',
-                       bool(aud.get('error') or _bad_urls))
+            # лимиты допа (10k/10МБ = предупр.) и протокола (50k/50МБ = баг)
+            _fstats = aud.get('file_stats') or []
+            _over_proto = [f for f in _fstats
+                           if f.get('urls', 0) > 50000
+                           or f.get('bytes', 0) > 50 * 1024 * 1024]
+            _over_dop = [f for f in _fstats if f not in _over_proto
+                         and (f.get('urls', 0) > 10000
+                              or f.get('bytes', 0) > 10 * 1024 * 1024)]
+            _mc = aud.get('missing_catalog') or {}
+            _miss = ((_mc.get('categories') or [])
+                     + (_mc.get('filters') or []))
+            _sec_title('Sitemap: структура записей (ТЗ 3.4.2 + доп. чек-лист)',
+                       bool(aud.get('error') or _bad_urls or _over_proto
+                            or _miss))
             if aud.get('error'):
                 _line(f'⚠ Аудит не выполнен: {aud["error"]}', C.warn)
             else:
@@ -1793,6 +1812,29 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                       f'{_tot} · с lastmod: {aud.get("with_lastmod", 0)} · '
                       f'с changefreq: {aud.get("with_changefreq", 0)} · '
                       f'с priority: {aud.get("with_priority", 0)}', C.text_muted)
+                # структура: индекс или одиночный файл
+                if aud.get('is_index'):
+                    _line(f'✅ Sitemap - индекс-файл, внутри '
+                          f'{max(aud.get("files", 1) - 1, 0)} файлов.', C.ok)
+                elif _tot > 10000:
+                    _line(f'⚠ Записей {_tot}, но sitemap - одиночный файл '
+                          f'без индекса; доп. чек-лист требует индекс с '
+                          f'разбивкой по типам страниц.', C.warn)
+                else:
+                    _line('✅ Одиночный sitemap - допустимо, страниц немного.',
+                          C.ok)
+                # лимиты на файл
+                for f in _over_proto:
+                    _line(f'❌ {f.get("url", "")} - {f.get("urls", 0)} URL, '
+                          f'{f.get("bytes", 0) // 1048576} МБ: нарушен лимит '
+                          f'протокола (50 000 / 50 МБ).', C.err, bold=True)
+                for f in _over_dop:
+                    _line(f'⚠ {f.get("url", "")} - {f.get("urls", 0)} URL, '
+                          f'{f.get("bytes", 0) // 1048576} МБ: больше лимита '
+                          f'доп. чек-листа (10 000 / 10 МБ на файл).', C.warn)
+                if _fstats and not _over_proto and not _over_dop:
+                    _line('✅ Лимиты на файл соблюдены (до 10 000 ссылок '
+                          'и 10 МБ).', C.ok)
                 if _bad_urls:
                     _line(f'❌ Неправильные URL в sitemap ({len(_bad_urls)}):',
                           C.err, bold=True)
@@ -1805,6 +1847,22 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 for name, _n in _fld_missing:
                     _line(f'⚠ Ни у одной записи нет <{name}> - ТЗ требует '
                           f'заполнять.', C.warn)
+                # полнота: категории/фильтры из выгрузки каталога
+                if aud.get('truncated'):
+                    _line('- Полнота (категории/фильтры в sitemap) не '
+                          'проверена: обход упёрся в лимит файлов/записей.',
+                          C.text_muted)
+                elif _miss:
+                    _line(f'❌ В sitemap нет {len(_miss)} категорий/фильтров '
+                          f'из выгрузки каталога - страницы не попадут в '
+                          f'индекс:', C.err, bold=True)
+                    for _p in _miss[:20]:
+                        _line(_p, C.err)
+                    if len(_miss) > 20:
+                        _line(f'… и ещё {len(_miss) - 20}', C.text_muted)
+                elif aud.get('missing_catalog') is not None:
+                    _line('✅ Все категории и фильтры из выгрузки каталога '
+                          'есть в sitemap.', C.ok)
             row += 1
 
             # ── Секция 7: даты lastmod (ТЗ 3.4.3) ──
@@ -1849,6 +1907,30 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                         _n = s.get('urls_count')
                         _line(f'✅ {s.get("url", "")} - без ошибок'
                               + (f', URL: {_n}' if _n else ''), C.ok)
+
+        # ── Секция 9: HTML-карта сайта (доп. чек-лист) ──
+        hm = indexing_summary.get('html_sitemap')
+        if hm is not None:
+            _hm_junk = hm.get('junk_links') or []
+            _sec_title('HTML-карта сайта (доп. чек-лист)',
+                       bool(_hm_junk))
+            if hm.get('status') != 200:
+                _line(f'⚠ HTML-карта не найдена по типовым адресам '
+                      f'(/sitemap/, /sitemap.html) - последний ответ '
+                      f'HTTP {hm.get("status") if hm.get("status") is not None else "нет"}'
+                      f'{"; " + hm["error"] if hm.get("error") else ""}. '
+                      f'Если карта живёт по другому адресу - проверить '
+                      f'руками.', C.warn)
+            elif _hm_junk:
+                _line(f'❌ {hm.get("url", "")} - в HTML-карте служебные '
+                      f'ссылки ({len(_hm_junk)}):', C.err, bold=True)
+                for j in _hm_junk[:15]:
+                    _line(f'{j.get("url", "")}', C.err)
+                if len(_hm_junk) > 15:
+                    _line(f'… и ещё {len(_hm_junk) - 15}', C.text_muted)
+            else:
+                _line(f'✅ {hm.get("url", "")} - существует, служебных '
+                      f'ссылок нет.', C.ok)
 
 
 # ── Группировка «одна проблема - одна строка + список URL» ─────────
@@ -2929,8 +3011,14 @@ def build_report(
         )
     _idx_blanket = (indexing_summary or {}).get('blanket_disallow') or []
     _idx_assets = (indexing_summary or {}).get('assets_closed') or []
+    _idx_mc = (((indexing_summary or {}).get('sitemap_audit') or {})
+               .get('missing_catalog') or {})
+    _idx_missing = ((_idx_mc.get('categories') or [])
+                    + (_idx_mc.get('filters') or []))
+    _idx_hm_junk = (((indexing_summary or {}).get('html_sitemap') or {})
+                    .get('junk_links') or [])
     if (indexing_bad_pages or indexing_sitemap_conflicts
-            or _idx_blanket or _idx_assets):
+            or _idx_blanket or _idx_assets or _idx_missing or _idx_hm_junk):
         _idx_bits = []
         if indexing_bad_pages:
             _idx_bits.append(f'расхождения с robots.txt на {len(indexing_bad_pages)} '
@@ -2942,6 +3030,11 @@ def build_report(
             _idx_bits.append('в robots.txt есть «Disallow: /» - сайт закрыт целиком')
         if _idx_assets:
             _idx_bits.append(f'{len(_idx_assets)} файлов .css/.js закрыты в robots.txt')
+        if _idx_missing:
+            _idx_bits.append(f'{len(_idx_missing)} категорий/фильтров каталога '
+                             f'нет в sitemap')
+        if _idx_hm_junk:
+            _idx_bits.append(f'{len(_idx_hm_junk)} служебных ссылок в HTML-карте')
         summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
                          + ' - см. лист «Индексация».')
     if meta_bad_pages or meta_dup_groups:
