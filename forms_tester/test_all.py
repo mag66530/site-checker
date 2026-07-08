@@ -1497,10 +1497,12 @@ def append_log_row(path: str, row: dict) -> None:
     for col, key in enumerate(keys, 1):
         val = row.get(key, "")
         ws.cell(r, col, val)
-        # авто-ширина: растим колонку под содержимое (с разумным потолком)
+        # авто-ширина: растим колонку под содержимое (с разумным потолком).
+        # «Комментарий» тянем шире (там длинные пояснения) - до 120.
         letter = get_column_letter(col)
         cur = ws.column_dimensions[letter].width or (len(headers[col - 1]) + 3)
-        ws.column_dimensions[letter].width = min(max(cur, len(str(val)) + 3), 70)
+        _cap = 120 if str(headers[col - 1]).strip().lower() == "комментарий" else 70
+        ws.column_dimensions[letter].width = min(max(cur, len(str(val)) + 3), _cap)
     try:
         si = keys.index("статус") + 1
         sval = str(row.get("статус", "")).strip().lower()

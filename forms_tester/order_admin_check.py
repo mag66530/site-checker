@@ -139,17 +139,14 @@ def записать_в_логи(excel_path: str, результаты: list) ->
     if i_city == -1 or i_name == -1:
         return
 
-    i_ord = col("Заказ в админке")
+    # Заказы пишем в ОБЩУЮ с формами колонку «Статус в админке» (не отдельную):
+    # формы и заказы - разные строки, не конфликтуют, а столбец один.
+    i_ord = col("Статус в админке")
     if i_ord == -1:
-        # ставим после «Письмо покупателю» / «Статус в админке» / «Статус»
-        anchor = col("Письмо покупателю")
-        if anchor == -1:
-            anchor = col("Статус в админке")
-        if anchor == -1:
-            anchor = col("Статус")
+        anchor = col("Статус")
         i_ord = (anchor + 1) if anchor != -1 else len(headers) + 1
         ws.insert_cols(i_ord)
-        hc = ws.cell(1, i_ord, "Заказ в админке")
+        hc = ws.cell(1, i_ord, "Статус в админке")
         hc.font = Font(bold=True)
         hc.fill = PatternFill("solid", fgColor="EEF3FB")
         ws.column_dimensions[get_column_letter(i_ord)].width = 18
