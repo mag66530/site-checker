@@ -651,6 +651,7 @@ def init_session():
         'c30_check_cis': True,         # пункт 1.10 - СНГ-домены без РФ/СНГ/чужих стран
         'c30_check_layout': True,      # пункт 1.11 - вёрстка и адаптивность (viewport, CSS)
         'c30_check_markup': True,      # пункт 1.12 - микроразметка Schema.org + OpenGraph
+        'c30_check_security': True,    # доп. 1.8 - заголовки безопасности HTTP
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
@@ -892,7 +893,7 @@ with st.container(border=True):
                    'c30_check_filters', 'c30_check_products', 'c30_check_text',
                    'c30_check_indexing', 'c30_check_meta',
                    'c30_check_region', 'c30_check_cis', 'c30_check_layout',
-                   'c30_check_markup'):
+                   'c30_check_markup', 'c30_check_security'):
             st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
@@ -1127,6 +1128,13 @@ if pid:
                              'формат microdata: тип только в JSON-LD = '
                              'предупреждение. Валидность полей - инструментами '
                              'Яндекса/Google вручную.')
+            st.checkbox('1.13  Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
+                        key='c30_check_security',
+                        help='Доп. чек-лист: HTTP-заголовки безопасности ответа. '
+                             'Мягко - нет HSTS / X-Content-Type-Options / защиты '
+                             'от кликджекинга = предупреждение; битое значение '
+                             '(HSTS max-age=0, ALLOW-FROM, не-nosniff, конфликт '
+                             'дублей) = баг. CSP отсутствие не ругаем.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1255,6 +1263,7 @@ if pid:
         bool(st.session_state.get('c30_check_cis', True)),
         bool(st.session_state.get('c30_check_layout', True)),
         bool(st.session_state.get('c30_check_markup', True)),
+        bool(st.session_state.get('c30_check_security', True)),
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
@@ -1296,6 +1305,7 @@ if pid:
                 'check_cis': st.session_state.get('c30_check_cis', True),
                 'check_layout': st.session_state.get('c30_check_layout', True),
                 'check_markup': st.session_state.get('c30_check_markup', True),
+                'check_security': st.session_state.get('c30_check_security', True),
                 'check_links': st.session_state.get('c30_check_links', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),

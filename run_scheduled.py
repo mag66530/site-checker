@@ -98,6 +98,7 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'check_meta': True,      # п.1.8 - метаданные, дубли, единственность тегов
         'check_layout': True,    # п.1.11 - вёрстка и адаптивность (viewport, CSS)
         'check_markup': True,    # п.1.12 - микроразметка Schema.org + OpenGraph
+        'check_security': True,  # доп. 1.8 - заголовки безопасности HTTP
         'check_links': False,   # «ссылки открываются (404)» - тяжёлая, по запросу
         'fetch_notifications': fetch_notifications,
         'notify_days': int(days),

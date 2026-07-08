@@ -303,8 +303,14 @@ def run_check(pid, params, creds, log, progress):
             check_cis=_chk_cis and region_ctx is not None,
             check_layout=bool(params.get('check_layout', True)),
             check_markup=bool(params.get('check_markup', True)),
+            check_security=bool(params.get('check_security', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
+
+        _sec_bad = sum(1 for r in results
+                       if getattr(r, 'has_security_issues', False))
+        if _sec_bad:
+            log(f'Заголовки безопасности: страниц с ошибками {_sec_bad}')
 
         # ── Индексация (п.1.7): кросс-проверка sitemap ↔ robots.txt ──
         # Все известные пути каталога (категории/фильтры/товары) прогоняем

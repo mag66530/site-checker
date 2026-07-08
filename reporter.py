@@ -2194,6 +2194,87 @@ def _build_markup_sheet(wb, results):
             extra=_markup_found)
 
 
+# ── Лист «Безопасность» (доп. 1.8: заголовки безопасности HTTP) ────
+
+
+def _build_security_sheet(wb, results):
+    """Лист заголовков безопасности: HSTS/CSP/X-Frame и т.п. по ответу
+    сервера. Добавляется только если проверка выполнялась."""
+    checked = [r for r in results if getattr(r, 'security', None)]
+    if not checked:
+        return
+
+    bad = [r for r in checked if r.security.get('issues')]
+    warned = [r for r in checked if (not r.security.get('issues')
+                                     and r.security.get('warnings'))]
+    has_bugs = bool(bad)
+
+    ws = wb.create_sheet('Безопасность')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 18
+    ws.column_dimensions['C'].width = 14
+    ws.column_dimensions['D'].width = 62
+    ws.column_dimensions['E'].width = 60
+    ws.column_dimensions['F'].width = 3
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Заголовки безопасности (1.8)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('HTTP-заголовки безопасности ответа сервера. Нет HSTS, '
+               'X-Content-Type-Options: nosniff или защиты от кликджекинга '
+               '(X-Frame-Options / CSP frame-ancestors) - предупреждение. '
+               'Битое значение (HSTS max-age=0, устаревший ALLOW-FROM, '
+               'X-Content-Type-Options не nosniff, конфликт дублей) - баг: '
+               'заголовок есть, но работает во вред или впустую. Отсутствие '
+               'CSP не считаем ошибкой - для сайта-визитки это норма. '
+               'Полную оценку даёт securityheaders.com.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 60
+
+    row = 5
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Проверено страниц: {len(checked)} · с багами: {len(bad)} · '
+               f'с предупреждениями: {len(warned)}')
+    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 26
+    row += 2
+
+    def _sec_found(r):
+        present = (getattr(r, 'security', None) or {}).get('present') or []
+        return ('есть на странице: ' + ', '.join(present)
+                if present else 'заголовков безопасности нет вообще')
+
+    _meta_section_title(ws, row, f'Ошибки заголовков  ({len(bad)})',
+                        C.err if bad else C.ok)
+    row += 1
+    if not bad:
+        _meta_ok_line(ws, row, '✅ Битых значений заголовков безопасности нет.')
+        row += 2
+    else:
+        row = _render_issue_groups(
+            ws, row, _issue_groups(bad, 'security', 'issues'), C.err,
+            extra=_sec_found)
+
+    if warned:
+        _meta_section_title(ws, row, f'Рекомендации  ({len(warned)})', C.warn)
+        row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(warned, 'security', 'warnings'), C.warn,
+            extra=_sec_found)
+
+
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
 
 _META_FIELD_LABEL = {'title': 'title', 'description': 'description', 'h1': 'H1'}
@@ -2951,6 +3032,10 @@ def build_report(
 
     # Разметка (п.1.12): OG/Schema.org
     markup_bad_pages = [r for r in results if getattr(r, 'has_markup_issues', False)]
+
+    # Заголовки безопасности (доп. 1.8): битые значения HSTS/CSP/X-Frame
+    security_bad_pages = [r for r in results
+                          if getattr(r, 'has_security_issues', False)]
     _mdups = (meta_summary or {}).get('duplicates') or {}
     meta_dup_groups = (len(_mdups.get('same_city') or [])
                        + len(_mdups.get('cross_city') or [])
@@ -3090,6 +3175,11 @@ def build_report(
                          f'{len(markup_bad_pages)} '
                          f'{_plural_pages(len(markup_bad_pages))} - '
                          f'см. лист «Разметка».')
+    if security_bad_pages:
+        summary_text += (f'\nБезопасность: ошибки заголовков на '
+                         f'{len(security_bad_pages)} '
+                         f'{_plural_pages(len(security_bad_pages))} - '
+                         f'см. лист «Безопасность».')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -3179,6 +3269,9 @@ def build_report(
 
     # ─── Лист разметки (п.1.12) - если проверка выполнялась ─────────
     _build_markup_sheet(wb, results)
+
+    # ─── Лист заголовков безопасности (доп. 1.8) - если проверялась ──
+    _build_security_sheet(wb, results)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
