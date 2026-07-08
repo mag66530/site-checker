@@ -152,9 +152,6 @@ ACTIONS = {
             'phone_footer': 'клика по этой кнопке в подвале на сайте нет '
                             '(старый идентификатор Метрики)',
             'zvonok_text_category': 'такой формы «Заказать звонок» на сайте нет',
-            'call_ordering': 'кнопка «Заказать звонок» в шапке шлёт актуальную цель '
-                             'callorderclick (она зелёная); старую call_ordering сайт '
-                             'больше не отправляет',
             'managerclick': 'кнопка «Связаться с менеджером» есть только на сайтах СНГ, '
                             'на РФ её нет - проверяется в отчётах стран СНГ',
             'managerform': 'форма «Связаться с менеджером» есть только на сайтах СНГ, '
@@ -168,6 +165,24 @@ ACTIONS = {
             'click_yandexorg_podval': 'это виджет Яндекс-карты (iframe) в подвале - '
                                       'клик внутрь чужой карты автотест не '
                                       'воспроизводит, проверьте вручную',
+            'click_no_confirm': 'цель «Нет» в модалке города: срабатывает при клике '
+                                '«Нет» и ВЫБОРЕ другого города. Автотест город не '
+                                'меняет (иначе собьёт весь прогон на другой город) - '
+                                'проверьте вручную в инкогнито',
+            'auto_close_confirm': 'цель «модалка города закрылась сама»: ловится при '
+                                  'отправке форм (Проверка форм). Если галочка форм '
+                                  'включена - берётся оттуда',
+        },
+        # СМЕЖНЫЕ ЦЕЛИ: на кнопке/форме РЕАЛЬНО срабатывает один идентификатор, а в
+        # Метрике цель заведена под другим (устаревшим/переименованным). Если
+        # «фактический» ID сработал в прогоне - цель считаем достигнутой и пишем в
+        # пояснении: «ловится вот такой, а в Метрике вот такой».
+        #   {ожидаемый_id: (фактический_id, пояснение)}
+        'смежные': {
+            'call_ordering': ('callorderclick',
+                              'кнопка «Заказать звонок» в шапке'),
+            'raschet_stoimosti_dostavki': ('callorderform',
+                              'форма «Расчёт стоимости доставки»'),
         },
     },
     'imp': {
@@ -507,7 +522,7 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             try:
                 resp = page.goto(url, wait_until='domcontentloaded', timeout=45000)
                 код = resp.status if resp else 0
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(1000)
             except Exception as e:
                 log(f"   ⚠️ не открылась: {e}")
                 страницы_инфо.append({'название': название, 'url': url, 'код': код,
@@ -517,26 +532,21 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             # поймать цель click_no_confirm (её иначе не проверить - мы всегда
             # оставляем город через «Да»). После этого перезагружаем страницу -
             # модалка появится снова, и ниже её закроет «Да» как обычно.
+            # dispatch (не реальный клик и БЕЗ перезагрузки), чтобы не сбить «Да»:
+            # если reachGoal click_no_confirm висит на кнопке «Нет» - поймаем; если
+            # нет (в песочнице клик по «Нет» ничего не шлёт) - не навредим потоку.
             if not _модалка_нет_сделана:
                 for _no in ('.city-popup__btn--no', '.city-confirm-popup__btn--no',
-                            'button:has-text("Выбрать город")',
-                            '[class*="city"] button:has-text("Нет")'):
+                            '[class*="city"] button:has-text("Выбрать город")'):
                     try:
                         el = page.locator(_no).first
-                        if el.count() and el.is_visible():
-                            el.click(timeout=2500, force=True)   # → click_no_confirm
-                            page.wait_for_timeout(700)
-                            _модалка_нет_сделана = True
-                            try:                       # вернуть страницу в исходное
-                                page.goto(url, wait_until='domcontentloaded',
-                                          timeout=30000)
-                                page.wait_for_timeout(1200)
-                            except Exception:
-                                pass
+                        if el.count():
+                            el.dispatch_event('click')   # только событие
+                            page.wait_for_timeout(400)
                             break
                     except Exception:
                         continue
-                _модалка_нет_сделана = True   # больше не пытаемся (даже если не нашли)
+                _модалка_нет_сделана = True
             # УНИВЕРСАЛЬНОЕ закрытие модалки выбора города (СРАЗУ после загрузки).
             # Разные проекты - разные кнопки «оставить текущий город»:
             #   СМУ: «Все верно» (button.city-popup__btn--yes) или «Да (N)»;
@@ -577,116 +587,68 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             # прокрутка вниз (ленивые блоки + подвал с соцсетями)
             try:
                 page.mouse.wheel(0, 20000)
-                page.wait_for_timeout(1200)
+                page.wait_for_timeout(700)
             except Exception:
                 pass
 
-            # общие безопасные клики (переход гасим сразу возвратом)
+            # общие безопасные «клики» (тел/почта/соцсети) - через dispatch_event:
+            # событие click всплывает, Метрика ловит внешнюю ссылку своим слушателем,
+            # но БЕЗ перехода по href и без новой вкладки (быстро, без go_back).
             for sel in GENERIC_CLICK_SELECTORS:
                 try:
                     els = page.locator(sel)
                     n = min(els.count(), MAX_PER_SELECTOR)
                     for i in range(n):
-                        el = els.nth(i)
                         try:
-                            el.scroll_into_view_if_needed(timeout=2000)
-                            el.click(timeout=2500, no_wait_after=True)
-                            page.wait_for_timeout(350)
+                            els.nth(i).dispatch_event('click')
+                            page.wait_for_timeout(110)
                         except Exception:
                             continue
-                        if page.url != url:      # утащило по ссылке - вернёмся
-                            try:
-                                page.go_back(wait_until='domcontentloaded',
-                                             timeout=15000)
-                                page.wait_for_timeout(800)
-                            except Exception:
-                                page.goto(url, wait_until='domcontentloaded',
-                                          timeout=30000)
                 except Exception:
                     continue
 
             # ЭЛЕМЕНТЫ С ЦЕЛЬЮ В onclick: на СМУ/МПЭ цели прошиты прямо в
-            # onclick="ym(...,'reachGoal','X')" - кликаем их все напрямую.
-            # Submit-кнопки и input НЕ трогаем (иначе ушла бы пустая заявка).
+            # onclick="ym(...,'reachGoal','X')" (в т.ч. скрытые input и submit-кнопки).
+            # Скорость: ВСЕ строки onclick забираем ОДНИМ page.evaluate (раньше был
+            # get_attribute на каждый из ~40 «городов» = десятки round-trip'ов),
+            # дедупим по id в Python, а дальше жмём проверенным Playwright
+            # dispatch_event (вызывает onclick/reachGoal БЕЗ перехода по ссылке и БЕЗ
+            # реального сабмита - пустая заявка не уходит).
+            _RG_SEL = ('a[onclick*="reachGoal"], div[onclick*="reachGoal"], '
+                       'span[onclick*="reachGoal"], button[onclick*="reachGoal"], '
+                       'input[onclick*="reachGoal"]')
             try:
-                _rg = page.locator(
-                    'a[onclick*="reachGoal"], div[onclick*="reachGoal"], '
-                    'span[onclick*="reachGoal"], '
-                    'button[onclick*="reachGoal"]:not([type="submit"])')
-                _видели_цель: set[str] = set()   # по одной цели каждого id хватит
-                _обработано = 0
-                for i in range(_rg.count()):
-                    if _обработано >= 30:
-                        break
-                    el = _rg.nth(i)
-                    # id цели из onclick - чтобы не жать 40 одинаковых «городов»
-                    try:
-                        _oc = el.get_attribute('onclick') or ''
-                        _m = re.search(r"reachGoal[^)]*['\"]([\w\-.]+)['\"]", _oc)
-                        _gid = _m.group(1) if _m else f'#{i}'
-                    except Exception:
-                        _gid = f'#{i}'
+                _oncs = page.evaluate(
+                    "(s) => [...document.querySelectorAll(s)].map(e => "
+                    "e.getAttribute('onclick') || '')", _RG_SEL)
+            except Exception:
+                _oncs = []
+            try:
+                _all_rg = page.locator(_RG_SEL)
+                _видели_цель: set[str] = set()
+                _idx: list[int] = []
+                for _i, _oc in enumerate(_oncs):
+                    _m = re.search(r"reachGoal[^)]*['\"]([\w\-.]+)['\"]", _oc)
+                    _gid = _m.group(1) if _m else f'#{_i}'
                     if _gid in _видели_цель:
                         continue
                     _видели_цель.add(_gid)
-                    _обработано += 1
-                    # scroll не должен «съедать» скрытый элемент: если не вышло -
-                    # всё равно шлём dispatch_event (onclick с reachGoal сработает
-                    # без перехода по ссылке - важно для города в скрытом попапе).
+                    _idx.append(_i)
+                    if len(_idx) >= 60:
+                        break
+                for _i in _idx:
                     try:
-                        el.scroll_into_view_if_needed(timeout=1000)
+                        _all_rg.nth(_i).dispatch_event('click')
                     except Exception:
-                        pass
-                    try:
-                        try:
-                            el.click(timeout=1500, no_wait_after=True)
-                        except Exception:
-                            el.dispatch_event('click')   # скрытый/перекрытый
-                        page.wait_for_timeout(280)
-                        page.keyboard.press('Escape')
-                        page.wait_for_timeout(120)
-                    except Exception:
-                        pass
-                    if page.url != url:      # ссылка увела - вернёмся
-                        try:
-                            page.go_back(wait_until='domcontentloaded', timeout=15000)
-                        except Exception:
-                            page.goto(url, wait_until='domcontentloaded', timeout=30000)
-                        page.wait_for_timeout(600)
+                        continue
+                page.wait_for_timeout(700)   # даём beacon'ам уйти
+                page.keyboard.press('Escape')
+                page.wait_for_timeout(120)
             except Exception:
                 pass
 
-            # ЦЕЛИ НА input / submit-кнопках с onclick reachGoal: их НЕ кликаем по-
-            # настоящему (ушла бы пустая заявка/сабмит), а шлём dispatch_event -
-            # он вызывает onclick (reachGoal) БЕЗ отправки формы. Ловит скрытые
-            # input.d-none (напр. МПЭ rasschitatzakaz, raschet_stoimosti_dostavki).
-            try:
-                _rgs = page.locator(
-                    'input[onclick*="reachGoal"], '
-                    'button[type="submit"][onclick*="reachGoal"]')
-                _видели_s: set[str] = set()
-                for i in range(min(_rgs.count(), 30)):
-                    el = _rgs.nth(i)
-                    try:
-                        _oc = el.get_attribute('onclick') or ''
-                        _m = re.search(r"reachGoal[^)]*['\"]([\w\-.]+)['\"]", _oc)
-                        _gid = _m.group(1) if _m else f's{i}'
-                    except Exception:
-                        _gid = f's{i}'
-                    if _gid in _видели_s:
-                        continue
-                    _видели_s.add(_gid)
-                    try:
-                        el.dispatch_event('click')   # только событие, без сабмита
-                        page.wait_for_timeout(200)
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-
-            # подвал: кликаем ТОЛЬКО соцсети/мессенджеры (открываются новой
-            # вкладкой - её закрываем; на текущей странице ничего не ломается).
-            # Внутренние ссылки не трогаем, чтобы не уходить со страницы.
+            # подвал: соцсети/мессенджеры - dispatch_event (событие всплывает,
+            # Метрика ловит внешнюю ссылку, но без новой вкладки и без ухода).
             _soc = ("vk.com", "vk.me", "ok.ru", "t.me", "dzen.ru", "rutube.ru",
                     "max.ru", "wa.me", "whatsapp", "yandex.ru/maps",
                     "yandex.ru/profile")
@@ -698,9 +660,8 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                         href = (el.get_attribute("href") or "").lower()
                         if not any(s in href for s in _soc):
                             continue
-                        el.scroll_into_view_if_needed(timeout=1200)
-                        el.click(timeout=1800, no_wait_after=True)
-                        page.wait_for_timeout(200)
+                        el.dispatch_event('click')
+                        page.wait_for_timeout(90)
                     except Exception:
                         continue
             except Exception:
@@ -774,7 +735,7 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                 for i in range(min(total, MAX_PER_SELECTOR)):
                     try:
                         page.keyboard.press('Escape')
-                        page.wait_for_timeout(150)
+                        page.wait_for_timeout(100)
                         el = page.locator(sel).nth(i)
                         if el.count() == 0:
                             break
@@ -783,7 +744,8 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                             el.click(timeout=2000)
                         except Exception:
                             el.click(timeout=2000, force=True)
-                        page.wait_for_timeout(500)
+                        # держим паузу для beacon корзины (tocart/addocart уходят ajax-ом)
+                        page.wait_for_timeout(650)
                         # клик мог быть по ссылке-переходу (Каталог/Акции/Прайс в
                         # шапке): цель сработала, но нужно вернуться и кликать дальше.
                         if page.url != url:
@@ -791,13 +753,13 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                                 page.go_back(wait_until='domcontentloaded', timeout=15000)
                             except Exception:
                                 page.goto(url, wait_until='domcontentloaded', timeout=30000)
-                            page.wait_for_timeout(600)
+                            page.wait_for_timeout(500)
                             break   # после ухода нумерация сбилась - к следующему селектору
                         page.keyboard.press('Escape')
-                        page.wait_for_timeout(150)
+                        page.wait_for_timeout(100)
                     except Exception:
                         continue
-            page.wait_for_timeout(300)
+            page.wait_for_timeout(200)
 
             страницы_инфо.append({'название': название, 'url': url, 'код': код,
                                   'счётчик': есть_счётчик,
@@ -917,7 +879,8 @@ def _лид_цель(g: dict) -> bool:
 # классификации и в рисовании листов).
 _GREEN, _RED, _GREY, _BLUE = '1E8E3E', 'C62828', '757575', '1565C0'
 _ФОН = {_GREEN: 'E6F4EA', _RED: 'FCE8E6', _BLUE: 'E8F0FE', _GREY: 'F1F3F4'}
-_ПОРЯДОК = {'Сработала': 0, 'Сработала (формы)': 1, 'Действие выполнено': 2,
+_ПОРЯДОК = {'Сработала': 0, 'Сработала (формы)': 1, 'Сработала (другой ID)': 1,
+            'Действие выполнено': 2,
             'Сработает': 3, 'Нет в коде сайта': 4, 'НЕ сработала': 5, 'Проблема': 6,
             'Нужно спец-действие': 7, 'Не найдено на сайте': 8,
             'Не найдена на сайте': 8, 'Не проверено': 9,
@@ -950,6 +913,9 @@ def _классифицировать(pid: str, каталог: dict, прого
         нет_на_сайте = {k.lower(): v for k, v in _ннс_raw.items()}
     else:
         нет_на_сайте = {i.lower(): '' for i in _ннс_raw}
+    # смежные: {ожидаемый_id: (фактический_id, пояснение)} - на кнопке/форме
+    # реально срабатывает фактический, а в Метрике заведён ожидаемый.
+    смежные = {k.lower(): v for k, v in (_план.get('смежные') or {}).items()}
     GREEN, RED, GREY, BLUE = _GREEN, _RED, _GREY, _BLUE
     _код_кэш: dict[str, bool] = {}
 
@@ -1001,6 +967,22 @@ def _классифицировать(pid: str, каталог: dict, прого
         return (any(w in ids for w in _ФОРМ_ID)
                 or any(w in name for w in _ФОРМ_ИМЯ))
 
+    def _смежная(g):
+        """Если цель заведена в Метрике под одним id, а на кнопке/форме реально
+        срабатывает другой (смежный), и этот другой ПОЙМАН в прогоне - вернуть
+        (фактический_id, пояснение). Иначе None."""
+        for gid in (g.get('идентификаторы') or []):
+            пара = смежные.get(gid.lower())
+            if not пара:
+                continue
+            факт, поясн = пара
+            _поймана = (факт in fired
+                        or (форм_статусы.get(факт, '').lower().startswith('сработал'))
+                        or 'зафиксир' in форм_статусы.get(факт, '').lower())
+            if _поймана:
+                return (факт, поясн)
+        return None
+
     def _авто_действие_сделано(условие: str) -> bool:
         """Автоцель Метрики: выполнил ли автотест соответствующее действие.
         Клики по телефону/почте/соцсетям/мессенджерам мы делаем; формы/файлы/
@@ -1042,6 +1024,18 @@ def _классифицировать(pid: str, каталог: dict, прого
             elif hit:
                 способ, статус, цвет = 'клики автотеста', 'Сработала', GREEN
                 детали = f'зафиксирован идентификатор «{hit}»'
+                счёт['ok'] += 1
+            elif _смежная(g):
+                # На кнопке/форме реально срабатывает СМЕЖНЫЙ идентификатор (он
+                # пойман), а в Метрике цель заведена под другим. По факту действие
+                # выполнено и цель достигается - зелёный + понятное пояснение.
+                _факт, _поясн = _смежная(g)
+                способ, статус, цвет = 'смежная цель', 'Сработала (другой ID)', GREEN
+                _этот = (g.get('идентификаторы') or ['?'])[0]
+                детали = (f'по факту срабатывает «{_факт}» ({_поясн}), а в Метрике эта '
+                          f'цель заведена под идентификатором «{_этот}». Действие '
+                          'выполнено и засчитывается - но сверьте идентификатор в '
+                          'кабинете (возможно, старый/переименованный)')
                 счёт['ok'] += 1
             elif форма_id:
                 # Цель реально сработала при ОТПРАВКЕ формы («Проверка форм») -
