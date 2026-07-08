@@ -407,6 +407,70 @@ for c in _cities:
 _all_forms = _list_forms(pid_key)
 _all_form_names = [f['name'] for f in _all_forms]
 
+# ── Шаблоны прогона (пункт 2.6: выбор/сохранение шаблона) ─────────────
+# Шаблон запоминает набор: выбранные города + выбранные формы. Можно сохранить
+# настройку под именем и переиспользовать (в т.ч. на будущее для автозапуска).
+# Хранится в cache/forms/<project>/templates.json (рядом с random_cities.json).
+# ВАЖНО: «Применить» выставляет session_state ДО отрисовки виджетов городов/форм,
+# поэтому блок стоит здесь (раньше них) - иначе Streamlit не даст менять значения.
+_TPL_FILE = ROOT / 'cache' / 'forms' / pid_key / 'templates.json'
+
+
+def _tpl_load_all() -> dict:
+    try:
+        return json.loads(_TPL_FILE.read_text(encoding='utf-8')) or {}
+    except Exception:
+        return {}
+
+
+def _tpl_save_all(data: dict):
+    try:
+        _TPL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _TPL_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                             encoding='utf-8')
+    except Exception:
+        pass
+
+
+def _tpl_apply(tpl: dict):
+    """Проставляет города и формы шаблона в session_state и переключает режимы
+    на «Выбрать …», чтобы отрисовались именно они. Вызывается ДО виджетов + rerun."""
+    cities = [c for c in (tpl.get('cities') or []) if c in _all_names]
+    forms = [f for f in (tpl.get('forms') or []) if f in _all_form_names]
+    if _cities:
+        st.session_state[f'fc_mode_{pid_key}'] = 'Выбрать города'
+        st.session_state[f'fc_init_osn_{pid_key}'] = True
+        for nm in _all_names:
+            st.session_state[f'fc_cb_{pid_key}_{nm}'] = (nm in cities)
+    if _all_forms:
+        st.session_state[f'fc_forms_mode_{pid_key}'] = 'Выбрать формы'
+        st.session_state[f'ff_init_{pid_key}'] = True
+        for nm in _all_form_names:
+            st.session_state[f'ff_cb_{pid_key}_{nm}'] = (nm in forms)
+
+
+with st.expander('📁 Шаблоны прогона (сохранить/выбрать набор городов и форм)',
+                 expanded=False):
+    _tpls = _tpl_load_all()
+    if _tpls:
+        _tc1, _tc2, _tc3 = st.columns([3, 1, 1], vertical_alignment='bottom')
+        _pick = _tc1.selectbox(
+            'Сохранённые шаблоны', list(_tpls.keys()),
+            index=None, placeholder='- выберите шаблон -', key=f'tpl_pick_{pid_key}')
+        if _tc2.button('Применить', use_container_width=True,
+                       disabled=not _pick, key=f'tpl_apply_{pid_key}'):
+            _tpl_apply(_tpls[_pick])
+            st.rerun()
+        if _tc3.button('Удалить', use_container_width=True,
+                       disabled=not _pick, key=f'tpl_del_{pid_key}'):
+            _tpls.pop(_pick, None)
+            _tpl_save_all(_tpls)
+            st.rerun()
+    else:
+        st.caption('Пока нет сохранённых шаблонов. Настрой города и формы ниже, '
+                   'потом вернись сюда и сохрани текущий выбор как шаблон.')
+    st.caption('Сохранение текущего выбора - кнопкой ниже, под списком форм.')
+
 _MODE_OPTIONS = ['Основные домены (по странам)', 'Выбрать города', 'Случайные города']
 _FORMS_MODE_OPTIONS = ['Все формы', 'Выбрать формы']
 # Запоминаются ТОЛЬКО настройки «Случайных городов» (числа по странам).
@@ -732,6 +796,27 @@ if _all_forms:
         st.caption(f'Будут проверены все формы проекта: {len(_all_forms)}.')
     st.divider()
 
+# ── Сохранить текущий набор (города + формы) как шаблон (пункт 2.6) ──
+# Здесь _chosen_cities/_chosen_forms уже собраны выше. Само сохранение
+# session_state виджетов не трогает, поэтому его можно держать внизу.
+with st.expander('💾 Сохранить текущий выбор как шаблон', expanded=False):
+    _sv1, _sv2 = st.columns([3, 1], vertical_alignment='bottom')
+    _tpl_new = _sv1.text_input(
+        'Название шаблона', key=f'tpl_name_{pid_key}',
+        placeholder='Например: СМУ РФ - только оформление заказа')
+    if _sv2.button('Сохранить', use_container_width=True,
+                   disabled=not (_tpl_new or '').strip(), key=f'tpl_save_{pid_key}'):
+        _all_t = _tpl_load_all()
+        _all_t[_tpl_new.strip()] = {'cities': list(_chosen_cities),
+                                    'forms': list(_chosen_forms)}
+        _tpl_save_all(_all_t)
+        st.success(f'Шаблон «{_tpl_new.strip()}» сохранён - выбери его вверху, '
+                   'в разделе «Шаблоны прогона».')
+    st.caption(f'Запомнит выбранные города ({len(_chosen_cities)}) и формы '
+               f'({len(_chosen_forms)}) проекта {proj["name"]}.')
+
+st.divider()
+
 _forms_all_selected = (len(_chosen_forms) == len(_all_form_names))
 _forms_none = bool(_all_forms) and len(_chosen_forms) == 0
 
@@ -759,6 +844,69 @@ if _project_has_admin(pid_key):
             _admin_env = {'ADMIN_LOGIN': _al.strip(), 'ADMIN_PASSWORD': _ap}
         else:
             st.caption('⚠️ Введите логин и пароль - без них админка не проверится.')
+
+# ── Проверка письма о заказе покупателю (пункт 2.9) ──────────────────
+# Заказ оформляется на РЕАЛЬНУЮ почту (тестовый ящик или свою рабочую), чтобы
+# письмо-подтверждение реально пришло. Два режима (по просьбе - вариативность):
+#  • Тестовая почта - скрипт сам зайдёт по IMAP и подтвердит письмо;
+#  • Своя почта - заказ уйдёт на неё, письмо проверяешь глазами.
+# Без выбора - как раньше: заказ на адрес из конфига, письмо не проверяем.
+def _secret(key: str, default: str = '') -> str:
+    try:
+        if hasattr(st, 'secrets') and key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+    return default
+
+
+_mail_env: dict[str, str] = {}
+st.subheader('Проверка письма о заказе')
+st.caption('Относится к оформлению заказа через корзину: на какую почту оформить '
+           'заказ и как проверить письмо-подтверждение покупателю.')
+_MAIL_MODES = ['Не проверять', 'Тестовая почта (автопроверка по IMAP)',
+               'Своя почта (проверю письмо вручную)']
+st.session_state.setdefault(f'fc_mail_mode_{pid_key}', _MAIL_MODES[0])
+_mail_mode = st.radio('Как проверяем письмо покупателю', _MAIL_MODES,
+                      key=f'fc_mail_mode_{pid_key}', label_visibility='collapsed')
+
+if _mail_mode == _MAIL_MODES[1]:
+    st.caption('Заказ оформится на этот ящик, а скрипт сам зайдёт в него по IMAP '
+               'и проверит, что письмо-подтверждение пришло. Нужны ПАРОЛЬ '
+               'ПРИЛОЖЕНИЯ и включённый IMAP (проще всего у Яндекса). Логин/пароль '
+               'нигде не сохраняются - только передаются проверке.')
+    _mc1, _mc2 = st.columns(2)
+    _m_email = _mc1.text_input('Почтовый ящик (логин)', key=f'fc_mail_email_{pid_key}',
+                               placeholder='test111@yandex.ru')
+    _m_pass = _mc2.text_input('Пароль приложения', type='password',
+                              key=f'fc_mail_pass_{pid_key}')
+    _m_host = st.text_input(
+        'IMAP-сервер (по умолчанию imap.yandex.ru)', key=f'fc_mail_host_{pid_key}',
+        placeholder='imap.yandex.ru',
+        help='Для Gmail: imap.gmail.com (нужен пароль приложения и включённый IMAP).')
+    if _m_email.strip() and _m_pass:
+        _mail_env = {
+            'ORDER_BUYER_EMAIL': _m_email.strip(),
+            'ORDER_MAIL_EMAIL': _m_email.strip(),
+            'ORDER_MAIL_PASSWORD': _m_pass,
+        }
+        if _m_host.strip():
+            _mail_env['ORDER_MAIL_IMAP_HOST'] = _m_host.strip()
+        _px = _secret('proxy_url')
+        if _px:
+            _mail_env['proxy_url'] = _px
+    else:
+        st.caption('⚠️ Введите ящик и пароль приложения - без них авто-проверка не запустится.')
+elif _mail_mode == _MAIL_MODES[2]:
+    st.caption('Заказ оформится на указанную почту. Автопроверку не делаем - '
+               'просто открой этот ящик и убедись, что письмо о заказе пришло. '
+               'В отчёте (колонка «Письмо покупателю») будет напоминание с адресом.')
+    _m_own = st.text_input('Ваша почта (куда придёт письмо о заказе)',
+                           key=f'fc_mail_own_{pid_key}', placeholder='ваша@почта.ru')
+    if _m_own.strip():
+        _mail_env = {'ORDER_BUYER_EMAIL': _m_own.strip()}
+    else:
+        st.caption('⚠️ Укажите почту - иначе заказ уйдёт на тестовый адрес из конфига.')
 
 st.subheader('Запуск проверки')
 
@@ -836,7 +984,7 @@ with _run_col:
                 LOG_FILE.write_text('', encoding='utf-8')
             except Exception:
                 pass
-            _launch_background(args, LOG_FILE, extra_env=_admin_env)
+            _launch_background(args, LOG_FILE, extra_env={**_admin_env, **_mail_env})
             st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key
