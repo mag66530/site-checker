@@ -234,8 +234,9 @@ ACTIONS = {
             # движка снимает их сам (login/citys/about/catalog/smotretvse/raschet/
             # rekvizity_podval). Ниже - только то, что требует особых шагов.
             ('Главная',   'https://mepen.ru/',
+             # rasschitatzakaz и raschet_stoimosti_dostavki - скрытые input.d-none с
+             # onclick reachGoal; их снимает dispatch-проход по input (см. движок).
              ['header.header-kostyl .bottom-header-right button.popup_form',
-              '[onclick*="rasschitatzakaz"]',              # «Прикрепить файл» в форме заказа (скрытый - dispatch)
               'a.link_more',                               # «Узнать больше» → about
               'a.footer-link[href="/catalog/"]']),         # «Смотреть все» в подвале → smotretvse
             ('Контакты',  'https://mepen.ru/contacts/',
@@ -251,10 +252,16 @@ ACTIONS = {
             # Корзина: клик по полю купона → skidochnyy_kupon (товар уже в корзине).
             ('Корзина',   'https://mepen.ru/personal/basket/',
              ['[onclick*="skidochnyy_kupon"], text=Введите код купона, [class*="coupon"]']),
-            # Авторизация: кнопка «Авторизоваться» → klik_avtorizovatsya (форма
-            # пустая - вход не произойдёт, заявка не уходит, цель фиксируется).
-            ('Авторизация', 'https://mepen.ru/personal/',
-             ['[onclick*="klik_avtorizovatsya"], button:has-text("Авторизоваться")']),
+            # Авторизация: иконка аккаунта (a.lk_link.personal_popups → i.fa-user)
+            # открывает модалку «Авторизация», в ней кнопка «Авторизоваться»
+            # (button type=submit, onclick reachGoal klik_avtorizovatsya). Форма
+            # пустая - вход не произойдёт, но onclick срабатывает до отправки.
+            ('Авторизация', 'https://mepen.ru/',
+             [{'цепочка': ['a.lk_link.personal_popups, a[href="/personal/auth.php"], '
+                           'a[data-idform="auth"], .top-header-right a:has(.fa-user)',
+                           {'dispatch': 'button[onclick*="klik_avtorizovatsya"], '
+                                        '#auth_form button[type="submit"], '
+                                        '.modal button:has-text("Авторизоваться")'}]}]),
             ('Товар',     'https://mepen.ru/catalog/tovar/telezhka-tip-b-gcl/',
              ['text=Нужна консультация', 'text=Нашли дешевле',
               '[onclick*="tovar_v_korzinu"], text=в корзину']),
@@ -649,6 +656,34 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             except Exception:
                 pass
 
+            # ЦЕЛИ НА input / submit-кнопках с onclick reachGoal: их НЕ кликаем по-
+            # настоящему (ушла бы пустая заявка/сабмит), а шлём dispatch_event -
+            # он вызывает onclick (reachGoal) БЕЗ отправки формы. Ловит скрытые
+            # input.d-none (напр. МПЭ rasschitatzakaz, raschet_stoimosti_dostavki).
+            try:
+                _rgs = page.locator(
+                    'input[onclick*="reachGoal"], '
+                    'button[type="submit"][onclick*="reachGoal"]')
+                _видели_s: set[str] = set()
+                for i in range(min(_rgs.count(), 30)):
+                    el = _rgs.nth(i)
+                    try:
+                        _oc = el.get_attribute('onclick') or ''
+                        _m = re.search(r"reachGoal[^)]*['\"]([\w\-.]+)['\"]", _oc)
+                        _gid = _m.group(1) if _m else f's{i}'
+                    except Exception:
+                        _gid = f's{i}'
+                    if _gid in _видели_s:
+                        continue
+                    _видели_s.add(_gid)
+                    try:
+                        el.dispatch_event('click')   # только событие, без сабмита
+                        page.wait_for_timeout(200)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
             # подвал: кликаем ТОЛЬКО соцсети/мессенджеры (открываются новой
             # вкладкой - её закрываем; на текущей странице ничего не ломается).
             # Внутренние ссылки не трогаем, чтобы не уходить со страницы.
@@ -698,6 +733,19 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                                 el.click(timeout=2500)
                                 el.type(step.get('текст', 'а'), delay=120)
                                 page.wait_for_timeout(900)
+                                continue
+                            if isinstance(step, dict) and step.get('dispatch'):
+                                # dispatch_event: вызвать onclick (reachGoal) БЕЗ
+                                # реального сабмита (для submit-кнопок вроде
+                                # «Авторизоваться» - иначе форма уходит и цель теряется).
+                                el = page.locator(step['dispatch']).first
+                                if el.count() == 0:
+                                    break
+                                try:
+                                    el.dispatch_event('click')
+                                except Exception:
+                                    pass
+                                page.wait_for_timeout(700)
                                 continue
                             el = page.locator(step).first
                             if el.count() == 0:
