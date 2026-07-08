@@ -102,14 +102,18 @@ ACTIONS = {
             # «Скачать прайс-лист» (a.btn, onclick reachGoal) → price_download_category
             ('Листинг (прайс)', 'https://stalmetural.ru/catalog/list-goryachekatanyy/',
              ['a.btn:has-text("Скачать прайс"), a:has-text("Скачать прайс-лист"), text=Скачать прайс']),
-            # Корзина (товар положен «В корзину» на листинге): клик по полю купона
-            # + ввод буквы → цель coupon.
-            ('Корзина',   'https://stalmetural.ru/basket/',
-             [{'цепочка': [{'ввод': '.basket-coupon-block-field input, input[id*="coupon" i], input[name*="coupon" i]',
-                            'текст': 'а'}]}]),
-            # Первый товар открываем, чтобы он попал в «Ранее просмотренные» второго.
+            # ВАЖНО: товар кладём в корзину ДО страницы «Корзина», иначе корзина пуста
+            # и поля купона нет. «Добавить в корзину» на карточке реально добавляет
+            # позицию (как в «Проверке форм»). Заодно tocart/addocart.
             ('Товар (труба)', 'https://stalmetural.ru/catalog/truba-profilnaya/2972110-truba-profilnaya-100kh10-mm-gost-8639-82-kvadratnaya/',
-             ['.one-click-to-buy', 'text=Добавить в корзину, text=В корзину']),
+             ['div.btn:has-text("Добавить в корзину"), .add-to-cart, text=Добавить в корзину, text=В корзину',
+              '.one-click-to-buy']),
+            # Корзина (в ней уже есть товар): клик по полю купона + ввод буквы → coupon.
+            ('Корзина',   'https://stalmetural.ru/basket/',
+             [{'цепочка': [{'ввод': '.basket-coupon-block-field input, input[id*="coupon" i], '
+                                    'input[name*="coupon" i], input[placeholder*="упон" i], '
+                                    'input[placeholder*="ромокод" i], .coupon input, [class*="coupon"] input',
+                            'текст': 'а'}]}]),
             ('Товар',     'https://stalmetural.ru/catalog/izgotovlenie-pruzhin/1285453-izgotovlenie-pruzhin-rastyazheniya/',
              ['.one-click-to-buy', '#call-back-form-product',
               '.copy-btn:has(.an-ico-link-price)',
@@ -230,8 +234,9 @@ ACTIONS = {
             # движка снимает их сам (login/citys/about/catalog/smotretvse/raschet/
             # rekvizity_podval). Ниже - только то, что требует особых шагов.
             ('Главная',   'https://mepen.ru/',
+             # rasschitatzakaz и raschet_stoimosti_dostavki - скрытые input.d-none с
+             # onclick reachGoal; их снимает dispatch-проход по input (см. движок).
              ['header.header-kostyl .bottom-header-right button.popup_form',
-              '[onclick*="rasschitatzakaz"]',              # «Прикрепить файл» в форме заказа (скрытый - dispatch)
               'a.link_more',                               # «Узнать больше» → about
               'a.footer-link[href="/catalog/"]']),         # «Смотреть все» в подвале → smotretvse
             ('Контакты',  'https://mepen.ru/contacts/',
@@ -247,10 +252,16 @@ ACTIONS = {
             # Корзина: клик по полю купона → skidochnyy_kupon (товар уже в корзине).
             ('Корзина',   'https://mepen.ru/personal/basket/',
              ['[onclick*="skidochnyy_kupon"], text=Введите код купона, [class*="coupon"]']),
-            # Авторизация: кнопка «Авторизоваться» → klik_avtorizovatsya (форма
-            # пустая - вход не произойдёт, заявка не уходит, цель фиксируется).
-            ('Авторизация', 'https://mepen.ru/personal/',
-             ['[onclick*="klik_avtorizovatsya"], button:has-text("Авторизоваться")']),
+            # Авторизация: иконка аккаунта (a.lk_link.personal_popups → i.fa-user)
+            # открывает модалку «Авторизация», в ней кнопка «Авторизоваться»
+            # (button type=submit, onclick reachGoal klik_avtorizovatsya). Форма
+            # пустая - вход не произойдёт, но onclick срабатывает до отправки.
+            ('Авторизация', 'https://mepen.ru/',
+             [{'цепочка': ['a.lk_link.personal_popups, a[href="/personal/auth.php"], '
+                           'a[data-idform="auth"], .top-header-right a:has(.fa-user)',
+                           {'dispatch': 'button[onclick*="klik_avtorizovatsya"], '
+                                        '#auth_form button[type="submit"], '
+                                        '.modal button:has-text("Авторизоваться")'}]}]),
             ('Товар',     'https://mepen.ru/catalog/tovar/telezhka-tip-b-gcl/',
              ['text=Нужна консультация', 'text=Нашли дешевле',
               '[onclick*="tovar_v_korzinu"], text=в корзину']),
@@ -484,6 +495,7 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             ctx.route('**/*', _route)
 
         _всего = len(план['страницы'])
+        _модалка_нет_сделана = False   # «Нет» в модалке города жмём один раз за прогон
         for _idx, (название, url, клики) in enumerate(план['страницы'], 1):
             if stop and stop():
                 log('⛔ Остановлено')
@@ -501,6 +513,30 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                 страницы_инфо.append({'название': название, 'url': url, 'код': код,
                                       'счётчик': False, 'визит': False})
                 continue
+            # ОДИН РАЗ за прогон: жмём «Нет»/«Выбрать город» в модалке города, чтобы
+            # поймать цель click_no_confirm (её иначе не проверить - мы всегда
+            # оставляем город через «Да»). После этого перезагружаем страницу -
+            # модалка появится снова, и ниже её закроет «Да» как обычно.
+            if not _модалка_нет_сделана:
+                for _no in ('.city-popup__btn--no', '.city-confirm-popup__btn--no',
+                            'button:has-text("Выбрать город")',
+                            '[class*="city"] button:has-text("Нет")'):
+                    try:
+                        el = page.locator(_no).first
+                        if el.count() and el.is_visible():
+                            el.click(timeout=2500, force=True)   # → click_no_confirm
+                            page.wait_for_timeout(700)
+                            _модалка_нет_сделана = True
+                            try:                       # вернуть страницу в исходное
+                                page.goto(url, wait_until='domcontentloaded',
+                                          timeout=30000)
+                                page.wait_for_timeout(1200)
+                            except Exception:
+                                pass
+                            break
+                    except Exception:
+                        continue
+                _модалка_нет_сделана = True   # больше не пытаемся (даже если не нашли)
             # УНИВЕРСАЛЬНОЕ закрытие модалки выбора города (СРАЗУ после загрузки).
             # Разные проекты - разные кнопки «оставить текущий город»:
             #   СМУ: «Все верно» (button.city-popup__btn--yes) или «Да (N)»;
@@ -620,6 +656,34 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             except Exception:
                 pass
 
+            # ЦЕЛИ НА input / submit-кнопках с onclick reachGoal: их НЕ кликаем по-
+            # настоящему (ушла бы пустая заявка/сабмит), а шлём dispatch_event -
+            # он вызывает onclick (reachGoal) БЕЗ отправки формы. Ловит скрытые
+            # input.d-none (напр. МПЭ rasschitatzakaz, raschet_stoimosti_dostavki).
+            try:
+                _rgs = page.locator(
+                    'input[onclick*="reachGoal"], '
+                    'button[type="submit"][onclick*="reachGoal"]')
+                _видели_s: set[str] = set()
+                for i in range(min(_rgs.count(), 30)):
+                    el = _rgs.nth(i)
+                    try:
+                        _oc = el.get_attribute('onclick') or ''
+                        _m = re.search(r"reachGoal[^)]*['\"]([\w\-.]+)['\"]", _oc)
+                        _gid = _m.group(1) if _m else f's{i}'
+                    except Exception:
+                        _gid = f's{i}'
+                    if _gid in _видели_s:
+                        continue
+                    _видели_s.add(_gid)
+                    try:
+                        el.dispatch_event('click')   # только событие, без сабмита
+                        page.wait_for_timeout(200)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
             # подвал: кликаем ТОЛЬКО соцсети/мессенджеры (открываются новой
             # вкладкой - её закрываем; на текущей странице ничего не ломается).
             # Внутренние ссылки не трогаем, чтобы не уходить со страницы.
@@ -669,6 +733,19 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                                 el.click(timeout=2500)
                                 el.type(step.get('текст', 'а'), delay=120)
                                 page.wait_for_timeout(900)
+                                continue
+                            if isinstance(step, dict) and step.get('dispatch'):
+                                # dispatch_event: вызвать onclick (reachGoal) БЕЗ
+                                # реального сабмита (для submit-кнопок вроде
+                                # «Авторизоваться» - иначе форма уходит и цель теряется).
+                                el = page.locator(step['dispatch']).first
+                                if el.count() == 0:
+                                    break
+                                try:
+                                    el.dispatch_event('click')
+                                except Exception:
+                                    pass
+                                page.wait_for_timeout(700)
                                 continue
                             el = page.locator(step).first
                             if el.count() == 0:
@@ -845,6 +922,7 @@ _ПОРЯДОК = {'Сработала': 0, 'Сработала (формы)': 1
             'Нужно спец-действие': 7, 'Не найдено на сайте': 8,
             'Не найдена на сайте': 8, 'Не проверено': 9,
             'Нет автопроверки': 10, 'Проверяется формами': 11,
+            'Не зафиксирована при форме': 11,
             'Автоцель (Метрика сама)': 12, 'Только в Метрике': 12, 'Составная': 13,
             'Вручную': 14}
 
@@ -859,6 +937,10 @@ def _классифицировать(pid: str, каталог: dict, прого
     код = прогон.get('код', '')       # весь код страниц + JS (нижний регистр)
     формные = _формные_цели(pid)
     форм_статусы = _результаты_форм(pid)
+    # Прогонялись ли формы в этом запуске (есть результат «Проверки форм»). Если да,
+    # но цель формы всё равно не поймалась - это не «запустите формы», а «форма
+    # отправлена, но цель при ней не зафиксировалась» (проблема настройки цели/формы).
+    _формы_прогнали = bool(форм_статусы) or bool(_формные_url(pid))
     url_map = _url_цели_проверка(каталог, страницы, _формные_url(pid))
     _план = ACTIONS.get(pid) or _план_для_домена(каталог.get('домен', ''))
     ожидаемые = {i.lower() for i in _план.get('ожидаемые', [])}
@@ -901,17 +983,23 @@ def _классифицировать(pid: str, каталог: dict, прого
                 return gid
         return None
 
-    _ФОРМ_СЛОВА = ('form', 'forma', 'formu', 'otpravlen', 'otpravit',
-                   'zayavk', 'zayavka', 'заявк', 'форм', 'подписк', 'subscribe',
-                   'konsultaci', 'консультац', 'obratnoy_svyazi', 'obratnaya_svyaz')
+    # По ИДЕНТИФИКАТОРУ (надёжно: это цель ОТПРАВКИ формы).
+    _ФОРМ_ID = ('form', 'forma', 'formu', 'otpravlen', 'zayavka', 'subscribe',
+                'podpisk', 'findtome', 'raschet_stoimosti')
+    # По НАЗВАНИЮ - только явные фразы отправки (НЕ «клик ... из формы ...»:
+    # это клик по кнопке внутри формы, а не отправка - иначе ловили бы raschetaddtocart).
+    _ФОРМ_ИМЯ = ('отправка форм', 'отправить форм', 'отправленная форма',
+                 'отправленной форм', 'заполнение форм', 'форма подписки',
+                 'подписк на рассыл')
 
     def _похоже_на_форму(g) -> bool:
-        """Цель отправки формы (fires on onsubmit): её reachGoal почти никогда не
+        """Цель ОТПРАВКИ формы (fires on onsubmit): её reachGoal почти никогда не
         виден статически в коде, поэтому «нет в коде» - ложь. Определяем по
-        названию/идентификатору - такие показываем «Проверяется формами»."""
-        текст = ((g.get('название') or '') + ' ' +
-                 ' '.join(g.get('идентификаторы') or [])).lower()
-        return any(w in текст for w in _ФОРМ_СЛОВА)
+        идентификатору (надёжно) или явной фразе отправки в названии."""
+        ids = ' '.join(g.get('идентификаторы') or []).lower()
+        name = (g.get('название') or '').lower()
+        return (any(w in ids for w in _ФОРМ_ID)
+                or any(w in name for w in _ФОРМ_ИМЯ))
 
     def _авто_действие_сделано(условие: str) -> bool:
         """Автоцель Метрики: выполнил ли автотест соответствующее действие.
@@ -982,13 +1070,22 @@ def _классифицировать(pid: str, каталог: dict, прого
                 детали = ('кнопку/страницу входа в личный кабинет на сайте найти '
                           'не удалось - проверьте вручную')
                 счёт['manual'] += 1
-            elif в_формах:
-                # Цель привязана к отправке формы в конфиге, но результата форм ещё
-                # нет: подскажем запустить «Проверку форм» (результат подтянется сам).
+            elif в_формах and not _формы_прогнали:
+                # Цель привязана к отправке формы, а результата форм ещё нет:
+                # подскажем запустить «Проверку форм» (результат подтянется сам).
                 способ, статус, цвет = 'через формы', 'Проверяется формами', BLUE
                 детали = ('цель срабатывает при отправке формы - запустите «Проверку '
                           'форм» (её результат автоматически подтянется в этот отчёт)')
                 счёт['forms'] += 1
+            elif в_формах:
+                # Формы УЖЕ прогнаны в этом запуске, но при отправке этой формы цель
+                # не зафиксировалась - значит форма уходит, а reachGoal на ней не
+                # срабатывает (проблема настройки цели/формы на стороне сайта).
+                способ, статус, цвет = 'через формы', 'Не зафиксирована при форме', GREY
+                детали = ('форма отправлена в «Проверке форм» (заявка ушла), но эта '
+                          'цель при отправке в Метрике не зафиксировалась - проверьте '
+                          'привязку цели к этой форме на стороне сайта/Метрики')
+                счёт['manual'] += 1
             elif (any(gid.lower() in ожидаемые for gid in (g.get('идентификаторы') or []))
                   and _код_надёжен and _привязана(g) == 'есть'):
                 # Действие мы выполняли (клик), reachGoal ЕСТЬ в коде, но цель не

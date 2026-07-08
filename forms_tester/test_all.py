@@ -2128,6 +2128,17 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 )
 
             form = loc.nth(idx)
+            # Несколько форм с одним классом (напр. find-form встречается 3 раза):
+            # скрытые дубли можно «отправить», но цель на них не срабатывает. Если
+            # индекс явно не задан - берём первую ВИДИМУЮ форму.
+            if idx == 0 and n_match > 1 and "индекс" not in форма_config:
+                for _k in range(n_match):
+                    try:
+                        if loc.nth(_k).is_visible():
+                            form = loc.nth(_k)
+                            break
+                    except Exception:
+                        continue
             form.wait_for(state="visible", timeout=8000)
             try:
                 _root_tag = form.evaluate("el => el.tagName.toLowerCase()")
