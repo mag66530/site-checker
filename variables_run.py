@@ -15,6 +15,7 @@ variables_run.py - фоновый прогон проверки «главных
 Прокси (для проектов, блокирующих зарубежный IP) - через env proxy_url.
 """
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -51,21 +52,41 @@ def _use_proxy(project: str) -> bool:
         return False
 
 
-def _fetch(url: str, proxy: str | None):
-    """Скачать HTML главной. Возвращает (html, ошибка)."""
-    import requests
+async def _fetch_all(domains, proxy, log):
+    """Скачивает главные всех поддоменов через aiohttp (как http_checker - тем же
+    способом ходит через прокси, который у проектов вроде СМУ обязателен). Качает
+    параллельно (до 6 сразу). Возвращает {domain: (html, ошибка)} и печатает
+    прогресс «[i/N]»."""
+    import aiohttp
+
     headers = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                               "AppleWebKit/537.36 (KHTML, like Gecko) "
                               "Chrome/124.0.0.0 Safari/537.36")}
-    proxies = {"http": proxy, "https": proxy} if proxy else None
-    try:
-        r = requests.get(url, headers=headers, proxies=proxies, timeout=30,
-                         allow_redirects=True)
-        if r.status_code >= 400:
-            return "", f"HTTP {r.status_code}"
-        return r.text or "", ""
-    except Exception as e:  # noqa: BLE001
-        return "", str(e)
+    to = aiohttp.ClientTimeout(total=35)
+    sem = asyncio.Semaphore(6)
+    out: dict = {}
+    N = len(domains)
+    done = {"n": 0}
+
+    async with aiohttp.ClientSession(timeout=to, headers=headers) as s:
+        async def one(dom, city):
+            html, err = "", ""
+            async with sem:
+                try:
+                    async with s.get(f"https://{dom}/", proxy=proxy,
+                                     allow_redirects=True) as r:
+                        if r.status >= 400:
+                            err = f"HTTP {r.status}"
+                        else:
+                            html = await r.text(errors="replace")
+                except Exception as e:  # noqa: BLE001
+                    err = str(e)[:200] or e.__class__.__name__
+            out[dom] = (html, err)
+            done["n"] += 1
+            log(f'  [{done["n"]}/{N}] {dom} ({city}): '
+                + (f'ошибка загрузки - {err}' if err else 'загружено'))
+        await asyncio.gather(*[one(d, row.city) for d, row in domains])
+    return out
 
 
 def _регион_статусы(html, host, ctx):
@@ -132,12 +153,12 @@ def main() -> int:
     _stamp(f'ПРОВЕРКА ПЕРЕМЕННЫХ (1.4) - {PROJECT_NAMES[a.project]} - '
            f'поддоменов: {len(domains)}')
 
+    html_map = asyncio.run(_fetch_all(domains, proxy, _stamp))
+    _stamp('Загрузка завершена, сверяю с КП …')
     результаты = []
-    for i, (dom, row) in enumerate(domains, 1):
-        url = f'https://{dom}/'
-        html, err = _fetch(url, proxy)
+    for dom, row in domains:
+        html, err = html_map.get(dom, ("", "не загружено"))
         if err:
-            _stamp(f'  [{i}/{len(domains)}] {dom}: ошибка загрузки - {err}')
             результаты.append({"domain": dom, "city": row.city,
                                "country": row.country, "error": err, "fields": []})
             continue
@@ -146,9 +167,6 @@ def main() -> int:
         var["fields"] = [город, страна] + var["fields"]
         var["error"] = ""
         результаты.append(var)
-        _плохих = sum(1 for f in var["fields"] if f["status"] == "bug")
-        _stamp(f'  [{i}/{len(domains)}] {dom} ({row.city}): '
-               + ('все ок' if not _плохих else f'расхождений: {_плохих}'))
 
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
