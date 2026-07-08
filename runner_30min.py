@@ -302,6 +302,7 @@ def run_check(pid, params, creds, log, progress):
             check_region=_chk_region and region_ctx is not None,
             check_cis=_chk_cis and region_ctx is not None,
             check_layout=bool(params.get('check_layout', True)),
+            check_markup=bool(params.get('check_markup', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
 
@@ -612,7 +613,10 @@ def run_check(pid, params, creds, log, progress):
                         + len((_meta_summary or {}).get('url_duplicates', []))),
                     layout_issues_pages=sum(
                         1 for r in results
-                        if getattr(r, 'has_layout_issues', False)))
+                        if getattr(r, 'has_layout_issues', False)),
+                    markup_issues_pages=sum(
+                        1 for r in results
+                        if getattr(r, 'has_markup_issues', False)))
                 tg_result = send_run_notification(
                     bot_token=tg_token, recipients=tg_recipients,
                     project_name=cfg['name'], summary_text=summary_text,
