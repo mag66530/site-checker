@@ -894,59 +894,33 @@ _mail_mode = st.radio('Как проверяем письмо покупател
                       key=f'fc_mail_mode_{pid_key}', label_visibility='collapsed')
 
 if _mail_mode == _MAIL_MODES[1]:
-    # Тестовую почту можно один раз задать в секретах приложения (order_mail_email /
-    # order_mail_password / order_mail_imap_host) - тогда авто-проверка работает для
-    # ВСЕХ проектов без ввода: «запустил и убедился, что письмо пришло». Введённое
-    # вручную имеет приоритет над секретами (можно проверить другой ящик).
+    # Тестовая почта берётся ТОЛЬКО из секретов приложения (order_mail_email /
+    # order_mail_password / опц. order_mail_imap_host) - один раз для всех проектов.
+    # Ввод своего ящика здесь не нужен: если кому-то нужен свой ящик, для этого
+    # есть режим «Своя почта».
     _sec_mail = _secret('order_mail_email')
     _sec_pass = _secret('order_mail_password')
     _sec_host = _secret('order_mail_imap_host')
     if _sec_mail and _sec_pass:
         st.success(f'Тестовый ящик задан в секретах приложения: **{_sec_mail}**. '
-                   'Можно просто запускать - вводить ничего не нужно. Поля ниже '
-                   'заполняй, только если хочешь проверить ДРУГОЙ ящик.')
-    else:
-        st.caption('Заказ оформится на этот ящик, а скрипт сам зайдёт по IMAP и '
-                   'проверит письмо-подтверждение. Нужны ПАРОЛЬ ПРИЛОЖЕНИЯ и '
-                   'включённый IMAP (проще всего у Яндекса). Чтобы не вводить каждый '
-                   'раз - задай их один раз в секретах приложения (см. «Как задать…» '
-                   'ниже). Данные никуда не сохраняются - только передаются проверке.')
-    _mc1, _mc2 = st.columns(2)
-    _m_email = _mc1.text_input('Почтовый ящик (логин)', key=f'fc_mail_email_{pid_key}',
-                               placeholder=_sec_mail or 'test@yandex.ru')
-    _m_pass = _mc2.text_input(
-        'Пароль приложения', type='password', key=f'fc_mail_pass_{pid_key}',
-        placeholder='•••• (уже задан в секретах)' if _sec_pass else '')
-    _m_host = st.text_input(
-        'IMAP-сервер (по умолчанию imap.yandex.ru)', key=f'fc_mail_host_{pid_key}',
-        placeholder=_sec_host or 'imap.yandex.ru',
-        help='Для Gmail: imap.gmail.com (нужен пароль приложения и включённый IMAP).')
-    with st.expander('Как задать тестовую почту в секретах (один раз, для всех проектов)'):
-        st.markdown('На Streamlit Cloud: **Manage app → Settings → Secrets** - добавь строки:')
-        st.code('order_mail_email = "тест@yandex.ru"\n'
-                'order_mail_password = "пароль_приложения_яндекса"', language='toml')
-        st.caption('IMAP-сервер по умолчанию imap.yandex.ru. Для Gmail добавь '
-                   'order_mail_imap_host = "imap.gmail.com". Если Яндекс режет '
-                   'облачный IP - нужен ещё proxy_url (тот же, что уже используется '
-                   'для СМУ).')
-    # Приоритет: введённое вручную > секреты приложения.
-    _use_email = _m_email.strip() or _sec_mail
-    _use_pass = _m_pass or _sec_pass
-    _use_host = _m_host.strip() or _sec_host
-    if _use_email and _use_pass:
+                   'Просто запускай проверку - заказ оформится на него, а письмо-'
+                   'подтверждение проверится автоматически. Нужен свой ящик - выбери '
+                   'режим «Своя почта».')
         _mail_env = {
-            'ORDER_BUYER_EMAIL': _use_email,
-            'ORDER_MAIL_EMAIL': _use_email,
-            'ORDER_MAIL_PASSWORD': _use_pass,
+            'ORDER_BUYER_EMAIL': _sec_mail,
+            'ORDER_MAIL_EMAIL': _sec_mail,
+            'ORDER_MAIL_PASSWORD': _sec_pass,
         }
-        if _use_host:
-            _mail_env['ORDER_MAIL_IMAP_HOST'] = _use_host
+        if _sec_host:
+            _mail_env['ORDER_MAIL_IMAP_HOST'] = _sec_host
         _px = _secret('proxy_url')
         if _px:
             _mail_env['proxy_url'] = _px
     else:
-        st.caption('⚠️ Нет ни введённых данных, ни секретов - авто-проверка не '
-                   'запустится. Введите ящик и пароль приложения или задайте их в секретах.')
+        st.warning('Тестовая почта не задана в секретах приложения - авто-проверка '
+                   'недоступна. Её настраивает администратор приложения (один раз, для '
+                   'всех проектов). Чтобы проверить письмо на свой ящик - выбери режим '
+                   '«Своя почта».')
 elif _mail_mode == _MAIL_MODES[2]:
     st.caption('Заказ оформится на указанную почту. Автопроверку не делаем - '
                'просто открой этот ящик и убедись, что письмо о заказе пришло. '
