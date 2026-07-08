@@ -58,6 +58,21 @@ async def _fetch_all(domains, proxy, log):
     параллельно (до 6 сразу). Возвращает {domain: (html, ошибка)} и печатает
     прогресс «[i/N]»."""
     import aiohttp
+    from urllib.parse import urlparse
+
+    # aiohttp НЕ берёт логин/пароль из URL прокси (иначе - 407 Proxy Auth Required):
+    # креды нужно передать явно через proxy_auth=BasicAuth. Разбираем proxy-URL.
+    proxy_clean, proxy_auth = None, None
+    if proxy:
+        pr = urlparse(proxy)
+        if pr.hostname:
+            _scheme = pr.scheme or "http"
+            proxy_clean = (f"{_scheme}://{pr.hostname}:{pr.port}" if pr.port
+                           else f"{_scheme}://{pr.hostname}")
+            if pr.username:
+                proxy_auth = aiohttp.BasicAuth(pr.username, pr.password or "")
+        else:
+            proxy_clean = proxy
 
     headers = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                               "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -73,7 +88,8 @@ async def _fetch_all(domains, proxy, log):
             html, err = "", ""
             async with sem:
                 try:
-                    async with s.get(f"https://{dom}/", proxy=proxy,
+                    async with s.get(f"https://{dom}/", proxy=proxy_clean,
+                                     proxy_auth=proxy_auth,
                                      allow_redirects=True) as r:
                         if r.status >= 400:
                             err = f"HTTP {r.status}"
