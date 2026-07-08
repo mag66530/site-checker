@@ -222,6 +222,11 @@ class CheckResult:
     markup: Optional[dict] = None
     has_markup_issues: bool = False
 
+    # Доп. чек-лист «1.8 заголовки безопасности»: HSTS/CSP/X-Frame и т.п.
+    # dict из security_checker.check_security_headers | None - не проверяли
+    security: Optional[dict] = None
+    has_security_issues: bool = False
+
     checked_at: Optional[str] = None
 
 
@@ -505,6 +510,7 @@ async def check_one(
     check_cis: bool = False,
     check_layout: bool = False,
     check_markup: bool = False,
+    check_security: bool = False,
     region_ctx=None,            # RegionContext из region_checker.py
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
@@ -709,6 +715,18 @@ async def check_one(
         except Exception:
             meta_unique = None
 
+    # Доп. чек-лист «1.8»: заголовки безопасности финального ответа.
+    # Заголовки есть у любого ответа (не только 200), но проверяем по OK -
+    # редиректы/ошибки отдают свой набор, не репрезентативно.
+    security = None
+    if check_security and is_ok and a.get('headers'):
+        try:
+            from security_checker import check_security_headers
+            security = check_security_headers(a['headers'],
+                                              a['final_url'] or task.url)
+        except Exception:
+            security = None
+
     return CheckResult(
         url=task.url,
         city=task.city,
@@ -751,6 +769,8 @@ async def check_one(
         has_layout_issues=bool(layout and layout.get('issues')),
         markup=markup,
         has_markup_issues=bool(markup and markup.get('issues')),
+        security=security,
+        has_security_issues=bool(security and security.get('issues')),
         checked_at=None,
     )
 
@@ -776,6 +796,7 @@ async def run_batch(
     check_cis: bool = False,
     check_layout: bool = False,
     check_markup: bool = False,
+    check_security: bool = False,
     region_ctx=None,            # RegionContext из region_checker.build_region_context
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
@@ -876,6 +897,7 @@ async def run_batch(
                     check_cis=check_cis,
                     check_layout=check_layout,
                     check_markup=check_markup,
+                    check_security=check_security,
                     region_ctx=region_ctx,
                     proxy_url=proxy_url,
                     kp_map=kp_map,
