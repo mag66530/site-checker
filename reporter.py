@@ -49,6 +49,7 @@ class C:
 STATUS_LABEL = {
     'ok': 'Работает',
     'redirect': 'Перенаправление',
+    'redirect_loop': 'Циклический редирект',
     'not_found': 'Страница не найдена',
     'client_error': 'Ошибка на сайте',
     'server_error': 'Сервер не отвечает',
@@ -2243,7 +2244,9 @@ def _build_meta_sheet(wb, results, meta_summary):
     dups = (meta_summary or {}).get('duplicates') or {}
     same_city = dups.get('same_city') or []
     cross_city = dups.get('cross_city') or []
-    url_dups = (meta_summary or {}).get('url_duplicates') or []
+    url_dups_all = (meta_summary or {}).get('url_duplicates') or []
+    url_dups = [d for d in url_dups_all if d.get('problem') != 'not_301']
+    url_not301 = [d for d in url_dups_all if d.get('problem') == 'not_301']
     has_bugs = bool(bad or same_city or cross_city or url_dups)
 
     ws = wb.create_sheet('Метаданные')
@@ -2270,8 +2273,9 @@ def _build_meta_sheet(wb, results, meta_summary):
                'в рекомендуемых рамках. Дубли: одинаковые title/description/H1 '
                'у разных страниц одного города - баг; полное совпадение между '
                'городами - город не подставился в шаблон. Дубли УРЛОВ: варианты '
-               'адреса (http, без слэша, www) должны редиректить - ответ 200 '
-               'без редиректа = страница доступна по двум адресам.')
+               'адреса (http, без слэша, www, index.php/index.html) должны '
+               '301-редиректить - ответ 200 без редиректа = страница доступна '
+               'по двум адресам; временный 302 вместо 301 = предупреждение.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
@@ -2283,7 +2287,8 @@ def _build_meta_sheet(wb, results, meta_summary):
     c = ws.cell(row=row, column=2)
     c.value = (f'Проверено страниц: {len(checked)} · с проблемами: {len(bad)} · '
                f'предупреждений: {len(warned)} · дублей в городе: {len(same_city)} · '
-               f'межгородских: {len(cross_city)} · дублей URL: {len(url_dups)}')
+               f'межгородских: {len(cross_city)} · дублей URL: {len(url_dups)} · '
+               f'временных редиректов: {len(url_not301)}')
     c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
     c.fill = _fill(C.surface)
     c.alignment = _align(wrap=True)
@@ -2360,37 +2365,49 @@ def _build_meta_sheet(wb, results, meta_summary):
         row += 1
 
     # ── Секция 5: дубли УРЛОВ ──
+    def _url_dup_table(items, color):
+        nonlocal row
+        _meta_table_header(ws, row, ['Вариант', 'Код',
+                                     'Адрес варианта',
+                                     'Канонический адрес'])
+        row += 1
+        for d in items:
+            ws.row_dimensions[row].height = 20
+            vals = [
+                (d.get('kind', ''), {'size': 9, 'color': C.text_muted}),
+                (d.get('code', ''), {'size': 10, 'color': color}),
+                (d.get('variant', ''), {'size': 10, 'color': color}),
+                (d.get('canonical', ''), {'size': 10, 'color': C.accent,
+                                          'underline': 'single'}),
+            ]
+            for ci, (val, kw) in enumerate(vals, 2):
+                cell = ws.cell(row=row, column=ci)
+                cell.value = val
+                cell.font = _font(**kw)
+                cell.alignment = _align(wrap=True, vertical='top')
+                cell.border = _border(color=C.border_light)
+                if ci == 5 and val:
+                    cell.hyperlink = val
+            row += 1
+
     if meta_summary is not None:
         _meta_section_title(ws, row, f'Дубли УРЛОВ (нет редиректа)  ({len(url_dups)})',
                             C.err if url_dups else C.ok)
         row += 1
         if not url_dups:
-            _meta_ok_line(ws, row, '✅ Все варианты адресов (http, слэш, www) '
-                                   'корректно редиректят.')
+            _meta_ok_line(ws, row, '✅ Все варианты адресов (http, слэш, www, '
+                                   'index.php) корректно редиректят.')
             row += 1
         else:
-            _meta_table_header(ws, row, ['Вариант', 'Код',
-                                         'Дубль (отвечает без редиректа)',
-                                         'Канонический адрес'])
+            _url_dup_table(url_dups, C.err)
+        row += 1
+        # Временные редиректы: склейка не передаётся, 301 обязателен
+        if url_not301:
+            _meta_section_title(
+                ws, row,
+                f'Временный редирект вместо 301  ({len(url_not301)})', C.warn)
             row += 1
-            for d in url_dups:
-                ws.row_dimensions[row].height = 20
-                vals = [
-                    (d.get('kind', ''), {'size': 9, 'color': C.text_muted}),
-                    (d.get('code', ''), {'size': 10, 'color': C.err}),
-                    (d.get('variant', ''), {'size': 10, 'color': C.err}),
-                    (d.get('canonical', ''), {'size': 10, 'color': C.accent,
-                                              'underline': 'single'}),
-                ]
-                for ci, (val, kw) in enumerate(vals, 2):
-                    cell = ws.cell(row=row, column=ci)
-                    cell.value = val
-                    cell.font = _font(**kw)
-                    cell.alignment = _align(wrap=True, vertical='top')
-                    cell.border = _border(color=C.border_light)
-                    if ci == 5 and val:
-                        cell.hyperlink = val
-                row += 1
+            _url_dup_table(url_not301, C.warn)
 
 
 # ── Лист «Контакты по городам» (сверка с КП) ───────────────────────
@@ -2937,7 +2954,9 @@ def build_report(
     _mdups = (meta_summary or {}).get('duplicates') or {}
     meta_dup_groups = (len(_mdups.get('same_city') or [])
                        + len(_mdups.get('cross_city') or [])
-                       + len((meta_summary or {}).get('url_duplicates') or []))
+                       + sum(1 for d in ((meta_summary or {})
+                                         .get('url_duplicates') or [])
+                             if d.get('problem') != 'not_301'))
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 1: Обзор

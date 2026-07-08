@@ -237,6 +237,10 @@ def _url_variants(url: str) -> list:
     # 3. www. - только для корневого домена (www.spb.… обычно без DNS)
     if not host.startswith('www.') and host.count('.') == 1:
         variants.append(('www', f'{sp.scheme}://www.{host}{path}'))
+    # 4. index.php и т.п. - дубли главной (Bitrix часто отдаёт 200)
+    if path == '/':
+        for idx in ('index.php', 'index.html', 'index.htm', 'home.php'):
+            variants.append((idx, f'{sp.scheme}://{host}/{idx}'))
     return variants
 
 
@@ -256,11 +260,14 @@ async def _probe_variant(session, url, proxy_url, timeout_ms=20000):
 
 async def check_url_duplicates(urls: list, *, proxy_url=None,
                                concurrency: int = 6) -> list:
-    """Прозвонить варианты адресов (http/слэш/www) для списка канонических
-    URL (обычно главная и каталог каждого поддомена).
+    """Прозвонить варианты адресов (http/слэш/www/index.*) для списка
+    канонических URL (обычно главная и каталог каждого поддомена).
 
-    Возвращает список багов:
-    [{'canonical': url, 'variant': url, 'kind': str, 'code': int}]"""
+    Возвращает список находок:
+    [{'canonical', 'variant', 'kind', 'code', 'problem'}], где problem:
+      • 'duplicate' - вариант отвечает 200 без редиректа = дубль (баг);
+      • 'not_301'   - редирект есть, но временный 302/303/307 -
+        постоянную склейку зеркал делает только 301/308 (предупреждение)."""
     import aiohttp
     from http_checker import make_browser_headers
     sem = asyncio.Semaphore(concurrency)
@@ -269,9 +276,14 @@ async def check_url_duplicates(urls: list, *, proxy_url=None,
     async def probe(canonical, kind, variant, session):
         async with sem:
             code, loc = await _probe_variant(session, variant, proxy_url)
-        if code is not None and 200 <= code < 300:
+        if code is None:
+            return
+        if 200 <= code < 300:
             out.append({'canonical': canonical, 'variant': variant,
-                        'kind': kind, 'code': code})
+                        'kind': kind, 'code': code, 'problem': 'duplicate'})
+        elif code in (302, 303, 307):
+            out.append({'canonical': canonical, 'variant': variant,
+                        'kind': kind, 'code': code, 'problem': 'not_301'})
 
     tasks = []
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
