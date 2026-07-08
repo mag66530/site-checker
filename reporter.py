@@ -1479,7 +1479,9 @@ def _build_indexing_sheet(wb, results, indexing_summary):
     warned = [r for r in checked if (not r.indexing.get('issues')
                                      and r.indexing.get('warnings'))]
     sm_dis = (indexing_summary or {}).get('disallowed') or []
-    has_bugs = bool(bad or sm_dis)
+    _blanket = (indexing_summary or {}).get('blanket_disallow') or []
+    _assets_closed = (indexing_summary or {}).get('assets_closed') or []
+    has_bugs = bool(bad or sm_dis or _blanket or _assets_closed)
 
     ws = wb.create_sheet('Индексация')
     ws.sheet_view.showGridLines = False
@@ -1667,13 +1669,63 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             ws.row_dimensions[row].height = 24
             row += 1
             if not junk:
-                _line('✅ Пагинация, поиск, корзина, сравнение и личный кабинет '
+                _line('✅ Пагинация, сортировки, поиск, корзина, сравнение, '
+                      'оформление заказа, личный кабинет и админ. панель '
                       'закрыты в robots.txt (или не существуют на сайте).', C.ok)
             else:
                 _line('Эти страницы отвечают 200, но НЕ закрыты в robots - '
                       'мусор попадает в обход робота:', C.text_muted)
                 for j in junk:
                     _line(f'{j.get("label", "")}: {j.get("path", "")}', C.err)
+            row += 1
+
+        # ── Секция 4а: гигиена robots.txt (доп. чек-лист) ──
+        # Показываем только если проверка выполнялась (нет error и robots 200)
+        if not indexing_summary.get('error'):
+            _ua = indexing_summary.get('ua_groups')
+            _hyg_bad = bool(_blanket or _assets_closed)
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = 'Гигиена robots.txt (доп. чек-лист)'
+            c.font = _font(size=13, bold=True, color=C.err if _hyg_bad else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            # 1. Disallow: / - сайт закрыт целиком
+            if _blanket:
+                _grp = ', '.join(f'User-agent: {a}' for a in _blanket)
+                _line(f'❌ В robots.txt есть директива «Disallow: /» ({_grp}) - '
+                      f'сайт закрыт от индексации целиком.', C.err, bold=True)
+            else:
+                _line('✅ Директивы «Disallow: /» нет.', C.ok)
+            # 2. Отдельные группы User-agent для Яндекса и Google
+            if _ua:
+                _missing = [n for n, k in (('Yandex', 'yandex'),
+                                           ('Googlebot', 'google'))
+                            if not _ua.get(k)]
+                if _missing:
+                    _line(f'⚠ Нет отдельных групп User-agent: '
+                          f'{", ".join(_missing)} - роботы работают по общей '
+                          f'группе «*» (не ошибка, но доп. чек-лист требует '
+                          f'раздельные).', C.warn)
+                else:
+                    _line('✅ Отдельные группы User-agent для Яндекса и Google '
+                          'заданы.', C.ok)
+            # 3. CSS/JS открыты для роботов
+            _n_assets = indexing_summary.get('assets_checked', 0)
+            if _assets_closed:
+                _line(f'❌ Файлы .css/.js закрыты в robots.txt '
+                      f'({len(_assets_closed)} из {_n_assets}) - Google не '
+                      f'сможет отрендерить страницы:', C.err, bold=True)
+                for _a in _assets_closed[:10]:
+                    _line(f'{_a.get("url", "")}  (Disallow: {_a.get("rule", "")})',
+                          C.err)
+                if len(_assets_closed) > 10:
+                    _line(f'… и ещё {len(_assets_closed) - 10}', C.text_muted)
+            elif _n_assets:
+                _line(f'✅ Файлы .css/.js главной ({_n_assets} шт.) открыты '
+                      f'для роботов.', C.ok)
             row += 1
 
         # ── Секция 5: sitemap-директивы в robots (ТЗ 3.3.6) ──
@@ -2875,7 +2927,10 @@ def build_report(
             f'\nВ контенте {total_content_bugs} проблем на {len(pages_with_content_bugs)} страницах '
             f'(нет цены, кнопок заказа или заголовка) - см. лист «Структура страниц».'
         )
-    if indexing_bad_pages or indexing_sitemap_conflicts:
+    _idx_blanket = (indexing_summary or {}).get('blanket_disallow') or []
+    _idx_assets = (indexing_summary or {}).get('assets_closed') or []
+    if (indexing_bad_pages or indexing_sitemap_conflicts
+            or _idx_blanket or _idx_assets):
         _idx_bits = []
         if indexing_bad_pages:
             _idx_bits.append(f'расхождения с robots.txt на {len(indexing_bad_pages)} '
@@ -2883,6 +2938,10 @@ def build_report(
         if indexing_sitemap_conflicts:
             _idx_bits.append(f'{indexing_sitemap_conflicts} путей каталога под Disallow '
                              f'в robots.txt')
+        if _idx_blanket:
+            _idx_bits.append('в robots.txt есть «Disallow: /» - сайт закрыт целиком')
+        if _idx_assets:
+            _idx_bits.append(f'{len(_idx_assets)} файлов .css/.js закрыты в robots.txt')
         summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
                          + ' - см. лист «Индексация».')
     if meta_bad_pages or meta_dup_groups:

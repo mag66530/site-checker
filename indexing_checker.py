@@ -320,10 +320,10 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
 # ── Кросс-проверка sitemap ↔ robots (весь каталог, не только выборка) ─
 
 
-# Типовой «мусор», который ДОЛЖЕН быть закрыт в robots (ТЗ 3.3.4.2):
-# пагинация/сортировка строятся от реальной категории, остальное - типовые
-# пути Bitrix-проектов. Находка = путь ОТКРЫТ в robots И реально отвечает 200
-# (несуществующие страницы не считаем - закрывать нечего).
+# Типовой «мусор», который ДОЛЖЕН быть закрыт в robots (ТЗ 3.3.4.2 + доп.
+# чек-лист «Robots.txt»): пагинация/сортировка строятся от реальной категории,
+# остальное - типовые пути Bitrix-проектов. Находка = путь ОТКРЫТ в robots И
+# реально отвечает 200 (несуществующие страницы не считаем - закрывать нечего).
 _JUNK_FIXED = [
     ('поиск', '/search/'),
     ('корзина', '/basket/'),
@@ -331,6 +331,12 @@ _JUNK_FIXED = [
     ('сравнение', '/compare/'),
     ('личный кабинет', '/personal/'),
     ('авторизация', '/auth/'),
+    # доп. чек-лист: оформление/отправленные заказы, вход в админку
+    ('оформление заказа', '/order/'),
+    ('оформление заказа', '/checkout/'),
+    ('отправленные заказы', '/personal/order/'),
+    ('админ. панель', '/bitrix/'),
+    ('админ. панель', '/admin/'),
 ]
 
 
@@ -371,15 +377,25 @@ async def check_paths_against_robots(host: str, paths: list, *,
        200 = находка.
     3. Sitemap-директивы (ТЗ 3.3.6): есть хотя бы одна; каждая отдаёт 200;
        совпадает ли с sitemap проекта.
+    4. Доп. чек-лист «Robots.txt»:
+       • нет буквальной директивы «Disallow: /» (сайт закрыт целиком) - баг;
+       • заданы отдельные группы User-agent для Yandex и Googlebot -
+         отсутствие = предупреждение (правила и так наследуются от «*»);
+       • .css/.js главной страницы не закрыты Disallow - Google требует
+         доступ к ресурсам для рендеринга, закрытые = баг.
 
     Возвращает {'host', 'robots_status', 'sitemaps', 'checked',
                 'disallowed': [...], 'junk_open': [...],
-                'sitemap_checks': {...}, 'error'}."""
+                'sitemap_checks': {...}, 'blanket_disallow': [...],
+                'ua_groups': {...}, 'assets_checked': int,
+                'assets_closed': [...], 'error'}."""
     import aiohttp
     from http_checker import make_browser_headers
     out = {'host': host, 'robots_status': None, 'sitemaps': [],
            'checked': 0, 'disallowed': [], 'junk_open': [],
-           'sitemap_checks': None, 'error': None}
+           'sitemap_checks': None, 'blanket_disallow': [],
+           'ua_groups': None, 'assets_checked': 0, 'assets_closed': [],
+           'error': None}
     try:
         async with aiohttp.ClientSession(
                 headers=make_browser_headers()) as session:
@@ -389,6 +405,27 @@ async def check_paths_against_robots(host: str, paths: list, *,
             if not info.ok:
                 out['error'] = info.error or f'robots.txt: HTTP {info.status}'
                 return out
+
+            # ── 0а. «Disallow: /» - сайт закрыт целиком (доп. чек-лист) ──
+            # Буквальное правило: даже если частично перекрыто Allow,
+            # такая директива в боевом robots - ошибка. Смотрим ТОЛЬКО
+            # поисковых роботов: «Disallow: /» для GPTBot/ClaudeBot и
+            # прочих AI-краулеров - намеренная блокировка, не находка.
+            for _agent, _rules in info.groups.items():
+                if not (_agent == '*' or 'yandex' in _agent
+                        or 'google' in _agent):
+                    continue
+                if any(not _allow and _pat == '/'
+                       for _allow, _pat, _rx in _rules):
+                    out['blanket_disallow'].append(_agent)
+
+            # ── 0б. Отдельные группы User-agent (доп. чек-лист) ──
+            _names = set(info.groups)
+            out['ua_groups'] = {
+                'star': '*' in _names,
+                'yandex': any('yandex' in n for n in _names),
+                'google': any('google' in n for n in _names),
+            }
 
             # ── 1. sitemap ↔ robots (пути каталога не закрыты) ──
             seen = set()
@@ -407,10 +444,18 @@ async def check_paths_against_robots(host: str, paths: list, *,
             junk = list(_JUNK_FIXED)
             if sample_category:
                 _c = '/' + sample_category.strip('/') + '/'
+                # сортировки из доп. чек-листа: цена/новизна/популярность/алфавит
                 junk = [('пагинация', f'{_c}?PAGEN_1=2'),
                         ('пагинация', f'{_c}?page=2'),
-                        ('сортировка', f'{_c}?sort=price')] + junk
+                        ('сортировка', f'{_c}?sort=price'),
+                        ('сортировка', f'{_c}?sort=date'),
+                        ('сортировка', f'{_c}?sort=popularity'),
+                        ('сортировка', f'{_c}?sort=name')] + junk
             for label, path in junk:
+                # одна находка на сущность: «сортировка» открыта - хватит
+                # одного примера, варианты параметров не перечисляем
+                if any(j['label'] == label for j in out['junk_open']):
+                    continue
                 dis, _rule, _agent = robots_verdict(info, f'https://{host}{path}')
                 if dis:
                     continue                     # закрыт - как и должно быть
@@ -435,6 +480,53 @@ async def check_paths_against_robots(host: str, paths: list, *,
                     _norm_sm(u) == _norm_sm(project_sitemap_url)
                     for u in info.sitemaps)
             out['sitemap_checks'] = sm
+
+            # ── 4. .css/.js не закрыты Disallow (доп. чек-лист) ──
+            # Google рендерит страницы: закрытые стили/скрипты = страница
+            # «без вёрстки» в глазах робота. Берём ресурсы главной.
+            try:
+                _assets = await _collect_assets(
+                    session, f'https://{host}/', proxy_url)
+                out['assets_checked'] = len(_assets)
+                for _u in _assets:
+                    _dis, _rule, _agent = robots_verdict(info, _u)
+                    if _dis:
+                        out['assets_closed'].append(
+                            {'url': _u, 'rule': _rule, 'agent': _agent})
+            except Exception:
+                pass
     except Exception as e:
         out['error'] = str(e)
     return out
+
+
+_RE_CSS = re.compile(
+    r'<link\b[^>]*href\s*=\s*["\']([^"\']+\.css(?:\?[^"\']*)?)["\']', re.I)
+_RE_JS = re.compile(
+    r'<script\b[^>]*src\s*=\s*["\']([^"\']+\.js(?:\?[^"\']*)?)["\']', re.I)
+
+
+async def _collect_assets(session, page_url: str, proxy_url,
+                          *, limit: int = 30) -> list:
+    """URL .css/.js СВОЕГО хоста со страницы (для проверки по robots).
+    Чужие CDN не проверяем - их robots нам не подчиняется."""
+    import aiohttp
+    from urllib.parse import urljoin
+    to = aiohttp.ClientTimeout(total=20)
+    async with session.get(page_url, timeout=to, allow_redirects=True,
+                           proxy=proxy_url) as r:
+        if r.status != 200:
+            return []
+        html = (await r.read()).decode('utf-8', errors='replace')
+    page_host = (urlsplit(page_url).netloc or '').lower().removeprefix('www.')
+    seen, urls = set(), []
+    for m in list(_RE_CSS.finditer(html)) + list(_RE_JS.finditer(html)):
+        u = urljoin(page_url, m.group(1).strip())
+        h = (urlsplit(u).netloc or '').lower().removeprefix('www.')
+        if h != page_host or u in seen:
+            continue
+        seen.add(u)
+        urls.append(u)
+        if len(urls) >= limit:
+            break
+    return urls

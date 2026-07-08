@@ -329,6 +329,12 @@ def run_check(pid, params, creds, log, progress):
                     f'путей каталога под Disallow {_n_dis} '
                     f'(проверено {_idx_summary.get("checked", 0)}), '
                     f'мусора не закрыто {_n_junk}')
+                if _idx_summary.get('blanket_disallow'):
+                    log('❌ robots.txt: есть «Disallow: /» - сайт закрыт целиком')
+                _n_ac = len(_idx_summary.get('assets_closed') or [])
+                if _n_ac:
+                    log(f'❌ robots.txt: закрыто .css/.js файлов {_n_ac} '
+                        f'из {_idx_summary.get("assets_checked", 0)}')
             except Exception as _e:
                 log(f'⚠ Индексация (sitemap↔robots): {_e}')
 
