@@ -504,6 +504,63 @@ def проверка_полей_форм(scope, page) -> dict:
     return res
 
 
+def состав_формы(scope) -> dict:
+    """Пункт «Все элементы формы (поля/кнопки/чекбоксы/радио/списки) присутствуют».
+    Перепись ВИДИМЫХ элементов формы ОДНИМ evaluate - чистое чтение DOM, без ввода
+    и без отправки. Вердикт «Проверить» - только если форма совсем без элементов
+    ввода. «Соответствие дизайну» - визуально по макету (авто не проверяем).
+    Возвращает {ок(bool|None), детали, поля, чекбоксы, радио, радиоГрупп, списки,
+    кнопки, отправка, файл}."""
+    c = {"поля": 0, "чекбоксы": 0, "радио": 0, "радиоГрупп": 0, "списки": 0,
+         "кнопки": 0, "отправка": False, "файл": 0}
+    try:
+        r = scope.evaluate(
+            "el => {"
+            " const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);"
+            " const inputs = [...el.querySelectorAll('input')].filter(vis);"
+            " const tt = ['text','tel','email','search','url','number','password',"
+            "'date','time','datetime-local','month','week',''];"
+            " const ty = e => (e.type||'text').toLowerCase();"
+            " const поля = inputs.filter(e => tt.includes(ty(e))).length"
+            "   + [...el.querySelectorAll('textarea')].filter(vis).length;"
+            " const чекбоксы = inputs.filter(e => ty(e)==='checkbox').length;"
+            " const радио = inputs.filter(e => ty(e)==='radio');"
+            " const nm = радио.map(e => e.name||'');"
+            " const радиоГрупп = new Set(nm.filter(n=>n)).size + nm.filter(n=>!n).length;"
+            " const файл = inputs.filter(e => ty(e)==='file').length;"
+            " const списки = [...el.querySelectorAll('select')].filter(vis).length;"
+            " const btns = [...el.querySelectorAll("
+            "\"button, input[type='submit'], input[type='button'], input[type='reset']\")].filter(vis);"
+            " const отправка = btns.some(b => { const g=b.tagName.toLowerCase();"
+            "   const t=(b.getAttribute('type')||'').toLowerCase();"
+            "   return g==='input' ? t==='submit' : (t===''||t==='submit'); });"
+            " return {поля, чекбоксы, радио: радио.length, радиоГрупп, списки,"
+            "   кнопки: btns.length, отправка, файл};"
+            "}")
+        if isinstance(r, dict):
+            for k in c:
+                if k in r and r[k] is not None:
+                    c[k] = r[k]
+    except Exception:  # noqa: BLE001
+        return {"ок": None, "детали": "состав формы определить не удалось", **c}
+
+    есть_ввод = bool(c["поля"] or c["чекбоксы"] or c["списки"] or c["радио"])
+    радио_txt = f"{c['радио']}" + (f" ({c['радиоГрупп']} групп)" if c["радио"] else "")
+    if c["кнопки"]:
+        кноп_txt = f"{c['кнопки']}" + (" (есть отправка)" if c["отправка"]
+                                       else " (кнопки отправки нет)")
+    else:
+        кноп_txt = "0"
+    детали = (f"поля ввода: {c['поля']}, чекбоксы: {c['чекбоксы']}, "
+              f"радио: {радио_txt}, списки: {c['списки']}, кнопки: {кноп_txt}, "
+              f"файл: {c['файл']}. Соответствие дизайну — по макету вручную.")
+    if not есть_ввод:
+        детали = "элементы ввода не найдены (та ли форма/скоуп?). " + детали
+    elif not c["кнопки"]:
+        детали += " Кнопка отправки не найдена — возможно, отправка через JS/ссылку."
+    return {"ок": есть_ввод, "детали": детали, **c}
+
+
 # Типы для пробы серверной фильтрации загрузки: (расширение, опасное?).
 # Контент БЕЗВРЕДНЫЙ (не эксплойт) - меняем только расширение. «Опасные» -
 # исполняемые/скриптовые/веб (могут стать вектором атаки): их приём сервером
@@ -2980,6 +3037,23 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                       + (f"; файлы: {_файлы_кол}" if _файлы_кол else ""))
             except Exception as _epf:  # noqa: BLE001
                 print(f"   ⚠️ Аудит полей формы не удался: {_epf}")
+
+            # Пункт «Все элементы формы присутствуют»: перепись состава формы
+            # (чистое чтение DOM, без ввода/отправки) - отдельной строкой отчёта.
+            try:
+                _cf = состав_формы(form)
+                записать_в_excel({
+                    "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                    "тип_селектора": "поля", "ид": название,
+                    "название": f"Состав формы (поля/кнопки/чекбоксы/радио/списки): {название}",
+                    "имя": имя_теста,
+                    "статус": "Проверить" if _cf.get("ок") is False else "OK",
+                    "комментарий_готовый": _cf["детали"],
+                    "код": "form_census",
+                })
+                print(f"   🧩 Состав формы «{название}»: {_cf['детали']}")
+            except Exception as _ecf:  # noqa: BLE001
+                print(f"   ⚠️ Перепись состава формы не удалась: {_ecf}")
 
             # Файл-проба (по галочке): грузим безвредный файл с опасным
             # расширением и отправляем - пройдёт ли серверную фильтрацию.
