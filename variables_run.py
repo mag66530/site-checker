@@ -107,7 +107,18 @@ def _fetch_one(dom, proxy_parts):
                 resp.read()
                 return '', f'HTTP {resp.status}'
             data = resp.read()
-            return data.decode('utf-8', 'replace'), ''
+            html = data.decode('utf-8', 'replace')
+            # Антибот/заглушка вместо страницы (частый ответ при частых запросах):
+            # либо совсем короткий ответ, либо явные маркеры проверки браузера.
+            # Помечаем ошибкой - тогда fetch_all повторит попытку свежим соединением.
+            low = html[:5000].lower()
+            _block = ('ddos-guard', 'challenge-platform', 'attention required',
+                      'checking your browser', 'проверяем ваш браузер',
+                      'проверка вашего браузера', 'запрос отправили вы, а не робот',
+                      'доступ ограничен', 'captcha-delivery')
+            if len(html) < 1500 or (len(html) < 25000 and any(m in low for m in _block)):
+                return '', 'похоже на антибот/капчу'
+            return html, ''
         finally:
             try:
                 if conn:
@@ -121,27 +132,48 @@ def _fetch_one(dom, proxy_parts):
         return '', (str(e)[:200] or e.__class__.__name__)
 
 
-def fetch_all(domains, proxy, log):
+def fetch_all(domains, proxy, log, retries=2):
     """Качает главные всех поддоменов параллельно (пул потоков), печатает
-    прогресс «[i/N]». → {domain: (html, ошибка)}."""
+    прогресс «[i/N]». Не загрузившиеся (500/таймаут/антибот) повторяет ещё
+    `retries` раз - только их, свежим соединением, помягче (успешные не трогает).
+    → {domain: (html, ошибка)}."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time
     parts = _proxy_parts(proxy)
     out: dict = {}
     N = len(domains)
-    done = 0
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        futs = {ex.submit(_fetch_one, d, parts): (d, row.city)
-                for d, row in domains}
-        for fut in as_completed(futs):
-            dom, city = futs[fut]
-            try:
-                html, err = fut.result()
-            except Exception as e:  # noqa: BLE001
-                html, err = '', str(e)[:200]
-            out[dom] = (html, err)
-            done += 1
-            log(f'  [{done}/{N}] {dom} ({city}): '
-                + (f'ошибка загрузки - {err}' if err else 'загружено'))
+
+    def _pass(items, workers, counting):
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(_fetch_one, d, parts): (d, row.city)
+                    for d, row in items}
+            for k, fut in enumerate(as_completed(futs), 1):
+                dom, city = futs[fut]
+                try:
+                    html, err = fut.result()
+                except Exception as e:  # noqa: BLE001
+                    html, err = '', str(e)[:200]
+                out[dom] = (html, err)
+                if counting:
+                    log(f'  [{k}/{N}] {dom} ({city}): '
+                        + (f'ошибка загрузки - {err}' if err else 'загружено'))
+                else:
+                    log(f'    повтор {dom} ({city}): '
+                        + (f'снова ошибка - {err}' if err else 'загружено ✓'))
+
+    _pass(domains, 6, counting=True)
+    # Повторяем только упавшие: сервер часто отдаёт 500 при частых параллельных
+    # запросах - на повторе меньшим пулом и с паузой большинство доходит.
+    for attempt in range(1, retries + 1):
+        failed = [(d, row) for d, row in domains if out.get(d, ('', ''))[1]]
+        if not failed:
+            break
+        log(f'↻ Повтор {attempt}/{retries}: заново пробуем {len(failed)} '
+            'не загрузившихся (успешные не трогаем)…')
+        time.sleep(4)
+        _pass(failed, 3, counting=False)
+    n_ok = sum(1 for v in out.values() if not v[1])
+    log(f'Итог загрузки: {n_ok} из {N} (после повторов).')
     return out
 
 
