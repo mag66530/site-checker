@@ -639,34 +639,34 @@ def check_variables(html: str, domain: str) -> dict:
         add("Адрес", row.address, "—", "warn",
             "адрес из КП не найден в шапке/подвале - проверьте вручную")
 
+    # Мессенджеры (Telegram / WhatsApp) проверяем по НАЛИЧИЮ канала, а НЕ по
+    # совпадению номера/аккаунта. На сайте это кнопки «Написать в Telegram» /
+    # «Чат в WhatsApp»: номер/аккаунт скрыт в ссылке и обычно ОБЩИЙ на всю сеть
+    # (у АПС Telegram везде один - aviapromstal_ekb, WhatsApp - номер менеджера).
+    # Сверять их по городам с КП = сплошной шум (десятки ложных «не из КП»).
     exp_tg = row.telegram_norm()
     site_tg = set(site.get("telegram", []))
-    if not exp_tg:
-        add("Telegram", "—", ", ".join(sorted(site_tg)[:3]), "na", "нет в КП")
-    elif exp_tg in site_tg:
-        add("Telegram", exp_tg, exp_tg, "ok")
-    elif site_tg:
-        # Мессенджер часто общий на всю сеть (не per-city) - это не жёсткая
-        # ошибка, а повод сверить вручную. warn (⚠), а не bug (✗).
-        add("Telegram", exp_tg, ", ".join(sorted(site_tg)[:3]), "warn",
-            "на сайте другой Telegram (обычно общий на сеть - проверьте вручную)")
+    if site_tg:
+        add("Telegram", ("@" + exp_tg) if exp_tg else "—",
+            "есть: " + ", ".join("@" + t for t in sorted(site_tg)[:2]), "ok",
+            "ссылка на Telegram на сайте есть (аккаунт обычно общий - не сверяем)")
+    elif exp_tg:
+        add("Telegram", "@" + exp_tg, "—", "warn",
+            "на сайте нет ссылки на Telegram (в КП аккаунт указан)")
     else:
-        add("Telegram", exp_tg, "—", "warn", "ссылка на Telegram не найдена")
+        add("Telegram", "—", "—", "na", "нет в КП и на сайте")
 
     exp_wa = row.whatsapp_norm()
     site_wa = set(site.get("whatsapp", []))
-    if not exp_wa:
-        add("WhatsApp", "—", ", ".join(_fmt(w) for w in sorted(site_wa)[:3]), "na", "нет в КП")
-    elif exp_wa in site_wa:
-        add("WhatsApp", _fmt(exp_wa), _fmt(exp_wa), "ok")
-    elif site_wa:
-        # WhatsApp почти всегда общий на всю сеть (один номер на все поддомены),
-        # а в КП он записан по-городам - сравнивать построчно = сплошной шум.
-        # warn (⚠, не в «Расхождениях»), а не bug (✗).
-        add("WhatsApp", _fmt(exp_wa), ", ".join(_fmt(w) for w in sorted(site_wa)[:3]),
-            "warn", "на сайте другой WhatsApp (обычно общий на сеть - проверьте вручную)")
+    if site_wa:
+        add("WhatsApp", _fmt(exp_wa) if exp_wa else "—",
+            "кнопка есть (" + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]) + ")", "ok",
+            "кнопка WhatsApp на сайте есть; номер скрыт в ссылке и обычно общий - не сверяем")
+    elif exp_wa:
+        add("WhatsApp", _fmt(exp_wa), "—", "warn",
+            "на сайте нет кнопки WhatsApp (в КП номер указан)")
     else:
-        add("WhatsApp", _fmt(exp_wa), "—", "warn", "ссылка на WhatsApp не найдена")
+        add("WhatsApp", "—", "—", "na", "нет в КП и на сайте")
 
     return out
 
