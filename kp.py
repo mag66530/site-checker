@@ -374,12 +374,23 @@ def extract_site_contacts(html: str) -> dict:
         r'(?:wa\.me/|api\.whatsapp\.com/send[^"\'\s]*?phone=|whatsapp://send\?phone=)'
         r'(\+?\d[\d\-()\s]{7,})', html, re.I)
     wa = [n for n in (normalize_phone(w) for w in wa_raw) if n]
+    # Рабочие chat-ссылки вотсапа (по ним кнопка «переходит в WhatsApp»).
+    wa_urls = re.findall(
+        r'href=["\']((?:https?:)?//(?:wa\.me|api\.whatsapp\.com|chat\.whatsapp\.com)'
+        r'[^"\']*)["\']', html, re.I)
+    # Кнопка вотсапа ВООБЩЕ есть? (ссылка на wa.me ИЛИ <a> с текстом про вотсап -
+    # тогда, если рабочей chat-ссылки нет, кнопка «битая»). Ищем по <a>-тегам.
+    wa_anchor_urls = re.findall(
+        r'<a\b[^>]*?href=["\']([^"\']+)["\'][^>]*>(?:(?!</a>).){0,200}?'
+        r'(?:whatsapp|вотсап|ватсап|вацап)', html, re.I | re.S)
     return {
         'phones': list(dict.fromkeys(phones)),
         'emails': list(dict.fromkeys(emails)),
         'address': addr,
         'telegram': list(dict.fromkeys(tg)),
         'whatsapp': list(dict.fromkeys(wa)),
+        'whatsapp_urls': list(dict.fromkeys(wa_urls)),
+        'whatsapp_anchor_urls': list(dict.fromkeys(wa_anchor_urls)),
         'full_text': text,
     }
 
@@ -689,17 +700,29 @@ def check_variables(html: str, domain: str) -> dict:
     else:
         add("Telegram", "—", "—", "na", "нет в КП и на сайте")
 
+    # WhatsApp (по просьбе заказчика):
+    #   • кнопки нет вовсе → прочерк (—), это не ошибка;
+    #   • кнопка есть и ссылка ведёт в WhatsApp (wa.me/api.whatsapp) → ✓;
+    #   • кнопка «Чат в WhatsApp» есть, но ссылка НЕ ведёт в WhatsApp (битая) →
+    #     ✗ «при переходе ошибка» (точный код 404 уточняет проверка в variables_run).
     exp_wa = row.whatsapp_norm()
     site_wa = set(site.get("whatsapp", []))
-    if site_wa:
-        add("WhatsApp", _fmt(exp_wa) if exp_wa else "—",
-            "кнопка есть (" + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]) + ")", "ok",
+    wa_links = site.get("whatsapp_urls", [])            # рабочие chat-ссылки
+    wa_anchor = site.get("whatsapp_anchor_urls", [])    # <a> с текстом «вотсап»
+    if wa_links or site_wa:
+        _найд = "кнопка WhatsApp есть"
+        if site_wa:
+            _найд += " (" + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]) + ")"
+        add("WhatsApp", _fmt(exp_wa) if exp_wa else "—", _найд, "ok",
             "кнопка WhatsApp на сайте есть; номер скрыт в ссылке и обычно общий - не сверяем")
-    elif exp_wa:
-        add("WhatsApp", _fmt(exp_wa), "—", "warn",
-            "на сайте нет кнопки WhatsApp (в КП номер указан)")
+    elif wa_anchor:
+        add("WhatsApp", _fmt(exp_wa) if exp_wa else "—",
+            "кнопка есть, но ссылка не ведёт в WhatsApp", "bug",
+            "кнопка «Чат в WhatsApp» есть, но при переходе ошибка "
+            "(ссылка не ведёт в WhatsApp)")
+        fields[-1]["check_url"] = wa_anchor[0]
     else:
-        add("WhatsApp", "—", "—", "na", "нет в КП и на сайте")
+        add("WhatsApp", "—", "—", "na", "кнопки WhatsApp на сайте нет")
 
     return out
 

@@ -148,6 +148,38 @@ def _fetch_one(dom, proxy_parts, ua=None):
         return '', (str(e)[:200] or e.__class__.__name__)
 
 
+def _проверить_ссылку(url, base_dom, proxy_parts):
+    """HTTP-код ссылки кнопки (для WhatsApp с битой ссылкой). Возвращает int-код,
+    'stub' для пустых ссылок (#/javascript/mailto/tel) или None, если не проверить.
+    Относительные ссылки раскрываем относительно домена страницы."""
+    from urllib.parse import urljoin, urlparse
+    import http.client
+    import ssl
+    u = (url or '').strip()
+    if not u or u.startswith('#') or u.lower().startswith(('javascript:', 'mailto:', 'tel:')):
+        return 'stub'
+    full = urljoin(f'https://{base_dom}/', u)
+    p = urlparse(full)
+    if not p.hostname:
+        return 'stub'
+    try:
+        if proxy_parts:
+            phost, pport, phdrs = proxy_parts
+            conn = http.client.HTTPSConnection(phost, pport, timeout=20,
+                                               context=ssl.create_default_context())
+            conn.set_tunnel(p.hostname, 443, headers=dict(phdrs))
+        else:
+            conn = http.client.HTTPSConnection(p.hostname, 443, timeout=20)
+        conn.request('GET', (p.path or '/') + (f'?{p.query}' if p.query else ''),
+                     headers={'User-Agent': _UA, 'Accept-Encoding': 'identity'})
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        return resp.status
+    except Exception:
+        return None
+
+
 def fetch_all(domains, proxy, log, retries=3):
     """Качает главные всех поддоменов параллельно (пул потоков), печатает
     прогресс «[i/N]». Не загрузившиеся (500/таймаут/антибот) повторяет ещё
@@ -317,10 +349,28 @@ def main() -> int:
     for dom, row in domains:
         html, err = html_map.get(dom, ("", "не загружено"))
         if err:
+            _le = err.lower()
+            if ('name or service not known' in _le or 'errno -2' in _le
+                    or 'getaddrinfo' in _le or 'nodename nor servname' in _le):
+                err = ('домен не существует (DNS не находит) - проверьте адрес '
+                       'в КП, обычно опечатка')
             результаты.append({"domain": dom, "city": row.city,
                                "country": row.country, "error": err, "fields": []})
             continue
         var = kpmod.check_variables(html, dom)
+        # WhatsApp: кнопка есть, но ссылка не ведёт в WhatsApp - проверяем ссылку
+        # вживую и уточняем код (404 и т.п.), чтобы в примечании был точный ответ.
+        for f in var.get("fields", []):
+            if f.get("field") == "WhatsApp" and f.get("check_url"):
+                код = _проверить_ссылку(f["check_url"], dom, _proxy_parts(proxy))
+                if код == 'stub':
+                    f["found"] = "ссылка-заглушка (#/пусто)"
+                    f["note"] = ("кнопка «Чат в WhatsApp» есть, но ссылка пустая "
+                                 "(#/javascript) - при переходе ничего не откроется")
+                elif isinstance(код, int) and код >= 400:
+                    f["found"] = f"при переходе ошибка {код}"
+                    f["note"] = (f"кнопка «Чат в WhatsApp» есть, но при переходе "
+                                 f"ошибка {код} (ссылка не ведёт в WhatsApp)")
         город, _страна = _регион_статусы(html, kpmod._norm_host(dom), ctx)
         var["fields"] = [город] + var["fields"]   # «Страна» убрана из отчёта
         var["error"] = ""
