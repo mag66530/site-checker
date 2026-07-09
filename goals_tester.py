@@ -262,7 +262,12 @@ ACTIONS = {
             # Товар кладём в корзину ДО «Корзины» (иначе поля купона нет).
             ('Товар',     'https://mepen.ru/catalog/tovar/telezhka-tip-b-gcl/',
              ['[onclick*="tovar_v_korzinu"], text=в корзину, text=В корзину',
-              'text=Нужна консультация', 'text=Нашли дешевле']),
+              # Submit-цели этих форм (otpravlennaya_forma_nuzhna_konsultaciya,
+              # otpravit_formu_nashli_deshevle) лежат в РАЗМЕТКЕ модалки, которая
+              # грузится AJAX-ом при открытии. Открываем чисто и до-собираем цель
+              # из DOM - БЕЗ отправки заявки (см. _открыть_модалку_и_собрать).
+              {'цель_модалка': 'text=Нужна консультация'},
+              {'цель_модалка': 'text=Нашли дешевле'}]),
             # Корзина (товар уже добавлен на стр. «Товар»): цель skidochnyy_kupon
             # висит на элементе, который появляется ТОЛЬКО с товаром в корзине и
             # срабатывает на ВВОД купона + «Применить», а не на голый клик по полю.
@@ -283,7 +288,12 @@ ACTIONS = {
             # (button type=submit, onclick reachGoal klik_avtorizovatsya). Форма
             # пустая - вход не произойдёт, но onclick срабатывает до отправки.
             ('Авторизация', 'https://mepen.ru/',
-             [{'цепочка': ['a.lk_link.personal_popups, a[href="/personal/auth.php"], '
+             [# klik_avtorizovatsya - onclick-литерал на кнопке «Авторизоваться»
+              # внутри модалки входа; в DOM появляется только когда модалка открыта.
+              # Чистый проход открывает модалку и до-собирает цель из разметки.
+              {'цель_модалка': 'a.lk_link.personal_popups, a[href="/personal/auth.php"], '
+                               '.top-header-right a:has(.fa-user)'},
+              {'цепочка': ['a.lk_link.personal_popups, a[href="/personal/auth.php"], '
                            'a[data-idform="auth"], .top-header-right a:has(.fa-user)',
                            {'dispatch': 'button[onclick*="klik_avtorizovatsya"], '
                                         '#auth_form button[type="submit"], '
@@ -416,7 +426,10 @@ def _план_мпэ_для_домена(домен: str) -> dict:
             # плюс «Нашли дешевле» (klik_nashli_deshevle) и «Нужна консультация».
             ('Товар',     d + '/catalog/tovar/telezhka-tip-b-gcl/',
              ['[onclick*="tovar_v_korzinu"], text=в корзину, text=В корзину',
-              'text=Нужна консультация', 'text=Нашли дешевле']),
+              # submit-цели форм лежат в разметке модалки (грузится AJAX-ом) -
+              # открываем чисто и до-собираем из DOM, без отправки заявки.
+              {'цель_модалка': 'text=Нужна консультация'},
+              {'цель_модалка': 'text=Нашли дешевле'}]),
             ('Корзина',   d + '/personal/basket/', [_корзина]),
             ('Авторизация', d + '/', [_auth]),
             ('Поиск',     d + '/search/?q=bolt', []),
@@ -675,6 +688,66 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
 
         текущий_url = {'u': ''}
 
+        def _добрать_цели_из_dom():
+            """Догоняет reachGoal-литералы из ЖИВОГО DOM - после кликов, которые
+            открыли модалку/подгрузили форму AJAX-ом. Часть целей отправки формы
+            (otpravlennaya_forma_*, otpravit_formu_*) и клик-целей модалок (напр.
+            klik_avtorizovatsya) есть в разметке ТОЛЬКО пока окно открыто; разовый
+            скан до кликов (_собрать_привязки) их не видит. Кладём в «привязки» -
+            классификатор пометит цель «в коде» БЕЗ реальной отправки заявки.
+            Регэксп гоняем в браузере и возвращаем только id (не тащим 200КБ HTML)."""
+            try:
+                ids = page.evaluate(
+                    r"() => { const re=/reachGoal\W{1,4}([\w\-.]+)/g,"
+                    r" h=document.documentElement.innerHTML, o=[]; let m;"
+                    r" while((m=re.exec(h))!==null) o.push(m[1]); return o; }")
+                привязки.update(i for i in (ids or []) if i)
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _открыть_модалку_и_собрать(trigger_sel):
+            """Чисто открывает модалку с формой (реальный клик по ПЕРВОМУ ВИДИМОМУ
+            триггеру), ждёт подгрузки её HTML и до-собирает reachGoal. Submit-цели
+            формы (otpravlennaya_forma_*, otpravit_formu_*) лежат в разметке модалки
+            ТОЛЬКО пока она открыта и грузятся AJAX-ом - разовый скан и dispatch_event
+            их не видят. Заявку НЕ отправляем: жмём только триггер и закрываем."""
+            try:
+                # Жёстко закрываем всё от ПРЕДЫДУЩЕЙ модалки: одиночный Escape не
+                # добивает попап МПЭ до конца, его оверлей перекрывает следующий
+                # триггер, и вторая модалка («Нашли дешевле») не открывается.
+                for _ in range(3):
+                    page.keyboard.press('Escape')
+                    page.wait_for_timeout(150)
+                loc = page.locator(trigger_sel)
+                el = None
+                for _j in range(min(loc.count(), 8)):
+                    cand = loc.nth(_j)
+                    try:
+                        if cand.is_visible():
+                            el = cand
+                            break
+                    except Exception:  # noqa: BLE001
+                        continue
+                if el is None:
+                    return
+                el.scroll_into_view_if_needed(timeout=1500)
+                try:
+                    el.click(timeout=2500)
+                except Exception:  # noqa: BLE001
+                    el.click(timeout=2500, force=True)
+                # Ждём, пока в DOM появятся НОВЫЕ reachGoal (форма модалки подгрузилась).
+                _было = len(привязки)
+                for _ in range(6):                       # до ~1.8с
+                    page.wait_for_timeout(300)
+                    _добрать_цели_из_dom()
+                    if len(привязки) > _было:
+                        break
+                for _ in range(2):                       # закрываем за собой
+                    page.keyboard.press('Escape')
+                    page.wait_for_timeout(120)
+            except Exception:  # noqa: BLE001
+                pass
+
         def _на_запрос(req):
             u = req.url
             if 'mc.yandex' in u or 'mc.webvisor' in u:
@@ -811,6 +884,15 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             есть_счётчик = counter in html if counter else False
             _собрать_привязки(html, url)
 
+            # Чистый проход по «модалкам с целью» - пока состояние страницы
+            # предсказуемо (до скролла и генерик-кликов). Открываем каждую
+            # настоящим кликом, до-собираем reachGoal её формы из DOM, закрываем.
+            # Так submit-цели форм (otpravlennaya_forma_*) ловятся статикой, без
+            # реальной отправки заявки. В общем цикле кликов эти пункты пропускаем.
+            for _op in клики:
+                if isinstance(_op, dict) and _op.get('цель_модалка'):
+                    _открыть_модалку_и_собрать(_op['цель_модалка'])
+
             # прокрутка вниз (ленивые блоки + подвал с соцсетями)
             try:
                 page.mouse.wheel(0, 20000)
@@ -868,11 +950,13 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                         _all_rg.nth(_i).dispatch_event('click')
                     except Exception:
                         continue
-                page.wait_for_timeout(700)   # даём beacon'ам уйти
-                page.keyboard.press('Escape')
-                page.wait_for_timeout(120)
+                if _idx:                     # ничего не диспатчили - нечего и ждать
+                    page.wait_for_timeout(700)   # даём beacon'ам уйти
+                    page.keyboard.press('Escape')
+                    page.wait_for_timeout(120)
             except Exception:
                 pass
+            _добрать_цели_из_dom()   # onclick-элементы могли подгрузить цели в DOM
 
             # подвал: соцсети/мессенджеры - dispatch_event (событие всплывает,
             # Метрика ловит внешнюю ссылку, но без новой вкладки и без ухода).
@@ -903,6 +987,8 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             for sel in клики:
                 if isinstance(sel, str) and sel.startswith('!'):
                     continue        # срочный - уже выполнен сразу после загрузки
+                if isinstance(sel, dict) and sel.get('цель_модалка'):
+                    continue        # обработано чистым проходом выше (модалка с целью)
                 # ЦЕПОЧКА: {'цепочка': [шаг1, шаг2, ...]} - действия ПОДРЯД без
                 # Escape между ними (модалка остаётся открытой). Шаг - селектор
                 # (клик) или {'ввод': селектор, 'текст': 'а'} (клик + ввод текста,
@@ -944,6 +1030,7 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                             except Exception:
                                 el.click(timeout=2500, force=True)
                             page.wait_for_timeout(900)
+                        _добрать_цели_из_dom()   # цепочка открыла модалку (напр. авторизация) - берём её цели
                         page.keyboard.press('Escape')
                         page.wait_for_timeout(200)
                         if page.url != url:
@@ -973,6 +1060,7 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                             el.click(timeout=2000, force=True)
                         # держим паузу для beacon корзины (tocart/addocart уходят ajax-ом)
                         page.wait_for_timeout(650)
+                        _добрать_цели_из_dom()   # клик мог открыть модалку/форму - берём её цели из DOM
                         # клик мог быть по ссылке-переходу (Каталог/Акции/Прайс в
                         # шапке): цель сработала, но нужно вернуться и кликать дальше.
                         if page.url != url:
