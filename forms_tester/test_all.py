@@ -247,6 +247,109 @@ def проверка_согласия_2_13(scope, page) -> dict:
     return res
 
 
+def _parse_accept_types(accept: str):
+    """accept-атрибут <input type=file> → (список типов, принимает_любые?).
+    Пустой accept или '*'/'*/*' = загрузчик берёт ЛЮБЫЕ файлы. Чистая
+    функция - тестируется без браузера."""
+    a = (accept or "").strip()
+    if not a or a in ("*", "*/*", "*.*"):
+        return [], True
+    parts = [p.strip() for p in a.split(",") if p.strip()]
+    if any(p in ("*", "*/*", "*.*") for p in parts):
+        return parts, True
+    return parts, bool(not parts)
+
+
+def проверка_полей_форм(scope, page) -> dict:
+    """Аудит полей формы БЕЗ отправки (доп. чек-лист):
+      • Маска телефона: ограничено ли поле цифрами/длиной. Смотрим атрибуты
+        (type=tel / pattern / maxlength / inputmode / JS-маска) И поведение -
+        вводим буквы и лишние цифры, проверяем, что осталось; корректное
+        значение восстанавливаем, отправку не трогаем.
+      • Загрузка файлов: находим <input type=file>, читаем accept и выводим
+        разрешённые типы (только вывод, без вердикта - тема безопасности:
+        через это поле грузили вредоносные файлы, важно видеть, что можно).
+    Возвращает {телефон_ограничен(bool|None), телефон_детали, файл_есть,
+    файл_типы, файл_любые}."""
+    res = {"телефон_ограничен": None, "телефон_детали": "поле телефона не найдено",
+           "файл_есть": False, "файл_типы": [], "файл_любые": False}
+
+    # ── Телефон ──
+    phone_sel = (
+        "input[type='tel'], input[name*='phone' i], input[name*='tel' i], "
+        "input[placeholder*='телефон' i], input[placeholder*='phone' i], "
+        "input[autocomplete='tel']")
+    try:
+        pl = scope.locator(phone_sel).first
+        if pl.count():
+            attrs = pl.evaluate(
+                "el => ({type:(el.type||'').toLowerCase(),"
+                " pattern: el.getAttribute('pattern'),"
+                " maxlength: el.maxLength,"
+                " inputmode:(el.getAttribute('inputmode')||'').toLowerCase(),"
+                " mask: el.getAttribute('data-mask')||el.getAttribute('data-phone-mask')"
+                "||el.getAttribute('data-tel')||'',"
+                " cls: el.className||''})")
+            детали = []
+            if attrs.get("type") == "tel":
+                детали.append("type=tel")
+            if attrs.get("pattern"):
+                детали.append("pattern")
+            _ml = attrs.get("maxlength")
+            if isinstance(_ml, int) and 0 < _ml <= 25:
+                детали.append(f"maxlength={_ml}")
+            if attrs.get("inputmode") in ("numeric", "tel"):
+                детали.append(f"inputmode={attrs['inputmode']}")
+            _has_mask = bool(attrs.get("mask")) or bool(
+                re.search(r"(mask|imask|inputmask|js-tel|js-phone)",
+                          attrs.get("cls", ""), re.I))
+            if _has_mask:
+                детали.append("JS-маска")
+            attr_ok = bool(детали)
+
+            # Поведенческая проба: буквы + много цифр → что останется в поле.
+            beh_ok = None
+            try:
+                saved = pl.input_value(timeout=1500)
+                pl.fill("", timeout=1500, force=True)
+                pl.type("ab1cd2345678901234567890", timeout=2500)
+                got = pl.input_value(timeout=1500) or ""
+                letters = sum(c.isalpha() for c in got)
+                beh_ok = (letters == 0 and len(got) <= 18)
+                pl.fill(saved, timeout=1500, force=True)   # вернуть телефон
+                if beh_ok and not attr_ok:
+                    детали.append("ввод фильтруется")
+            except Exception:  # noqa: BLE001
+                beh_ok = None
+
+            res["телефон_ограничен"] = bool(attr_ok or beh_ok)
+            res["телефон_детали"] = (
+                ", ".join(детали) if детали else
+                "нет ограничения (не tel, без pattern/maxlength/inputmode/"
+                "маски; ввод не фильтруется)")
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ── Загрузка файлов ──
+    try:
+        fi = scope.locator("input[type='file']")
+        n = fi.count()
+        if n:
+            res["файл_есть"] = True
+            типы, любые = set(), False
+            for i in range(min(n, 6)):
+                acc = fi.nth(i).get_attribute("accept") or ""
+                parts, unrestricted = _parse_accept_types(acc)
+                типы.update(parts)
+                if unrestricted:
+                    любые = True
+            res["файл_типы"] = sorted(типы)
+            res["файл_любые"] = любые or not типы
+    except Exception:  # noqa: BLE001
+        pass
+    return res
+
+
 def _извлечь_цели_из_запроса(url: str, body: str = "") -> list:
     """Имена целей Метрики из запроса reachGoal. Цель уходит на mc.yandex.* как
     page-url=goal://<домен>/<цель>. Это бывает и в URL (обычный GET), и в ТЕЛЕ
@@ -2563,6 +2666,33 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                       f"{'OK' if _ok213 else 'проверить'} - {_det213}")
             except Exception as _e213:  # noqa: BLE001
                 print(f"   ⚠️ Проверка согласия 2.13 не удалась: {_e213}")
+
+            # Аудит полей формы: маска телефона (баг, если нет ограничения) +
+            # типы файлов у загрузчика (только вывод). Отправку не трогает.
+            try:
+                _pf = проверка_полей_форм(form, page)
+                _phone_bug = _pf["телефон_ограничен"] is False
+                _bits = [f"телефон - {_pf['телефон_детали']}"]
+                if _pf["файл_есть"]:
+                    if _pf["файл_любые"]:
+                        _bits.append("загрузка файлов: принимает ЛЮБЫЕ типы "
+                                     "(accept не задан)")
+                    else:
+                        _bits.append("загрузка файлов принимает: "
+                                     + ", ".join(_pf["файл_типы"]))
+                else:
+                    _bits.append("поля загрузки файлов нет")
+                записать_в_excel({
+                    "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                    "тип_селектора": "поля", "ид": название,
+                    "название": f"Поля формы (маска телефона, типы файлов): {название}",
+                    "имя": имя_теста,
+                    "статус": "Ошибка" if _phone_bug else "OK",
+                    "комментарий_готовый": "; ".join(_bits), "код": "fields_audit",
+                })
+                print(f"   🧪 Поля формы «{название}»: {'; '.join(_bits)}")
+            except Exception as _epf:  # noqa: BLE001
+                print(f"   ⚠️ Аудит полей формы не удался: {_epf}")
 
             _ensure_modal_consent(form, page)  # надёжно: required + согласие по тексту подписи
             page.wait_for_timeout(300)
