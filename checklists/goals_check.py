@@ -238,6 +238,19 @@ if not _alive:
         st.error(f'Браузер не готов: {_bmsg}. Проверка целей работает локально '
                  f'или на своём сервере; в облаке нужен playwright + packages.txt.')
 
+# Прокси + проверка доступности сайта (над кнопкой запуска)
+try:
+    from site_access import render_proxy_access
+    _dom = ''
+    _vars = СТРАНЫ.get(_base, [])
+    if _vars and '·' in _vars[0][1]:
+        _dom = _vars[0][1].split('·')[-1].strip()
+    render_proxy_access(f'goals_{_base}',
+                        default_url=(f"https://{_dom}/" if _dom else ''),
+                        pid=_base)
+except Exception as _e_pa:
+    st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
+
 c1, c2 = st.columns([3, 1])
 with c1:
     if st.button('▶ Запустить проверку целей', use_container_width=True,

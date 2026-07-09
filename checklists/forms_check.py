@@ -959,6 +959,14 @@ if _forms_none:
 if _cities_none:
     st.warning('Не выбрано ни одного домена/города - отметь хотя бы один, чтобы запустить.')
 
+# Прокси + проверка доступности сайта (над кнопкой запуска)
+try:
+    from site_access import render_proxy_access
+    render_proxy_access(f'forms_{pid_key}',
+                        default_url=f"https://{proj['domain']}/", pid=pid_key)
+except Exception as _e_pa:
+    st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
+
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
     if st.button('▶ Запустить проверку', use_container_width=True,
