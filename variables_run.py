@@ -107,7 +107,18 @@ def _fetch_one(dom, proxy_parts):
                 resp.read()
                 return '', f'HTTP {resp.status}'
             data = resp.read()
-            return data.decode('utf-8', 'replace'), ''
+            html = data.decode('utf-8', 'replace')
+            # Антибот/заглушка вместо страницы (частый ответ при частых запросах):
+            # либо совсем короткий ответ, либо явные маркеры проверки браузера.
+            # Помечаем ошибкой - тогда fetch_all повторит попытку свежим соединением.
+            low = html[:5000].lower()
+            _block = ('ddos-guard', 'challenge-platform', 'attention required',
+                      'checking your browser', 'проверяем ваш браузер',
+                      'проверка вашего браузера', 'запрос отправили вы, а не робот',
+                      'доступ ограничен', 'captcha-delivery')
+            if len(html) < 1500 or (len(html) < 25000 and any(m in low for m in _block)):
+                return '', 'похоже на антибот/капчу'
+            return html, ''
         finally:
             try:
                 if conn:
@@ -121,27 +132,48 @@ def _fetch_one(dom, proxy_parts):
         return '', (str(e)[:200] or e.__class__.__name__)
 
 
-def fetch_all(domains, proxy, log):
+def fetch_all(domains, proxy, log, retries=2):
     """Качает главные всех поддоменов параллельно (пул потоков), печатает
-    прогресс «[i/N]». → {domain: (html, ошибка)}."""
+    прогресс «[i/N]». Не загрузившиеся (500/таймаут/антибот) повторяет ещё
+    `retries` раз - только их, свежим соединением, помягче (успешные не трогает).
+    → {domain: (html, ошибка)}."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time
     parts = _proxy_parts(proxy)
     out: dict = {}
     N = len(domains)
-    done = 0
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        futs = {ex.submit(_fetch_one, d, parts): (d, row.city)
-                for d, row in domains}
-        for fut in as_completed(futs):
-            dom, city = futs[fut]
-            try:
-                html, err = fut.result()
-            except Exception as e:  # noqa: BLE001
-                html, err = '', str(e)[:200]
-            out[dom] = (html, err)
-            done += 1
-            log(f'  [{done}/{N}] {dom} ({city}): '
-                + (f'ошибка загрузки - {err}' if err else 'загружено'))
+
+    def _pass(items, workers, counting):
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(_fetch_one, d, parts): (d, row.city)
+                    for d, row in items}
+            for k, fut in enumerate(as_completed(futs), 1):
+                dom, city = futs[fut]
+                try:
+                    html, err = fut.result()
+                except Exception as e:  # noqa: BLE001
+                    html, err = '', str(e)[:200]
+                out[dom] = (html, err)
+                if counting:
+                    log(f'  [{k}/{N}] {dom} ({city}): '
+                        + (f'ошибка загрузки - {err}' if err else 'загружено'))
+                else:
+                    log(f'    повтор {dom} ({city}): '
+                        + (f'снова ошибка - {err}' if err else 'загружено ✓'))
+
+    _pass(domains, 6, counting=True)
+    # Повторяем только упавшие: сервер часто отдаёт 500 при частых параллельных
+    # запросах - на повторе меньшим пулом и с паузой большинство доходит.
+    for attempt in range(1, retries + 1):
+        failed = [(d, row) for d, row in domains if out.get(d, ('', ''))[1]]
+        if not failed:
+            break
+        log(f'↻ Повтор {attempt}/{retries}: заново пробуем {len(failed)} '
+            'не загрузившихся (успешные не трогаем)…')
+        time.sleep(4)
+        _pass(failed, 3, counting=False)
+    n_ok = sum(1 for v in out.values() if not v[1])
+    log(f'Итог загрузки: {n_ok} из {N} (после повторов).')
     return out
 
 
@@ -197,10 +229,29 @@ def main() -> int:
                if not wanted or (row.city or '').lower() in wanted]
     domains.sort(key=lambda x: x[1].city or x[0])
 
+    # Прокси используем ТОЛЬКО для проектов с use_proxy=true (напр. ИМП, который
+    # блокирует зарубежный IP). СМУ/МПЭ (use_proxy=false) качаем напрямую - им
+    # прокси не нужен, а сломанный proxy_url иначе давал бы им ложный 407.
     proxy = (os.environ.get('proxy_url') or '').strip() or None
-    if _use_proxy(a.project) and not proxy:
-        _stamp('⚠️ У проекта use_proxy=true, а proxy_url не задан - '
-               'зарубежный IP может блокироваться (будут ошибки загрузки).')
+    if _use_proxy(a.project):
+        if not proxy:
+            _stamp('⚠️ У проекта use_proxy=true, а proxy_url не задан - '
+                   'зарубежный IP может блокироваться (будут ошибки загрузки).')
+    else:
+        if proxy:
+            _stamp(f'Проект {a.project}: use_proxy=false - страницы качаем '
+                   'напрямую, без прокси.')
+        proxy = None
+    # Диагностика прокси (без вывода самих логина/пароля).
+    _pp = _proxy_parts(proxy)
+    if _pp:
+        _ph, _pport, _phdrs = _pp
+        _stamp(f'Прокси: {_ph}:{_pport}; авторизация в proxy_url: '
+               + ('есть' if _phdrs.get('Proxy-Authorization')
+                  else 'НЕТ - в ссылке нет логина:пароля (будет 407)'))
+    elif proxy:
+        _stamp('⚠️ proxy_url задан, но не разобрался '
+               '(ожидается http://логин:пароль@хост:порт).')
 
     ctx = build_region_context(
         kp, [SimpleNamespace(host=d, city=row.city, country=row.country)
@@ -210,6 +261,11 @@ def main() -> int:
            f'поддоменов: {len(domains)}')
 
     html_map = fetch_all(domains, proxy, _stamp)
+    _n407 = sum(1 for h, e in html_map.values() if '407' in (e or ''))
+    if _n407 and _n407 == len(html_map):
+        _stamp('⚠️ ВСЕ страницы вернули 407 Proxy Authentication Required - '
+               'прокси отклонил авторизацию. Проверь логин:пароль в секрете '
+               'proxy_url (формат http://логин:пароль@хост:порт).')
     _stamp('Загрузка завершена, сверяю с КП …')
     результаты = []
     for dom, row in domains:
@@ -251,6 +307,12 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
         cell.alignment = Alignment(horizontal="center")
     ws.freeze_panes = "B2"
 
+    from openpyxl.comments import Comment
+    # Заливка только у проблемных ячеек, чтобы зелёные ✓ оставались чистыми
+    # (без «тревожного» красного уголка-примечания на каждой ячейке).
+    BUG_FILL = PatternFill("solid", fgColor="FDE3E3")   # мягкий красный
+    WARN_FILL = PatternFill("solid", fgColor="FFF2DA")  # мягкий оранжевый
+
     расхождения = []
     r = 2
     for res in результаты:
@@ -268,16 +330,20 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
             if not f:
                 ws.cell(r, c, "—")
                 continue
-            cell = ws.cell(r, c, _SYMBOL.get(f["status"], "?"))
-            cell.font = Font(color=_COLOR.get(f["status"], "000000"), bold=True)
+            status = f["status"]
+            cell = ws.cell(r, c, _SYMBOL.get(status, "?"))
+            cell.font = Font(color=_COLOR.get(status, "000000"), bold=True)
             cell.alignment = Alignment(horizontal="center")
-            # детали в примечание ячейки
-            from openpyxl.comments import Comment
-            подпись = f"ожидалось: {f['expected']}\nна сайте: {f['found']}"
-            if f.get("note"):
-                подпись += f"\n{f['note']}"
-            cell.comment = Comment(подпись, "1.4")
-            if f["status"] == "bug":
+            # Примечание + заливку вешаем ТОЛЬКО на проблемные ячейки (✗ и ⚠) -
+            # тогда зелёные ✓ чистые, а красные сразу видно (красная заливка +
+            # уголок-примечание с деталями). Просьба заказчика.
+            if status in ("bug", "warn"):
+                подпись = f"ожидалось: {f['expected']}\nна сайте: {f['found']}"
+                if f.get("note"):
+                    подпись += f"\n{f['note']}"
+                cell.comment = Comment(подпись, "1.4")
+                cell.fill = BUG_FILL if status == "bug" else WARN_FILL
+            if status == "bug":
                 расхождения.append((res["domain"], res.get("city", ""), name,
                                     f["expected"], f["found"], f.get("note", "")))
         r += 1

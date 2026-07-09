@@ -818,8 +818,20 @@ st.markdown(
     /* Пресеты как карточки (radio с подписями): клик = выбор, выбранная -
        рамка подсвечивается; равные, по центру, без кружка и кнопки «Выбрать». */
     .st-key-c30_preset div[role="radiogroup"] { gap: 12px !important; align-items: stretch !important; }
-    /* прячем кружок радио - карточка кликается целиком, заголовок по центру */
-    .st-key-c30_preset div[role="radiogroup"] > label > div:first-child { display: none !important; }
+    /* прячем кружок радио - карточка кликается целиком, заголовок по центру.
+       В разных версиях Streamlit кружок - это либо первый div, либо сам input;
+       гасим оба варианта, чтобы заголовок точно встал по центру карточки. */
+    .st-key-c30_preset div[role="radiogroup"] > label > div:first-child,
+    .st-key-c30_preset div[role="radiogroup"] > label input[type="radio"],
+    .st-key-c30_preset div[role="radiogroup"] > label [data-testid="stRadioButton"] > div:first-child {
+        display: none !important;
+    }
+    /* заголовок + подпись строго по центру карточки (перебиваем строчную раскладку) */
+    .st-key-c30_preset div[role="radiogroup"] > label,
+    .st-key-c30_preset div[role="radiogroup"] > label > div {
+        flex-direction: column !important; align-items: center !important;
+        text-align: center !important; width: 100% !important;
+    }
     .st-key-c30_preset div[role="radiogroup"] > label {
         flex: 1 1 0 !important; min-height: 90px;
         flex-direction: column !important; align-items: center !important;
