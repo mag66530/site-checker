@@ -118,9 +118,18 @@ def service_account_info() -> dict | None:
     return None
 
 
+_GOOGLE_SHEET_MIME = 'application/vnd.google-apps.spreadsheet'
+
+
 def _download_xlsx_private(file_id: str, sa_info: dict) -> bytes:
-    """Скачивает Google-таблицу как xlsx через Drive API от имени сервисного
-    аккаунта (таблица должна быть расшарена на его client_email - Читатель)."""
+    """Скачивает КП-таблицу проекта как xlsx через Drive API от имени сервисного
+    аккаунта (файл должен быть расшарен на его client_email - Читатель).
+
+    Два случая по типу файла:
+      • НАТИВНАЯ Google-таблица - экспортируем в xlsx (files/export);
+      • ЗАГРУЖЕННЫЙ .xlsx (Office-режим) - качаем как есть (files?alt=media).
+        Для него export не работает: Drive отвечает 403 «Export only supports
+        Docs Editors files». Тип определяем заранее по mimeType."""
     from google.oauth2 import service_account
     from google.auth.transport.requests import Request as _GARequest
     import requests
@@ -128,14 +137,30 @@ def _download_xlsx_private(file_id: str, sa_info: dict) -> bytes:
     creds = service_account.Credentials.from_service_account_info(
         sa_info, scopes=['https://www.googleapis.com/auth/drive.readonly'])
     creds.refresh(_GARequest())
-    r = requests.get(
-        f'https://www.googleapis.com/drive/v3/files/{file_id}/export',
-        params={'mimeType': _XLSX_MIME},
-        headers={'Authorization': f'Bearer {creds.token}'}, timeout=90)
+    headers = {'Authorization': f'Bearer {creds.token}'}
+    base = f'https://www.googleapis.com/drive/v3/files/{file_id}'
+
+    meta = requests.get(base, params={'fields': 'mimeType,name',
+                                      'supportsAllDrives': 'true'},
+                        headers=headers, timeout=30)
+    if meta.status_code != 200:
+        raise RuntimeError(
+            f'Drive API вернул HTTP {meta.status_code}: {meta.text[:160]} '
+            '(расшарена ли таблица на сервисный аккаунт? включён ли Drive API?)')
+    mime = (meta.json() or {}).get('mimeType', '')
+
+    if mime == _GOOGLE_SHEET_MIME:
+        r = requests.get(base + '/export', params={'mimeType': _XLSX_MIME},
+                         headers=headers, timeout=90)
+    else:
+        # загруженный файл (xlsx и т.п.) - прямое скачивание, без экспорта
+        r = requests.get(base, params={'alt': 'media',
+                                       'supportsAllDrives': 'true'},
+                         headers=headers, timeout=90)
     if r.status_code != 200:
         raise RuntimeError(
             f'Drive API вернул HTTP {r.status_code}: {r.text[:160]} '
-            '(расшарена ли таблица на сервисный аккаунт? включён ли Drive API?)')
+            f'(тип файла: {mime or "неизвестен"})')
     return r.content
 
 
