@@ -154,7 +154,9 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
             with st.spinner("Проверяю доступ…"):
                 d_ip, d_ms, d_err = outbound_ip(None)
                 a_ip, a_ms, a_err = outbound_ip(effective)
-                site = probe_site(url.strip(), None) if url.strip() else None
+                _u = url.strip()
+                site = probe_site(_u, None) if _u else None
+                site_px = probe_site(_u, effective) if (_u and effective) else None
 
             # 1. IP напрямую
             st.markdown("**Outbound IP (без прокси, прямое подключение):** "
@@ -164,23 +166,39 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
             st.markdown("**Outbound IP (с текущими настройками приложения):** "
                         + (f"`{a_ip}` · {_pm} · {a_ms} мс" if a_ip
                            else f"— ({_pm}) {a_err}"))
-            # 3. Прямой запрос к сайту (всегда без прокси - проверяем блокировку)
-            if not site:
-                st.caption("URL не задан - запрос к сайту пропущен.")
-            elif site["error"]:
-                st.error(f"❌ Запрос к {url} (НАПРЯМУЮ, без прокси): "
-                         f"{site['error']} · {site['ms']} мс")
-            else:
-                _line = (f"Запрос к {url} (НАПРЯМУЮ, без прокси): "
-                         f"HTTP {site['status']} · {site['ms']} мс · "
-                         f"{site['size']} байт · Server: "
-                         f"{site['server'] or '—'}")
-                if site["status"] == 200:
+
+            def _показать(site_res, подпись):
+                if site_res["error"]:
+                    st.error(f"❌ Запрос к {url} ({подпись}): "
+                             f"{site_res['error']} · {site_res['ms']} мс")
+                    return
+                _line = (f"Запрос к {url} ({подпись}): "
+                         f"HTTP {site_res['status']} · {site_res['ms']} мс · "
+                         f"{site_res['size']} байт · Server: "
+                         f"{site_res['server'] or '—'}")
+                if site_res["status"] == 200:
                     st.success("✅ " + _line)
-                elif 400 <= (site["status"] or 0) < 600:
+                elif 400 <= (site_res["status"] or 0) < 600:
                     st.warning("⚠️ " + _line + "  — возможно блокировка по "
                                "IP/региону, нужен прокси")
                 else:
                     st.info(_line)
+
+            # 3. Прямой запрос (всегда без прокси - проверяем блокировку)
+            if not site:
+                st.caption("URL не задан - запрос к сайту пропущен.")
+            else:
+                _показать(site, "НАПРЯМУЮ, без прокси")
+            # 4. Запрос через прокси (если прокси включён и задан)
+            if site_px is not None:
+                _показать(site_px, "ЧЕРЕЗ ПРОКСИ")
+                # подсказка: помог ли прокси обойти блокировку
+                if (site and site.get("status") and site["status"] != 200
+                        and site_px.get("status") == 200):
+                    st.caption("→ прокси обходит блокировку (напрямую "
+                               f"{site['status']}, через прокси 200)")
+            elif effective is None and site:
+                st.caption("Прокси выключен - строка «через прокси» пропущена. "
+                           "Включи «Вкл. Прокси» и задай прокси, чтобы сравнить.")
 
     return effective
