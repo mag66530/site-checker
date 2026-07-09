@@ -38,6 +38,32 @@ PROJECT_NAMES = {
     'avia': 'АПС - Авиапромсталь',
 }
 
+
+def _имена_заказов(src_config: Path) -> list[str]:
+    """Названия сценариев/форм/шагов из блоков «тип: Оформление*» конфига проекта -
+    это и есть сквозной заказ (корзина → оформление). Нужны, чтобы «Проверка целей»
+    прогоняла ТОЛЬКО заказ (через ТОЛЬКО_ФОРМЫ), а не все формы. Конфиг импортируем
+    напрямую - в нём только словари/константы, движок не тянется."""
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location('cfg_orders', src_config)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+    except Exception:
+        return []
+    имена: set[str] = set()
+    for блок in getattr(m, 'СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ', []) or []:
+        if not str(блок.get('тип', '')).startswith('Оформление'):
+            continue
+        for ключ in ('формы', 'модалки', 'сценарии'):
+            for it in блок.get(ключ, []) or []:
+                if it.get('название'):
+                    имена.add(str(it['название']).strip())
+                for шаг in it.get('шаги', []) or []:
+                    if шаг.get('название'):
+                        имена.add(str(шаг['название']).strip())
+    return sorted(имена)
+
 # Проекты-варианты со своим config.py, но БЕЗ своего cities.csv - берут
 # справочник городов у «родителя». Так «МПЭ - Корзина» гоняет те же города,
 # что и Мепэн, без дублирования файла на 160 строк.
@@ -101,6 +127,9 @@ def main() -> int:
                          'Пусто = проверять все формы проекта.')
     ap.add_argument('--no-admin', action='store_true',
                     help='Не проверять админку (Уровень 1) после прогона.')
+    ap.add_argument('--only-orders', action='store_true',
+                    help='Прогнать ТОЛЬКО сквозной заказ (блоки «Оформление») - '
+                         'для подтверждения заказ-целей из «Проверки целей».')
     a = ap.parse_args()
 
     name = PROJECT_NAMES[a.project]
@@ -139,6 +168,15 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             _stamp(f'⚠️ Не удалось прочитать список форм ({a.forms_file}): {e}')
             forms_filter = []
+    # Только заказ (для «Проверки целей»): фильтр = имена сценариев оформления.
+    if a.only_orders and not forms_filter:
+        forms_filter = _имена_заказов(src_config)
+        if forms_filter:
+            _stamp(f'Режим «только заказ»: прогоняю сценарий оформления '
+                   f'({len(forms_filter)} шаг(ов)).')
+        else:
+            _stamp('⚠️ Режим «только заказ»: в конфиге нет блока «Оформление» - '
+                   'прогоняю все формы.')
     if forms_filter:
         base_config = base_config.rstrip() + '\n\nТОЛЬКО_ФОРМЫ = ' + repr(list(forms_filter)) + '\n'
         _stamp(f'Выбрано форм: {len(forms_filter)} (остальные пропускаем).')
