@@ -522,6 +522,18 @@ def _fmt(norm10: str) -> str:
 # ── Пункт 1.4: сверка «главных переменных» поддомена с КП (для вкладки) ──
 
 
+def _addr_on_page(text: str, kp_addr: str) -> str:
+    """Короткий фрагмент адреса со страницы - вокруг названия улицы из КП (для
+    наглядного «на сайте: …»). '' если не нашли."""
+    words = sorted((w for w in re.findall(r'[А-Яа-яЁё]{5,}', kp_addr or '')
+                    if w.lower() not in _STREET_WORDS), key=len, reverse=True)
+    for w in words:
+        m = re.search(r'.{0,25}' + re.escape(w) + r'.{0,25}', text)
+        if m:
+            return re.sub(r'\s+', ' ', m.group(0)).strip()
+    return ''
+
+
 def check_variables(html: str, domain: str) -> dict:
     """Сверяет контактные переменные главной страницы поддомена с КП: телефоны
     (поиск/реклама/общий - по правилу «номер на сайте входит в набор КП города»),
@@ -576,14 +588,18 @@ def check_variables(html: str, domain: str) -> dict:
     else:
         add("Почта", exp_mail, "—", "warn", "почта на сайте не найдена")
 
+    # Адрес сверяем по ВСЕМУ тексту шапки+подвала (там на сайтах СМУ и лежит
+    # адрес города). Точечный сниппет ловил не то место (напр. «Город: … изменить»)
+    # и давал ложное «адрес не найден» - хотя адрес есть в подвале.
+    haystack = site.get("full_text") or site.get("address") or ""
     if not row.address:
-        add("Адрес", "—", site.get("address", ""), "na", "нет в КП")
-    elif address_match(site.get("address", ""), row.address):
-        add("Адрес", row.address, site.get("address") or "—", "ok")
-    elif site.get("address"):
-        add("Адрес", row.address, site["address"], "bug", "адрес не совпадает с КП")
+        add("Адрес", "—", "", "na", "нет в КП")
+    elif address_match(haystack, row.address):
+        add("Адрес", row.address,
+            _addr_on_page(haystack, row.address) or "совпадает с КП", "ok")
     else:
-        add("Адрес", row.address, "—", "warn", "адрес на сайте не найден")
+        add("Адрес", row.address, "—", "warn",
+            "адрес из КП не найден в шапке/подвале - проверьте вручную")
 
     exp_tg = row.telegram_norm()
     site_tg = set(site.get("telegram", []))
