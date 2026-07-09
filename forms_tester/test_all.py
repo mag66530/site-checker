@@ -190,8 +190,31 @@ def проверка_согласия_2_13(scope, page) -> dict:
     по атрибуту required и браузерной проверке формы checkValidity().
     Возвращает {чекбоксов, предустановлены, ссылка, валидация}."""
     res = {"чекбоксов": 0, "предустановлены": False, "ссылка": False, "валидация": False}
+    # Зона поиска галочек: часто чекбоксы согласия лежат ВНЕ <form> - в теле
+    # модалки/попапа (у МПЭ так почти везде). Если в самой форме видимых галочек
+    # нет, расширяем поиск до ближайшего контейнера модалки - иначе визуально
+    # видимые 2 галочки давали «0». Валидность (checkValidity) считаем по ФОРМЕ.
+    контейнер = scope
     try:
-        cb = scope.locator("input[type='checkbox']")
+        _в_форме = 0
+        _cbf = scope.locator("input[type='checkbox']")
+        for i in range(min(_cbf.count(), 12)):
+            try:
+                if _cbf.nth(i).is_visible():
+                    _в_форме += 1
+            except Exception:  # noqa: BLE001
+                continue
+        if not _в_форме:
+            anc = scope.locator(
+                "xpath=ancestor::*[contains(@class,'modal') or contains(@class,'popup') "
+                "or contains(@class,'fancybox') or contains(@class,'my-modal') "
+                "or @role='dialog'][1]")
+            if anc.count():
+                контейнер = anc.first
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        cb = контейнер.locator("input[type='checkbox']")
         видимых = 0
         for i in range(min(cb.count(), 12)):
             el = cb.nth(i)
@@ -215,10 +238,10 @@ def проверка_согласия_2_13(scope, page) -> dict:
         res["чекбоксов"] = видимых
     except Exception:  # noqa: BLE001
         pass
-    # Ссылка на политику среди ссылок формы.
+    # Ссылка на политику среди ссылок формы/модалки.
     try:
-        links = scope.locator("a")
-        for j in range(min(links.count(), 15)):
+        links = контейнер.locator("a")
+        for j in range(min(links.count(), 20)):
             a = links.nth(j)
             if ссылка_ведёт_на_политику(a.get_attribute("href") or "",
                                         a.inner_text(timeout=400) or ""):

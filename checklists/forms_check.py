@@ -1099,6 +1099,11 @@ if _alive and _this and not _done_by_log:
         _done = _xl
     _total = st.session_state.get('forms_expected_total') \
         or _count_expected(_sel) * st.session_state.get('forms_cities_n', 1)
+    # Оценка приблизительная (кроме форм в прогон попадают проверки 2.13/2.12,
+    # поля, оформление) - реальный счётчик может её превысить. Не показываем
+    # «47 из ~40»: подтягиваем «всего» минимум до фактически проверенного.
+    if _total and _done > _total:
+        _total = _done
 
     if _total:
         st.progress(min(_done / max(_total, 1), 0.99),
