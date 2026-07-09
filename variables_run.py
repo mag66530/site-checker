@@ -197,10 +197,19 @@ def main() -> int:
                if not wanted or (row.city or '').lower() in wanted]
     domains.sort(key=lambda x: x[1].city or x[0])
 
+    # Прокси используем ТОЛЬКО для проектов с use_proxy=true (напр. ИМП, который
+    # блокирует зарубежный IP). СМУ/МПЭ (use_proxy=false) качаем напрямую - им
+    # прокси не нужен, а сломанный proxy_url иначе давал бы им ложный 407.
     proxy = (os.environ.get('proxy_url') or '').strip() or None
-    if _use_proxy(a.project) and not proxy:
-        _stamp('⚠️ У проекта use_proxy=true, а proxy_url не задан - '
-               'зарубежный IP может блокироваться (будут ошибки загрузки).')
+    if _use_proxy(a.project):
+        if not proxy:
+            _stamp('⚠️ У проекта use_proxy=true, а proxy_url не задан - '
+                   'зарубежный IP может блокироваться (будут ошибки загрузки).')
+    else:
+        if proxy:
+            _stamp(f'Проект {a.project}: use_proxy=false - страницы качаем '
+                   'напрямую, без прокси.')
+        proxy = None
     # Диагностика прокси (без вывода самих логина/пароля).
     _pp = _proxy_parts(proxy)
     if _pp:
