@@ -275,6 +275,12 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
         cell.alignment = Alignment(horizontal="center")
     ws.freeze_panes = "B2"
 
+    from openpyxl.comments import Comment
+    # Заливка только у проблемных ячеек, чтобы зелёные ✓ оставались чистыми
+    # (без «тревожного» красного уголка-примечания на каждой ячейке).
+    BUG_FILL = PatternFill("solid", fgColor="FDE3E3")   # мягкий красный
+    WARN_FILL = PatternFill("solid", fgColor="FFF2DA")  # мягкий оранжевый
+
     расхождения = []
     r = 2
     for res in результаты:
@@ -292,16 +298,20 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
             if not f:
                 ws.cell(r, c, "—")
                 continue
-            cell = ws.cell(r, c, _SYMBOL.get(f["status"], "?"))
-            cell.font = Font(color=_COLOR.get(f["status"], "000000"), bold=True)
+            status = f["status"]
+            cell = ws.cell(r, c, _SYMBOL.get(status, "?"))
+            cell.font = Font(color=_COLOR.get(status, "000000"), bold=True)
             cell.alignment = Alignment(horizontal="center")
-            # детали в примечание ячейки
-            from openpyxl.comments import Comment
-            подпись = f"ожидалось: {f['expected']}\nна сайте: {f['found']}"
-            if f.get("note"):
-                подпись += f"\n{f['note']}"
-            cell.comment = Comment(подпись, "1.4")
-            if f["status"] == "bug":
+            # Примечание + заливку вешаем ТОЛЬКО на проблемные ячейки (✗ и ⚠) -
+            # тогда зелёные ✓ чистые, а красные сразу видно (красная заливка +
+            # уголок-примечание с деталями). Просьба заказчика.
+            if status in ("bug", "warn"):
+                подпись = f"ожидалось: {f['expected']}\nна сайте: {f['found']}"
+                if f.get("note"):
+                    подпись += f"\n{f['note']}"
+                cell.comment = Comment(подпись, "1.4")
+                cell.fill = BUG_FILL if status == "bug" else WARN_FILL
+            if status == "bug":
                 расхождения.append((res["domain"], res.get("city", ""), name,
                                     f["expected"], f["found"], f.get("note", "")))
         r += 1
