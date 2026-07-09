@@ -920,6 +920,16 @@ st.session_state.setdefault(f'fc_clear_{pid_key}', True)
 st.session_state.setdefault(f'fc_show_{pid_key}', False)
 clear_log = st.checkbox('Очищать лог Excel перед прогоном', key=f'fc_clear_{pid_key}')
 show_browser = st.checkbox('Показывать окно браузера', key=f'fc_show_{pid_key}')
+st.session_state.setdefault(f'fc_fileprobe_{pid_key}', False)
+file_probe = st.checkbox('Проба серверной фильтрации загрузки файлов',
+                         key=f'fc_fileprobe_{pid_key}')
+st.caption('Только для форм с полем загрузки файлов. По очереди грузит '
+           'БЕЗВРЕДНЫЙ файл 31 типа (13 опасных: .php/.svg/.exe/.js/.bat/.sh/'
+           '.py/.jar/.dll/.msi/.html/.htm/.phtml, 18 обычных: pdf/docx/xlsx/'
+           'zip/jpg/png…) и отправляет форму - проверяет, что примет сервер. '
+           '«Ошибка» = сервер принял ОПАСНЫЙ тип (фильтрации нет). ВНИМАНИЕ: '
+           'каждый принятый тип = отдельная тест-заявка в админке боевого '
+           'сайта.')
 st.caption('По умолчанию браузер работает скрыто (headless) - окно не '
            'показывается, отчёт всё равно формируется. Включи галочку выше, '
            'если хочешь видеть, как он заполняет формы.')
@@ -975,6 +985,8 @@ with _run_col:
                 args.append('--show-browser')
             if _project_has_admin(pid_key) and not _admin_on:
                 args.append('--no-admin')      # админку явно отключили галочкой
+            if file_probe:
+                args.append('--file-probe')    # проба фильтрации загрузки файлов
             if _chosen_cities:
                 args += ['--cities', ','.join(_chosen_cities)]
             # Фильтр форм: передаём только если выбрано подмножество (не все).

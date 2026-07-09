@@ -2,8 +2,9 @@
 
 
 def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
-             город="", почта_получателя=""):
+             город="", почта_получателя="", проба_файлов=False):
     from test_all import run_test as _run_test
 
     return _run_test(ОЧИСТИТЬ_EXCEL=ОЧИСТИТЬ_EXCEL, stop_flag=stop_flag, headless=headless,
-                     город=город, почта_получателя=почта_получателя)
+                     город=город, почта_получателя=почта_получателя,
+                     проба_файлов=проба_файлов)
