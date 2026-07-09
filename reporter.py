@@ -2165,9 +2165,11 @@ def _build_markup_sheet(wb, results):
                'CollectionPage), на товаре - Product, характеристики '
                '(PropertyValue), фото (itemprop=image). Основной формат - '
                'microdata: тип только в JSON-LD = предупреждение. Цена не '
-               'размечена = предупреждение (товары «по запросу»). Валидность '
-               'полей проверяют инструменты Яндекса/Google - тут наличие и '
-               'полнота.')
+               'размечена = предупреждение (товары «по запросу»). Плюс '
+               'проверка обязательных полей в объекте: Product без '
+               'offers/name/image, Offer без цены/валюты, крошки без '
+               'элементов = баг; желательные (логотип, описание) = '
+               'предупреждение.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 68

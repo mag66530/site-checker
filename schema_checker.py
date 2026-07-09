@@ -18,11 +18,20 @@ JSON-LD - допустим, но «по обстоятельствам»: тип
     отсутствие - ПРЕДУПРЕЖДЕНИЕ (товары «по запросу» без цены)  [3.5.2.6]
   • Характеристики - PropertyValue на товаре                   [3.5.2.7]
 
-Валидаторы Яндекса/Google из ТЗ - ручные инструменты; здесь проверяется
-наличие и полнота разметки, не валидность каждого поля.
+Плюс валидация ОБЯЗАТЕЛЬНЫХ ПОЛЕЙ по каждому типу (_validate_fields):
+разбираем дерево microdata (свой парсер на stdlib) и JSON-LD-объекты и
+проверяем поля внутри объекта - Product без name/offers/image, Offer без
+price/priceCurrency, BreadcrumbList без itemListElement и т.п. Нет
+критичного поля = баг, нет желательного = предупреждение. Это то, что
+раньше показывали только внешние валидаторы.
+
+Внешние валидаторы Яндекса/Google из ТЗ (validator.schema.org и пр.) -
+ручные, у них нет пригодного API; полную «как поисковик» проверку каждого
+значения они дают, здесь - наличие типов, обязательных полей и формат.
 """
 import json
 import re
+from html.parser import HTMLParser
 from typing import Optional
 
 _RE_OG = re.compile(
@@ -68,6 +77,200 @@ def _jsonld_types(html: str) -> set:
             elif isinstance(x, list):
                 stack.extend(x)
     return types
+
+
+# ── Разбор объектов разметки (для проверки обязательных полей) ───────
+# Без внешних зависимостей: microdata - свой парсер на stdlib html.parser
+# (строит дерево itemscope/itemprop), JSON-LD - через json. Нужно, чтобы
+# проверять НАЛИЧИЕ ПОЛЕЙ внутри конкретного объекта (Product.offers.price
+# и т.п.), а не просто «где-то на странице есть itemprop=price».
+
+_VOID = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+         'meta', 'param', 'source', 'track', 'wbr'}
+
+
+def _type_seg(itemtype: str) -> str:
+    """Последний сегмент itemtype: https://schema.org/Product → Product."""
+    seg = (itemtype or '').strip().split()[0] if itemtype else ''
+    return re.sub(r'.*/', '', seg)
+
+
+class _MicrodataParser(HTMLParser):
+    """Строит дерево microdata-объектов: [{'type', 'props'}], где props -
+    {имя: [значения|вложенные объекты]}."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.roots = []
+        self._stack = []          # [{'item', 'depth'}]
+        self._depth = 0
+        self._txt = None          # (item, prop, depth) - захват текста
+        self._buf = []
+
+    def _open(self, tag, attrs, void):
+        a = dict(attrs)
+        itemprop = a.get('itemprop')
+        if 'itemscope' in a:
+            item = {'type': _type_seg(a.get('itemtype')), 'props': {}}
+            if self._stack and itemprop:
+                self._stack[-1]['item']['props'].setdefault(
+                    itemprop, []).append(item)
+            else:
+                self.roots.append(item)
+            if not void:
+                self._stack.append({'item': item, 'depth': self._depth})
+        elif itemprop and self._stack:
+            parent = self._stack[-1]['item']
+            val = None
+            if tag == 'meta':
+                val = a.get('content', '')
+            elif tag in ('a', 'link', 'area'):
+                val = a.get('href', '')
+            elif tag in ('img', 'audio', 'video', 'source', 'iframe', 'embed'):
+                val = a.get('src', '')
+            elif tag == 'object':
+                val = a.get('data', '')
+            elif tag == 'time':
+                val = a.get('datetime')
+            if val is not None:
+                parent['props'].setdefault(itemprop, []).append((val or '').strip())
+            else:
+                self._txt = (parent, itemprop, self._depth)
+                self._buf = []
+        if not void:
+            self._depth += 1
+
+    def handle_starttag(self, tag, attrs):
+        self._open(tag, attrs, tag in _VOID)
+
+    def handle_startendtag(self, tag, attrs):
+        self._open(tag, attrs, True)
+
+    def handle_endtag(self, tag):
+        if tag in _VOID:
+            return
+        self._depth -= 1
+        while self._stack and self._stack[-1]['depth'] >= self._depth:
+            self._stack.pop()
+        if self._txt and self._depth <= self._txt[2]:
+            parent, prop, _ = self._txt
+            txt = ' '.join(''.join(self._buf).split())
+            if txt:
+                parent['props'].setdefault(prop, []).append(txt)
+            self._txt = None
+            self._buf = []
+
+    def handle_data(self, data):
+        if self._txt:
+            self._buf.append(data)
+
+
+def _microdata_objects(html: str) -> list:
+    p = _MicrodataParser()
+    try:
+        p.feed(html or '')
+    except Exception:
+        pass
+    return p.roots
+
+
+def _jsonld_objects(html: str) -> list:
+    """Типизированные объекты (с @type) из всех JSON-LD блоков, рекурсивно.
+    Возвращает [{'type', 'props'}] в том же виде, что и microdata."""
+    out = []
+
+    def _norm(node):
+        if isinstance(node, dict):
+            t = node.get('@type')
+            typ = ''
+            if isinstance(t, str):
+                typ = t
+            elif isinstance(t, list) and t:
+                typ = str(t[0])
+            if typ:
+                props = {k: (v if isinstance(v, list) else [v])
+                         for k, v in node.items() if not k.startswith('@')}
+                out.append({'type': _type_seg(typ), 'props': props})
+            for v in node.values():
+                _norm(v)
+        elif isinstance(node, list):
+            for x in node:
+                _norm(x)
+
+    for m in _RE_JSONLD.finditer(html or ''):
+        try:
+            _norm(json.loads(m.group(1).strip()))
+        except Exception:
+            continue
+    return out
+
+
+def _walk_objects(items):
+    """Все объекты рекурсивно (включая вложенные в props)."""
+    for it in items:
+        yield it
+        for vals in it.get('props', {}).values():
+            for x in vals:
+                if isinstance(x, dict):
+                    yield from _walk_objects([x])
+
+
+# Обязательные (баг) и желательные (предупр.) поля по типам. Значение -
+# список групп «любое из»: поле засчитано, если есть хотя бы один вариант.
+# req - критично для сниппета (нет = баг), rec - желательно (нет = предупр.).
+_FIELD_RULES = {
+    'Product': {'req': [('название', ('name',)),
+                        ('предложение/цена', ('offers', 'price')),
+                        ('изображение', ('image',))],
+                'rec': [('описание', ('description',))]},
+    'Offer': {'req': [('цена', ('price', 'priceSpecification', 'lowPrice')),
+                      ('валюта', ('priceCurrency',))],
+              'rec': [('наличие', ('availability',))]},
+    'AggregateOffer': {'req': [('цена', ('lowPrice', 'price')),
+                               ('валюта', ('priceCurrency',))], 'rec': []},
+    'BreadcrumbList': {'req': [('элементы', ('itemListElement',))], 'rec': []},
+    'PropertyValue': {'req': [('название', ('name',)),
+                              ('значение', ('value',))], 'rec': []},
+    'Organization': {'req': [('название', ('name',))],
+                     'rec': [('адрес/телефон', ('address', 'telephone')),
+                             ('логотип', ('logo',))]},
+    'LocalBusiness': {'req': [('название', ('name',))],
+                      'rec': [('адрес/телефон', ('address', 'telephone'))]},
+    'PostalAddress': {'req': [('адрес', ('streetAddress', 'addressLocality'))],
+                      'rec': []},
+}
+
+
+def _validate_fields(html: str):
+    """Проверить обязательные/желательные поля у каждого объекта разметки.
+    Возвращает (issues, warnings) - по одной строке на «тип+поле» с числом
+    объектов, где поля нет (агрегируем, чтобы не плодить по карточке)."""
+    objs = list(_walk_objects(_microdata_objects(html))) \
+        + list(_walk_objects(_jsonld_objects(html)))
+    # счётчики: (тип, метка поля, критично?) → (нет, всего)
+    miss = {}
+    total = {}
+    for o in objs:
+        rules = _FIELD_RULES.get(o.get('type'))
+        if not rules:
+            continue
+        props = o.get('props') or {}
+        total[o['type']] = total.get(o['type'], 0) + 1
+        for crit, groups in (('req', rules['req']), ('rec', rules['rec'])):
+            for label, alts in groups:
+                has = any(props.get(a) for a in alts)
+                if not has:
+                    key = (o['type'], label, crit)
+                    miss[key] = miss.get(key, 0) + 1
+
+    issues, warnings = [], []
+    for (typ, label, crit), n in sorted(
+            miss.items(), key=lambda kv: (-kv[1], kv[0])):
+        tot = total.get(typ, n)
+        frag = (f'в разметке {typ}: нет поля «{label}»'
+                + (f' ({n} из {tot})' if tot > 1 else ''))
+        (issues if crit == 'req' else warnings).append(frag)
+    return issues, warnings
 
 
 def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional[dict]:
@@ -133,6 +336,14 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
         if 'price' not in props and not (micro | ld) & _PRICE_TYPES:
             warnings.append('цена не размечена (Offer/PriceSpecification) - '
                             'норма для «цены по запросу»')
+
+    # ── Обязательные ПОЛЯ внутри объектов (валидация, а не только наличие
+    # типа): Product без offers/name, Offer без price/currency, крошки без
+    # itemListElement и т.п. Работает по разобранному дереву microdata +
+    # JSON-LD - то, что раньше делали только внешние валидаторы. ──
+    f_issues, f_warnings = _validate_fields(html)
+    issues.extend(f_issues)
+    warnings.extend(f_warnings)
 
     return {
         'og_missing': og_missing,
