@@ -101,6 +101,11 @@ def main() -> int:
                          'Пусто = проверять все формы проекта.')
     ap.add_argument('--no-admin', action='store_true',
                     help='Не проверять админку (Уровень 1) после прогона.')
+    ap.add_argument('--file-probe', action='store_true',
+                    help='Проба серверной фильтрации загрузки: грузит безвредный '
+                         'файл с опасным расширением (.php/.svg/.html/.js) в формы '
+                         'с полем загрузки и отправляет - пройдёт ли фильтр. '
+                         'Создаёт тест-заявки на боевых формах.')
     a = ap.parse_args()
 
     name = PROJECT_NAMES[a.project]
@@ -189,6 +194,7 @@ def main() -> int:
                 headless=not a.show_browser,
                 город=city,
                 почта_получателя=city_mail,
+                проба_файлов=a.file_probe,
             )
 
         # ── Пункт 2.12: cookie-уведомление + ссылка на политику + живочат ──
