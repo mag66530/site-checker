@@ -197,10 +197,29 @@ def main() -> int:
                if not wanted or (row.city or '').lower() in wanted]
     domains.sort(key=lambda x: x[1].city or x[0])
 
+    # Прокси используем ТОЛЬКО для проектов с use_proxy=true (напр. ИМП, который
+    # блокирует зарубежный IP). СМУ/МПЭ (use_proxy=false) качаем напрямую - им
+    # прокси не нужен, а сломанный proxy_url иначе давал бы им ложный 407.
     proxy = (os.environ.get('proxy_url') or '').strip() or None
-    if _use_proxy(a.project) and not proxy:
-        _stamp('⚠️ У проекта use_proxy=true, а proxy_url не задан - '
-               'зарубежный IP может блокироваться (будут ошибки загрузки).')
+    if _use_proxy(a.project):
+        if not proxy:
+            _stamp('⚠️ У проекта use_proxy=true, а proxy_url не задан - '
+                   'зарубежный IP может блокироваться (будут ошибки загрузки).')
+    else:
+        if proxy:
+            _stamp(f'Проект {a.project}: use_proxy=false - страницы качаем '
+                   'напрямую, без прокси.')
+        proxy = None
+    # Диагностика прокси (без вывода самих логина/пароля).
+    _pp = _proxy_parts(proxy)
+    if _pp:
+        _ph, _pport, _phdrs = _pp
+        _stamp(f'Прокси: {_ph}:{_pport}; авторизация в proxy_url: '
+               + ('есть' if _phdrs.get('Proxy-Authorization')
+                  else 'НЕТ - в ссылке нет логина:пароля (будет 407)'))
+    elif proxy:
+        _stamp('⚠️ proxy_url задан, но не разобрался '
+               '(ожидается http://логин:пароль@хост:порт).')
 
     ctx = build_region_context(
         kp, [SimpleNamespace(host=d, city=row.city, country=row.country)
@@ -210,6 +229,11 @@ def main() -> int:
            f'поддоменов: {len(domains)}')
 
     html_map = fetch_all(domains, proxy, _stamp)
+    _n407 = sum(1 for h, e in html_map.values() if '407' in (e or ''))
+    if _n407 and _n407 == len(html_map):
+        _stamp('⚠️ ВСЕ страницы вернули 407 Proxy Authentication Required - '
+               'прокси отклонил авторизацию. Проверь логин:пароль в секрете '
+               'proxy_url (формат http://логин:пароль@хост:порт).')
     _stamp('Загрузка завершена, сверяю с КП …')
     результаты = []
     for dom, row in domains:
