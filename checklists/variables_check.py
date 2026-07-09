@@ -251,6 +251,16 @@ else:
 _alive = _pid_alive(_read_pid())
 _none_chosen = (_mode == 'Выбрать города' and not _chosen)
 
+# Прокси + проверка доступности сайта (над кнопкой запуска)
+try:
+    from site_access import render_proxy_access
+    _dom = _cities[0][1] if _cities else ''
+    render_proxy_access(f'vars_{pid_key}',
+                        default_url=(f"https://{_dom}/" if _dom else ''),
+                        pid=pid_key)
+except Exception as _e_pa:
+    st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
+
 _c1, _c2 = st.columns([3, 1])
 with _c1:
     if st.button('▶ Запустить проверку', use_container_width=True,

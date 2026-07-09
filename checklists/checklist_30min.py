@@ -1289,6 +1289,15 @@ if pid:
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
 
+    # Прокси + проверка доступности сайта (над кнопкой запуска)
+    try:
+        from site_access import render_proxy_access
+        _def_url = (cfg.get('main_url')
+                    or (f"https://{cfg['root_domain']}/" if cfg.get('root_domain') else ''))
+        render_proxy_access('c30', default_url=_def_url, pid=pid)
+    except Exception as _e_pa:
+        st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
+
     # БЛОК запуска
     with st.container():
         _paths = _c30_paths(pid)
