@@ -144,6 +144,39 @@ for city, dom, country in _cities:
 st.caption(f'В КП проекта: **{len(_cities)}** поддоменов, стран: '
            f'{len([c for c in _by_country if c])}.')
 
+# ── Источник данных (Карта присутствия) ──────────────────────────────
+# Если задана ссылка на Google-таблицу КП - при запуске проверка сама тянет
+# свежие данные из таблицы; здесь же можно обновить снапшот вручную.
+_kp_url = ''
+try:
+    import kp_sheets as _ks
+    _kp_url = _ks.kp_sheet_url(pid_key)
+except Exception:
+    _ks = None
+_kp_csv = ROOT / 'catalogs' / f'{pid_key}-kp.csv'
+with st.expander('📄 Источник данных (Карта присутствия)', expanded=False):
+    _upd = (datetime.fromtimestamp(_kp_csv.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
+            if _kp_csv.exists() else '—')
+    if _kp_url and _ks:
+        st.success('КП берётся из Google-таблицы — при запуске проверки данные '
+                   'обновляются автоматически (свежие правки из таблицы '
+                   'подхватываются).')
+        st.caption(f'Локальный снапшот: `{_kp_csv.name}`, обновлён {_upd}.')
+        if st.button('↻ Обновить КП из Google сейчас', key=f'kp_refresh_{pid_key}'):
+            with st.spinner('Скачиваю и разбираю таблицу КП…'):
+                _ok, _msg = _ks.refresh_project(pid_key, log=lambda *a, **k: None)
+            (st.success if _ok else st.error)(_msg)
+            st.rerun()
+    else:
+        st.warning('Ссылка на Google-таблицу КП не задана — используется зашитый '
+                   f'снапшот `{_kp_csv.name}` (обновлён {_upd}).')
+        st.caption(
+            'Чтобы скрипт брал СВЕЖИЕ данные прямо из таблицы, задай ссылку одним '
+            f'из способов:\n'
+            f'• секрет приложения `kp_sheet_url_{pid_key} = "https://docs.google.com/…"`, '
+            f'или\n• поле `"kp_sheet_url"` в `projects/{pid_key}.json`.\n\n'
+            'Таблица должна быть открыта «Всем, у кого есть ссылка — Читатель».')
+
 st.divider()
 st.subheader('Что проверяем')
 _mode = st.radio('Охват', ['Все поддомены', 'Выбрать города'],
