@@ -263,10 +263,21 @@ ACTIONS = {
             ('Товар',     'https://mepen.ru/catalog/tovar/telezhka-tip-b-gcl/',
              ['[onclick*="tovar_v_korzinu"], text=в корзину, text=В корзину',
               'text=Нужна консультация', 'text=Нашли дешевле']),
-            # Корзина (товар уже добавлен): клик по полю купона → skidochnyy_kupon.
+            # Корзина (товар уже добавлен на стр. «Товар»): цель skidochnyy_kupon
+            # висит на элементе, который появляется ТОЛЬКО с товаром в корзине и
+            # срабатывает на ВВОД купона + «Применить», а не на голый клик по полю.
+            # Поэтому цепочка: печатаем код в поле купона, затем жмём «Применить».
             ('Корзина',   'https://mepen.ru/personal/basket/',
-             ['[onclick*="skidochnyy_kupon"], text=Введите код купона, '
-              'input[class*="coupon"], [class*="coupon"] input, text=Купон']),
+             [{'цепочка': [
+                 {'ввод': 'input[name*="coupon" i], input[id*="coupon" i], '
+                          'input[placeholder*="упон" i], input[placeholder*="ромокод" i], '
+                          '[class*="coupon"] input, [class*="promo"] input, '
+                          '.basket-coupon input, input[name="COUPON"]',
+                  'текст': 'TEST'},
+                 '[onclick*="skidochnyy_kupon"], button:has-text("Применить"), '
+                 '[class*="coupon"] button, .basket-coupon button, '
+                 'button:has-text("Применить купон")',
+             ]}]),
             # Авторизация: иконка аккаунта (a.lk_link.personal_popups → i.fa-user)
             # открывает модалку «Авторизация», в ней кнопка «Авторизоваться»
             # (button type=submit, onclick reachGoal klik_avtorizovatsya). Форма
@@ -374,6 +385,18 @@ def _план_мпэ_для_домена(домен: str) -> dict:
                          {'dispatch': 'button[onclick*="klik_avtorizovatsya"], '
                                       '#auth_form button[type="submit"], '
                                       '.modal button:has-text("Авторизоваться")'}]}
+    # Купон: цель skidochnyy_kupon появляется ТОЛЬКО с товаром в корзине и
+    # срабатывает на ввод кода + «Применить». Один и тот же сценарий, что и на РФ.
+    _корзина = {'цепочка': [
+        {'ввод': 'input[name*="coupon" i], input[id*="coupon" i], '
+                 'input[placeholder*="упон" i], input[placeholder*="ромокод" i], '
+                 '[class*="coupon"] input, [class*="promo"] input, '
+                 '.basket-coupon input, input[name="COUPON"]',
+         'текст': 'TEST'},
+        '[onclick*="skidochnyy_kupon"], button:has-text("Применить"), '
+        '[class*="coupon"] button, .basket-coupon button, '
+        'button:has-text("Применить купон")',
+    ]}
     return {
         'страницы': [
             ('Главная',   d + '/',
@@ -383,8 +406,18 @@ def _план_мпэ_для_домена(домен: str) -> dict:
             ('Реквизиты', d + '/rekvizity/',
              ['[onclick*="skachat_rekvizity"], a:has-text("Скачать реквизиты")']),
             ('Каталог',   d + '/catalog/', []),
-            ('Корзина',   d + '/personal/basket/',
-             ['[onclick*="skidochnyy_kupon"], [class*="coupon"] input']),
+            # Листинг с корзиной (болты): «В корзину» → tocart, клик карточки →
+            # klik_kartochka_tovara. Пути каталога общие для всех доменов МПЭ.
+            ('Листинг (болты)',
+             d + '/catalog/zheleznodorozhnaya-avtomatika/zheleznodorozhnyy-krepezh/bolt/',
+             ['[onclick*="tocart"], button:has-text("В корзину"), text=В корзину',
+              '[onclick*="klik_kartochka_tovara"]']),
+            # Товар: кладём в корзину (ДО «Корзины», иначе поля купона нет),
+            # плюс «Нашли дешевле» (klik_nashli_deshevle) и «Нужна консультация».
+            ('Товар',     d + '/catalog/tovar/telezhka-tip-b-gcl/',
+             ['[onclick*="tovar_v_korzinu"], text=в корзину, text=В корзину',
+              'text=Нужна консультация', 'text=Нашли дешевле']),
+            ('Корзина',   d + '/personal/basket/', [_корзина]),
             ('Авторизация', d + '/', [_auth]),
             ('Поиск',     d + '/search/?q=bolt', []),
             ('Страница 404', d + '/nesuschestvuyushaya-404-xyz/', []),

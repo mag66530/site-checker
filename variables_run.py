@@ -54,6 +54,17 @@ def _use_proxy(project: str) -> bool:
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
+# Для повторов «как из другого браузера»: разные User-Agent + всегда без кеша.
+_UA_POOL = [
+    _UA,
+    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+     "(KHTML, like Gecko) Version/17.4 Safari/605.1.15"),
+    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) "
+     "Gecko/20100101 Firefox/125.0"),
+    ("Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 "
+     "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"),
+]
+
 
 def _proxy_parts(proxy):
     """(proxy_host, proxy_port, proxy_headers|None) из proxy-URL. () если нет."""
@@ -72,13 +83,16 @@ def _proxy_parts(proxy):
     return pr.hostname, pr.port or 8080, headers
 
 
-def _fetch_one(dom, proxy_parts):
+def _fetch_one(dom, proxy_parts, ua=None):
     """Скачивает https://<dom>/ через http.client (CONNECT-туннель с
     Proxy-Authorization в CONNECT-запросе - надёжный способ прокси-авторизации
     для HTTPS, в отличие от aiohttp, который упорно отдавал 407). Один редирект
-    в пределах того же/родственного хоста поддерживаем. → (html, ошибка)."""
+    в пределах того же/родственного хоста поддерживаем. Каждый вызов - свежее
+    соединение без кеша/куки (по сути «инкогнито»); ua позволяет притвориться
+    другим браузером на повторах. → (html, ошибка)."""
     import http.client
     import ssl
+    ua = ua or _UA
 
     def _get(host, path, depth=0):
         conn = None
@@ -91,8 +105,9 @@ def _fetch_one(dom, proxy_parts):
             else:
                 conn = http.client.HTTPSConnection(host, 443, timeout=30)
             conn.request('GET', path or '/', headers={
-                'User-Agent': _UA, 'Accept-Encoding': 'identity',
-                'Accept': 'text/html,application/xhtml+xml'})
+                'User-Agent': ua, 'Accept-Encoding': 'identity',
+                'Accept': 'text/html,application/xhtml+xml',
+                'Cache-Control': 'no-cache', 'Pragma': 'no-cache'})
             resp = conn.getresponse()
             if resp.status in (301, 302, 303, 307, 308) and depth < 3:
                 loc = resp.getheader('Location') or ''
@@ -132,20 +147,21 @@ def _fetch_one(dom, proxy_parts):
         return '', (str(e)[:200] or e.__class__.__name__)
 
 
-def fetch_all(domains, proxy, log, retries=2):
+def fetch_all(domains, proxy, log, retries=3):
     """Качает главные всех поддоменов параллельно (пул потоков), печатает
     прогресс «[i/N]». Не загрузившиеся (500/таймаут/антибот) повторяет ещё
-    `retries` раз - только их, свежим соединением, помягче (успешные не трогает).
-    → {domain: (html, ошибка)}."""
+    `retries` раз - только их, «как из другого браузера»: свежее соединение
+    без кеша (инкогнито) + другой User-Agent на каждом заходе, помягче (меньший
+    пул + пауза). Успешные повторно не трогает. → {domain: (html, ошибка)}."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import time
     parts = _proxy_parts(proxy)
     out: dict = {}
     N = len(domains)
 
-    def _pass(items, workers, counting):
+    def _pass(items, workers, counting, ua=None):
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = {ex.submit(_fetch_one, d, parts): (d, row.city)
+            futs = {ex.submit(_fetch_one, d, parts, ua): (d, row.city)
                     for d, row in items}
             for k, fut in enumerate(as_completed(futs), 1):
                 dom, city = futs[fut]
@@ -162,18 +178,22 @@ def fetch_all(domains, proxy, log, retries=2):
                         + (f'снова ошибка - {err}' if err else 'загружено ✓'))
 
     _pass(domains, 6, counting=True)
-    # Повторяем только упавшие: сервер часто отдаёт 500 при частых параллельных
-    # запросах - на повторе меньшим пулом и с паузой большинство доходит.
+    # Повторяем ТОЛЬКО упавшие: сервер часто отдаёт 500 при частых параллельных
+    # запросах - на повторе меньшим пулом, с паузой и от имени другого браузера
+    # большинство доходит. Успешные не перезапрашиваем.
     for attempt in range(1, retries + 1):
         failed = [(d, row) for d, row in domains if out.get(d, ('', ''))[1]]
         if not failed:
             break
+        ua = _UA_POOL[attempt % len(_UA_POOL)]
         log(f'↻ Повтор {attempt}/{retries}: заново пробуем {len(failed)} '
-            'не загрузившихся (успешные не трогаем)…')
+            'не загрузившихся, как из другого браузера (успешные не трогаем)…')
         time.sleep(4)
-        _pass(failed, 3, counting=False)
+        _pass(failed, 3, counting=False, ua=ua)
     n_ok = sum(1 for v in out.values() if not v[1])
-    log(f'Итог загрузки: {n_ok} из {N} (после повторов).')
+    n_fail = N - n_ok
+    log(f'Итог загрузки: {n_ok} из {N}'
+        + (f' (осталось с ошибкой: {n_fail})' if n_fail else ' (все загрузились)'))
     return out
 
 
@@ -201,9 +221,21 @@ def _регион_статусы(html, host, ctx):
                           if ctx.host_country.get(host) == "Россия" else "")
         else:
             iss = cm.get("issues", [])
-            страна.update(found=("есть чужие" if iss else "чисто"),
-                          status=("bug" if iss else "ok"),
-                          note=(iss[0].get("пояснение", "") if iss else ""))
+            if iss:
+                _zru = {'title': 'title', 'description': 'description',
+                        'h1': 'H1', 'текст': 'текст страницы'}
+                parts = []
+                for it in iss[:2]:
+                    z = _zru.get(it.get('зона', ''), it.get('зона', ''))
+                    ctxt = (it.get('контекст') or '').strip()
+                    parts.append(f'«{it.get("найдено", "?")}» в {z}: …{ctxt}…'
+                                 if ctxt else f'«{it.get("найдено", "?")}» в {z}')
+                note = '; '.join(parts)
+                if len(iss) > 2:
+                    note += f' (и ещё {len(iss) - 2})'
+                страна.update(found="есть чужая страна", status="bug", note=note)
+            else:
+                страна.update(found="чисто", status="ok", note="")
     except Exception:  # noqa: BLE001
         pass
     return город, страна
@@ -227,7 +259,20 @@ def main() -> int:
     wanted = {c.strip().lower() for c in a.cities.split(',') if c.strip()}
     domains = [(d, row) for d, row in kp.items()
                if not wanted or (row.city or '').lower() in wanted]
-    domains.sort(key=lambda x: x[1].city or x[0])
+    # Порядок как в КП: страны в порядке появления в КП, но Россия первой;
+    # внутри страны сохраняем исходный порядок КП (сортировка стабильная).
+    _country_seq = []
+    for _d, _row in kp.items():
+        _c = (_row.country or '').strip()
+        if _c and _c not in _country_seq:
+            _country_seq.append(_c)
+
+    def _crank(row):
+        c = (row.country or '').strip()
+        if c.lower() in ('россия', 'рф'):
+            return -1
+        return _country_seq.index(c) if c in _country_seq else 10 ** 6
+    domains.sort(key=lambda x: _crank(x[1]))
 
     # Прокси используем ТОЛЬКО для проектов с use_proxy=true (напр. ИМП, который
     # блокирует зарубежный IP). СМУ/МПЭ (use_proxy=false) качаем напрямую - им
@@ -289,13 +334,36 @@ def main() -> int:
     return 0
 
 
+_ЛЕГЕНДА = [
+    ("Как читать результат", True),
+    ("", False),
+    ("✓  — значение на сайте совпадает с КП "
+     "(для телефона: номер входит в набор номеров города из КП).", False),
+    ("✗  — расхождение. В примечании ячейки: «Ожидалось (КП) / По факту (на сайте)». "
+     "Все расхождения также собраны на листе «Расхождения».", False),
+    ("⚠  — на сайте не найдено (телефон / почта / адрес / мессенджер).", False),
+    ("—  — в КП этого поля нет (проверять не с чем).", False),
+]
+
+
+def _написать_легенду(ws) -> None:
+    from openpyxl.styles import Font, Alignment
+    ws.column_dimensions["A"].width = 100
+    for i, (text, bold) in enumerate(_ЛЕГЕНДА, 1):
+        cell = ws.cell(i, 1, text)
+        cell.font = Font(bold=bold, size=14 if (bold and i == 1) else 11)
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+
 def _записать_xlsx(path: Path, proj_name: str, результаты: list) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Переменные"
+    # Лист-подсказка «Как читать результат» - первым (перед данными). Просьба заказчика.
+    _написать_легенду(wb.active)
+    wb.active.title = "Как читать результат"
+    ws = wb.create_sheet("Переменные")
     hdr_fill = PatternFill("solid", fgColor="EEF3FB")
     headers = ["Поддомен", "Город(КП)", "Страна(КП)"] + VAR_COLUMNS
     # «Город»/«Страна» из VAR_COLUMNS дублируют колонки КП по смыслу - оставляем
@@ -338,10 +406,17 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
             # тогда зелёные ✓ чистые, а красные сразу видно (красная заливка +
             # уголок-примечание с деталями). Просьба заказчика.
             if status in ("bug", "warn"):
-                подпись = f"ожидалось: {f['expected']}\nна сайте: {f['found']}"
-                if f.get("note"):
-                    подпись += f"\n{f['note']}"
-                cell.comment = Comment(подпись, "1.4")
+                подпись = (f"Ожидалось (КП): {f['expected']}\n"
+                           f"По факту (на сайте): {f['found']}")
+                note = (f.get("note") or "").strip()
+                if note:
+                    подпись += f"\n\n{note}"
+                # Длинное не расписываем в ячейке - отсылаем на лист «Расхождения».
+                if len(подпись) > 200:
+                    подпись = подпись[:190].rstrip() + "…\n→ см. лист «Расхождения»"
+                cm = Comment(подпись, "1.4")
+                cm.width, cm.height = 340, 170   # чтобы текст влезал в окошко
+                cell.comment = cm
                 cell.fill = BUG_FILL if status == "bug" else WARN_FILL
             if status == "bug":
                 расхождения.append((res["domain"], res.get("city", ""), name,
@@ -361,8 +436,10 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
         cell.fill = hdr_fill
     for i, row in enumerate(расхождения, 2):
         for c, v in enumerate(row, 1):
-            ws2.cell(i, c, v)
-    for col, w in (("A", 32), ("B", 16), ("C", 14), ("D", 30), ("E", 30), ("F", 40)):
+            cell = ws2.cell(i, c, v)
+            if c in (4, 5, 6):     # «Ожидалось», «На сайте», «Примечание» - переносим
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+    for col, w in (("A", 32), ("B", 16), ("C", 14), ("D", 34), ("E", 34), ("F", 70)):
         ws2.column_dimensions[col].width = w
     ws2.freeze_panes = "A2"
     if not расхождения:
