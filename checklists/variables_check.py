@@ -223,8 +223,10 @@ with _c1:
             try:
                 if _kp_url:
                     _env[f'kp_sheet_url_{pid_key}'] = _kp_url
-                if 'gcp_service_account' in st.secrets:
-                    _env['GCP_SA_JSON'] = json.dumps(dict(st.secrets['gcp_service_account']))
+                _sa = st.secrets.get('gcp_service_account')
+                if _sa is not None:
+                    # секрет может быть строкой-JSON или TOML-секцией (dict)
+                    _env['GCP_SA_JSON'] = _sa if isinstance(_sa, str) else json.dumps(dict(_sa))
             except Exception:
                 pass
             _launch(args, extra_env=_env or None)
