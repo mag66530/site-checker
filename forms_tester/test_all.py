@@ -297,6 +297,7 @@ def проверка_полей_форм(scope, page) -> dict:
     res = {"телефон_ограничен": None, "телефон_детали": "поле телефона не найдено",
            "почта_ок": None, "почта_детали": "поле почты не найдено",
            "обязательность_ок": None, "обязательность_детали": "не определено",
+           "длина_ок": None, "длина_детали": "поля с ограничением длины не найдены",
            "файл_есть": False, "файл_типы": [], "файл_любые": False}
 
     # ── Телефон ──
@@ -414,6 +415,75 @@ def проверка_полей_форм(scope, page) -> dict:
     except Exception:  # noqa: BLE001
         pass
 
+    # ── Ограничение длины: РЕАЛЬНО пробуем ввести больше лимита (пункт 2.14) ──
+    # Не верим атрибуту на слово: в каждое поле с maxlength вводим (лимит+5)
+    # символов настоящими нажатиями (type) и проверяем, что браузер обрезал по
+    # лимиту, как у живого пользователя. Значение сохраняем и возвращаем; форму
+    # не трогаем. Телефон пропускаем (его покрывает проба маски + маска добавляет
+    # формат-символы → ложные срабатывания). type=number тоже пропускаем: браузеры
+    # к нему maxlength не применяют - иначе ложное «не держит».
+    try:
+        проверено, не_держат, примеры = 0, [], []
+        поля = scope.locator(
+            "input:not([type='checkbox']):not([type='radio']):not([type='file'])"
+            ":not([type='hidden']):not([type='submit']):not([type='button'])"
+            ":not([type='date']):not([type='time']):not([type='color'])"
+            ":not([type='range']):not([type='number']), textarea")
+        for i in range(min(поля.count(), 30)):
+            if проверено >= 8:
+                break
+            el = поля.nth(i)
+            try:
+                info = el.evaluate(
+                    "e => ({ml: e.maxLength, vis: e.offsetParent!==null,"
+                    " off: !!(e.disabled||e.readOnly),"
+                    " tel: ((e.type||'').toLowerCase()==='tel')"
+                    " || /phone|tel/i.test(e.name||'')"
+                    " || /телефон|phone/i.test(e.getAttribute('placeholder')||''),"
+                    " label:(e.name||e.getAttribute('placeholder')||e.id||'поле')})")
+            except Exception:  # noqa: BLE001
+                continue
+            ml = info.get("ml")
+            if not isinstance(ml, int) or not (0 < ml <= 40):
+                continue                        # нет реального лимита / слишком большой
+            if not info.get("vis") or info.get("off") or info.get("tel"):
+                continue                        # скрыто/недоступно/это телефон
+            try:
+                saved = el.input_value(timeout=1500)
+            except Exception:  # noqa: BLE001
+                continue
+            got = None
+            try:
+                el.fill("", timeout=1500, force=True)
+                el.type(("1234567890" * 5)[:ml + 5], timeout=3000)   # лимит+5 цифр
+                got = el.input_value(timeout=1500) or ""
+            except Exception:  # noqa: BLE001
+                got = None
+            try:
+                el.fill(saved, timeout=1500, force=True)             # вернуть как было
+            except Exception:  # noqa: BLE001
+                pass
+            if got is None:
+                continue
+            проверено += 1
+            if len(got) > ml:
+                не_держат.append(f"«{info['label']}»: лимит {ml}, ввелось {len(got)}")
+            else:
+                примеры.append(f"{info['label']}={ml}")
+        if проверено == 0:
+            res["длина_ок"] = None
+            res["длина_детали"] = "поля с ограничением длины не найдены"
+        elif не_держат:
+            res["длина_ок"] = False
+            res["длина_детали"] = "ограничение НЕ работает: " + "; ".join(не_держат[:4])
+        else:
+            res["длина_ок"] = True
+            _пр = ", ".join(примеры[:4])
+            res["длина_детали"] = (f"полей с лимитом: {проверено}, все не дают ввести "
+                                   f"больше" + (f" ({_пр})" if _пр else ""))
+    except Exception:  # noqa: BLE001
+        pass
+
     # ── Загрузка файлов ──
     try:
         fi = scope.locator("input[type='file']")
@@ -432,6 +502,63 @@ def проверка_полей_форм(scope, page) -> dict:
     except Exception:  # noqa: BLE001
         pass
     return res
+
+
+def состав_формы(scope) -> dict:
+    """Пункт «Все элементы формы (поля/кнопки/чекбоксы/радио/списки) присутствуют».
+    Перепись ВИДИМЫХ элементов формы ОДНИМ evaluate - чистое чтение DOM, без ввода
+    и без отправки. Вердикт «Проверить» - только если форма совсем без элементов
+    ввода. «Соответствие дизайну» - визуально по макету (авто не проверяем).
+    Возвращает {ок(bool|None), детали, поля, чекбоксы, радио, радиоГрупп, списки,
+    кнопки, отправка, файл}."""
+    c = {"поля": 0, "чекбоксы": 0, "радио": 0, "радиоГрупп": 0, "списки": 0,
+         "кнопки": 0, "отправка": False, "файл": 0}
+    try:
+        r = scope.evaluate(
+            "el => {"
+            " const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);"
+            " const inputs = [...el.querySelectorAll('input')].filter(vis);"
+            " const tt = ['text','tel','email','search','url','number','password',"
+            "'date','time','datetime-local','month','week',''];"
+            " const ty = e => (e.type||'text').toLowerCase();"
+            " const поля = inputs.filter(e => tt.includes(ty(e))).length"
+            "   + [...el.querySelectorAll('textarea')].filter(vis).length;"
+            " const чекбоксы = inputs.filter(e => ty(e)==='checkbox').length;"
+            " const радио = inputs.filter(e => ty(e)==='radio');"
+            " const nm = радио.map(e => e.name||'');"
+            " const радиоГрупп = new Set(nm.filter(n=>n)).size + nm.filter(n=>!n).length;"
+            " const файл = inputs.filter(e => ty(e)==='file').length;"
+            " const списки = [...el.querySelectorAll('select')].filter(vis).length;"
+            " const btns = [...el.querySelectorAll("
+            "\"button, input[type='submit'], input[type='button'], input[type='reset']\")].filter(vis);"
+            " const отправка = btns.some(b => { const g=b.tagName.toLowerCase();"
+            "   const t=(b.getAttribute('type')||'').toLowerCase();"
+            "   return g==='input' ? t==='submit' : (t===''||t==='submit'); });"
+            " return {поля, чекбоксы, радио: радио.length, радиоГрупп, списки,"
+            "   кнопки: btns.length, отправка, файл};"
+            "}")
+        if isinstance(r, dict):
+            for k in c:
+                if k in r and r[k] is not None:
+                    c[k] = r[k]
+    except Exception:  # noqa: BLE001
+        return {"ок": None, "детали": "состав формы определить не удалось", **c}
+
+    есть_ввод = bool(c["поля"] or c["чекбоксы"] or c["списки"] or c["радио"])
+    радио_txt = f"{c['радио']}" + (f" ({c['радиоГрупп']} групп)" if c["радио"] else "")
+    if c["кнопки"]:
+        кноп_txt = f"{c['кнопки']}" + (" (есть отправка)" if c["отправка"]
+                                       else " (кнопки отправки нет)")
+    else:
+        кноп_txt = "0"
+    детали = (f"поля ввода: {c['поля']}, чекбоксы: {c['чекбоксы']}, "
+              f"радио: {радио_txt}, списки: {c['списки']}, кнопки: {кноп_txt}, "
+              f"файл: {c['файл']}. Соответствие дизайну — по макету вручную.")
+    if not есть_ввод:
+        детали = "элементы ввода не найдены (та ли форма/скоуп?). " + детали
+    elif not c["кнопки"]:
+        детали += " Кнопка отправки не найдена — возможно, отправка через JS/ссылку."
+    return {"ок": есть_ввод, "детали": детали, **c}
 
 
 # Типы для пробы серверной фильтрации загрузки: (расширение, опасное?).
@@ -2882,7 +3009,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _phone_bug = _pf["телефон_ограничен"] is False
                 _mail_bug = _pf["почта_ок"] is False
                 _req_bug = _pf["обязательность_ок"] is False
-                _есть_баг = _phone_bug or _mail_bug or _req_bug
+                _len_bug = _pf["длина_ок"] is False
+                _есть_баг = _phone_bug or _mail_bug or _req_bug or _len_bug
                 # Телефон - в «Комментарий»; типы файлов - в отдельную
                 # колонку «Типы файлов формы» (пусто, если поля загрузки нет).
                 if not _pf["файл_есть"]:
@@ -2893,11 +3021,12 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     _файлы_кол = ", ".join(_pf["файл_типы"])
                 _ком214 = (f"телефон (маска): {_pf['телефон_детали']}; "
                            f"почта (валидация): {_pf['почта_детали']}; "
-                           f"обязательность/уведомления: {_pf['обязательность_детали']}")
+                           f"обязательность/уведомления: {_pf['обязательность_детали']}; "
+                           f"ограничение длины: {_pf['длина_детали']}")
                 записать_в_excel({
                     "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
                     "тип_селектора": "поля", "ид": название,
-                    "название": f"Поля формы 2.14 (маска тел./почта/обязательность): {название}",
+                    "название": f"Поля формы 2.14 (маска тел./почта/обязательность/длина): {название}",
                     "имя": имя_теста,
                     "статус": "Проверить" if _есть_баг else "OK",
                     "типы_файлов": _файлы_кол,
@@ -2908,6 +3037,23 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                       + (f"; файлы: {_файлы_кол}" if _файлы_кол else ""))
             except Exception as _epf:  # noqa: BLE001
                 print(f"   ⚠️ Аудит полей формы не удался: {_epf}")
+
+            # Пункт «Все элементы формы присутствуют»: перепись состава формы
+            # (чистое чтение DOM, без ввода/отправки) - отдельной строкой отчёта.
+            try:
+                _cf = состав_формы(form)
+                записать_в_excel({
+                    "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                    "тип_селектора": "поля", "ид": название,
+                    "название": f"Состав формы (поля/кнопки/чекбоксы/радио/списки): {название}",
+                    "имя": имя_теста,
+                    "статус": "Проверить" if _cf.get("ок") is False else "OK",
+                    "комментарий_готовый": _cf["детали"],
+                    "код": "form_census",
+                })
+                print(f"   🧩 Состав формы «{название}»: {_cf['детали']}")
+            except Exception as _ecf:  # noqa: BLE001
+                print(f"   ⚠️ Перепись состава формы не удалась: {_ecf}")
 
             # Файл-проба (по галочке): грузим безвредный файл с опасным
             # расширением и отправляем - пройдёт ли серверную фильтрацию.
