@@ -1,0 +1,13 @@
+{
+  "_comment": "МПЭ (mepen.ru) - Bitrix smart-filter. Клик по чекбоксу (input[name^=arrFilter].form-check-input, onclick=smartFilter.click), затем кнопка «Показать» (#set_filter). ВНИМАНИЕ: товары рендерятся JS, точный класс карточки статикой не виден - card оставлен null (движок подберёт по фолбэку). Если первый прогон даст no_cards - вписать реальный класс карточки из отрендеренного DOM. Селекторы фильтра/кнопки по живой разметке 2026-07-09.",
+  "cases": [
+    {
+      "name": "Кованые чугунные изделия - по параметру",
+      "category": "https://mepen.ru/catalog/chugunnyy-prokat/kovanye-chugunnye-izdeliya/",
+      "card": ".card-item",
+      "filter": "input[name^='arrFilter'].form-check-input",
+      "apply": "#set_filter",
+      "wait_ms": 3500
+    }
+  ]
+}

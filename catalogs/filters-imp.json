@@ -1,0 +1,13 @@
+{
+  "_comment": "ИМП (inmetprom.ru) - кастомный фильтр (input.ocf-target.checkbox__input), применяется АВТОМАТОМ по клику чекбокса (AJAX), кнопки «Показать» нет → apply=null. Сайт за прокси; filters_run ходит напрямую (с UA открывается). Селекторы по живой разметке 2026-07-09.",
+  "cases": [
+    {
+      "name": "Стальная арматура - по параметру",
+      "category": "https://inmetprom.ru/catalog/armatura/stalnaya-armatura/",
+      "card": ".card-product",
+      "filter": "input.ocf-target.checkbox__input",
+      "apply": null,
+      "wait_ms": 4000
+    }
+  ]
+}
