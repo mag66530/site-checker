@@ -718,24 +718,40 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             log(f"- Страница: {название}  {url}")
             текущий_url['u'] = url
             код = 0
-            try:
-                resp = page.goto(url, wait_until='domcontentloaded', timeout=45000)
-                код = resp.status if resp else 0
-                # 5xx часто транзиентны (сервер моргнул) - пробуем ещё пару раз,
-                # прежде чем метить сайт «недоступен».
-                for _try in range(2):
-                    if код < 500:
-                        break
-                    log(f"   ↻ код {код}, повтор через 3с…")
-                    page.wait_for_timeout(3000)
-                    resp = page.goto(url, wait_until='domcontentloaded', timeout=45000)
-                    код = resp.status if resp else код
-                page.wait_for_timeout(1000)
-            except Exception as e:
-                log(f"   ⚠️ не открылась: {e}")
+            # Медленные сайты (напр. МПЭ) не успевали за 45с и уходили в «Проблема»/
+            # «не проверено» - раньше таймаут НЕ повторялся. Грузим устойчиво: сначала
+            # как обычно; при таймауте - дольше, затем мягче (ждём только 'commit' -
+            # HTML и reachGoal-код уже доступны, даже если тяжёлые ресурсы ещё грузятся).
+            _load_err = None
+            for _wait, _to in (('domcontentloaded', 45000),
+                               ('domcontentloaded', 60000),
+                               ('commit', 45000)):
+                try:
+                    resp = page.goto(url, wait_until=_wait, timeout=_to)
+                    код = resp.status if resp else 0
+                    # 5xx часто транзиентны (сервер моргнул) - пробуем ещё пару раз.
+                    for _try in range(2):
+                        if код < 500:
+                            break
+                        log(f"   ↻ код {код}, повтор через 3с…")
+                        page.wait_for_timeout(3000)
+                        resp = page.goto(url, wait_until=_wait, timeout=_to)
+                        код = resp.status if resp else код
+                    _load_err = None
+                    break
+                except Exception as e:   # таймаут/сетевая - пробуем ещё раз помягче
+                    _load_err = e
+                    log("   ↻ страница медленная, повтор загрузки…")
+                    try:
+                        page.wait_for_timeout(2000)
+                    except Exception:
+                        pass
+            if _load_err is not None:
+                log(f"   ⚠️ не открылась: {_load_err}")
                 страницы_инфо.append({'название': название, 'url': url, 'код': код,
                                       'счётчик': False, 'визит': False})
                 continue
+            page.wait_for_timeout(1500)
             # ОДИН РАЗ за прогон: жмём «Нет»/«Выбрать город» в модалке города, чтобы
             # поймать цель click_no_confirm (её иначе не проверить - мы всегда
             # оставляем город через «Да»). После этого перезагружаем страницу -
