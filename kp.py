@@ -136,6 +136,26 @@ def split_phones(s: Optional[str]) -> list[str]:
     return out
 
 
+# Разделители номеров ВНУТРИ одной ячейки КП: перевод строки, пометка «(стар…)»,
+# запятая/точка-с-запятой/слэш, « или ». По ним режем и нормализуем КАЖДЫЙ кусок
+# отдельно - иначе normalize_phone склеивал цифры двух номеров (и возвращал
+# старый/мусор), а строгий split_phones пропускал 4-значные коды (8 (4852)…).
+_CELL_SPLIT = re.compile(r'\n|\r|\(?\s*стар[^)]*\)?|[,;/]|\s+или\s+', re.I)
+
+
+def phones_in_cell(s: Optional[str]) -> list[str]:
+    """Номера из ОДНОЙ ячейки КП по порядку (первый = текущий). Режем по
+    разделителям и нормализуем каждый кусок; берём только валидные 9-10 цифр."""
+    if not s:
+        return []
+    out = []
+    for part in _CELL_SPLIT.split(str(s)):
+        n = normalize_phone(part)
+        if 9 <= len(n) <= 10 and n not in out:
+            out.append(n)
+    return out
+
+
 def _norm_addr(s: Optional[str]) -> str:
     if not s:
         return ''
@@ -187,15 +207,18 @@ class KPRow:
         return normalize_tg(self.telegram)
 
     def whatsapp_norm(self) -> str:
-        """номер WhatsApp - 10 значащих цифр (как normalize_phone)."""
-        return normalize_phone(self.whatsapp)
+        """номер WhatsApp - 10 значащих цифр. Через split_phones (в ячейке бывает
+        номер + мусор «(Ватсап)+тг» или второй номер - берём первый настоящий)."""
+        _w = phones_in_cell(self.whatsapp)
+        return _w[0] if _w else normalize_phone(self.whatsapp)
 
     def phone_set(self) -> set[str]:
-        """Все номера города из КП (нормализованные)."""
+        """Все номера города из КП (нормализованные). В ячейке КП бывает НЕСКОЛЬКО
+        номеров (напр. «8 (903)… (стар. 8 (861)…)») - берём split_phones, а не
+        normalize_phone (тот склеивал цифры двух номеров и возвращал мусор/старый)."""
         nums = {n for n in (self.all_phones or '').split(';') if n}
         for v in (self.phone_seo, self.phone_ad, self.phone_common):
-            n = normalize_phone(v)
-            if n:
+            for n in phones_in_cell(v):
                 nums.add(n)
         return nums
 
@@ -576,7 +599,8 @@ def check_variables(html: str, domain: str) -> dict:
     for label, val in (("Тел. поиск", row.phone_seo),
                        ("Тел. реклама", row.phone_ad),
                        ("Тел. общий", row.phone_common)):
-        exp = normalize_phone(val)
+        _exps = phones_in_cell(val)         # первый = текущий номер (не «стар.»)
+        exp = _exps[0] if _exps else ''
         if not exp:
             add(label, "—", site_ph_fmt, "na", "нет в КП")
         elif exp in site_phones:
@@ -585,7 +609,8 @@ def check_variables(html: str, domain: str) -> dict:
             add(label, _fmt(exp), site_ph_fmt, "ok_set",
                 "на сайте другой номер этого же города из КП")
         elif site_phones:
-            add(label, _fmt(exp), site_ph_fmt, "bug", "на сайте номер НЕ из КП города")
+            add(label, _fmt(exp), site_ph_fmt, "bug",
+                "номер на сайте не совпадает с КП города")
         else:
             add(label, _fmt(exp), "—", "warn", "телефон на сайте не найден")
 
@@ -596,7 +621,8 @@ def check_variables(html: str, domain: str) -> dict:
     elif exp_mail in site_mails:
         add("Почта", exp_mail, exp_mail, "ok")
     elif site_mails:
-        add("Почта", exp_mail, ", ".join(site_mails[:3]), "bug", "почта не из КП")
+        add("Почта", exp_mail, ", ".join(site_mails[:3]), "bug",
+            "почта на сайте не совпадает с КП")
     else:
         add("Почта", exp_mail, "—", "warn", "почта на сайте не найдена")
 
@@ -620,7 +646,10 @@ def check_variables(html: str, domain: str) -> dict:
     elif exp_tg in site_tg:
         add("Telegram", exp_tg, exp_tg, "ok")
     elif site_tg:
-        add("Telegram", exp_tg, ", ".join(sorted(site_tg)[:3]), "bug", "TG не из КП")
+        # Мессенджер часто общий на всю сеть (не per-city) - это не жёсткая
+        # ошибка, а повод сверить вручную. warn (⚠), а не bug (✗).
+        add("Telegram", exp_tg, ", ".join(sorted(site_tg)[:3]), "warn",
+            "на сайте другой Telegram (обычно общий на сеть - проверьте вручную)")
     else:
         add("Telegram", exp_tg, "—", "warn", "ссылка на Telegram не найдена")
 
@@ -631,8 +660,11 @@ def check_variables(html: str, domain: str) -> dict:
     elif exp_wa in site_wa:
         add("WhatsApp", _fmt(exp_wa), _fmt(exp_wa), "ok")
     elif site_wa:
+        # WhatsApp почти всегда общий на всю сеть (один номер на все поддомены),
+        # а в КП он записан по-городам - сравнивать построчно = сплошной шум.
+        # warn (⚠, не в «Расхождениях»), а не bug (✗).
         add("WhatsApp", _fmt(exp_wa), ", ".join(_fmt(w) for w in sorted(site_wa)[:3]),
-            "bug", "WA не из КП")
+            "warn", "на сайте другой WhatsApp (обычно общий на сеть - проверьте вручную)")
     else:
         add("WhatsApp", _fmt(exp_wa), "—", "warn", "ссылка на WhatsApp не найдена")
 
