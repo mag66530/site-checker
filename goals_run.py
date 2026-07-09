@@ -101,6 +101,17 @@ def main() -> int:
     _stamp(f'ПРОВЕРКА ЦЕЛЕЙ СТАРТ - сайтов: {len(projects)} '
            f'({", ".join(projects)})')
 
+    # Внешний IP прогона: некоторые сайты (напр. inmetprom.ru) отдают 403
+    # запросам из дата-центра. Чтобы добавить нас в белый список, админу сайта
+    # нужен именно этот IP - выводим его в лог, чтобы можно было прочитать и
+    # передать. Мягко: короткий таймаут, любая ошибка не мешает прогону.
+    try:
+        import urllib.request as _u
+        _ip = _u.urlopen('https://api.ipify.org', timeout=8).read().decode().strip()
+        _stamp(f'Внешний IP прогона (для белого списка сайта): {_ip}')
+    except Exception:
+        _stamp('Внешний IP прогона: определить не удалось')
+
     try:
         sys.path.insert(0, str(ROOT / 'forms_tester'))
         from form_tester.stop_signal import make_stop_check

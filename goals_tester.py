@@ -393,10 +393,78 @@ def _план_мпэ_для_домена(домен: str) -> dict:
     }
 
 
+def _имп_товар_путь() -> str:
+    """Путь реальной карточки товара из каталога (catalogs/imp-products.csv).
+    На карточке товара живут корзинные цели, которых нет на листинге:
+    v-cart-kartochka, v-cart-kartochka-ranee-prosmotrennye, bistrii-zakaz-cartochka,
+    bistrii-zakaz-listing-img и т.д. Slug у товара КОРНЕВОЙ и один и тот же на всех
+    доменах ИМП, поэтому просто подставляем домен. Берём стабильный товар (арматура/
+    абразивы есть на всех странах); если каталога нет - надёжный фоллбэк."""
+    fallback = '/karbid-bora-f80-tu-u-24-1-00222226-047-2005/'
+    try:
+        import csv as _csv
+        путь = os.path.join(os.path.dirname(__file__), 'catalogs', 'imp-products.csv')
+        with open(путь, encoding='utf-8') as f:
+            for row in _csv.DictReader(f):
+                u = (row.get('url') or '').strip()
+                if u.startswith('/') and u.endswith('/') and len(u) > 12:
+                    return u
+    except Exception:
+        pass
+    return fallback
+
+
+def _план_имп_для_домена(домен: str) -> dict:
+    """План прогона ИМП для страны СНГ: структурные страницы (каталог, акции,
+    поиск) с ИМП-селекторами, домен подставляется. Цели ИМП - reachGoal в общем
+    бандле, поэтому важно зайти на те же разделы, что и на РФ, а НЕ гнать СМУ-шаблон
+    (страны ИМП раньше брали СМУ-план - отсюда «куча ошибок»)."""
+    d = (домен or '').rstrip('/')
+    if not d:
+        return {'страницы': []}
+    return {
+        'страницы': [
+            ('Главная',   d + '/',
+             ['[data-my-modal="#modal-callback"], .banner-fast-order__application',
+              'header a:has-text("Каталог"), a:has-text("Акции"), a:has-text("Прайс")',
+              {'цепочка': ['[data-my-modal="#city-modal-id"], .choose-city',
+                           '.city-modal__city:not(.active)']},
+              '.footer-manager-call, .footer-email, .footer-phone, footer .telephone-utf']),
+            ('Контакты',  d + '/contacts/',
+             ['.footer-manager-call', '.footer-email']),
+            ('Каталог',   d + '/catalog/',
+             ['.add-to-cart-btn', 'text=Быстрый заказ, [class*="fast-order"]']),
+            # РЕАЛЬНЫЙ ЛИСТИНГ (категория с товарами): тут живут корзинные цели
+            # v-cart-listing / bistrii-zakaz-* (на корне каталога их нет). Категории
+            # armatura/reshetchatyj-nastil есть на всех доменах ИМП.
+            ('Листинг',   d + '/catalog/armatura/',
+             ['.add-to-cart-btn, button:has-text("В корзину")',
+              'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]',
+              '.tags a, [class*="tag"] a']),
+            # РЕАЛЬНАЯ КАРТОЧКА ТОВАРА: тут живут цели «Товар.*» - v-cart-kartochka,
+            # v-cart-kartochka-ranee-prosmotrennye («ранее просмотренные»),
+            # bistrii-zakaz-cartochka, bistrii-zakaz-listing-img. На листинге и в
+            # каталоге их нет. Slug корневой, одинаков на всех доменах ИМП.
+            ('Товар',     d + _имп_товар_путь(),
+             ['.add-to-cart-btn, button:has-text("В корзину")',
+              'text=Быстрый заказ, [class*="fast-order"], [class*="bystryy"]']),
+            ('Акции',     d + '/specials/',
+             ['.add-to-cart-btn, button:has-text("В корзину")',
+              'text=Быстрый заказ, [class*="fast-order"]']),
+            ('Поиск',     d + '/search/?q=труба', []),
+            ('Страница 404', d + '/nesuschestvuyushaya-404-xyz/', []),
+        ],
+        'ожидаемые': ACTIONS['imp']['ожидаемые'],
+    }
+
+
 def _план_страна(pid: str, домен: str) -> dict:
     """Универсальный план для суб-проекта страны - по базовому проекту."""
-    if _базовый(pid) == 'mpe':
+    base = _базовый(pid)
+    if base == 'mpe':
         return _план_мпэ_для_домена(домен)
+    if base == 'imp':
+        return _план_имп_для_домена(домен)
     return _план_для_домена(домен)
 
 
@@ -577,9 +645,16 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
         def _на_запрос(req):
             u = req.url
             if 'mc.yandex' in u or 'mc.webvisor' in u:
-                m = _RE_GOAL.search(unquote(u))
-                if m:
-                    gid = m.group(1)
+                # goal://<домен>/<цель> бывает и в URL (GET), и в теле (POST /
+                # sendBeacon) - проверяем оба, иначе POST-цели (напр. findtome при
+                # отправке формы) не ловятся.
+                body = ''
+                try:
+                    if req.method == 'POST':
+                        body = req.post_data or ''
+                except Exception:
+                    body = ''
+                for gid in _RE_GOAL.findall(unquote(u) + ' ' + unquote(body)):
                     if gid not in fired:
                         fired.add(gid)
                         log(f"   🎯 цель: {gid}")

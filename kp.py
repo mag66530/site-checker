@@ -166,6 +166,17 @@ class KPRow:
     all_phones: str = ''        # все номера города из КП, через ';' (10-значные)
     email: str = ''
     address: str = ''
+    country: str = ''           # страна из КП (Россия / Беларусь / …)
+    telegram: str = ''          # username менеджера без @ (напр. 'smu_manager2')
+    whatsapp: str = ''          # номер WhatsApp (напр. '7-903-130-36-69')
+
+    def telegram_norm(self) -> str:
+        """username Telegram в нижнем регистре, без @ и без t.me/."""
+        return normalize_tg(self.telegram)
+
+    def whatsapp_norm(self) -> str:
+        """номер WhatsApp - 10 значащих цифр (как normalize_phone)."""
+        return normalize_phone(self.whatsapp)
 
     def phone_set(self) -> set[str]:
         """Все номера города из КП (нормализованные)."""
@@ -232,8 +243,26 @@ def load_kp(project_id: str) -> dict[str, KPRow]:
                 all_phones=row.get('all_phones', ''),
                 email=row.get('email', ''),
                 address=row.get('address', ''),
+                # новые колонки могут отсутствовать в старых csv - берём по умолчанию.
+                country=row.get('country', ''),
+                telegram=row.get('telegram', ''),
+                whatsapp=row.get('whatsapp', ''),
             )
     return out
+
+
+def normalize_tg(s: Optional[str]) -> str:
+    """username Telegram → нижний регистр, без @, t.me/, telegram.me/, tg://…domain=."""
+    s = (s or '').strip().lower()
+    if not s:
+        return ''
+    # Есть явный префикс ссылки/@ - берём username сразу после него.
+    m = re.search(r'(?:t\.me/|telegram\.me/|resolve\?domain=|@)([a-z0-9_]{3,})', s)
+    if m:
+        return m.group(1)
+    # Иначе строка сама и есть username (как в КП: 'smu_manager2').
+    m = re.fullmatch(r'[a-z0-9_]{3,}', s)
+    return m.group(0) if m else ''
 
 
 def _norm_host(url_or_host: str) -> str:
@@ -269,10 +298,22 @@ def extract_site_contacts(html: str) -> dict:
                   r'.{0,40}', text, re.IGNORECASE)
     if m:
         addr = m.group(0).strip()
+    # Мессенджеры ищем по ВСЕМУ html: кнопки часто плавающие/виджеты вне шапки-подвала.
+    tg = re.findall(r'(?:t\.me|telegram\.me)/([A-Za-z0-9_]{3,})', html, re.I)
+    tg += re.findall(r'tg://resolve\?domain=([A-Za-z0-9_]{3,})', html, re.I)
+    _tg_skip = {'share', 'joinchat', 'iv', 's', 'proxy', 'socks',
+                'addstickers', 'joinchannel', 'addlist'}
+    tg = [t.lower() for t in tg if t.lower() not in _tg_skip]
+    wa_raw = re.findall(
+        r'(?:wa\.me/|api\.whatsapp\.com/send[^"\'\s]*?phone=|whatsapp://send\?phone=)'
+        r'(\+?\d[\d\-()\s]{7,})', html, re.I)
+    wa = [n for n in (normalize_phone(w) for w in wa_raw) if n]
     return {
         'phones': list(dict.fromkeys(phones)),
         'emails': list(dict.fromkeys(emails)),
         'address': addr,
+        'telegram': list(dict.fromkeys(tg)),
+        'whatsapp': list(dict.fromkeys(wa)),
         'full_text': text,
     }
 
@@ -454,3 +495,114 @@ def _fmt(norm10: str) -> str:
     if len(norm10) != 10:
         return norm10
     return f'+7 ({norm10[:3]}) {norm10[3:6]}-{norm10[6:8]}-{norm10[8:]}'
+
+
+# ── Пункт 1.4: сверка «главных переменных» поддомена с КП (для вкладки) ──
+
+
+def check_variables(html: str, domain: str) -> dict:
+    """Сверяет контактные переменные главной страницы поддомена с КП: телефоны
+    (поиск/реклама/общий - по правилу «номер на сайте входит в набор КП города»),
+    почта, адрес, Telegram, WhatsApp. Город/страна проверяются отдельно
+    region_checker'ом. Возвращает {domain, city, country, matched, fields:[...]}
+    где каждое поле = {field, expected, found, status, note}.
+    status: ok | ok_set | bug | warn | na.
+    """
+    kp = load_kp_for_domain(domain)
+    host = _norm_host(domain)
+    row = kp.get(host) if kp else None
+    out = {"domain": host, "city": row.city if row else "",
+           "country": row.country if row else "", "matched": bool(row), "fields": []}
+    if not row:
+        return out
+
+    site = extract_site_contacts(html)
+    fields = out["fields"]
+
+    def add(field, expected, found, status, note=""):
+        fields.append({"field": field, "expected": expected or "—",
+                       "found": found or "—", "status": status, "note": note})
+
+    kp_phones = row.phone_set()
+    site_phones = {p for p in (normalize_phone(x) for x in site.get("phones", [])) if p}
+    site_ph_fmt = ", ".join(_fmt(p) for p in sorted(site_phones)) or "—"
+
+    for label, val in (("Тел. поиск", row.phone_seo),
+                       ("Тел. реклама", row.phone_ad),
+                       ("Тел. общий", row.phone_common)):
+        exp = normalize_phone(val)
+        if not exp:
+            add(label, "—", site_ph_fmt, "na", "нет в КП")
+        elif exp in site_phones:
+            add(label, _fmt(exp), _fmt(exp), "ok", "виден на сайте")
+        elif site_phones & kp_phones:
+            add(label, _fmt(exp), site_ph_fmt, "ok_set",
+                "на сайте другой номер этого же города из КП")
+        elif site_phones:
+            add(label, _fmt(exp), site_ph_fmt, "bug", "на сайте номер НЕ из КП города")
+        else:
+            add(label, _fmt(exp), "—", "warn", "телефон на сайте не найден")
+
+    exp_mail = (row.email or "").strip().lower()
+    site_mails = [e.lower() for e in site.get("emails", [])]
+    if not exp_mail:
+        add("Почта", "—", ", ".join(site_mails[:3]), "na", "нет в КП")
+    elif exp_mail in site_mails:
+        add("Почта", exp_mail, exp_mail, "ok")
+    elif site_mails:
+        add("Почта", exp_mail, ", ".join(site_mails[:3]), "bug", "почта не из КП")
+    else:
+        add("Почта", exp_mail, "—", "warn", "почта на сайте не найдена")
+
+    if not row.address:
+        add("Адрес", "—", site.get("address", ""), "na", "нет в КП")
+    elif address_match(site.get("address", ""), row.address):
+        add("Адрес", row.address, site.get("address") or "—", "ok")
+    elif site.get("address"):
+        add("Адрес", row.address, site["address"], "bug", "адрес не совпадает с КП")
+    else:
+        add("Адрес", row.address, "—", "warn", "адрес на сайте не найден")
+
+    exp_tg = row.telegram_norm()
+    site_tg = set(site.get("telegram", []))
+    if not exp_tg:
+        add("Telegram", "—", ", ".join(sorted(site_tg)[:3]), "na", "нет в КП")
+    elif exp_tg in site_tg:
+        add("Telegram", exp_tg, exp_tg, "ok")
+    elif site_tg:
+        add("Telegram", exp_tg, ", ".join(sorted(site_tg)[:3]), "bug", "TG не из КП")
+    else:
+        add("Telegram", exp_tg, "—", "warn", "ссылка на Telegram не найдена")
+
+    exp_wa = row.whatsapp_norm()
+    site_wa = set(site.get("whatsapp", []))
+    if not exp_wa:
+        add("WhatsApp", "—", ", ".join(_fmt(w) for w in sorted(site_wa)[:3]), "na", "нет в КП")
+    elif exp_wa in site_wa:
+        add("WhatsApp", _fmt(exp_wa), _fmt(exp_wa), "ok")
+    elif site_wa:
+        add("WhatsApp", _fmt(exp_wa), ", ".join(_fmt(w) for w in sorted(site_wa)[:3]),
+            "bug", "WA не из КП")
+    else:
+        add("WhatsApp", _fmt(exp_wa), "—", "warn", "ссылка на WhatsApp не найдена")
+
+    return out
+
+
+_KP_CACHE: dict[str, dict] = {}
+
+
+def load_kp_for_domain(domain: str) -> dict:
+    """КП того проекта, которому принадлежит домен (по совпадению второго уровня
+    хоста с доменом первой строки КП). Кэшируется. Служит check_variables, когда
+    проект заранее не передан."""
+    host = _norm_host(domain)
+    parts = host.split('.')
+    brand = parts[-2] if len(parts) >= 2 else host
+    for proj in ('smu', 'imp', 'mpe', 'avia'):
+        if proj not in _KP_CACHE:
+            _KP_CACHE[proj] = load_kp(proj)
+        kp = _KP_CACHE[proj]
+        if any(brand == d.split('.')[-2] for d in kp if '.' in d):
+            return kp
+    return {}

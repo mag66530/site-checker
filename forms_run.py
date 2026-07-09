@@ -191,6 +191,23 @@ def main() -> int:
                 почта_получателя=city_mail,
             )
 
+        # ── Пункт 2.12: cookie-уведомление + ссылка на политику + живочат ──
+        # ВАЖНО: пишем строки 2.12 в лог ПЕРВЫМИ (до проверок админки) - они
+        # добавляют строки через append_log_row по фиксированному порядку колонок,
+        # а проверки админки ниже ВСТАВЛЯЮТ доп. колонки; если 2.12 писать после,
+        # значения разъедутся по колонкам. Открываем главную каждого города свежим
+        # контекстом (без cookie = «новый пользователь»). Тихо пропускается без городов.
+        if not (stop and stop()):
+            try:
+                import privacy_check
+                _города_212 = [(c, u) for (c, u, _m) in run_cities if u]
+                if _города_212:
+                    privacy_check.выполнить_проверку(
+                        _города_212, excel_path='log_forms.xlsx',
+                        show=a.show_browser, log=_stamp)
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠️ Проверка 2.12 (cookie/чат) не выполнена: {e}')
+
         # ── Уровень 1: проверка админки (если заданы креды admin.local.json) ──
         # У СМУ разные админки для РФ / СНГ / Steelgroup (АДМИН_ЗОНЫ в конфиге), но
         # логин/пароль общие. Логинимся в каждую нужную зону, читаем «Уведомления
@@ -241,6 +258,22 @@ def main() -> int:
                 )
             except Exception as e:  # noqa: BLE001
                 _stamp(f'⚠️ Проверка письма о заказе не выполнена: {e}')
+
+        # Финал: колонку «Комментарий» тянем шире (её ширину сбивают вставки
+        # колонок проверок админки/письма). Делаем в самом конце, когда все
+        # колонки уже на месте.
+        try:
+            from openpyxl import load_workbook as _lw
+            from openpyxl.utils import get_column_letter as _gcl
+            _wb = _lw('log_forms.xlsx')
+            if 'Логи' in _wb.sheetnames:
+                _ws = _wb['Логи']
+                _h = [str(c.value or '').strip().lower() for c in _ws[1]]
+                if 'комментарий' in _h:
+                    _ws.column_dimensions[_gcl(_h.index('комментарий') + 1)].width = 120
+                    _wb.save('log_forms.xlsx')
+        except Exception:  # noqa: BLE001
+            pass
     except SystemExit as e:
         rc = int(e.code) if isinstance(e.code, int) else 1
     except Exception as e:

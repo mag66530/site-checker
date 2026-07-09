@@ -89,6 +89,146 @@ def response_indicates_form_error(text: str) -> str:
     return ""
 
 
+# Пункт 2.7: уведомление пользователю о заявке после отправки формы (попап/
+# картинка «спасибо», сообщение об успехе или смена текста кнопки на подтверждение).
+_МАРКЕРЫ_УВЕДОМЛЕНИЯ = (
+    "спасибо", "заявка принят", "заявка отправлен", "благодар", "мы свяжемся",
+    "ваша заявка", "заявка успешно", "успешно отправл", "отправлено", "принято в обработ",
+    "заявка получен", "мы получили", "будем на связи", "заявка зарегистрирован",
+)
+
+
+def _текст_подтверждает_отправку(text: str) -> bool:
+    """True, если в тексте есть слова-маркеры подтверждения заявки пользователю.
+    Чистая функция (без браузера) - легко тестируется."""
+    t = (text or "").lower().replace("ё", "е")
+    return any(m in t for m in _МАРКЕРЫ_УВЕДОМЛЕНИЯ)
+
+
+def детект_уведомления_пользователю(page, текст_кнопки_до: str = "",
+                                    текст_кнопки_после: str = "") -> str:
+    """Проверяет (пункт 2.7), увидел ли пользователь подтверждение отправки заявки:
+    всплывающий попап/картинка «спасибо», текст успеха на видимой странице или
+    смена текста кнопки на подтверждение. Возвращает короткую пометку для отчёта:
+    «Да (попап)» / «Да (кнопка)» / «Да (текст)» / «Нет». Ошибки браузера гасим."""
+    # 1) Видимый попап/модалка с текстом успеха (всплывающая «картинка»).
+    for sel in ("[class*='popup']", "[class*='modal']", "[role='dialog']",
+                "[class*='thank']", "[class*='success']", "[class*='spasibo']",
+                "[class*='thanks']"):
+        try:
+            loc = page.locator(sel)
+            for i in range(min(loc.count(), 6)):
+                el = loc.nth(i)
+                if el.is_visible() and _текст_подтверждает_отправку(
+                        el.inner_text(timeout=1000)):
+                    return "Да (попап)"
+        except Exception:  # noqa: BLE001
+            pass
+    # 2) Кнопка сменила текст на подтверждение («Отправить» → «Заявка отправлена»).
+    до = (текст_кнопки_до or "").strip()
+    после = (текст_кнопки_после or "").strip()
+    if после and после != до and _текст_подтверждает_отправку(после):
+        return "Да (кнопка)"
+    # 3) Текст успеха на видимой части страницы.
+    try:
+        if _текст_подтверждает_отправку(page.locator("body").inner_text(timeout=2000)):
+            return "Да (текст)"
+    except Exception:  # noqa: BLE001
+        pass
+    return "Нет"
+
+
+# Пункт 2.13: согласие на обработку персональных данных + ссылка на политику.
+_ПОЛИТИКА_МАРКЕРЫ_213 = (
+    "politik", "policy", "privacy", "personal", "confiden", "soglas", "agree",
+    "полит", "конфиденциальн", "персональн", "обработк", "согласи", "152",
+)
+
+
+def ссылка_ведёт_на_политику(href: str, text: str) -> bool:
+    """True, если ссылка (по href или подписи) ведёт на политику/согласие. Чистая."""
+    h = (href or "").lower().replace("ё", "е")
+    t = (text or "").lower().replace("ё", "е")
+    return any(m in h for m in _ПОЛИТИКА_МАРКЕРЫ_213) or \
+        any(m in t for m in _ПОЛИТИКА_МАРКЕРЫ_213)
+
+
+def проверка_согласия_2_13(scope, page) -> dict:
+    """Пункт 2.13 для одной формы: считает видимые чекбоксы согласия, проверяет
+    предустановлены ли они, есть ли ссылка на политику, и обязательно ли согласие
+    (без него форму не отправить). Ничего не отправляет: обязательность проверяем
+    по атрибуту required и браузерной проверке формы checkValidity().
+    Возвращает {чекбоксов, предустановлены, ссылка, валидация}."""
+    res = {"чекбоксов": 0, "предустановлены": False, "ссылка": False, "валидация": False}
+    try:
+        cb = scope.locator("input[type='checkbox']")
+        видимых = 0
+        for i in range(min(cb.count(), 12)):
+            el = cb.nth(i)
+            try:
+                if not el.is_visible():
+                    continue
+            except Exception:  # noqa: BLE001
+                continue
+            видимых += 1
+            try:
+                if el.is_checked():
+                    res["предустановлены"] = True
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if el.evaluate("e => !!(e.required || "
+                               "e.getAttribute('aria-required')==='true')"):
+                    res["валидация"] = True
+            except Exception:  # noqa: BLE001
+                pass
+        res["чекбоксов"] = видимых
+    except Exception:  # noqa: BLE001
+        pass
+    # Ссылка на политику среди ссылок формы.
+    try:
+        links = scope.locator("a")
+        for j in range(min(links.count(), 15)):
+            a = links.nth(j)
+            if ссылка_ведёт_на_политику(a.get_attribute("href") or "",
+                                        a.inner_text(timeout=400) or ""):
+                res["ссылка"] = True
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    # Если по атрибуту required не увидели - спросим браузер: без согласия форма
+    # невалидна? (снимаем видимые галочки согласия и вызываем checkValidity()).
+    if not res["валидация"] and res["чекбоксов"]:
+        try:
+            cb = scope.locator("input[type='checkbox']")
+            for i in range(min(cb.count(), 12)):
+                el = cb.nth(i)
+                try:
+                    if el.is_visible() and el.is_checked():
+                        el.uncheck(force=True)
+                except Exception:  # noqa: BLE001
+                    pass
+            ok = scope.evaluate("f => { try { return f.checkValidity ? "
+                                "f.checkValidity() : true } catch(e){ return true } }")
+            if ok is False:
+                res["валидация"] = True
+        except Exception:  # noqa: BLE001
+            pass
+    return res
+
+
+def _извлечь_цели_из_запроса(url: str, body: str = "") -> list:
+    """Имена целей Метрики из запроса reachGoal. Цель уходит на mc.yandex.* как
+    page-url=goal://<домен>/<цель>. Это бывает и в URL (обычный GET), и в ТЕЛЕ
+    запроса (POST / navigator.sendBeacon) - раньше смотрели только URL, из-за чего
+    цели, уходящие POST-ом (напр. findtome при отправке формы), не ловились.
+    Проверяем оба места. Чистая функция - легко тестируется."""
+    if "mc.yandex" not in (url or "") and "mc.webvisor" not in (url or ""):
+        return []
+    hay = unquote(url or "") + " " + unquote(body or "")
+    return re.findall(r"goal://[^/]+/([^&\s\"?#]+)", hay)
+
+
 def _form_field_map_from_config(форма_config: dict) -> dict | None:
     """Явная карта полей: HTML name → токен источника (ПОЧТА, ТЕЛЕФОН, …) или буквальная строка."""
     raw = форма_config.get("поля") or форма_config.get("fields")
@@ -1210,22 +1350,24 @@ def prep_steps_from_page(страница: dict) -> list:
 # неудачи кладём в колонку «Комментарий» (см. _status_clean_reason).
 LOG_HEADERS = [
     "Дата", "Время", "Город", "Страница", "URL",
-    "Название", "Имя", "Телефон", "Почта", "Почта получателя", "Статус", "Комментарий",
+    "Название", "Где находится", "Имя", "Телефон", "Почта", "Почта получателя",
+    "Статус", "Уведомление пользователю", "Комментарий",
 ]
 
 # Ключи строки-словаря в порядке колонок LOG_HEADERS.
 LOG_KEYS_ORDER = [
     "дата", "время", "город", "страница", "url",
-    "название", "имя", "телефон", "почта", "почта_получателя", "статус", "комментарий",
+    "название", "где", "имя", "телефон", "почта", "почта_получателя",
+    "статус", "уведомление", "комментарий",
 ]
 
 # Отдельный лист «Цели» (Яндекс.Метрика): свои колонки - форма/кнопка + идентификатор цели.
 GOAL_HEADERS = [
-    "Дата", "Время", "Город", "Страница", "Форма / кнопка",
+    "Дата", "Время", "Город", "Страница", "Форма / кнопка", "Где находится",
     "Цель (идентификатор)", "URL", "Статус", "Комментарий",
 ]
 GOAL_KEYS_ORDER = [
-    "дата", "время", "город", "страница", "название",
+    "дата", "время", "город", "страница", "название", "где",
     "ид", "url", "статус", "комментарий",
 ]
 
@@ -1326,6 +1468,15 @@ def append_log_row(path: str, row: dict) -> None:
     from openpyxl.utils import get_column_letter
     wb = load_workbook(path)
 
+    # Подсказка «где находится форма» - из общего словаря по названию, если
+    # строка её ещё не несёт (заполняем и для форм, и для целей-кнопок).
+    if not row.get("где"):
+        try:
+            from form_locations import where as _where_form
+            row = {**row, "где": _where_form(row.get("название", ""))}
+        except Exception:
+            pass
+
     цель_строка = _строка_это_цель(row)
     if цель_строка:
         # лист «Цели» создаём при первой цели
@@ -1346,10 +1497,12 @@ def append_log_row(path: str, row: dict) -> None:
     for col, key in enumerate(keys, 1):
         val = row.get(key, "")
         ws.cell(r, col, val)
-        # авто-ширина: растим колонку под содержимое (с разумным потолком)
+        # авто-ширина: растим колонку под содержимое (с разумным потолком).
+        # «Комментарий» тянем шире (там длинные пояснения) - до 120.
         letter = get_column_letter(col)
         cur = ws.column_dimensions[letter].width or (len(headers[col - 1]) + 3)
-        ws.column_dimensions[letter].width = min(max(cur, len(str(val)) + 3), 70)
+        _cap = 120 if str(headers[col - 1]).strip().lower() == "комментарий" else 70
+        ws.column_dimensions[letter].width = min(max(cur, len(str(val)) + 3), _cap)
     try:
         si = keys.index("статус") + 1
         sval = str(row.get("статус", "")).strip().lower()
@@ -1357,6 +1510,17 @@ def append_log_row(path: str, row: dict) -> None:
             ws.cell(r, si).font = Font(color="1E8E3E", bold=True)   # зелёный
         elif sval.startswith("ошибк") or sval.startswith("не сработала"):
             ws.cell(r, si).font = Font(color="C62828", bold=True)   # красный
+    except Exception:
+        pass
+    # Пункт 2.7: колонку «Уведомление пользователю» подсветим (Да - зелёный,
+    # Нет - оранжевый, чтобы обратить внимание). Пустую не трогаем.
+    try:
+        ui = keys.index("уведомление") + 1
+        uval = str(row.get("уведомление", "")).strip()
+        if uval.startswith("Да"):
+            ws.cell(r, ui).font = Font(color="1E8E3E", bold=True)
+        elif uval.startswith("Нет"):
+            ws.cell(r, ui).font = Font(color="B26A00", bold=True)
     except Exception:
         pass
     wb.save(path)
@@ -2346,6 +2510,30 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             ta.first.fill(КОММЕНТАРИЙ, force=True)
                             break
 
+            # Пункт 2.13: проверяем согласие и политику ДО проставления галочек
+            # (иначе не увидим «предустановлены ли изначально»). Отправку не делаем.
+            try:
+                _c213 = проверка_согласия_2_13(form, page)
+                _ok213 = (_c213["чекбоксов"] >= 2 and not _c213["предустановлены"]
+                          and _c213["ссылка"] and _c213["валидация"])
+                _det213 = (
+                    f"чек-боксов согласия: {_c213['чекбоксов']} "
+                    f"(нужно ≥2); не предустановлены: "
+                    f"{'да' if not _c213['предустановлены'] else 'НЕТ - стоят по умолчанию'}; "
+                    f"ссылка на политику: {'да' if _c213['ссылка'] else 'нет'}; "
+                    f"без согласия не отправить: {'да' if _c213['валидация'] else 'нет'}")
+                записать_в_excel({
+                    "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                    "тип_селектора": "согласие", "ид": название,
+                    "название": f"Согласие и политика (2.13): {название}",
+                    "имя": имя_теста, "статус": "OK" if _ok213 else "Проверить",
+                    "комментарий_готовый": _det213, "код": "consent213",
+                })
+                print(f"   📝 Согласие (2.13) «{название}»: "
+                      f"{'OK' if _ok213 else 'проверить'} - {_det213}")
+            except Exception as _e213:  # noqa: BLE001
+                print(f"   ⚠️ Проверка согласия 2.13 не удалась: {_e213}")
+
             _ensure_modal_consent(form, page)  # надёжно: required + согласие по тексту подписи
             page.wait_for_timeout(300)
 
@@ -2376,6 +2564,12 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _btn_css or "button[type='submit'], input[type='submit'], button.btn"
             ).first
             sub.scroll_into_view_if_needed()
+            # Пункт 2.7: запомним текст кнопки ДО отправки - чтобы поймать её смену
+            # на подтверждение («Отправить» → «Заявка отправлена»).
+            try:
+                _btn_текст_до = (sub.inner_text(timeout=1000) or "").strip()
+            except Exception:
+                _btn_текст_до = ""
             _t_отправки = _time.time()   # цели Метрики считаем с момента отправки
             try:
                 sub.click(timeout=5000)
@@ -2403,6 +2597,15 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             else:
                 статус = "УСПЕШНО (Playwright - как ручная отправка)"
 
+            # Пункт 2.7: увидел ли пользователь подтверждение заявки (попап/картинка
+            # «спасибо», текст успеха или смена текста кнопки) - в отдельную колонку.
+            try:
+                _btn_текст_после = (sub.inner_text(timeout=1000) or "").strip()
+            except Exception:
+                _btn_текст_после = ""
+            _уведомл_польз = детект_уведомления_пользователю(
+                page, _btn_текст_до, _btn_текст_после)
+
             записать_в_excel(
                 {
                     "тип": "PLAYWRIGHT-FORM",
@@ -2415,10 +2618,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_теста,
                     "комментарий_готовый": _коммент_готовый,
                     "статус": статус,
+                    "уведомление": _уведомл_польз,
                     "код": "browser",
                 }
             )
-            print(f"   ✅ {название} - {статус}")
+            print(f"   ✅ {название} - {статус}  ·  уведомление польз.: {_уведомл_польз}")
 
             # Цель Метрики этой формы (ключ «цель»): ждём немного (летит ajax-ом)
             # и пишем в отчёт «сработала / НЕ сработала». Причину показываем,
@@ -2592,11 +2796,15 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
     def _поймать_цель(request):
         try:
-            u = request.url
-            if ("mc.yandex" in u or "mc.webvisor" in u) and "goal" in u:
-                for t in re.findall(r"goal://[^/]+/([^&\s\"?#]+)", unquote(u)):
-                    _pw["goals"].append({"цель": t, "время": _time.time()})
-                    print(f"      🎯 Метрика: зафиксирована цель «{t}»")
+            body = ""
+            try:
+                if request.method == "POST":
+                    body = request.post_data or ""
+            except Exception:  # noqa: BLE001
+                body = ""
+            for t in _извлечь_цели_из_запроса(request.url, body):
+                _pw["goals"].append({"цель": t, "время": _time.time()})
+                print(f"      🎯 Метрика: зафиксирована цель «{t}»")
         except Exception:  # noqa: BLE001
             pass
 
