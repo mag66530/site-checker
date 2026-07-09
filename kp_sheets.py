@@ -64,28 +64,57 @@ def kp_sheet_url(project: str) -> str:
 _XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 
+def _sa_from_b64(raw) -> dict:
+    """base64-строка (весь файл-ключ) → dict. Пробелы/переносы игнорируем."""
+    import base64
+    cleaned = ''.join(str(raw).split())
+    return json.loads(base64.b64decode(cleaned).decode('utf-8'))
+
+
 def service_account_info() -> dict | None:
-    """JSON-ключ сервисного аккаунта Google: из окружения GCP_SA_JSON (строка
-    JSON - её прокидывает страница из секрета gcp_service_account) или, в
-    Streamlit-контексте, напрямую из st.secrets['gcp_service_account']. None - нет."""
+    """JSON-ключ сервисного аккаунта Google. Порядок источников:
+      1) окружение GCP_SA_JSON (строка-JSON) или GCP_SA_B64 (base64) -
+         их прокидывает страница из секрета в фоновый процесс;
+      2) в Streamlit-контексте - секрет gcp_service_account (TOML-секция или
+         строка-JSON) либо gcp_service_account_b64 (base64 всего файла - самый
+         надёжный формат для TOML: одна строка, без кавычек и переносов внутри).
+    None - ключ не задан / не разобрался (тогда работает публичный экспорт/снапшот)."""
     raw = os.environ.get('GCP_SA_JSON') or ''
     if raw.strip():
         try:
             return json.loads(raw)
         except Exception:
             return None
+    b64env = os.environ.get('GCP_SA_B64') or ''
+    if b64env.strip():
+        try:
+            return _sa_from_b64(b64env)
+        except Exception:
+            return None
     try:
         import streamlit as st  # доступно только когда код идёт из Streamlit
-        v = st.secrets.get('gcp_service_account')
-        if v is None:
-            return None
-        # Секрет может быть либо TOML-секцией (dict), либо целым JSON одной строкой
-        # (проще вставлять - весь файл-ключ в тройных кавычках).
-        if isinstance(v, str):
-            return json.loads(v)
-        return dict(v)
     except Exception:
-        pass
+        return None
+    # Секрет-JSON: либо TOML-секция (dict), либо целый JSON одной строкой.
+    try:
+        v = st.secrets.get('gcp_service_account')
+    except Exception:
+        v = None
+    if v is not None:
+        try:
+            return json.loads(v) if isinstance(v, str) else dict(v)
+        except Exception:
+            pass                        # битый - попробуем base64-вариант ниже
+    # base64 всего файла-ключа - надёжнее всего вставлять в TOML.
+    try:
+        b = st.secrets.get('gcp_service_account_b64')
+    except Exception:
+        b = None
+    if b:
+        try:
+            return _sa_from_b64(b)
+        except Exception:
+            pass
     return None
 
 
