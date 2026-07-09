@@ -295,6 +295,8 @@ def проверка_полей_форм(scope, page) -> dict:
     Возвращает {телефон_ограничен(bool|None), телефон_детали, файл_есть,
     файл_типы, файл_любые}."""
     res = {"телефон_ограничен": None, "телефон_детали": "поле телефона не найдено",
+           "почта_ок": None, "почта_детали": "поле почты не найдено",
+           "обязательность_ок": None, "обязательность_детали": "не определено",
            "файл_есть": False, "файл_типы": [], "файл_любые": False}
 
     # ── Телефон ──
@@ -350,6 +352,65 @@ def проверка_полей_форм(scope, page) -> dict:
                 ", ".join(детали) if детали else
                 "нет ограничения (не tel, без pattern/maxlength/inputmode/"
                 "маски; ввод не фильтруется)")
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ── Почта: валидируется ли формат (пункт 2.14) ──
+    # Одним evaluate: сохранить значение, проверить type=email, иначе ввести
+    # «abcdef» (без @) и «a@b.ru» и сравнить checkValidity - восстановить.
+    # checkValidity НЕ отправляет форму, только спрашивает браузер о валидности.
+    try:
+        _em = scope.evaluate(
+            "f => {"
+            " const e = f.querySelector(\"input[type='email'], input[name*='mail' i],"
+            " input[name*='email' i], input[placeholder*='mail' i],"
+            " input[placeholder*='почт' i], input[autocomplete='email']\");"
+            " if(!e) return {found:false};"
+            " const s=e.value; const t=(e.type||'').toLowerCase();"
+            " if(t==='email'){ return {found:true, typeEmail:true}; }"
+            " let v1=true,v2=true; try{ e.value='abcdef'; v1=e.checkValidity();"
+            " e.value='a@b.ru'; v2=e.checkValidity(); }catch(_){}"
+            " e.value=s; return {found:true, typeEmail:false, valid:(v1===false && v2===true)};"
+            "}")
+        if _em and _em.get("found"):
+            if _em.get("typeEmail"):
+                res["почта_ок"] = True
+                res["почта_детали"] = "type=email (браузер проверяет формат)"
+            elif _em.get("valid"):
+                res["почта_ок"] = True
+                res["почта_детали"] = "проверяет формат (pattern/валидация)"
+            else:
+                res["почта_ок"] = False
+                res["почта_детали"] = "НЕ проверяет формат (примет любой текст без @)"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ── Обязательность полей / уведомления о заполнении (пункт 2.14) ──
+    # Одним evaluate: сохранить значения всех полей, очистить видимые текстовые,
+    # спросить form.checkValidity() (пустая форма невалидна = браузер покажет
+    # «заполните поле»), восстановить значения. Форма НЕ отправляется.
+    try:
+        _rq = scope.evaluate(
+            "f => {"
+            " const inp=[...f.querySelectorAll('input,textarea,select')];"
+            " const saved=inp.map(e=>e.value);"
+            " const isText=e=>['text','tel','email','search','url','number','',"
+            "'textarea'].includes((e.type||e.tagName||'').toLowerCase());"
+            " const vis=e=>e.offsetParent!==null;"
+            " const req=inp.filter(e=>vis(e)&&isText(e)&&(e.required||"
+            "e.getAttribute('aria-required')==='true')).length;"
+            " inp.forEach(e=>{ if(isText(e)) e.value=''; });"
+            " let valid=true; try{ valid=f.checkValidity(); }catch(_){}"
+            " inp.forEach((e,i)=>{ e.value=saved[i]; });"
+            " return {req, emptyInvalid: valid===false};"
+            "}")
+        if _rq is not None:
+            _req = int(_rq.get("req") or 0)
+            _empty_invalid = bool(_rq.get("emptyInvalid"))
+            res["обязательность_ок"] = bool(_req > 0 or _empty_invalid)
+            res["обязательность_детали"] = (
+                f"обязательных полей: {_req}; пустую форму не отправить: "
+                f"{'да' if _empty_invalid else 'нет'}")
     except Exception:  # noqa: BLE001
         pass
 
@@ -2815,7 +2876,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # типы файлов у загрузчика (только вывод). Отправку не трогает.
             try:
                 _pf = проверка_полей_форм(form, page)
+                # Пункт 2.14: баг, если ЯВНО не работает маска телефона, почта не
+                # проверяет формат или пустую форму можно отправить (нет уведомлений
+                # о заполнении). None - поле не найдено, не считаем багом.
                 _phone_bug = _pf["телефон_ограничен"] is False
+                _mail_bug = _pf["почта_ок"] is False
+                _req_bug = _pf["обязательность_ок"] is False
+                _есть_баг = _phone_bug or _mail_bug or _req_bug
                 # Телефон - в «Комментарий»; типы файлов - в отдельную
                 # колонку «Типы файлов формы» (пусто, если поля загрузки нет).
                 if not _pf["файл_есть"]:
@@ -2824,18 +2891,20 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     _файлы_кол = "⚠ ЛЮБЫЕ типы (accept не задан)"
                 else:
                     _файлы_кол = ", ".join(_pf["файл_типы"])
+                _ком214 = (f"телефон (маска): {_pf['телефон_детали']}; "
+                           f"почта (валидация): {_pf['почта_детали']}; "
+                           f"обязательность/уведомления: {_pf['обязательность_детали']}")
                 записать_в_excel({
                     "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
                     "тип_селектора": "поля", "ид": название,
-                    "название": f"Поля формы (маска телефона, типы файлов): {название}",
+                    "название": f"Поля формы 2.14 (маска тел./почта/обязательность): {название}",
                     "имя": имя_теста,
-                    "статус": "Ошибка" if _phone_bug else "OK",
+                    "статус": "Проверить" if _есть_баг else "OK",
                     "типы_файлов": _файлы_кол,
-                    "комментарий_готовый": f"телефон - {_pf['телефон_детали']}",
+                    "комментарий_готовый": _ком214,
                     "код": "fields_audit",
                 })
-                print(f"   🧪 Поля формы «{название}»: телефон "
-                      f"{_pf['телефон_детали']}"
+                print(f"   🧪 Поля 2.14 «{название}»: {_ком214}"
                       + (f"; файлы: {_файлы_кол}" if _файлы_кол else ""))
             except Exception as _epf:  # noqa: BLE001
                 print(f"   ⚠️ Аудит полей формы не удался: {_epf}")
