@@ -76,8 +76,14 @@ def service_account_info() -> dict | None:
             return None
     try:
         import streamlit as st  # доступно только когда код идёт из Streamlit
-        if 'gcp_service_account' in st.secrets:
-            return dict(st.secrets['gcp_service_account'])
+        v = st.secrets.get('gcp_service_account')
+        if v is None:
+            return None
+        # Секрет может быть либо TOML-секцией (dict), либо целым JSON одной строкой
+        # (проще вставлять - весь файл-ключ в тройных кавычках).
+        if isinstance(v, str):
+            return json.loads(v)
+        return dict(v)
     except Exception:
         pass
     return None
