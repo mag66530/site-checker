@@ -146,7 +146,7 @@ st.caption(f'В КП проекта: **{len(_cities)}** поддоменов, с
 
 st.divider()
 st.subheader('Что проверяем')
-_mode = st.radio('Охват', ['Все поддомены', 'Выбрать города'],
+_mode = st.radio('Охват', ['Все домены+поддомены', 'Выбрать города'],
                  horizontal=True, label_visibility='collapsed')
 _chosen = []
 if _mode == 'Выбрать города':
@@ -155,7 +155,7 @@ if _mode == 'Выбрать города':
                              placeholder='- выберите города -')
     st.caption(f'Выбрано: {len(_chosen)} из {len(_all_city_names)}.')
 else:
-    st.caption(f'Будут проверены все {len(_cities)} поддоменов проекта.')
+    st.caption(f'Будут проверены все {len(_cities)} доменов и поддоменов проекта.')
 
 st.divider()
 st.subheader('Запуск')
@@ -195,7 +195,7 @@ with _c2:
         st.rerun()
 
 if _none_chosen:
-    st.warning('Выберите хотя бы один город или переключитесь на «Все поддомены».')
+    st.warning('Выберите хотя бы один город или переключитесь на «Все домены+поддомены».')
 
 # ── Легенда ──────────────────────────────────────────────────────────
 with st.expander('Как читать результат'):
