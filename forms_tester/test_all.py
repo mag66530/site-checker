@@ -297,6 +297,7 @@ def проверка_полей_форм(scope, page) -> dict:
     res = {"телефон_ограничен": None, "телефон_детали": "поле телефона не найдено",
            "почта_ок": None, "почта_детали": "поле почты не найдено",
            "обязательность_ок": None, "обязательность_детали": "не определено",
+           "длина_ок": None, "длина_детали": "поля с ограничением длины не найдены",
            "файл_есть": False, "файл_типы": [], "файл_любые": False}
 
     # ── Телефон ──
@@ -411,6 +412,75 @@ def проверка_полей_форм(scope, page) -> dict:
             res["обязательность_детали"] = (
                 f"обязательных полей: {_req}; пустую форму не отправить: "
                 f"{'да' if _empty_invalid else 'нет'}")
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ── Ограничение длины: РЕАЛЬНО пробуем ввести больше лимита (пункт 2.14) ──
+    # Не верим атрибуту на слово: в каждое поле с maxlength вводим (лимит+5)
+    # символов настоящими нажатиями (type) и проверяем, что браузер обрезал по
+    # лимиту, как у живого пользователя. Значение сохраняем и возвращаем; форму
+    # не трогаем. Телефон пропускаем (его покрывает проба маски + маска добавляет
+    # формат-символы → ложные срабатывания). type=number тоже пропускаем: браузеры
+    # к нему maxlength не применяют - иначе ложное «не держит».
+    try:
+        проверено, не_держат, примеры = 0, [], []
+        поля = scope.locator(
+            "input:not([type='checkbox']):not([type='radio']):not([type='file'])"
+            ":not([type='hidden']):not([type='submit']):not([type='button'])"
+            ":not([type='date']):not([type='time']):not([type='color'])"
+            ":not([type='range']):not([type='number']), textarea")
+        for i in range(min(поля.count(), 30)):
+            if проверено >= 8:
+                break
+            el = поля.nth(i)
+            try:
+                info = el.evaluate(
+                    "e => ({ml: e.maxLength, vis: e.offsetParent!==null,"
+                    " off: !!(e.disabled||e.readOnly),"
+                    " tel: ((e.type||'').toLowerCase()==='tel')"
+                    " || /phone|tel/i.test(e.name||'')"
+                    " || /телефон|phone/i.test(e.getAttribute('placeholder')||''),"
+                    " label:(e.name||e.getAttribute('placeholder')||e.id||'поле')})")
+            except Exception:  # noqa: BLE001
+                continue
+            ml = info.get("ml")
+            if not isinstance(ml, int) or not (0 < ml <= 40):
+                continue                        # нет реального лимита / слишком большой
+            if not info.get("vis") or info.get("off") or info.get("tel"):
+                continue                        # скрыто/недоступно/это телефон
+            try:
+                saved = el.input_value(timeout=1500)
+            except Exception:  # noqa: BLE001
+                continue
+            got = None
+            try:
+                el.fill("", timeout=1500, force=True)
+                el.type(("1234567890" * 5)[:ml + 5], timeout=3000)   # лимит+5 цифр
+                got = el.input_value(timeout=1500) or ""
+            except Exception:  # noqa: BLE001
+                got = None
+            try:
+                el.fill(saved, timeout=1500, force=True)             # вернуть как было
+            except Exception:  # noqa: BLE001
+                pass
+            if got is None:
+                continue
+            проверено += 1
+            if len(got) > ml:
+                не_держат.append(f"«{info['label']}»: лимит {ml}, ввелось {len(got)}")
+            else:
+                примеры.append(f"{info['label']}={ml}")
+        if проверено == 0:
+            res["длина_ок"] = None
+            res["длина_детали"] = "поля с ограничением длины не найдены"
+        elif не_держат:
+            res["длина_ок"] = False
+            res["длина_детали"] = "ограничение НЕ работает: " + "; ".join(не_держат[:4])
+        else:
+            res["длина_ок"] = True
+            _пр = ", ".join(примеры[:4])
+            res["длина_детали"] = (f"полей с лимитом: {проверено}, все не дают ввести "
+                                   f"больше" + (f" ({_пр})" if _пр else ""))
     except Exception:  # noqa: BLE001
         pass
 
@@ -2882,7 +2952,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _phone_bug = _pf["телефон_ограничен"] is False
                 _mail_bug = _pf["почта_ок"] is False
                 _req_bug = _pf["обязательность_ок"] is False
-                _есть_баг = _phone_bug or _mail_bug or _req_bug
+                _len_bug = _pf["длина_ок"] is False
+                _есть_баг = _phone_bug or _mail_bug or _req_bug or _len_bug
                 # Телефон - в «Комментарий»; типы файлов - в отдельную
                 # колонку «Типы файлов формы» (пусто, если поля загрузки нет).
                 if not _pf["файл_есть"]:
@@ -2893,11 +2964,12 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     _файлы_кол = ", ".join(_pf["файл_типы"])
                 _ком214 = (f"телефон (маска): {_pf['телефон_детали']}; "
                            f"почта (валидация): {_pf['почта_детали']}; "
-                           f"обязательность/уведомления: {_pf['обязательность_детали']}")
+                           f"обязательность/уведомления: {_pf['обязательность_детали']}; "
+                           f"ограничение длины: {_pf['длина_детали']}")
                 записать_в_excel({
                     "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
                     "тип_селектора": "поля", "ид": название,
-                    "название": f"Поля формы 2.14 (маска тел./почта/обязательность): {название}",
+                    "название": f"Поля формы 2.14 (маска тел./почта/обязательность/длина): {название}",
                     "имя": имя_теста,
                     "статус": "Проверить" if _есть_баг else "OK",
                     "типы_файлов": _файлы_кол,
