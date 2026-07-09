@@ -303,7 +303,9 @@ except Exception:
 
 
 def _rows_done(xlsx: Path):
-    """Сколько форм уже записано в лог (строки минус шапка). None - не прочиталось."""
+    """Сколько ФОРМ уже записано в лог (строки минус шапка). None - не прочиталось.
+    Не считаем служебные строки-проверки (согласие 2.13, cookie/политика/живочат
+    2.12) - они не формы и раздували бы прогресс (шкала считает формы)."""
     if not xlsx.exists():
         return 0
     try:
@@ -312,7 +314,22 @@ def _rows_done(xlsx: Path):
         # Считаем строки ИМЕННО листа «Логи» (не активного и не «Цели»):
         # строки целей на отдельном листе не должны раздувать прогресс.
         ws = wb["Логи"] if "Логи" in wb.sheetnames else wb.active
-        n = (ws.max_row or 1) - 1
+        rows = ws.iter_rows(values_only=True)
+        header = next(rows, None) or ()
+        try:
+            i_name = [str(h or '').strip().lower() for h in header].index('название')
+        except ValueError:
+            i_name = -1
+        _skip = ('согласие и политика', 'cookie-уведомление',
+                 'ссылка на политику', 'живочат')
+        n = 0
+        for r in rows:
+            if not r or all(v in (None, '') for v in r):
+                continue
+            nm = str(r[i_name] or '').strip().lower() if 0 <= i_name < len(r) else ''
+            if any(nm.startswith(s) for s in _skip):
+                continue
+            n += 1
         wb.close()
         return max(n, 0)
     except Exception:

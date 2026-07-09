@@ -107,7 +107,7 @@ def _launch(args, extra_env=None):
 
 
 def _deps_ready():
-    for mod in ('requests', 'bs4', 'openpyxl'):
+    for mod in ('bs4', 'openpyxl'):  # загрузка на http.client (stdlib)
         if importlib.util.find_spec(mod) is None:
             return False
     return True

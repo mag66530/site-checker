@@ -59,9 +59,12 @@ _EMPTY_MARKERS = (
 )
 
 # Кандидаты селектора карточки, если в конфиге card не задан.
-_CARD_FALLBACK = ('.catalog-item', '.product-item', '.catalog_item',
-                  '.product-card', '[class*="catalog-item"]',
-                  '[class*="product-item"]', '[data-entity="items-row-item"]')
+# Первыми - классы реальных проектов (SMU/IMP), потом общие.
+_CARD_FALLBACK = ('.catalog-product-card-item', '.card-product',
+                  '.catalog-item', '.product-item', '.catalog_item',
+                  '.product-card', '.catalog_item_wrapp',
+                  '[class*="product-item"]', '[class*="catalog-item"]',
+                  '[data-entity="items-row-item"]')
 
 
 def _config_path(pid: str) -> Path:
@@ -98,6 +101,26 @@ def _best_card_count(page, card: str | None) -> tuple[int, str]:
         if n > best_n:
             best_n, best_sel = n, sel
     return best_n, best_sel
+
+
+def _click(loc) -> str:
+    """Клик по элементу: сначала обычный (force), при неудаче - JS-клик
+    (el.click()). Смарт-фильтр Битрикса прячет чекбоксы/лейблы в свёрнутых
+    дропдаунах (display:none) - обычный клик их не берёт, JS-клик берёт.
+    Возвращает '' при успехе или текст ошибки."""
+    try:
+        loc.scroll_into_view_if_needed(timeout=3000)
+    except Exception:
+        pass
+    try:
+        loc.click(timeout=5000, force=True)
+        return ''
+    except Exception as e1:
+        try:
+            loc.evaluate('el => el.click()')
+            return ''
+        except Exception as e2:
+            return f'{e1} | JS: {e2}'
 
 
 def _has_empty_text(page) -> bool:
@@ -149,18 +172,26 @@ def run_case(page, case: dict, log) -> dict:
     # 3. Кликнуть фильтр
     try:
         loc = page.locator(filt).first
-        if loc.count() == 0:
+        if page.locator(filt).count() == 0:
             out['verdict'] = 'filter_absent'
             out['detail'] = f'селектор фильтра не найден: {filt}'
             return out
-        loc.scroll_into_view_if_needed(timeout=5000)
-        loc.click(timeout=8000, force=True)
     except Exception as e:
         out['verdict'] = 'filter_absent'
-        out['detail'] = f'по фильтру не удалось кликнуть: {e}'
+        out['detail'] = f'селектор фильтра невалиден: {e}'
+        return out
+    _err = _click(loc)
+    if _err:
+        out['verdict'] = 'filter_absent'
+        out['detail'] = f'по фильтру не удалось кликнуть: {_err}'
         return out
 
-    # 4. Применить (кнопка) или дождаться AJAX
+    # 4. Применить (кнопка) или дождаться AJAX.
+    # Смарт-фильтр Битрикса после клика чекбокса делает AJAX-пересчёт и
+    # только ПОТОМ кнопка «Показать» ведёт на /filter/.../ - жать её сразу
+    # бесполезно (выдача не сузится). Ждём пересчёт перед применением.
+    page.wait_for_timeout(int(case.get('pre_apply_ms') or 3000))
+
     nav_status = {'code': None}
 
     def _on_resp(r):
@@ -170,14 +201,19 @@ def run_case(page, case: dict, log) -> dict:
         except Exception:
             pass
     page.on('response', _on_resp)
-    try:
-        if apply_sel:
-            ap = page.locator(apply_sel).first
-            if ap.count():
-                ap.click(timeout=8000, force=True)
-    except Exception:
-        pass
-    page.wait_for_timeout(wait_ms)
+
+    if apply_sel and page.locator(apply_sel).count():
+        ap = page.locator(apply_sel).first
+        # кнопка «Показать» навигирует на отфильтрованный URL - ждём переход
+        try:
+            with page.expect_navigation(timeout=wait_ms + 4000):
+                _click(ap)
+        except Exception:
+            pass
+    else:
+        # авто-применение (AJAX по клику чекбокса, без кнопки) - просто ждём
+        page.wait_for_timeout(wait_ms)
+    page.wait_for_timeout(1200)
     try:
         page.wait_for_load_state('networkidle', timeout=8000)
     except Exception:

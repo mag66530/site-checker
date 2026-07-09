@@ -51,21 +51,98 @@ def _use_proxy(project: str) -> bool:
         return False
 
 
-def _fetch(url: str, proxy: str | None):
-    """Скачать HTML главной. Возвращает (html, ошибка)."""
-    import requests
-    headers = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/124.0.0.0 Safari/537.36")}
-    proxies = {"http": proxy, "https": proxy} if proxy else None
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+
+def _proxy_parts(proxy):
+    """(proxy_host, proxy_port, proxy_headers|None) из proxy-URL. () если нет."""
+    if not proxy:
+        return None
+    from urllib.parse import urlparse
+    pr = urlparse(proxy if '://' in proxy else 'http://' + proxy)
+    if not pr.hostname:
+        return None
+    headers = {}
+    if pr.username:
+        import base64
+        tok = base64.b64encode(
+            f"{pr.username}:{pr.password or ''}".encode()).decode()
+        headers['Proxy-Authorization'] = f'Basic {tok}'
+    return pr.hostname, pr.port or 8080, headers
+
+
+def _fetch_one(dom, proxy_parts):
+    """Скачивает https://<dom>/ через http.client (CONNECT-туннель с
+    Proxy-Authorization в CONNECT-запросе - надёжный способ прокси-авторизации
+    для HTTPS, в отличие от aiohttp, который упорно отдавал 407). Один редирект
+    в пределах того же/родственного хоста поддерживаем. → (html, ошибка)."""
+    import http.client
+    import ssl
+
+    def _get(host, path, depth=0):
+        conn = None
+        try:
+            if proxy_parts:
+                phost, pport, phdrs = proxy_parts
+                conn = http.client.HTTPSConnection(
+                    phost, pport, timeout=30, context=ssl.create_default_context())
+                conn.set_tunnel(host, 443, headers=dict(phdrs))
+            else:
+                conn = http.client.HTTPSConnection(host, 443, timeout=30)
+            conn.request('GET', path or '/', headers={
+                'User-Agent': _UA, 'Accept-Encoding': 'identity',
+                'Accept': 'text/html,application/xhtml+xml'})
+            resp = conn.getresponse()
+            if resp.status in (301, 302, 303, 307, 308) and depth < 3:
+                loc = resp.getheader('Location') or ''
+                resp.read()
+                conn.close()
+                from urllib.parse import urlparse, urljoin
+                nu = urlparse(urljoin(f'https://{host}{path or "/"}', loc))
+                return _get(nu.hostname or host,
+                            (nu.path or '/') + (f'?{nu.query}' if nu.query else ''),
+                            depth + 1)
+            if resp.status >= 400:
+                resp.read()
+                return '', f'HTTP {resp.status}'
+            data = resp.read()
+            return data.decode('utf-8', 'replace'), ''
+        finally:
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+
     try:
-        r = requests.get(url, headers=headers, proxies=proxies, timeout=30,
-                         allow_redirects=True)
-        if r.status_code >= 400:
-            return "", f"HTTP {r.status_code}"
-        return r.text or "", ""
+        return _get(dom, '/')
     except Exception as e:  # noqa: BLE001
-        return "", str(e)
+        return '', (str(e)[:200] or e.__class__.__name__)
+
+
+def fetch_all(domains, proxy, log):
+    """Качает главные всех поддоменов параллельно (пул потоков), печатает
+    прогресс «[i/N]». → {domain: (html, ошибка)}."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    parts = _proxy_parts(proxy)
+    out: dict = {}
+    N = len(domains)
+    done = 0
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        futs = {ex.submit(_fetch_one, d, parts): (d, row.city)
+                for d, row in domains}
+        for fut in as_completed(futs):
+            dom, city = futs[fut]
+            try:
+                html, err = fut.result()
+            except Exception as e:  # noqa: BLE001
+                html, err = '', str(e)[:200]
+            out[dom] = (html, err)
+            done += 1
+            log(f'  [{done}/{N}] {dom} ({city}): '
+                + (f'ошибка загрузки - {err}' if err else 'загружено'))
+    return out
 
 
 def _регион_статусы(html, host, ctx):
@@ -132,12 +209,12 @@ def main() -> int:
     _stamp(f'ПРОВЕРКА ПЕРЕМЕННЫХ (1.4) - {PROJECT_NAMES[a.project]} - '
            f'поддоменов: {len(domains)}')
 
+    html_map = fetch_all(domains, proxy, _stamp)
+    _stamp('Загрузка завершена, сверяю с КП …')
     результаты = []
-    for i, (dom, row) in enumerate(domains, 1):
-        url = f'https://{dom}/'
-        html, err = _fetch(url, proxy)
+    for dom, row in domains:
+        html, err = html_map.get(dom, ("", "не загружено"))
         if err:
-            _stamp(f'  [{i}/{len(domains)}] {dom}: ошибка загрузки - {err}')
             результаты.append({"domain": dom, "city": row.city,
                                "country": row.country, "error": err, "fields": []})
             continue
@@ -146,9 +223,6 @@ def main() -> int:
         var["fields"] = [город, страна] + var["fields"]
         var["error"] = ""
         результаты.append(var)
-        _плохих = sum(1 for f in var["fields"] if f["status"] == "bug")
-        _stamp(f'  [{i}/{len(domains)}] {dom} ({row.city}): '
-               + ('все ок' if not _плохих else f'расхождений: {_плохих}'))
 
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)

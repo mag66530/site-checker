@@ -1,0 +1,13 @@
+{
+  "_comment": "СМУ (stalmetural.ru) - Bitrix smart-filter. Кликаем скрытый чекбокс .smartfilter input[name^=arrFilter] (JS-клик выставляет checked + smartFilter.click), ждём AJAX-пересчёт, жмём «Показать» (#set_filter) → переход на /filter/.../. Первое значение «ширина 10» сужает 60→1. Проверено вживую 2026-07-09.",
+  "cases": [
+    {
+      "name": "Алюминиевый лист - по ширине",
+      "category": "https://stalmetural.ru/catalog/alyuminievyy-list/",
+      "card": ".catalog-product-card-item",
+      "filter": ".smartfilter input[name^='arrFilter']",
+      "apply": "#set_filter",
+      "wait_ms": 3500
+    }
+  ]
+}
