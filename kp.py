@@ -224,7 +224,29 @@ def _csv_path(project_id: str) -> Path:
     return CATALOGS_DIR / f'{project_id}-kp.csv'
 
 
-def load_kp(project_id: str) -> dict[str, KPRow]:
+_KP_MEM: dict[str, dict] = {}
+
+
+def load_kp(project_id: str, refresh: bool = True) -> dict[str, KPRow]:
+    """КП проекта {домен: KPRow}. Если задана ссылка на Google-таблицу КП
+    (kp_sheets.kp_sheet_url), ОДИН раз за процесс обновляет csv из таблицы -
+    так проверки берут свежие данные (при недоступности таблицы остаётся снапшот).
+    Кэшируется на процесс. refresh=False - только читать csv (без похода в Google)."""
+    if project_id in _KP_MEM:
+        return _KP_MEM[project_id]
+    if refresh:
+        try:
+            import kp_sheets
+            if kp_sheets.kp_sheet_url(project_id):
+                kp_sheets.refresh_project(project_id, log=lambda *a, **k: None)
+        except Exception:
+            pass                       # таблица недоступна - остаётся прежний csv
+    kp = _load_kp_csv(project_id)
+    _KP_MEM[project_id] = kp
+    return kp
+
+
+def _load_kp_csv(project_id: str) -> dict[str, KPRow]:
     """Прочитать catalogs/{proj}-kp.csv → {домен: KPRow}. {} если нет файла."""
     p = _csv_path(project_id)
     if not p.exists():
@@ -500,6 +522,18 @@ def _fmt(norm10: str) -> str:
 # ── Пункт 1.4: сверка «главных переменных» поддомена с КП (для вкладки) ──
 
 
+def _addr_on_page(text: str, kp_addr: str) -> str:
+    """Короткий фрагмент адреса со страницы - вокруг названия улицы из КП (для
+    наглядного «на сайте: …»). '' если не нашли."""
+    words = sorted((w for w in re.findall(r'[А-Яа-яЁё]{5,}', kp_addr or '')
+                    if w.lower() not in _STREET_WORDS), key=len, reverse=True)
+    for w in words:
+        m = re.search(r'.{0,25}' + re.escape(w) + r'.{0,25}', text)
+        if m:
+            return re.sub(r'\s+', ' ', m.group(0)).strip()
+    return ''
+
+
 def check_variables(html: str, domain: str) -> dict:
     """Сверяет контактные переменные главной страницы поддомена с КП: телефоны
     (поиск/реклама/общий - по правилу «номер на сайте входит в набор КП города»),
@@ -554,14 +588,18 @@ def check_variables(html: str, domain: str) -> dict:
     else:
         add("Почта", exp_mail, "—", "warn", "почта на сайте не найдена")
 
+    # Адрес сверяем по ВСЕМУ тексту шапки+подвала (там на сайтах СМУ и лежит
+    # адрес города). Точечный сниппет ловил не то место (напр. «Город: … изменить»)
+    # и давал ложное «адрес не найден» - хотя адрес есть в подвале.
+    haystack = site.get("full_text") or site.get("address") or ""
     if not row.address:
-        add("Адрес", "—", site.get("address", ""), "na", "нет в КП")
-    elif address_match(site.get("address", ""), row.address):
-        add("Адрес", row.address, site.get("address") or "—", "ok")
-    elif site.get("address"):
-        add("Адрес", row.address, site["address"], "bug", "адрес не совпадает с КП")
+        add("Адрес", "—", "", "na", "нет в КП")
+    elif address_match(haystack, row.address):
+        add("Адрес", row.address,
+            _addr_on_page(haystack, row.address) or "совпадает с КП", "ok")
     else:
-        add("Адрес", row.address, "—", "warn", "адрес на сайте не найден")
+        add("Адрес", row.address, "—", "warn",
+            "адрес из КП не найден в шапке/подвале - проверьте вручную")
 
     exp_tg = row.telegram_norm()
     site_tg = set(site.get("telegram", []))
@@ -601,7 +639,9 @@ def load_kp_for_domain(domain: str) -> dict:
     brand = parts[-2] if len(parts) >= 2 else host
     for proj in ('smu', 'imp', 'mpe', 'avia'):
         if proj not in _KP_CACHE:
-            _KP_CACHE[proj] = load_kp(proj)
+            # refresh=False: не тянем Google по каждому проекту при переборе -
+            # нужный проект уже обновлён явным load_kp(project) в начале прогона.
+            _KP_CACHE[proj] = load_kp(proj, refresh=False)
         kp = _KP_CACHE[proj]
         if any(brand == d.split('.')[-2] for d in kp if '.' in d):
             return kp

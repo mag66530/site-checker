@@ -2165,9 +2165,11 @@ def _build_markup_sheet(wb, results):
                'CollectionPage), на товаре - Product, характеристики '
                '(PropertyValue), фото (itemprop=image). Основной формат - '
                'microdata: тип только в JSON-LD = предупреждение. Цена не '
-               'размечена = предупреждение (товары «по запросу»). Валидность '
-               'полей проверяют инструменты Яндекса/Google - тут наличие и '
-               'полнота.')
+               'размечена = предупреждение (товары «по запросу»). Плюс '
+               'проверка обязательных полей в объекте: Product без '
+               'offers/name/image, Offer без цены/валюты, крошки без '
+               'элементов = баг; желательные (логотип, описание) = '
+               'предупреждение.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 68
@@ -2372,7 +2374,9 @@ def _build_meta_sheet(wb, results, meta_summary):
     c = ws['B3']
     c.value = ('Каждая страница выборки: title, meta description и H1 есть и не '
                'пустые, город поддомена присутствует в title/description, длины '
-               'в рекомендуемых рамках. Дубли: одинаковые title/description/H1 '
+               'в рекомендуемых рамках (title 10–70 символов, description '
+               '50–160). Выход за рамки - предупреждение (не баг). Дубли: '
+               'одинаковые title/description/H1 '
                'у разных страниц одного города - баг; полное совпадение между '
                'городами - город не подставился в шаблон. Дубли УРЛОВ: варианты '
                'адреса (http, без слэша, www, index.php/index.html) должны '
@@ -2412,8 +2416,15 @@ def _build_meta_sheet(wb, results, meta_summary):
     if warned:
         _meta_section_title(ws, row, f'Предупреждения (длины)  ({len(warned)})', C.warn)
         row += 1
+
+        def _meta_len(r):
+            m = getattr(r, 'meta', None) or {}
+            return (f'title: {m.get("title_len", 0)} симв. · '
+                    f'description: {m.get("desc_len", 0)} симв.')
+
         row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn)
+            ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn,
+            extra=_meta_len)
 
     # ── Секции 3-4: дубли метаданных ──
     for title_text, groups, note in (

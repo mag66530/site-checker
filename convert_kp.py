@@ -62,10 +62,44 @@ def _col(headers, *keywords, exact=None):
     return None
 
 
+def _sheet_has_kp_header(ws, max_scan=6):
+    """Похож ли лист на КП: в первых строках есть и 'город', и 'адрес'."""
+    for row in ws.iter_rows(min_row=1, max_row=max_scan, values_only=True):
+        joined = ' '.join(str(c).lower() for c in row if c)
+        if 'город' in joined and 'адрес' in joined:
+            return True
+    return False
+
+
+def _pick_sheet(wb, preferred: str):
+    """Выбрать лист КП. Приоритет:
+      1) точное имя из KP_LAYOUT;
+      2) то же имя без учёта регистра/пробелов (в таблице могли переименовать
+         «КП » с пробелом, «кп» строчными и т.п.);
+      3) любой лист, похожий на КП (в шапке есть «город» и «адрес»).
+    Если ничего не подошло - понятная ошибка со списком листов таблицы,
+    чтобы сразу было видно, как называется нужная вкладка."""
+    names = wb.sheetnames
+    if preferred in names:
+        return wb[preferred]
+    norm = lambda s: str(s).lower().replace('\n', ' ').strip()
+    want = norm(preferred)
+    for n in names:
+        if norm(n) == want:
+            return wb[n]
+    for n in names:
+        if _sheet_has_kp_header(wb[n]):
+            return wb[n]
+    raise RuntimeError(
+        f'в таблице нет листа «{preferred}» (и ни один лист не похож на КП). '
+        f'Листы таблицы: {", ".join(names)}. Переименуйте вкладку с КП '
+        f'в «{preferred}» либо укажите её название.')
+
+
 def convert(project_id: str, xlsx_path: str) -> Path:
     layout = KP_LAYOUT[project_id]
     wb = load_workbook(xlsx_path, read_only=True, data_only=True)
-    ws = wb[layout['sheet']]
+    ws = _pick_sheet(wb, layout['sheet'])
 
     hdr_row_idx, headers = _find_header_row(ws)
 
@@ -78,12 +112,23 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     ci_ad = _col(headers, *layout['phone_ad'])
     ci_common = _col(headers, *layout['phone_common'])
     phone_cols = _phone_columns(headers)
+    # Доп. переменные (пункт 1.4): страна, Telegram, WhatsApp.
+    ci_country = _col(headers, exact='страна') or _col(headers, 'страна')
+    ci_tg = _col(headers, 'telegram') or _col(headers, 'телеграм')
+    ci_wa = (_col(headers, 'whatsapp') or _col(headers, 'ватсап')
+             or _col(headers, 'вацап') or _col(headers, 'ватсапп'))
 
     def cell(row, idx):
         if idx is None or idx >= len(row):
             return ''
         v = row[idx]
         return '' if v is None else str(v).strip()
+
+    def clean_msgr(v):
+        """Мусорные значения мессенджеров в КП (#N/A, «нет», «подтвердить») → пусто."""
+        v = (v or '').strip()
+        return '' if v.lower() in ('нет', '-', '#n/a', 'подтвердить',
+                                   'подтвердить телефон') else v
 
     rows_out = []
     seen = set()
@@ -118,6 +163,9 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             'all_phones': ';'.join(all_norm),
             'email': cell(row, ci_email),
             'address': cell(row, ci_addr),
+            'country': cell(row, ci_country),
+            'telegram': clean_msgr(cell(row, ci_tg)),
+            'whatsapp': clean_msgr(cell(row, ci_wa)),
         })
     wb.close()
 
@@ -126,7 +174,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     with open(out, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=['domain', 'city', 'phone_seo',
                                           'phone_ad', 'phone_common', 'all_phones',
-                                          'email', 'address'])
+                                          'email', 'address',
+                                          'country', 'telegram', 'whatsapp'])
         w.writeheader()
         w.writerows(rows_out)
     print(f'{project_id}: {len(rows_out)} городов → {out}')

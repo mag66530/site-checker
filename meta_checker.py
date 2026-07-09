@@ -143,19 +143,27 @@ def check_meta(meta: dict, city: str, type_code: str) -> dict:
         if desc and city_in_text(city, desc) is False:
             issues.append('в description нет города')
 
-    # Длины - мягкие пороги, предупреждения
+    # Длины - мягкие пороги, предупреждения. В тексте - рекомендованный
+    # диапазон (одинаковый → группируется в отчёте); фактическая длина
+    # хранится в title_len/desc_len и показывается рядом с URL.
     if title:
         if len(title) < TITLE_MIN:
-            warnings.append('title короткий')
+            warnings.append(f'title короткий (меньше {TITLE_MIN} символов; '
+                            f'рекомендуется {TITLE_MIN}–{TITLE_MAX})')
         elif len(title) > TITLE_MAX:
-            warnings.append('title длинный')
+            warnings.append(f'title длинный (больше {TITLE_MAX} символов; '
+                            f'рекомендуется {TITLE_MIN}–{TITLE_MAX})')
     if desc:
         if len(desc) < DESC_MIN:
-            warnings.append('description короткий')
+            warnings.append(f'description короткий (меньше {DESC_MIN} символов; '
+                            f'рекомендуется {DESC_MIN}–{DESC_MAX})')
         elif len(desc) > DESC_MAX:
-            warnings.append('description длинный')
+            warnings.append(f'description длинный (больше {DESC_MAX} символов; '
+                            f'рекомендуется {DESC_MIN}–{DESC_MAX})')
 
     return {'title': title, 'description': desc, 'h1': h1,
+            'title_len': len(title) if title else 0,
+            'desc_len': len(desc) if desc else 0,
             'issues': issues, 'warnings': warnings}
 
 

@@ -8,6 +8,7 @@
 Сделана по образцу страницы «Проверка форм» (фоновый процесс variables_run.py).
 """
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -35,6 +36,46 @@ def _secret(key: str, default: str = '') -> str:
     except Exception:
         pass
     return default
+
+
+def _sa_json_for_env() -> str:
+    """JSON-строка ключа сервисного аккаунта из секретов (TOML-секция, строка-JSON
+    или base64) - чтобы прокинуть её в фоновый процесс через GCP_SA_JSON. '' если
+    ключ не задан / не разобрался."""
+    try:
+        v = st.secrets.get('gcp_service_account')
+    except Exception:
+        v = None
+    if v is not None:
+        try:
+            if isinstance(v, str):
+                json.loads(v)          # проверяем, что это валидный JSON
+                return v
+            return json.dumps(dict(v))
+        except Exception:
+            pass
+    try:
+        b = st.secrets.get('gcp_service_account_b64')
+    except Exception:
+        b = None
+    if b:
+        try:
+            import base64
+            return base64.b64decode(''.join(str(b).split())).decode('utf-8')
+        except Exception:
+            pass
+    return ''
+
+
+def _sa_configured() -> bool:
+    """Задан ли ключ сервисного аккаунта в секретах (в любом из форматов)?"""
+    for k in ('gcp_service_account', 'gcp_service_account_b64'):
+        try:
+            if st.secrets.get(k):
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def _load_kp_cities(project: str):
@@ -144,6 +185,80 @@ for city, dom, country in _cities:
 st.caption(f'В КП проекта: **{len(_cities)}** поддоменов, стран: '
            f'{len([c for c in _by_country if c])}.')
 
+# ── Источник данных (Карта присутствия) ──────────────────────────────
+# Если задана ссылка на Google-таблицу КП - при запуске проверка сама тянет
+# свежие данные из таблицы; здесь же можно обновить снапшот вручную.
+_kp_url = ''
+try:
+    import kp_sheets as _ks
+    _kp_url = _ks.kp_sheet_url(pid_key)
+except Exception:
+    _ks = None
+_kp_csv = ROOT / 'catalogs' / f'{pid_key}-kp.csv'
+with st.expander('📄 Источник данных (Карта присутствия)', expanded=False):
+    _upd = (datetime.fromtimestamp(_kp_csv.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
+            if _kp_csv.exists() else '—')
+    if _kp_url and _ks:
+        st.success('КП берётся напрямую из Google-таблицы — при каждом запуске '
+                   'проверки данные тянутся заново, свежие правки из таблицы '
+                   'подхватываются автоматически.')
+        if st.button('↻ Обновить КП из Google сейчас', key=f'kp_refresh_{pid_key}'):
+            with st.spinner('Скачиваю и разбираю таблицу КП…'):
+                _ok, _msg = _ks.refresh_project(pid_key, log=lambda *a, **k: None)
+            # Итог кладём в session_state и перерисовываем - иначе st.rerun()
+            # стирал плашку и было «непонятно, произошло что-то или нет».
+            st.session_state[f'kp_msg_{pid_key}'] = (bool(_ok), str(_msg))
+            st.rerun()
+        _kp_msg = st.session_state.get(f'kp_msg_{pid_key}')
+        if _kp_msg:
+            (st.success if _kp_msg[0] else st.error)(
+                f'Обновление КП: {_kp_msg[1]}')
+    else:
+        st.warning('Ссылка на Google-таблицу КП не задана — используется зашитый '
+                   f'снапшот `{_kp_csv.name}` (обновлён {_upd}).')
+        st.caption(
+            'Чтобы скрипт брал СВЕЖИЕ данные прямо из таблицы, задай ссылку одним '
+            f'из способов:\n'
+            f'• секрет приложения `kp_sheet_url_{pid_key} = "https://docs.google.com/…"`, '
+            f'или\n• поле `"kp_sheet_url"` в `projects/{pid_key}.json`.\n\n'
+            'Таблица должна быть открыта «Всем, у кого есть ссылка — Читатель», '
+            'либо (для приватной) расшарена на сервисный аккаунт — см. ниже.')
+
+    # ── Ключ сервисного аккаунта: генератор строки для секрета ──────────
+    # Приватную таблицу читаем от имени сервисного аккаунта Google. Вставлять
+    # JSON-ключ прямо в TOML муторно (кавычки, переносы в private_key ломают
+    # формат). Поэтому: загрузи файл-ключ здесь — получишь ГОТОВУЮ строку
+    # `gcp_service_account_b64 = "..."` (одна строка, без кавычек внутри —
+    # TOML такое проглотит всегда). Её и вставь в Secrets.
+    st.markdown('---')
+    st.markdown('**🔑 Ключ сервисного аккаунта (для приватной таблицы)**')
+    if _sa_configured():
+        st.caption('Ключ уже задан в секретах ✓. Заново нужен, только если сменили '
+                   'сервисный аккаунт.')
+    st.caption('Загрузите JSON-файл ключа — приложение соберёт из него готовую '
+               'строку для Secrets. JSON руками в TOML вставлять не нужно.')
+    _keyfile = st.file_uploader('JSON-ключ сервисного аккаунта', type=['json'],
+                                key=f'sa_upload_{pid_key}',
+                                label_visibility='collapsed')
+    if _keyfile is not None:
+        import base64 as _b64mod
+        _raw = _keyfile.getvalue()
+        try:
+            _info = json.loads(_raw.decode('utf-8'))
+            if _info.get('type') != 'service_account' or not _info.get('private_key'):
+                raise ValueError('в файле нет полей service_account/private_key')
+            _b64 = _b64mod.b64encode(_raw).decode('ascii')
+            st.success(f'Ключ прочитан: `{_info.get("client_email", "?")}` '
+                       '(на этот адрес расшарьте КП-таблицу как «Читатель»).')
+            st.caption('Скопируйте строку ниже ЦЕЛИКОМ (кнопка копирования в углу) и '
+                       'вставьте её отдельной строкой в Secrets (⚙️ Settings → '
+                       'Secrets). Кавычки/переносы править не нужно.')
+            st.code(f'gcp_service_account_b64 = "{_b64}"', language='toml')
+            st.caption('⚠️ Это доступ к вашим таблицам — не пересылайте строку в чат/'
+                       'переписку, вставляйте только в Secrets приложения.')
+        except Exception as _e:  # noqa: BLE001
+            st.error(f'Не похоже на JSON-ключ сервисного аккаунта: {_e}')
+
 st.divider()
 st.subheader('Что проверяем')
 _mode = st.radio('Охват', ['Все домены+поддомены', 'Выбрать города'],
@@ -180,8 +295,23 @@ with _c1:
             args = ['variables_run.py', '--project', pid_key]
             if _mode == 'Выбрать города' and _chosen:
                 args += ['--cities', ','.join(_chosen)]
+            # На свежем деплое папки cache/ ещё нет - создаём перед очисткой лога.
+            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
             LOG_FILE.write_text('', encoding='utf-8')
-            _launch(args, extra_env={'proxy_url': _proxy} if _proxy else None)
+            # Прокидываем в фоновый процесс: прокси + ссылку на КП-таблицу +
+            # JSON сервисного аккаунта (для приватных таблиц) - из секретов.
+            _env = {}
+            if _proxy:
+                _env['proxy_url'] = _proxy
+            try:
+                if _kp_url:
+                    _env[f'kp_sheet_url_{pid_key}'] = _kp_url
+                _sa_json = _sa_json_for_env()   # секция/строка-JSON/base64 → JSON
+                if _sa_json:
+                    _env['GCP_SA_JSON'] = _sa_json
+            except Exception:
+                pass
+            _launch(args, extra_env=_env or None)
             st.session_state['vars_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['vars_project'] = pid_key
             st.rerun()
