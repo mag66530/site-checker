@@ -1,13 +1,31 @@
 {
-  "_comment": "Шаблон фильтр-теста. Скопировать в filters-<project_id>.json и заполнить под конкретный сайт. Селекторы смотреть в DevTools на живой категории. Тест включается галочкой «Проверять фильтрацию товаров (браузер)».",
+  "_comment": "Шаблон фильтр-теста. Скопировать в filters-<project_id>.json, заполнить под сайт (селекторы смотреть в DevTools на живой ЛИСТ-категории с товарами, не в разделе). Включается галочкой «Проверять фильтрацию товаров (браузер)». Движок: открыть категорию → счётчик карточек (card) → кликнуть фильтр (filter, скрытые чекбоксы кликаются JS-кликом) → пауза pre_apply_ms на AJAX → нажать «Показать» (apply) → счётчик снова. Баг: пусто / не сузилось / ошибка HTTP.",
+  "_fields": {
+    "name": "имя кейса для отчёта",
+    "category": "URL лист-категории с товарами",
+    "card": "CSS-селектор карточки товара (для подсчёта). null → авто-подбор по фолбэку",
+    "filter": "что кликнуть (чекбокс/label фильтра). У Bitrix - сам input, напр. .smartfilter input[name^='arrFilter']",
+    "apply": "кнопка «Показать» (Bitrix: #set_filter). null - если фильтр применяется АВТОМАТОМ по клику (AJAX, без кнопки)",
+    "pre_apply_ms": "пауза перед «Показать» на AJAX-пересчёт (по умолч. 3000; для Bitrix обязательна)",
+    "wait_ms": "ожидание после применения фильтра (по умолч. 2500)"
+  },
   "cases": [
     {
-      "name": "Пример: категория — по параметру",
+      "name": "Bitrix smart-filter - с кнопкой «Показать»",
       "category": "https://site.ru/catalog/nekaya-kategoriya/",
-      "card": ".catalog-item",
-      "filter": ".filter-block input[type=checkbox]",
-      "apply": ".filter-submit",
-      "wait_ms": 2500
+      "card": ".catalog-product-card-item",
+      "filter": ".smartfilter input[name^='arrFilter']",
+      "apply": "#set_filter",
+      "pre_apply_ms": 3000,
+      "wait_ms": 3500
+    },
+    {
+      "name": "Кастомный фильтр - авто-применение (без кнопки)",
+      "category": "https://site.ru/catalog/drugaya-kategoriya/",
+      "card": ".card-product",
+      "filter": "input.checkbox__input",
+      "apply": null,
+      "wait_ms": 4000
     }
   ]
 }
