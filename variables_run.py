@@ -30,8 +30,9 @@ PROJECT_NAMES = {
     'mpe': 'МПЭ - Мепэн', 'avia': 'АПС - Авиапромсталь',
 }
 
-# Порядок и подписи переменных-колонок.
-VAR_COLUMNS = ["Город", "Страна", "Тел. поиск", "Тел. реклама", "Тел. общий",
+# Порядок и подписи переменных-колонок. «Страна» убрана по просьбе заказчика
+# (проверка чужих стран давала шум); справочная колонка «Страна(КП)» остаётся.
+VAR_COLUMNS = ["Город", "Тел. поиск", "Тел. реклама", "Тел. общий",
                "Почта", "Адрес", "Telegram", "WhatsApp"]
 
 _SYMBOL = {"ok": "✓", "ok_set": "✓", "bug": "✗", "warn": "⚠", "na": "—"}
@@ -320,8 +321,8 @@ def main() -> int:
                                "country": row.country, "error": err, "fields": []})
             continue
         var = kpmod.check_variables(html, dom)
-        город, страна = _регион_статусы(html, kpmod._norm_host(dom), ctx)
-        var["fields"] = [город, страна] + var["fields"]
+        город, _страна = _регион_статусы(html, kpmod._norm_host(dom), ctx)
+        var["fields"] = [город] + var["fields"]   # «Страна» убрана из отчёта
         var["error"] = ""
         результаты.append(var)
 
@@ -365,35 +366,39 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
     wb.active.title = "Как читать результат"
     ws = wb.create_sheet("Переменные")
     hdr_fill = PatternFill("solid", fgColor="EEF3FB")
-    headers = ["Поддомен", "Город(КП)", "Страна(КП)"] + VAR_COLUMNS
-    # «Город»/«Страна» из VAR_COLUMNS дублируют колонки КП по смыслу - оставляем
-    # обе: слева «что ожидаем по КП», в блоке переменных - «статус проверки».
+    # Порядок по просьбе заказчика: Страна(КП), затем Город(КП) со ссылкой на
+    # домен/поддомен, дальше проверяемые переменные.
+    headers = ["Страна(КП)", "Город(КП)"] + VAR_COLUMNS
     for c, t in enumerate(headers, 1):
         cell = ws.cell(1, c, t)
         cell.font = Font(bold=True)
         cell.fill = hdr_fill
         cell.alignment = Alignment(horizontal="center")
-    ws.freeze_panes = "B2"
+    ws.freeze_panes = "C2"
 
     from openpyxl.comments import Comment
+    LINK_FONT = Font(color="1155CC", underline="single")
     # Заливка только у проблемных ячеек, чтобы зелёные ✓ оставались чистыми
     # (без «тревожного» красного уголка-примечания на каждой ячейке).
     BUG_FILL = PatternFill("solid", fgColor="FDE3E3")   # мягкий красный
     WARN_FILL = PatternFill("solid", fgColor="FFF2DA")  # мягкий оранжевый
+    _FIRST_VAR_COL = 3   # A=Страна(КП), B=Город(КП), переменные с C
 
     расхождения = []
     r = 2
     for res in результаты:
-        ws.cell(r, 1, res["domain"])
-        ws.cell(r, 2, res.get("city", ""))
-        ws.cell(r, 3, res.get("country", ""))
+        ws.cell(r, 1, res.get("country", ""))
+        # Город(КП) - текст города, кликом ведёт на домен/поддомен.
+        gcell = ws.cell(r, 2, res.get("city", "") or res["domain"])
+        gcell.hyperlink = f'https://{res["domain"]}'
+        gcell.font = LINK_FONT
         by = {f["field"]: f for f in res.get("fields", [])}
         if res.get("error"):
-            hc = ws.cell(r, 4, f"ошибка загрузки: {res['error']}")
+            hc = ws.cell(r, _FIRST_VAR_COL, f"ошибка загрузки: {res['error']}")
             hc.font = Font(color="C62828")
             r += 1
             continue
-        for c, name in enumerate(VAR_COLUMNS, 4):
+        for c, name in enumerate(VAR_COLUMNS, _FIRST_VAR_COL):
             f = by.get(name)
             if not f:
                 ws.cell(r, c, "—")
@@ -423,9 +428,8 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
                                     f["expected"], f["found"], f.get("note", "")))
         r += 1
 
-    ws.column_dimensions["A"].width = 34
-    ws.column_dimensions["B"].width = 18
-    ws.column_dimensions["C"].width = 14
+    ws.column_dimensions["A"].width = 16   # Страна(КП)
+    ws.column_dimensions["B"].width = 26   # Город(КП) со ссылкой
 
     # Лист «Расхождения» - только проблемные ячейки, для быстрого разбора.
     ws2 = wb.create_sheet("Расхождения")

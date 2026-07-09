@@ -105,6 +105,10 @@ def convert(project_id: str, xlsx_path: str) -> Path:
 
     ci_city = _col(headers, exact='город') or _col(headers, 'город')
     ci_addr = _col(headers, exact='адрес') or _col(headers, 'адрес')
+    # Если у колонок «город»/«страна» ПУСТОЙ заголовок (как у АПС - первые два
+    # столбца без шапки) - берём их по позиции из layout (city_col/country_col).
+    if ci_city is None and layout.get('city_col') is not None:
+        ci_city = layout['city_col']
     ci_email = _col(headers, 'e-mail') or _col(headers, 'почта') or _col(headers, 'email')
     ci_url = (_col(headers, 'url', 'магазин') or _col(headers, 'домен')
               or _col(headers, 'ссылка') or _col(headers, 'url'))
@@ -114,6 +118,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     phone_cols = _phone_columns(headers)
     # Доп. переменные (пункт 1.4): страна, Telegram, WhatsApp.
     ci_country = _col(headers, exact='страна') or _col(headers, 'страна')
+    if ci_country is None and layout.get('country_col') is not None:
+        ci_country = layout['country_col']
     ci_tg = _col(headers, 'telegram') or _col(headers, 'телеграм')
     ci_wa = (_col(headers, 'whatsapp') or _col(headers, 'ватсап')
              or _col(headers, 'вацап') or _col(headers, 'ватсапп'))
@@ -123,6 +129,12 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             return ''
         v = row[idx]
         return '' if v is None else str(v).strip()
+
+    def norm_country(v):
+        """Приводим синонимы страны к единому виду (в КП АПС встречается и «РФ»,
+        и «Россия» - это одна страна, иначе в отчёте две)."""
+        s = (v or '').strip()
+        return 'Россия' if s.lower() in ('рф', 'россия', 'russia') else s
 
     def clean_msgr(v):
         """Мусорные значения мессенджеров в КП (#N/A, «нет», «подтвердить») → пусто."""
@@ -142,7 +154,7 @@ def convert(project_id: str, xlsx_path: str) -> Path:
         host = _norm_host(url)
         if not host:
             joined = ' '.join(str(c) for c in row if c)
-            m = re.search(r'([a-z0-9-]+\.)*(?:inmetprom|stalmetural|mepen)\.(?:ru|uz|kz|by)', joined)
+            m = re.search(r'([a-z0-9-]+\.)*(?:inmetprom|stalmetural|mepen|aviastal)\.(?:ru|uz|kz|by|az)', joined)
             host = _norm_host(m.group(0)) if m else ''
         if not host or host in seen:
             continue
@@ -163,7 +175,7 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             'all_phones': ';'.join(all_norm),
             'email': cell(row, ci_email),
             'address': cell(row, ci_addr),
-            'country': cell(row, ci_country),
+            'country': norm_country(cell(row, ci_country)),
             'telegram': clean_msgr(cell(row, ci_tg)),
             'whatsapp': clean_msgr(cell(row, ci_wa)),
         })
