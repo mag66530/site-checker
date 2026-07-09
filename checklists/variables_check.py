@@ -8,6 +8,7 @@
 Сделана по образцу страницы «Проверка форм» (фоновый процесс variables_run.py).
 """
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -214,7 +215,19 @@ with _c1:
             if _mode == 'Выбрать города' and _chosen:
                 args += ['--cities', ','.join(_chosen)]
             LOG_FILE.write_text('', encoding='utf-8')
-            _launch(args, extra_env={'proxy_url': _proxy} if _proxy else None)
+            # Прокидываем в фоновый процесс: прокси + ссылку на КП-таблицу +
+            # JSON сервисного аккаунта (для приватных таблиц) - из секретов.
+            _env = {}
+            if _proxy:
+                _env['proxy_url'] = _proxy
+            try:
+                if _kp_url:
+                    _env[f'kp_sheet_url_{pid_key}'] = _kp_url
+                if 'gcp_service_account' in st.secrets:
+                    _env['GCP_SA_JSON'] = json.dumps(dict(st.secrets['gcp_service_account']))
+            except Exception:
+                pass
+            _launch(args, extra_env=_env or None)
             st.session_state['vars_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['vars_project'] = pid_key
             st.rerun()
