@@ -224,7 +224,29 @@ def _csv_path(project_id: str) -> Path:
     return CATALOGS_DIR / f'{project_id}-kp.csv'
 
 
-def load_kp(project_id: str) -> dict[str, KPRow]:
+_KP_MEM: dict[str, dict] = {}
+
+
+def load_kp(project_id: str, refresh: bool = True) -> dict[str, KPRow]:
+    """КП проекта {домен: KPRow}. Если задана ссылка на Google-таблицу КП
+    (kp_sheets.kp_sheet_url), ОДИН раз за процесс обновляет csv из таблицы -
+    так проверки берут свежие данные (при недоступности таблицы остаётся снапшот).
+    Кэшируется на процесс. refresh=False - только читать csv (без похода в Google)."""
+    if project_id in _KP_MEM:
+        return _KP_MEM[project_id]
+    if refresh:
+        try:
+            import kp_sheets
+            if kp_sheets.kp_sheet_url(project_id):
+                kp_sheets.refresh_project(project_id, log=lambda *a, **k: None)
+        except Exception:
+            pass                       # таблица недоступна - остаётся прежний csv
+    kp = _load_kp_csv(project_id)
+    _KP_MEM[project_id] = kp
+    return kp
+
+
+def _load_kp_csv(project_id: str) -> dict[str, KPRow]:
     """Прочитать catalogs/{proj}-kp.csv → {домен: KPRow}. {} если нет файла."""
     p = _csv_path(project_id)
     if not p.exists():
@@ -601,7 +623,9 @@ def load_kp_for_domain(domain: str) -> dict:
     brand = parts[-2] if len(parts) >= 2 else host
     for proj in ('smu', 'imp', 'mpe', 'avia'):
         if proj not in _KP_CACHE:
-            _KP_CACHE[proj] = load_kp(proj)
+            # refresh=False: не тянем Google по каждому проекту при переборе -
+            # нужный проект уже обновлён явным load_kp(project) в начале прогона.
+            _KP_CACHE[proj] = load_kp(proj, refresh=False)
         kp = _KP_CACHE[proj]
         if any(brand == d.split('.')[-2] for d in kp if '.' in d):
             return kp

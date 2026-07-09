@@ -78,12 +78,23 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     ci_ad = _col(headers, *layout['phone_ad'])
     ci_common = _col(headers, *layout['phone_common'])
     phone_cols = _phone_columns(headers)
+    # Доп. переменные (пункт 1.4): страна, Telegram, WhatsApp.
+    ci_country = _col(headers, exact='страна') or _col(headers, 'страна')
+    ci_tg = _col(headers, 'telegram') or _col(headers, 'телеграм')
+    ci_wa = (_col(headers, 'whatsapp') or _col(headers, 'ватсап')
+             or _col(headers, 'вацап') or _col(headers, 'ватсапп'))
 
     def cell(row, idx):
         if idx is None or idx >= len(row):
             return ''
         v = row[idx]
         return '' if v is None else str(v).strip()
+
+    def clean_msgr(v):
+        """Мусорные значения мессенджеров в КП (#N/A, «нет», «подтвердить») → пусто."""
+        v = (v or '').strip()
+        return '' if v.lower() in ('нет', '-', '#n/a', 'подтвердить',
+                                   'подтвердить телефон') else v
 
     rows_out = []
     seen = set()
@@ -118,6 +129,9 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             'all_phones': ';'.join(all_norm),
             'email': cell(row, ci_email),
             'address': cell(row, ci_addr),
+            'country': cell(row, ci_country),
+            'telegram': clean_msgr(cell(row, ci_tg)),
+            'whatsapp': clean_msgr(cell(row, ci_wa)),
         })
     wb.close()
 
@@ -126,7 +140,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     with open(out, 'w', encoding='utf-8', newline='') as f:
         w = csv.DictWriter(f, fieldnames=['domain', 'city', 'phone_seo',
                                           'phone_ad', 'phone_common', 'all_phones',
-                                          'email', 'address'])
+                                          'email', 'address',
+                                          'country', 'telegram', 'whatsapp'])
         w.writeheader()
         w.writerows(rows_out)
     print(f'{project_id}: {len(rows_out)} городов → {out}')
