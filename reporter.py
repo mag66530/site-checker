@@ -2015,11 +2015,12 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None):
 # ── Лист «Вёрстка» (п.1.11, ТЗ 2.1/2.1.1: viewport, стили, @media) ──
 
 
-def _build_layout_sheet(wb, results):
+def _build_layout_sheet(wb, results, filters_test=None):
     """Лист вёрстки и адаптивности: страницы без viewport, битые CSS,
-    отсутствие @media. Добавляется только если проверка выполнялась."""
+    отсутствие @media. Плюс секция «Фильтрация товаров» (браузерный тест
+    фильтра). Добавляется, если выполнялась вёрстка ИЛИ фильтр-тест."""
     checked = [r for r in results if getattr(r, 'layout', None)]
-    if not checked:
+    if not checked and not filters_test:
         return
 
     bad = [r for r in checked if r.layout.get('issues')]
@@ -2123,6 +2124,11 @@ def _build_layout_sheet(wb, results):
         row = _render_issue_groups(
             ws, row, _issue_groups(warned, 'layout', 'warnings'), C.warn)
 
+    # Секция 5: фильтрация товаров (браузерный тест) - если запускался
+    if filters_test:
+        row += 1
+        row = _render_filters_section(ws, row, filters_test)
+
 
 # ── Лист «Разметка» (п.1.12, ТЗ 3.5: Schema.org + OpenGraph) ────────
 
@@ -2187,16 +2193,6 @@ def _build_markup_sheet(wb, results):
 
     # Что реально нашлось на странице - чтобы было видно: «нет разметки»
     # значит нет НИ ОДНОГО типа из требуемых, а не «часть есть».
-    def _markup_found(r):
-        m = getattr(r, 'markup', None) or {}
-        bits = []
-        if m.get('micro_types'):
-            bits.append('microdata: ' + ', '.join(m['micro_types']))
-        if m.get('ld_types'):
-            bits.append('JSON-LD: ' + ', '.join(m['ld_types']))
-        return ('найдено на странице - ' + ' · '.join(bits)
-                if bits else 'Schema.org-разметки на странице нет вообще')
-
     _meta_section_title(ws, row, f'Проблемы разметки  ({len(bad)})',
                         C.err if bad else C.ok)
     row += 1
@@ -2206,15 +2202,13 @@ def _build_markup_sheet(wb, results):
         row += 2
     else:
         row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err,
-            extra=_markup_found)
+            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err)
 
     if warned:
         _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
         row += 1
         row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn,
-            extra=_markup_found)
+            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn)
 
 
 # ── Лист «Безопасность» (доп. 1.8: заголовки безопасности HTTP) ────
@@ -2705,114 +2699,88 @@ _FILTER_VERDICT = {
 }
 
 
-def _build_filters_sheet(wb, filters_test):
-    """Лист «Фильтрация»: корректно ли работают фильтры товаров (живой
-    драйв в браузере по пер-проектным селекторам). Добавляется, только
-    если фильтр-тест запускался."""
+def _render_filters_section(ws, row, filters_test):
+    """Секция «Фильтрация товаров» на листе «Вёрстка» (колонки B:E). Живой
+    драйв фильтра в браузере по пер-проектным селекторам. Возвращает
+    следующую свободную строку."""
     if not filters_test:
-        return
+        return row
     cases = filters_test.get('cases') or []
     _bad = sum(1 for c in cases
                if _FILTER_VERDICT.get(c.get('verdict'), (None, None, False))[2])
-    ws = wb.create_sheet('Фильтрация')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if _bad else C.ok
 
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 30   # Кейс
-    ws.column_dimensions['C'].width = 44   # Категория
-    ws.column_dimensions['D'].width = 40   # Вердикт
-    ws.column_dimensions['E'].width = 22   # Было → стало
-    ws.column_dimensions['F'].width = 16   # Полей фильтра
-    ws.column_dimensions['G'].width = 3
+    _meta_section_title(
+        ws, row, f'Фильтрация товаров (браузер)  ({len(cases)})',
+        C.err if _bad else C.ok)
+    row += 1
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = ('Применяем ОДИН фильтр и сравниваем НАБОР товаров (ссылки '
+               'карточек) на 1-й странице до/после - изменился = фильтр '
+               'применился. «Полей фильтра» - сколько значений/групп на '
+               'странице (меняем один). Селекторы - в '
+               'catalogs/filters-<проект>.json.')
+    c.font = _font(size=9, italic=True, color=C.text_muted)
+    c.alignment = _align(wrap=True, indent=1)
+    ws.row_dimensions[row].height = 30
+    row += 1
 
-    ws.merge_cells('B2:F2')
-    c = ws['B2']
-    c.value = 'Фильтрация товаров'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:F3')
-    c = ws['B3']
-    c.value = ('Проверка, что фильтр реально РАБОТАЕТ: браузер открывает '
-               'категорию, применяет ОДИН фильтр и сравнивает НАБОР товаров '
-               '(ссылки карточек) на 1-й странице до и после - изменился = '
-               'фильтр применился. Баг: после фильтра пусто, товары не '
-               'изменились (не применился) или ошибка. Колонка «Полей '
-               'фильтра» - сколько значений/групп фильтра на странице (меняем '
-               'один). Селекторы - в catalogs/filters-<проект>.json.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
-
-    row = 5
     # Тест не выполнялся / нет конфига
     if not filters_test.get('available') or not cases:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
         c.value = filters_test.get('note') or (
-            'Фильтр-тест не выполнялся: не заданы селекторы фильтра для '
-            'проекта (catalogs/filters-<проект>.json).')
-        c.font = _font(size=11, color=C.text_soft)
-        c.alignment = _align(wrap=True, vertical='top')
-        ws.row_dimensions[row].height = 44
-        return
+            'Фильтр-тест не выполнялся: не заданы селекторы фильтра '
+            '(catalogs/filters-<проект>.json).')
+        c.font = _font(size=10, color=C.text_soft)
+        c.alignment = _align(wrap=True, indent=1)
+        ws.row_dimensions[row].height = 22
+        return row + 2
 
-    _ok = sum(1 for c in cases if c.get('verdict') == 'ok')
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-    c = ws.cell(row=row, column=2)
-    c.value = (f'Кейсов проверено: {len(cases)} · работают: {_ok} · '
-               f'ошибок фильтрации: {_bad}')
-    c.font = _font(size=10, bold=True, color=C.err if _bad else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 26
-    row += 2
-
-    # Заголовки таблицы
-    _meta_table_header(ws, row, ['Кейс', 'Категория', 'Вердикт',
-                                 'Было → стало', 'Полей фильтра'])
-    row += 1
     _CMAP = {'ok': C.ok, 'err': C.err, 'warn': C.warn}
     for cs in cases:
         label, ckey, _is_bad = _FILTER_VERDICT.get(
             cs.get('verdict'), (cs.get('verdict') or '?', 'warn', False))
         color = _CMAP.get(ckey, C.text_soft)
-        _b = cs.get('baseline')
-        _a = cs.get('after')
-        _ba = (f'{_b} → {_a}' if _b is not None and _a is not None
-               else (f'{_b} → -' if _b is not None else '-'))
-        _ff = cs.get('filter_fields')
-        _fg = cs.get('filter_groups')
-        _ff_txt = ('-' if _ff is None else
-                   (f'{_ff} (групп {_fg})' if _fg else str(_ff)))
+        _b, _a = cs.get('baseline'), cs.get('after')
+        _ba = (f'карточек {_b}→{_a}'
+               if _b is not None and _a is not None else '')
+        _ff, _fg = cs.get('filter_fields'), cs.get('filter_groups')
+        _ff_txt = ('' if _ff is None else
+                   (f'полей {_ff} (групп {_fg})' if _fg else f'полей {_ff}'))
+        # строка 1: имя + вердикт (+ метрики)
+        _extra = '  ·  '.join(x for x in (_ba, _ff_txt) if x)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = (f'{cs.get("name", "")}: {label}'
+                   + (f'   ({_extra})' if _extra else ''))
+        c.font = _font(size=10, bold=_is_bad, color=color)
+        c.fill = _fill(C.surface)
+        c.alignment = _align(wrap=True, indent=1)
+        c.border = _border()
         ws.row_dimensions[row].height = 20
-        vals = [
-            (cs.get('name', ''), {'size': 10, 'color': C.text}),
-            (cs.get('category', ''), {'size': 9, 'color': C.accent,
-                                      'underline': 'single'}),
-            (label, {'size': 10, 'color': color, 'bold': _is_bad}),
-            (_ba, {'size': 10, 'color': C.text_muted}),
-            (_ff_txt, {'size': 10, 'color': C.text_muted}),
-        ]
-        for ci, (val, kw) in enumerate(vals, 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = val
-            cell.font = _font(**kw)
-            cell.alignment = _align(wrap=True, vertical='top')
-            cell.border = _border(color=C.border_light)
-            if ci == 3 and val:
-                cell.hyperlink = val
         row += 1
-        # деталь под строкой (если не «ok»)
+        # строка 2: категория (ссылка)
+        _cat = cs.get('category', '')
+        if _cat:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = _cat
+            c.hyperlink = _cat
+            c.font = _font(size=9, color=C.accent, underline='single')
+            c.alignment = _align(indent=2)
+            ws.row_dimensions[row].height = 16
+            row += 1
+        # строка 3: деталь (если не «ok»)
         if cs.get('verdict') != 'ok' and cs.get('detail'):
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
             c = ws.cell(row=row, column=2)
             c.value = cs['detail']
             c.font = _font(size=9, italic=True, color=C.text_muted)
-            c.alignment = _align(indent=1)
+            c.alignment = _align(indent=2)
             ws.row_dimensions[row].height = 16
             row += 1
+    return row + 1
 
 
 def _build_autoclick_sheet(wb, autoclick):
@@ -3345,7 +3313,7 @@ def build_report(
     if _filters_bad:
         summary_text += (f'\nФильтрация: {_filters_bad} '
                          f'{"фильтр" if _filters_bad == 1 else "фильтров"} '
-                         f'работают некорректно - см. лист «Фильтрация».')
+                         f'работают некорректно - см. лист «Вёрстка».')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -3396,7 +3364,7 @@ def build_report(
         ('Индексация', 'если есть лист - расхождения сигналов страниц с robots.txt (noindex, canonical) и sitemap↔robots.'),
         ('Метаданные', 'если есть лист - title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
         ('Заголовки и мета', 'если есть лист - единственность title/description/H1, дубли H2 и заголовки вне текста.'),
-        ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media) и переходы из меню шапки.'),
+        ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media), переходы из меню шапки и работа фильтров товаров (браузерный тест).'),
         ('Разметка', 'если есть лист - OpenGraph-теги и Schema.org (крошки, компания, товар, цены, фото).'),
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
@@ -3430,8 +3398,8 @@ def build_report(
     # ─── Лист метаданных (п.1.8) - если проверка выполнялась ────────
     _build_meta_sheet(wb, results, meta_summary)
 
-    # ─── Лист вёрстки (п.1.11) - если проверка выполнялась ──────────
-    _build_layout_sheet(wb, results)
+    # ─── Лист вёрстки (п.1.11) + секция фильтрации (браузер) ────────
+    _build_layout_sheet(wb, results, filters_test)
 
     # ─── Лист разметки (п.1.12) - если проверка выполнялась ─────────
     _build_markup_sheet(wb, results)
@@ -3880,8 +3848,7 @@ def build_report(
     # ЛИСТ: «Автокликер» - итоги перекликивания ошибок (если запускался).
     _build_autoclick_sheet(wb, autoclick)
 
-    # ЛИСТ: «Фильтрация» - работают ли фильтры товаров (если тест запускался).
-    _build_filters_sheet(wb, filters_test)
+    # Фильтрация товаров - теперь секцией на листе «Вёрстка» (см. выше).
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)
