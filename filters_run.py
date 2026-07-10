@@ -16,10 +16,17 @@ catalogs/filters-<pid>.json:
           "card":   ".catalog-item",         // селектор карточки товара
           "filter": ".filter-block input[type=checkbox]",  // что кликнуть
           "apply":  ".filter-submit",         // кнопка «Показать» (null = AJAX)
-          "wait_ms": 2500                      // ждать после применения
+          "wait_ms": 2500,                     // ждать после применения
+          "total":  ".found-count"             // опц.: элемент «найдено N товаров»
         }
       ]
     }
+
+Как решаем, что фильтр СРАБОТАЛ (счётчик 60/стр из-за пагинации не годится -
+10к→6к всё равно 60 на странице): сравниваем НАБОР товаров (ссылки карточек)
+на 1-й странице до и после + «найдено N» (если задан total). Сработал, если
+изменился набор товаров ИЛИ упало «найдено N» ИЛИ упал счётчик карточек.
+Не сработал - те же товары и тот же счётчик.
 
 Нет файла/пустой cases → тест пропускается (в отчёте «селекторы не заданы»).
 
@@ -41,6 +48,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -131,6 +139,44 @@ def _has_empty_text(page) -> bool:
     return any(m in txt for m in _EMPTY_MARKERS)
 
 
+def _card_ids(page, card_sel: str) -> list:
+    """Идентификаторы товаров на 1-й странице: ссылка карточки (href) или,
+    если ссылки нет, название (textContent). Нужно, чтобы понять, ИЗМЕНИЛСЯ
+    ли набор товаров после фильтра - счётчик 60/стр из-за пагинации не
+    показателен (10к→6к всё равно 60 на странице)."""
+    if not card_sel:
+        return []
+    try:
+        ids = page.eval_on_selector_all(
+            card_sel,
+            "cards => cards.slice(0,60).map(c => {"
+            " let a = c.matches && c.matches('a[href]') ? c :"
+            "         (c.querySelector ? c.querySelector('a[href]') : null);"
+            " if (a) return a.getAttribute('href');"
+            " return (c.textContent||'').replace(/\\s+/g,' ').trim().slice(0,80);"
+            "})")
+        return [x for x in ids if x]
+    except Exception:
+        return []
+
+
+def _read_total(page, sel: str):
+    """«Найдено N товаров» из элемента-счётчика (если задан селектор total).
+    Возвращает int|None. Сильный сигнал: сузилось ли реально всё, а не
+    только видимая страница."""
+    if not sel:
+        return None
+    try:
+        el = page.locator(sel).first
+        if el.count() == 0:
+            return None
+        t = el.inner_text(timeout=1500) or ''
+        m = re.search(r'\d[\d\s]*', t)
+        return int(m.group(0).replace(' ', '')) if m else None
+    except Exception:
+        return None
+
+
 def run_case(page, case: dict, log) -> dict:
     name = case.get('name') or case.get('category') or 'фильтр'
     url = case.get('category') or ''
@@ -160,7 +206,10 @@ def run_case(page, case: dict, log) -> dict:
         return out
     page.wait_for_timeout(1500)
 
-    # 2. Счётчик карточек (база)
+    # 2. База: счётчик карточек + НАБОР товаров (ссылки) на 1-й странице +
+    # «найдено N» (если задан total). Набор нужен, чтобы поймать смену
+    # товаров при неизменном счётчике из-за пагинации.
+    total_sel = case.get('total')
     baseline, used_sel = _best_card_count(page, card)
     out['baseline'] = baseline
     if baseline <= 0:
@@ -168,6 +217,8 @@ def run_case(page, case: dict, log) -> dict:
         out['detail'] = (f'карточки не распознаны (селектор '
                          f'{card or "авто"}) - нечего сравнивать')
         return out
+    base_ids = _card_ids(page, used_sel)
+    total_before = _read_total(page, total_sel)
 
     # 3. Кликнуть фильтр
     try:
@@ -224,20 +275,48 @@ def run_case(page, case: dict, log) -> dict:
         out['detail'] = f'после фильтра HTTP {nav_status["code"]}'
         return out
 
-    # 5. Счётчик после фильтра
-    after, _ = _best_card_count(page, card)
+    # 5. После фильтра: счётчик + набор товаров + «найдено N».
+    after, _ = _best_card_count(page, used_sel)
     out['after'] = after
+    after_ids = _card_ids(page, used_sel)
+    total_after = _read_total(page, total_sel)
 
+    # Пусто / «ничего не найдено» - фильтр ломает выдачу.
     if after <= 0 or _has_empty_text(page):
         out['verdict'] = 'empty'
         out['detail'] = 'после фильтра нет товаров / «ничего не найдено»'
-    elif after >= baseline:
-        out['verdict'] = 'not_narrowed'
-        out['detail'] = (f'выдача не сузилась (было {baseline}, стало {after}) '
-                         f'- фильтр не применился')
-    else:
+        return out
+
+    # Сигналы, что фильтр РЕАЛЬНО применился (любого достаточно):
+    #  • «найдено N» уменьшилось (весь каталог, не только страница);
+    #  • изменился набор товаров на 1-й странице (даже если счётчик тот же);
+    #  • счётчик видимых карточек упал (мало товаров, без пагинации).
+    _total_dropped = (total_before is not None and total_after is not None
+                      and total_after < total_before)
+    _ids_changed = bool(base_ids) and bool(after_ids) and \
+        (set(after_ids) != set(base_ids))
+    _count_dropped = after < baseline
+
+    if _total_dropped:
         out['verdict'] = 'ok'
-        out['detail'] = f'фильтр сузил: {baseline} → {after}'
+        out['detail'] = (f'фильтр сузил: найдено {total_before} → '
+                         f'{total_after} товаров')
+    elif _ids_changed:
+        out['verdict'] = 'ok'
+        out['detail'] = ('фильтр применился: набор товаров на странице '
+                         'изменился'
+                         + (f' (найдено {total_before}→{total_after})'
+                            if total_after is not None else ''))
+    elif _count_dropped:
+        out['verdict'] = 'ok'
+        out['detail'] = f'фильтр сузил: карточек {baseline} → {after}'
+    else:
+        # тот же набор товаров И тот же счётчик И total не упал
+        out['verdict'] = 'not_narrowed'
+        out['detail'] = ('выдача не изменилась (те же товары на странице, '
+                         f'счётчик {after}) - фильтр не применился'
+                         + ('' if total_before is None
+                            else f'; найдено {total_before}→{total_after}'))
     return out
 
 
