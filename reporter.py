@@ -2070,29 +2070,62 @@ def _build_layout_sheet(wb, results, filters_test=None):
                         for r in checked)
     _menu_broken = sum(len((r.layout.get('menu') or {}).get('broken') or [])
                        for r in checked)
+    # Разбивка проверенных по типам страниц (чтобы было видно покрытие:
+    # «товаров 18, категорий 5…»).
+    from collections import Counter as _Counter
+    _by_type = _Counter(r.type_label for r in checked)
+    _cover = ' · '.join(f'{lbl} {n}' for lbl, n in _by_type.most_common())
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
-    c.value = (f'Проверено страниц: {len(checked)} · без viewport: {_no_vp} · '
-               f'с битыми CSS: {_css_broken_pages} · '
-               f'ссылок меню прозвонено: {_menu_checked}, битых: {_menu_broken} · '
-               f'предупреждений: {len(warned)}')
+    c.value = (f'Проверено страниц: {len(checked)} ({_cover}) · без viewport: '
+               f'{_no_vp} · с битыми CSS: {_css_broken_pages} · ссылок меню '
+               f'битых: {_menu_broken} · с предупреждениями: {len(warned)}')
     c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
     c.fill = _fill(C.surface)
     c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 26
+    ws.row_dimensions[row].height = 30
     row += 2
 
-    # Секция 1: проблемы (сгруппированы по тексту)
-    _meta_section_title(ws, row, f'Проблемы вёрстки  ({len(bad)})',
-                        C.err if bad else C.ok)
+    # Секция 1: ВСЕ проверенные страницы со статусом (покрытие + детализация).
+    # Сначала с багами, потом с предупреждениями, потом чистые.
+    _meta_section_title(
+        ws, row, f'Все проверенные страницы  ({len(checked)})',
+        C.err if has_bugs else C.ok)
     row += 1
-    if not bad:
-        _meta_ok_line(ws, row, '✅ На всех проверенных страницах viewport задан, '
-                               'все CSS-файлы грузятся.')
-        row += 2
-    else:
-        row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'layout', 'issues'), C.err)
+    _meta_table_header(ws, row, ['Город', 'Тип', 'URL', 'Результат (что не так)'])
+    row += 1
+
+    def _lrank(r):
+        return (0 if r.layout.get('issues') else
+                1 if r.layout.get('warnings') else 2, r.type_label, r.city or '')
+
+    for r in sorted(checked, key=_lrank):
+        _iss = r.layout.get('issues') or []
+        _wrn = r.layout.get('warnings') or []
+        if _iss:
+            _res, _clr = '; '.join(_iss), C.err
+        elif _wrn:
+            _res, _clr = '; '.join(_wrn), C.warn
+        else:
+            _res, _clr = '✅ ок', C.ok
+        ws.row_dimensions[row].height = 18 if not (_iss or _wrn) else 28
+        vals = [
+            (r.city or '-', {'size': 9, 'color': C.text_muted}),
+            (r.type_label, {'size': 9, 'color': C.text_muted}),
+            (r.url, {'size': 9, 'color': C.accent, 'underline': 'single'}),
+            (_res, {'size': 9, 'color': _clr,
+                    'bold': bool(_iss)}),
+        ]
+        for ci, (val, kw) in enumerate(vals, 2):
+            cell = ws.cell(row=row, column=ci)
+            cell.value = val
+            cell.font = _font(**kw)
+            cell.alignment = _align(wrap=True, vertical='top')
+            cell.border = _border(color=C.border_light)
+            if ci == 4:
+                cell.hyperlink = r.url
+        row += 1
+    row += 1
 
     # Секция 2: битые CSS-файлы (по файлу: какой файл на каких страницах)
     _by_css = {}
@@ -2119,12 +2152,8 @@ def _build_layout_sheet(wb, results, filters_test=None):
         row = _render_issue_groups(
             ws, row, sorted(_by_link.items(), key=lambda kv: -len(kv[1])), C.err)
 
-    # Секция 4: предупреждения (нет @media)
-    if warned:
-        _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
-        row += 1
-        row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'layout', 'warnings'), C.warn)
+    # (Предупреждения по каждой странице показаны в таблице «Все проверенные
+    # страницы» выше - отдельной сгруппированной секции не дублируем.)
 
     # Секция 5: фильтрация товаров (браузерный тест) - если запускался
     if filters_test:
