@@ -137,6 +137,17 @@ def main() -> int:
                          'для подтверждения заказ-целей из «Проверки целей».')
     a = ap.parse_args()
 
+    # Видимый браузер (show-browser) физически невозможен без дисплея: на сервере/
+    # в облаке (Streamlit Cloud - нет $DISPLAY) headed-запуск падает с «launched a
+    # headed browser without XServer» на КАЖДОЙ форме (весь прогон = «Ошибка»). Если
+    # дисплея нет - принудительно гоним скрыто (headless), отчёт формируется как
+    # обычно. Локально (Windows/Mac/Linux с X-сервером) галочка работает как раньше.
+    show_browser = a.show_browser
+    if show_browser and sys.platform.startswith('linux') and not os.environ.get('DISPLAY'):
+        _stamp('⚠️ «Показывать окно браузера» недоступно без дисплея (сервер/облако) '
+               '- гоню скрыто (headless). На отчёт это не влияет.')
+        show_browser = False
+
     name = PROJECT_NAMES[a.project]
     src_config = PROJECTS_ROOT / a.project / 'config.py'
     if not src_config.is_file():
@@ -229,7 +240,7 @@ def main() -> int:
             run_test(
                 ОЧИСТИТЬ_EXCEL=(not a.no_clear_excel and i == 0),   # чистим лог только перед первым
                 stop_flag=stop,
-                headless=not a.show_browser,
+                headless=not show_browser,
                 город=city,
                 почта_получателя=city_mail,
                 проба_файлов=a.file_probe,
@@ -248,7 +259,7 @@ def main() -> int:
                 if _города_212:
                     privacy_check.выполнить_проверку(
                         _города_212, excel_path='log_forms.xlsx',
-                        show=a.show_browser, log=_stamp)
+                        show=show_browser, log=_stamp)
             except Exception as e:  # noqa: BLE001
                 _stamp(f'⚠️ Проверка 2.12 (cookie/чат) не выполнена: {e}')
 
@@ -269,7 +280,7 @@ def main() -> int:
                         str(проект_дир), зоны,
                         excel_path='log_forms.xlsx',
                         submitted_path='submitted_forms.json',
-                        show=a.show_browser, log=_stamp,
+                        show=show_browser, log=_stamp,
                     )
                     # ── Пункт 2.11: заказы из корзины → список «Заказы» админки ──
                     # Тот же логин и зоны, но другой раздел (sale_order.php).
@@ -280,7 +291,7 @@ def main() -> int:
                             str(проект_дир), зоны,
                             orders_path='placed_orders.json',
                             excel_path='log_forms.xlsx',
-                            show=a.show_browser, log=_stamp,
+                            show=show_browser, log=_stamp,
                         )
                     except Exception as e:  # noqa: BLE001
                         _stamp(f'⚠️ Проверка заказов в админке не выполнена: {e}')
