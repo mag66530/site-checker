@@ -296,6 +296,7 @@ def проверка_полей_форм(scope, page) -> dict:
     файл_типы, файл_любые}."""
     res = {"телефон_ограничен": None, "телефон_детали": "поле телефона не найдено",
            "почта_ок": None, "почта_детали": "поле почты не найдено",
+           "дата_ок": None, "дата_детали": "поле даты не найдено",
            "обязательность_ок": None, "обязательность_детали": "не определено",
            "длина_ок": None, "длина_детали": "поля с ограничением длины не найдены",
            "файл_есть": False, "файл_типы": [], "файл_любые": False}
@@ -383,6 +384,56 @@ def проверка_полей_форм(scope, page) -> dict:
             else:
                 res["почта_ок"] = False
                 res["почта_детали"] = "НЕ проверяет формат (примет любой текст без @)"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ── Дата: валидируется ли формат (пункт 2.14) ──
+    # Находим поле даты (type=date или текстовое «дата/дд.мм/дата рождения»).
+    # type=date - формат гарантирует браузер; readonly = датапикер (руками
+    # некорректное не ввести); pattern - РЕАЛЬНО проверяем, что мусорную дату
+    # он отклоняет (checkValidity, форму не отправляем); маска/inputmode - тоже
+    # ограничение. Иначе поле принимает любой текст = формат не проверяется.
+    try:
+        _dt = scope.evaluate(
+            "f => {"
+            " const e = f.querySelector(\"input[type='date'], input[name*='date' i],"
+            " input[name*='дата' i], input[placeholder*='дата' i],"
+            " input[placeholder*='дд.мм' i], input[placeholder*='dd.mm' i],"
+            " input[placeholder*='дд/мм' i], input[name*='birth' i],"
+            " input[autocomplete='bday']\");"
+            " if(!e) return {found:false};"
+            " const t=(e.type||'').toLowerCase();"
+            " if(t==='date') return {found:true, typeDate:true};"
+            " const pattern=e.getAttribute('pattern');"
+            " let vinv=null;"
+            " if(pattern){ const s=e.value; try{ e.value='зз.зз.зззз';"
+            " vinv=e.checkValidity(); }catch(_){} e.value=s; }"
+            " return {found:true, typeDate:false, ro:!!e.readOnly, pattern:!!pattern,"
+            " vinv:vinv, ml:e.maxLength, im:(e.getAttribute('inputmode')||'').toLowerCase(),"
+            " mask:e.getAttribute('data-mask')||e.getAttribute('data-date-mask')||'',"
+            " cls:e.className||''};"
+            "}")
+        if _dt and _dt.get("found"):
+            _ml_d = _dt.get("ml")
+            _mask_d = bool(_dt.get("mask")) or bool(
+                re.search(r"(mask|datepicker|flatpickr|calendar|air-?datepicker)",
+                          _dt.get("cls", ""), re.I))
+            if _dt.get("typeDate"):
+                res["дата_ок"] = True
+                res["дата_детали"] = "type=date (браузер проверяет формат)"
+            elif _dt.get("ro"):
+                res["дата_ок"] = True
+                res["дата_детали"] = "датапикер (дата выбирается из календаря, руками не ввести)"
+            elif _dt.get("pattern") and _dt.get("vinv") is False:
+                res["дата_ок"] = True
+                res["дата_детали"] = "проверяет формат (pattern отклоняет некорректную дату)"
+            elif _mask_d or (isinstance(_ml_d, int) and 0 < _ml_d <= 10
+                             and _dt.get("im") in ("numeric", "tel")):
+                res["дата_ок"] = True
+                res["дата_детали"] = "маска даты (ввод ограничен по формату)"
+            else:
+                res["дата_ок"] = False
+                res["дата_детали"] = "НЕ проверяет формат (примет любой текст)"
     except Exception:  # noqa: BLE001
         pass
 
@@ -3138,9 +3189,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 # о заполнении). None - поле не найдено, не считаем багом.
                 _phone_bug = _pf["телефон_ограничен"] is False
                 _mail_bug = _pf["почта_ок"] is False
+                _date_bug = _pf["дата_ок"] is False
                 _req_bug = _pf["обязательность_ок"] is False
                 _len_bug = _pf["длина_ок"] is False
-                _есть_баг = _phone_bug or _mail_bug or _req_bug or _len_bug
+                _есть_баг = _phone_bug or _mail_bug or _date_bug or _req_bug or _len_bug
                 # Телефон - в «Комментарий»; типы файлов - в отдельную
                 # колонку «Типы файлов формы» (пусто, если поля загрузки нет).
                 if not _pf["файл_есть"]:
@@ -3149,8 +3201,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     _файлы_кол = "⚠ ЛЮБЫЕ типы (accept не задан)"
                 else:
                     _файлы_кол = ", ".join(_pf["файл_типы"])
+                # Дату упоминаем в комментарии, только если поле даты реально
+                # есть (дата_ок не None) - иначе на каждой форме шумит «не найдено».
+                _дата_txt = (f"дата (формат): {_pf['дата_детали']}; "
+                             if _pf["дата_ок"] is not None else "")
                 _ком214 = (f"телефон (маска): {_pf['телефон_детали']}; "
                            f"почта (валидация): {_pf['почта_детали']}; "
+                           f"{_дата_txt}"
                            f"обязательность/уведомления: {_pf['обязательность_детали']}; "
                            f"ограничение длины: {_pf['длина_детали']}")
                 записать_в_excel({
