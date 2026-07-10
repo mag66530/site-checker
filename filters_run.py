@@ -177,6 +177,70 @@ def _read_total(page, sel: str):
         return None
 
 
+MAX_FILTER_TRIES = 3     # если фильтр не сузил - пробуем ещё, до 3 групп
+
+
+def _pick_filter_indices(page, filt: str, max_groups: int = MAX_FILTER_TRIES):
+    """Индексы значений фильтра - по одному из первых max_groups РАЗНЫХ групп
+    (марка / ширина / длина…). Если групп/значений меньше - сколько есть.
+    Никогда не пусто (минимум [0]) - чтобы скрипт не запнулся."""
+    try:
+        names = page.eval_on_selector_all(
+            filt, "els => els.map(e => e.getAttribute('name')"
+                  "||e.getAttribute('id')||'')")
+    except Exception:
+        names = []
+    if not names:
+        return [0]
+    order, seen = [], set()
+    for i, nm in enumerate(names):
+        m = re.match(r'(arrFilter_\d+)_', nm or '') or re.match(r'(ocf\[\d+\])', nm or '')
+        g = m.group(1) if m else (re.sub(r'[_\-]?\d+$', '', nm or '') or f'i{i}')
+        if g not in seen:
+            seen.add(g)
+            order.append(i)
+        if len(order) >= max_groups:
+            break
+    return order or [0]
+
+
+def _apply_filter(page, idx, filt, apply_sel, wait_ms, pre_apply_ms):
+    """Кликнуть значение фильтра #idx и применить (кнопка/AJAX). Возвращает
+    HTTP-код навигации после применения (или None). Ошибки не бросает."""
+    try:
+        _click(page.locator(filt).nth(idx))
+    except Exception:
+        pass
+    page.wait_for_timeout(pre_apply_ms)
+    nav = {'code': None}
+
+    def _on(r):
+        try:
+            if r.request.is_navigation_request() and r.frame == page.main_frame:
+                nav['code'] = r.status
+        except Exception:
+            pass
+    page.on('response', _on)
+    if apply_sel and page.locator(apply_sel).count():
+        try:
+            with page.expect_navigation(timeout=wait_ms + 4000):
+                _click(page.locator(apply_sel).first)
+        except Exception:
+            pass
+    else:
+        page.wait_for_timeout(wait_ms)
+    page.wait_for_timeout(1200)
+    try:
+        page.wait_for_load_state('networkidle', timeout=8000)
+    except Exception:
+        pass
+    try:
+        page.remove_listener('response', _on)
+    except Exception:
+        pass
+    return nav['code']
+
+
 def _count_filter_groups(page, filt: str):
     """Сколько РАЗНЫХ групп фильтра (свойств), а не значений. Группируем по
     имени: arrFilter_<группа>_<значение> (Bitrix), ocf[<группа>] (ИМП), иначе
@@ -246,109 +310,72 @@ def run_case(page, case: dict, log) -> dict:
     base_ids = _card_ids(page, used_sel)
     total_before = _read_total(page, total_sel)
 
-    # 3. Кликнуть фильтр
+    # 3. Фильтр есть?
     try:
         _n_filt = page.locator(filt).count()
-        loc = page.locator(filt).first
-        if _n_filt == 0:
-            out['verdict'] = 'filter_absent'
-            out['detail'] = f'селектор фильтра не найден: {filt}'
-            return out
     except Exception as e:
         out['verdict'] = 'filter_absent'
         out['detail'] = f'селектор фильтра невалиден: {e}'
         return out
-    # Сколько полей/групп фильтра на странице (для отчёта; меняем только 1).
+    if _n_filt == 0:
+        out['verdict'] = 'filter_absent'
+        out['detail'] = f'селектор фильтра не найден: {filt}'
+        return out
     out['filter_fields'] = _n_filt
     out['filter_groups'] = _count_filter_groups(page, filt)
-    _err = _click(loc)
-    if _err:
-        out['verdict'] = 'filter_absent'
-        out['detail'] = f'по фильтру не удалось кликнуть: {_err}'
-        return out
 
-    # 4. Применить (кнопка) или дождаться AJAX.
-    # Смарт-фильтр Битрикса после клика чекбокса делает AJAX-пересчёт и
-    # только ПОТОМ кнопка «Показать» ведёт на /filter/.../ - жать её сразу
-    # бесполезно (выдача не сузится). Ждём пересчёт перед применением.
-    page.wait_for_timeout(int(case.get('pre_apply_ms') or 3000))
+    # 4. Пробуем фильтры ПО ОЧЕРЕДИ (до 3 разных групп): если выдача не
+    # изменилась - открываем следующий фильтр (марка → ширина → длина…).
+    # Изменилось с любого - ок. Меньше 3 фильтров/групп - берём сколько есть.
+    _pre = int(case.get('pre_apply_ms') or 3000)
+    indices = _pick_filter_indices(page, filt, MAX_FILTER_TRIES)
+    _tries = 0
+    last = ('not_narrowed', 'фильтр не найден для клика')
+    for attempt, idx in enumerate(indices):
+        if attempt > 0:
+            # Свежая категория под новый фильтр (прошлый увёл на /filter/…).
+            try:
+                r2 = page.goto(url, wait_until='domcontentloaded', timeout=45000)
+                if r2 and r2.status and r2.status >= 400:
+                    last = ('http_error', f'категория отдала HTTP {r2.status} '
+                            f'при повторном открытии')
+                    break
+                page.wait_for_timeout(1500)
+            except Exception:
+                break
+        _tries = attempt + 1
+        nav_code = _apply_filter(page, idx, filt, apply_sel, wait_ms, _pre)
+        if nav_code and nav_code >= 400:
+            _hint = ' — отфильтрованной страницы нет (404)' if nav_code == 404 else ''
+            last = ('http_error', f'после применения фильтра HTTP {nav_code}{_hint}')
+            break
+        after, _ = _best_card_count(page, used_sel)
+        out['after'] = after
+        after_ids = _card_ids(page, used_sel)
+        total_after = _read_total(page, total_sel)
+        if after <= 0 or _has_empty_text(page):
+            last = ('empty', 'после фильтра нет товаров / «ничего не найдено»')
+            break
+        # Признаки, что фильтр РЕАЛЬНО применился (сравниваем URL товаров).
+        _total_dropped = (total_before is not None and total_after is not None
+                          and total_after < total_before)
+        _ids_changed = bool(base_ids) and bool(after_ids) and \
+            (set(after_ids) != set(base_ids))
+        _count_dropped = after < baseline
+        if _total_dropped or _ids_changed or _count_dropped:
+            _d = 'фильтр применился: набор товаров изменился'
+            if _tries > 1:
+                _d += f' (сработал с {_tries}-й попытки)'
+            if total_after is not None and total_before is not None:
+                _d += f'; найдено {total_before}→{total_after}'
+            last = ('ok', _d)
+            break
+        # не изменилось - пробуем следующую группу фильтра (если есть)
+        last = ('not_narrowed',
+                f'проверено фильтров: {_tries} (из разных групп) - выдача не '
+                f'изменилась, товары те же (фильтр не применяется)')
 
-    nav_status = {'code': None}
-
-    def _on_resp(r):
-        try:
-            if r.request.is_navigation_request() and r.frame == page.main_frame:
-                nav_status['code'] = r.status
-        except Exception:
-            pass
-    page.on('response', _on_resp)
-
-    if apply_sel and page.locator(apply_sel).count():
-        ap = page.locator(apply_sel).first
-        # кнопка «Показать» навигирует на отфильтрованный URL - ждём переход
-        try:
-            with page.expect_navigation(timeout=wait_ms + 4000):
-                _click(ap)
-        except Exception:
-            pass
-    else:
-        # авто-применение (AJAX по клику чекбокса, без кнопки) - просто ждём
-        page.wait_for_timeout(wait_ms)
-    page.wait_for_timeout(1200)
-    try:
-        page.wait_for_load_state('networkidle', timeout=8000)
-    except Exception:
-        pass
-
-    if nav_status['code'] and nav_status['code'] >= 400:
-        _c = nav_status['code']
-        out['verdict'] = 'http_error'
-        _hint = ' — отфильтрованной страницы нет (404)' if _c == 404 else ''
-        out['detail'] = f'после применения фильтра страница отдала HTTP {_c}{_hint}'
-        return out
-
-    # 5. После фильтра: счётчик + набор товаров + «найдено N».
-    after, _ = _best_card_count(page, used_sel)
-    out['after'] = after
-    after_ids = _card_ids(page, used_sel)
-    total_after = _read_total(page, total_sel)
-
-    # Пусто / «ничего не найдено» - фильтр ломает выдачу.
-    if after <= 0 or _has_empty_text(page):
-        out['verdict'] = 'empty'
-        out['detail'] = 'после фильтра нет товаров / «ничего не найдено»'
-        return out
-
-    # Сигналы, что фильтр РЕАЛЬНО применился (любого достаточно):
-    #  • «найдено N» уменьшилось (весь каталог, не только страница);
-    #  • изменился набор товаров на 1-й странице (даже если счётчик тот же);
-    #  • счётчик видимых карточек упал (мало товаров, без пагинации).
-    _total_dropped = (total_before is not None and total_after is not None
-                      and total_after < total_before)
-    _ids_changed = bool(base_ids) and bool(after_ids) and \
-        (set(after_ids) != set(base_ids))
-    _count_dropped = after < baseline
-
-    if _total_dropped:
-        out['verdict'] = 'ok'
-        out['detail'] = (f'фильтр сузил: найдено {total_before} → '
-                         f'{total_after} товаров')
-    elif _ids_changed:
-        out['verdict'] = 'ok'
-        out['detail'] = ('фильтр применился: набор товаров на странице '
-                         'изменился'
-                         + (f' (найдено {total_before}→{total_after})'
-                            if total_after is not None else ''))
-    elif _count_dropped:
-        out['verdict'] = 'ok'
-        out['detail'] = f'фильтр сузил: карточек {baseline} → {after}'
-    else:
-        # тот же набор товаров И total не упал - фильтр ничего не изменил
-        out['verdict'] = 'not_narrowed'
-        out['detail'] = ('на 1-й странице те же товары - фильтр не изменил '
-                         'выдачу (клик по фильтру ничего не поменял)'
-                         + ('' if total_before is None
-                            else f'; «найдено» {total_before}→{total_after}'))
+    out['verdict'], out['detail'] = last
     return out
 
 
