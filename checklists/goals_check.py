@@ -278,6 +278,7 @@ with c1:
                                 creationflags=flags)
         PID_FILE.write_text(str(proc.pid), encoding='utf-8')
         st.session_state['goals_started'] = datetime.now().strftime('%H:%M:%S')
+        st.session_state['goals_started_ts'] = time.time()   # для секундомера прогона
         st.session_state['goals_selected'] = list(_selected)
         # Подпись прогона: проект + выбранные сайты. По ней прячем устаревший
         # прогресс, если пользователь сменил проект или набор галочек.
@@ -314,7 +315,13 @@ _sm = _re.findall(r'СТРАНА\s+(\d+)\s*/\s*(\d+)', log_txt)
 _pm = _re.findall(r'ПРОГРЕСС\s+(\d+)\s*/\s*(\d+)', log_txt)
 _goals_hit = len(_re.findall(r'цель:\s', log_txt))
 _forms_now = ('ФОРМЫ:' in log_txt) and ('СТРАНА' not in log_txt)
+# Секундомер прогона (как на «Проверке форм»): сколько времени идёт/заняло.
+# Старт берём из session_state (ставится при запуске); показываем только для
+# СВОЕГО прогона - после перезагрузки страницы отметки нет, тогда «…».
+_gts = st.session_state.get('goals_started_ts') if _own_run else None
 if _running:
+    _elapsed = int(time.time() - _gts) if _gts else None
+    _run_mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
     if _forms_now:
         st.progress(0.05, text='Прогон форм (перед целями)…')
     elif _sm:
@@ -327,12 +334,16 @@ if _running:
                     text=f'Сайт {_si} из {_sn} · целей поймано: {_goals_hit}')
     else:
         st.progress(0.02, text='Запуск браузера…')
-    st.markdown('**Статус:** ⏳ идёт проверка… (страница обновляется сама)')
+    st.markdown(f'**Статус:** ⏳ идёт проверка… {_run_mmss} (страница обновляется сама)')
     st.caption('Один сайт - около 3-5 минут, все сразу - до 20 минут. Можно уйти '
                'на другие вкладки - прогон не прервётся.')
 elif 'ПРОВЕРКА ЦЕЛЕЙ ЗАВЕРШЕНА' in log_txt:
     st.progress(1.0, text=f'Готово · целей поймано: {_goals_hit}')
-    st.markdown('**Статус:** ✅ завершено')
+    # Итоговое время = последняя запись лога (финиш) минус старт прогона.
+    _fin = LOG_FILE.stat().st_mtime if LOG_FILE.is_file() else None
+    _spent = int(_fin - _gts) if (_gts and _fin and _fin > _gts) else None
+    _spent_txt = f' · ⏱ заняло {_spent // 60}:{_spent % 60:02d}' if _spent else ''
+    st.markdown(f'**Статус:** ✅ завершено{_spent_txt}')
 elif log_txt:
     st.markdown('**Статус:** ⛔ остановлено / прервано')
 else:
