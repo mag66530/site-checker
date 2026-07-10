@@ -361,9 +361,34 @@ def _зона_отправки(зоны: list, город: str):
     return None
 
 
+def _xss_admin_в_отчёт(excel_path, статус: str, деталь: str, log=print) -> None:
+    """Дописывает в «Логи» итоговую строку XSS-в-админке (Фаза 2), заполняя ячейки
+    ПО ИМЕНИ колонки - устойчиво к вставленной админкой колонке «Статус в админке»."""
+    from openpyxl import load_workbook
+    from datetime import datetime as _dt
+    wb = load_workbook(excel_path)
+    ws = wb["Логи"] if "Логи" in wb.sheetnames else wb.active
+    idx = {str(c.value or "").strip(): i + 1 for i, c in enumerate(ws[1])}
+    r = ws.max_row + 1
+    now = _dt.now()
+
+    def put(name, val):
+        if name in idx:
+            ws.cell(r, idx[name], val)
+    put("Дата", now.strftime("%d.%m.%Y"))
+    put("Время", now.strftime("%H:%M:%S"))
+    put("Страница", "Админка")
+    put("Название", "Защита от XSS в админке (СМУ)")
+    put("Статус", "OK" if статус == "Защищена" else
+        ("Проверить" if статус == "Проверить" else "Ошибка"))
+    put("Защита от XSS", статус)
+    put("Комментарий", деталь)
+    wb.save(excel_path)
+
+
 def выполнить_проверку(проект_дир, зоны, excel_path: str = "log_forms.xlsx",
                        submitted_path: str = "submitted_forms.json",
-                       show: bool = False, log=print) -> bool:
+                       show: bool = False, log=print, xss_проба: bool = False) -> bool:
     """Уровень 1: по каждой АДМИН-ЗОНЕ (РФ / СНГ / Steelgroup - у них разные
     админки, но один логин/пароль) логинится, читает «Уведомления с форм» за
     сегодня и сверяет с нашими отправками. Пишет единый лист «Админка».
@@ -403,6 +428,9 @@ def выполнить_проверку(проект_дир, зоны, excel_pat
     from playwright.sync_api import sync_playwright
     все_результаты = []
     итог_есть = итог_нет = 0
+    # Фаза 2 XSS: копим по зонам, исполнился/отражён-сырым/присутствует ли наш
+    # payload-маркер на странице списка админки (stored XSS).
+    _xss_исп = _xss_сыр = _xss_present = False
 
     with sync_playwright() as pw:
         b = pw.chromium.launch(headless=not show,
@@ -427,6 +455,19 @@ def выполнить_проверку(проект_дир, зоны, excel_pat
                         html2 = _получить_список_html(page, домен, None)
                         з2 = разобрать_заявки(html2)
                         заявки, html = (з2, html2) if з2 else (заявки, html2)
+                    # Фаза 2 XSS: наша заявка с payload в ФИО сейчас на странице
+                    # списка. Смотрим, исполнился ли payload / отрендерен ли сырым
+                    # ЗДЕСЬ, в админке (stored XSS). Best-effort, ошибки гасим.
+                    if xss_проба:
+                        try:
+                            import test_all as _t
+                            _и, _с = _t._xss_наблюдение(page, html)
+                            _xss_исп = _xss_исп or _и
+                            _xss_сыр = _xss_сыр or _с
+                            if _t._XSS_MARK in (html or ""):
+                                _xss_present = True
+                        except Exception:  # noqa: BLE001
+                            pass
                 finally:
                     try:
                         page.close()
@@ -499,6 +540,25 @@ def выполнить_проверку(проект_дир, зоны, excel_pat
     записать_в_логи(excel_path, все_результаты)
     log(f"✅ Проверка админки: найдено {итог_есть}, НЕ найдено {итог_нет}. "
         f"Смотри колонку «Статус в админке» на листе «Логи».")
+
+    # Фаза 2 XSS: итог по админке (stored XSS). Пишем отдельной строкой в отчёт.
+    if xss_проба:
+        try:
+            if _xss_исп or _xss_сыр:
+                _st = "УЯЗВИМА"
+                _det = ("payload из заявки ИСПОЛНИЛСЯ / отрендерен сырым HTML в "
+                        "админке - это stored XSS: чинить экранирование вывода в админке")
+            elif _xss_present:
+                _st = "Защищена"
+                _det = "payload в админке показан экранированным (как текст) - не исполняется"
+            else:
+                _st = "Проверить"
+                _det = ("заявка с XSS-маркером в списке админки не найдена - "
+                        "проверьте, что заявка дошла, либо смотрите вручную")
+            _xss_admin_в_отчёт(excel_path, _st, _det, log)
+            log(f"🛡️ Защита от XSS (админка): {_st} - {_det}")
+        except Exception as e:  # noqa: BLE001
+            log(f"⚠️ XSS-проверка в админке не выполнена: {e}")
     return True
 
 

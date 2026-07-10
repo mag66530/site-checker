@@ -291,6 +291,7 @@ def main() -> int:
                         excel_path='log_forms.xlsx',
                         submitted_path='submitted_forms.json',
                         show=show_browser, log=_stamp,
+                        xss_проба=a.xss_probe,
                     )
                     # ── Пункт 2.11: заказы из корзины → список «Заказы» админки ──
                     # Тот же логин и зоны, но другой раздел (sale_order.php).
