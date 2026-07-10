@@ -917,9 +917,7 @@ elif _mail_mode == _MAIL_MODES[2]:
 st.subheader('Запуск проверки')
 
 st.session_state.setdefault(f'fc_clear_{pid_key}', True)
-st.session_state.setdefault(f'fc_show_{pid_key}', False)
 clear_log = st.checkbox('Очищать лог Excel перед прогоном', key=f'fc_clear_{pid_key}')
-show_browser = st.checkbox('Показывать окно браузера', key=f'fc_show_{pid_key}')
 st.session_state.setdefault(f'fc_fileprobe_{pid_key}', False)
 file_probe = st.checkbox('Проба серверной фильтрации загрузки файлов',
                          key=f'fc_fileprobe_{pid_key}')
@@ -989,8 +987,6 @@ with _run_col:
             args = ['forms_run.py', '--project', pid_key]
             if not clear_log:
                 args.append('--no-clear-excel')
-            if show_browser:
-                args.append('--show-browser')
             if _project_has_admin(pid_key) and not _admin_on:
                 args.append('--no-admin')      # админку явно отключили галочкой
             if file_probe:
