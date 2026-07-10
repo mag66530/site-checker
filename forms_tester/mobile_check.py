@@ -87,6 +87,51 @@ def _измерить(page) -> dict:
         "}", _TAP_MIN)
 
 
+# Ширины экрана для проверки «на всех устройствах».
+_ШИРИНЫ = [(360, "телефон"), (768, "планшет"), (1280, "десктоп")]
+
+
+def проверить_адаптивность(page) -> dict:
+    """Меняет ширину экрана (телефон/планшет/десктоп) и ищет ПРИЗНАКИ СЛОМАННОЙ
+    вёрстки формы: горизонтальный скролл, перекрытие элементов формы, форма стала
+    непригодной (не видно поля/кнопки). Возвращает {ок, детали[]}. Это объективное
+    ядро пункта «корректно на всех устройствах» - «красоту/макет» видит человек."""
+    проблемы = []
+    for w, имя in _ШИРИНЫ:
+        try:
+            page.set_viewport_size({"width": w, "height": 900})
+            page.wait_for_timeout(450)
+            r = page.evaluate(
+                "() => {"
+                " const W=document.documentElement.clientWidth;"
+                " const overflow=Math.max(0,(document.documentElement.scrollWidth||0)-W);"
+                " const vis=el=>{const r=el.getBoundingClientRect();const s=getComputedStyle(el);"
+                "   return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none';};"
+                " const sel='form input:not([type=hidden]),form textarea,form select,form button,"
+                "[id*=callme] input:not([type=hidden]),[id*=callme] button,.modal input:not([type=hidden]),.modal button';"
+                " const els=[...document.querySelectorAll(sel)].filter(vis);"
+                " const inter=(a,b)=>{const x=Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left));"
+                "   const y=Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));return x*y;};"
+                " let overlap=0;"
+                " for(let i=0;i<els.length;i++)for(let j=i+1;j<els.length;j++){"
+                "   const a=els[i].getBoundingClientRect(),b=els[j].getBoundingClientRect();"
+                "   const amin=Math.min(a.width*a.height,b.width*b.height);"
+                "   if(amin>0 && inter(a,b) > amin*0.35) overlap++; }"
+                " const hasBtn=[...document.querySelectorAll('form button,form [type=submit],[id*=callme] button,.modal button')].some(vis);"
+                " const hasField=[...document.querySelectorAll('form input:not([type=hidden]),form textarea,[id*=callme] input:not([type=hidden])')].some(vis);"
+                " return {overflow, overlap, usable:(hasBtn&&hasField), nforms:document.querySelectorAll('form').length};"
+                "}")
+            if int(r.get("overflow") or 0) > 8:
+                проблемы.append(f"{имя} ({w}px): горизонтальный скролл (+{int(r['overflow'])}px)")
+            if int(r.get("overlap") or 0) > 0:
+                проблемы.append(f"{имя} ({w}px): элементы формы налезают друг на друга")
+            if int(r.get("nforms") or 0) > 0 and not r.get("usable"):
+                проблемы.append(f"{имя} ({w}px): форма непригодна (не видно поля или кнопки)")
+        except Exception:  # noqa: BLE001
+            continue
+    return {"ок": not проблемы, "детали": проблемы[:8]}
+
+
 def _открыть_модалку(page) -> bool:
     """Пытается открыть форму-модалку кликом по кнопке-опенеру. True, если кликнули."""
     try:
@@ -142,6 +187,7 @@ def выполнить_проверку(страницы, excel_path: str = "log
         try:
             for метка, url in страницы:
                 page = ctx.new_page()
+                _ad = {"ок": True, "детали": []}
                 try:
                     page.goto(url, wait_until="domcontentloaded", timeout=35000)
                     page.wait_for_timeout(2500)
@@ -152,6 +198,10 @@ def выполнить_проверку(страницы, excel_path: str = "log
                         m["overflow"] = max(m["overflow"], m2["overflow"])
                         m["торчат"] = list(dict.fromkeys(m["торчат"] + m2["торчат"]))[:8]
                         m["мелкие"] = list(dict.fromkeys(m["мелкие"] + m2["мелкие"]))[:8]
+                    # «На всех устройствах»: несколько ширин + детект поломок вёрстки.
+                    # МЕНЯЕТ ширину экрана, поэтому строго ПОСЛЕДНИМ (страница дальше
+                    # закрывается, восстанавливать не нужно).
+                    _ad = проверить_адаптивность(page)
                 except Exception as e:  # noqa: BLE001
                     log(f"   ⚠️ {метка}: не удалось измерить ({str(e)[:70]})")
                     try:
@@ -184,8 +234,15 @@ def выполнить_проверку(страницы, excel_path: str = "log
                           "Мобильная вёрстка: тач-размер кнопок/полей",
                           _tap_ок, _tap_ком)
 
+                # 3) Вёрстка на разных устройствах (телефон/планшет/десктоп): без поломок.
+                _записать(excel_path, метка, url,
+                          "Вёрстка на устройствах (телефон/планшет/десктоп): без поломок",
+                          _ad["ок"],
+                          "Возможные поломки вёрстки — " + "; ".join(_ad["детали"]) + ".")
+
                 log(f"   {метка}: скролл={'нет' if _ov_ок else f'+{_ov}px'}, "
-                    f"мелких тач-целей={len(m.get('мелкие') or [])}")
+                    f"мелких тач-целей={len(m.get('мелкие') or [])}, "
+                    f"поломок вёрстки={len(_ad.get('детали') or [])}")
         finally:
             b.close()
     log("✅ Мобильная вёрстка проверена - смотри строки «Мобильная вёрстка: …» в «Логах».")
