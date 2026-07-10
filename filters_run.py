@@ -219,11 +219,12 @@ def run_case(page, case: dict, log) -> dict:
         status = resp.status if resp else None
     except Exception as e:
         out['verdict'] = 'http_error'
-        out['detail'] = f'категория не открылась: {e}'
+        out['detail'] = f'страница категории не открылась (сеть/таймаут): {e}'
         return out
     if status and status >= 400:
         out['verdict'] = 'http_error'
-        out['detail'] = f'категория отдала HTTP {status}'
+        _hint = ' — страницы нет (404)' if status == 404 else ''
+        out['detail'] = f'страница категории отдала HTTP {status}{_hint}'
         return out
     page.wait_for_timeout(1500)
 
@@ -296,8 +297,10 @@ def run_case(page, case: dict, log) -> dict:
         pass
 
     if nav_status['code'] and nav_status['code'] >= 400:
+        _c = nav_status['code']
         out['verdict'] = 'http_error'
-        out['detail'] = f'после фильтра HTTP {nav_status["code"]}'
+        _hint = ' — отфильтрованной страницы нет (404)' if _c == 404 else ''
+        out['detail'] = f'после применения фильтра страница отдала HTTP {_c}{_hint}'
         return out
 
     # 5. После фильтра: счётчик + набор товаров + «найдено N».
@@ -336,12 +339,12 @@ def run_case(page, case: dict, log) -> dict:
         out['verdict'] = 'ok'
         out['detail'] = f'фильтр сузил: карточек {baseline} → {after}'
     else:
-        # тот же набор товаров И тот же счётчик И total не упал
+        # тот же набор товаров И total не упал - фильтр ничего не изменил
         out['verdict'] = 'not_narrowed'
-        out['detail'] = ('выдача не изменилась (те же товары на странице, '
-                         f'счётчик {after}) - фильтр не применился'
+        out['detail'] = ('на 1-й странице те же товары - фильтр не изменил '
+                         'выдачу (клик по фильтру ничего не поменял)'
                          + ('' if total_before is None
-                            else f'; найдено {total_before}→{total_after}'))
+                            else f'; «найдено» {total_before}→{total_after}'))
     return out
 
 

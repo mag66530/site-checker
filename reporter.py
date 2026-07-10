@@ -2687,15 +2687,15 @@ def _country_by_url(url: str) -> str:
 
 # ── Лист «Фильтрация» (доп. чек-лист: фильтры товаров работают) ────
 
-# Вердикт → (метка, цвет, это баг?)
+# Вердикт → (метка «работает/не работает» + причина, цвет, это баг?)
 _FILTER_VERDICT = {
-    'ok':            ('✅ фильтр сузил выдачу',           'ok',  False),
-    'empty':         ('❌ пустая выдача после фильтра',   'err', True),
-    'not_narrowed':  ('❌ выдача не сузилась (дубль категории)', 'err', True),
-    'http_error':    ('❌ ошибка HTTP на фильтре',        'err', True),
-    'no_cards':      ('⚠ карточки не распознаны (проверить селектор card)', 'warn', False),
-    'filter_absent': ('⚠ селектор фильтра не найден',     'warn', False),
-    'config_error':  ('⚠ ошибка конфига кейса',           'warn', False),
+    'ok':            ('✅ работает',                                   'ok',  False),
+    'empty':         ('❌ не работает — после фильтра пусто (ничего не найдено)', 'err', True),
+    'not_narrowed':  ('❌ не работает — фильтр не применился (товары не изменились)', 'err', True),
+    'http_error':    ('❌ не работает — ошибка загрузки страницы',     'err', True),
+    'no_cards':      ('⚠ не проверено — карточки не распознаны (селектор card)', 'warn', False),
+    'filter_absent': ('⚠ не проверено — фильтр не найден на странице (селектор filter)', 'warn', False),
+    'config_error':  ('⚠ не проверено — ошибка конфига кейса',        'warn', False),
 }
 
 
@@ -2742,18 +2742,14 @@ def _render_filters_section(ws, row, filters_test):
         label, ckey, _is_bad = _FILTER_VERDICT.get(
             cs.get('verdict'), (cs.get('verdict') or '?', 'warn', False))
         color = _CMAP.get(ckey, C.text_soft)
-        _b, _a = cs.get('baseline'), cs.get('after')
-        _ba = (f'карточек {_b}→{_a}'
-               if _b is not None and _a is not None else '')
         _ff, _fg = cs.get('filter_fields'), cs.get('filter_groups')
         _ff_txt = ('' if _ff is None else
                    (f'полей {_ff} (групп {_fg})' if _fg else f'полей {_ff}'))
-        # строка 1: имя + вердикт (+ метрики)
-        _extra = '  ·  '.join(x for x in (_ba, _ff_txt) if x)
+        # строка 1: имя + работает/не работает (+ сколько полей фильтра)
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
         c.value = (f'{cs.get("name", "")}: {label}'
-                   + (f'   ({_extra})' if _extra else ''))
+                   + (f'   ({_ff_txt})' if _ff_txt else ''))
         c.font = _font(size=10, bold=_is_bad, color=color)
         c.fill = _fill(C.surface)
         c.alignment = _align(wrap=True, indent=1)
@@ -2771,13 +2767,13 @@ def _render_filters_section(ws, row, filters_test):
             c.alignment = _align(indent=2)
             ws.row_dimensions[row].height = 16
             row += 1
-        # строка 3: деталь (если не «ok»)
+        # строка 3: причина (если не «ok») - подробность из движка
         if cs.get('verdict') != 'ok' and cs.get('detail'):
             ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
             c = ws.cell(row=row, column=2)
-            c.value = cs['detail']
+            c.value = 'причина: ' + cs['detail']
             c.font = _font(size=9, italic=True, color=C.text_muted)
-            c.alignment = _align(indent=2)
+            c.alignment = _align(wrap=True, indent=2)
             ws.row_dimensions[row].height = 16
             row += 1
     return row + 1
