@@ -68,10 +68,11 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
     issues, warnings = [], []
 
     # ── Alt ──
+    # Текст без числа - чтобы страницы группировались в ОДИН блок отчёта
+    # (сколько картинок без alt - в детализации по строке).
     no_alt = imgs_no_alt(html)
     if no_alt:
-        issues.append(f'нет атрибута alt у {len(no_alt)} '
-                      f'{"картинки" if len(no_alt) == 1 else "картинок"}')
+        issues.append('есть картинки без атрибута alt')
 
     # ── Современные форматы (webp/avif) ──
     clean = _RE_HTML_COMMENT.sub(' ', html)

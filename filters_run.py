@@ -235,9 +235,13 @@ def run_case(page, case: dict, log) -> dict:
     baseline, used_sel = _best_card_count(page, card)
     out['baseline'] = baseline
     if baseline <= 0:
-        out['verdict'] = 'no_cards'
-        out['detail'] = (f'карточки не распознаны (селектор '
-                         f'{card or "авто"}) - нечего сравнивать')
+        # Авто-категория прогона без карточек = НЕ листинг товаров
+        # (подкатегория/раздел) - пропускаем, не считаем находкой. Явный
+        # кейс конфига без карточек = селектор card не тот (показываем).
+        out['verdict'] = 'skipped' if case.get('_auto') else 'no_cards'
+        out['detail'] = ('не листинг товаров (нет карточек) - пропущено'
+                         if case.get('_auto') else
+                         f'карточки не распознаны (селектор {card or "авто"})')
         return out
     base_ids = _card_ids(page, used_sel)
     total_before = _read_total(page, total_sel)
@@ -425,6 +429,7 @@ def _expand_cases_for_categories(cases: list, categories: list) -> list:
             'total': tpl.get('total'),
             'pre_apply_ms': tpl.get('pre_apply_ms'),
             'wait_ms': tpl.get('wait_ms'),
+            '_auto': True,     # авто-категория прогона (не из конфига)
         })
         if len(out) >= MAX_CATEGORIES:
             break
@@ -470,6 +475,11 @@ def main():
     log(f'Фильтр-тест: кейсов {len(cases)}, запускаю браузер…')
     try:
         results = _launch_and_run(pid, cases, log)
+        # skipped (не листинг товаров) в отчёт не тащим - это не находка.
+        _skipped = sum(1 for r in results if r.get('verdict') == 'skipped')
+        results = [r for r in results if r.get('verdict') != 'skipped']
+        if _skipped:
+            log(f'Пропущено {_skipped} страниц без товаров (не листинги).')
         payload = {'available': True, 'cases': results, 'note': None}
     except Exception as e:
         log(f'⚠ Фильтр-тест: {e}')

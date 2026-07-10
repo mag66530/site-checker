@@ -651,11 +651,13 @@ def run_check(pid, params, creds, log, progress):
                 session_b64=creds.get('autoclick_session'))
 
         # ── Фильтр-тест товаров (доп. чек-лист) - тяжёлый браузер, по галочке ──
-        # Проверяем фильтр на ВСЕХ категориях прогона (каталог/категория).
+        # Только листинги-КАТЕГОРИИ (последние во вложенности, где есть
+        # товары и фильтр). НЕ верхний каталог (type 'catalog' - там
+        # подкатегории, фильтровать нечего) и НЕ карточки товаров.
         _filters_test = None
         if params.get('check_filter_fn'):
             _cat_urls = [r.url for r in results if r.is_ok
-                         and r.type_code in ('catalog', 'category')]
+                         and r.type_code == 'category']
             _filters_test = _run_filters_test(pid, params, log,
                                               category_urls=_cat_urls)
 
