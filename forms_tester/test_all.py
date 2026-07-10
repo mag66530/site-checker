@@ -1997,7 +1997,8 @@ LOG_HEADERS = [
     "Дата", "Время", "Город", "Страница", "URL",
     "Название", "Где находится", "Имя", "Телефон", "Почта", "Почта получателя",
     "Статус", "Уведомление пользователю", "Типы файлов формы",
-    "Выпадающие списки", "Чекбоксы/радио", "Двойная отправка", "Комментарий",
+    "Выпадающие списки", "Чекбоксы/радио", "Двойная отправка",
+    "Enter отправляет", "Комментарий",
 ]
 
 # Ключи строки-словаря в порядке колонок LOG_HEADERS.
@@ -2005,7 +2006,7 @@ LOG_KEYS_ORDER = [
     "дата", "время", "город", "страница", "url",
     "название", "где", "имя", "телефон", "почта", "почта_получателя",
     "статус", "уведомление", "типы_файлов", "выпадающие_списки",
-    "чекбоксы_радио", "двойная_отправка", "комментарий",
+    "чекбоксы_радио", "двойная_отправка", "enter_отправляет", "комментарий",
 ]
 
 # Отдельный лист «Цели» (Яндекс.Метрика): свои колонки - форма/кнопка + идентификатор цели.
@@ -3378,6 +3379,75 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 )
                 return True
 
+            # Форма заказа? (тип блока «Оформление…» или URL checkout). На заказе
+            # НЕ жмём Enter и двойную отправку проверяем безопасно - чтобы не
+            # создать второй/лишний заказ на боевом сайте.
+            try:
+                _act = form.evaluate(
+                    "f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');"
+                    " return g ? (g.getAttribute('action')||'') : ''; }")
+            except Exception:  # noqa: BLE001
+                _act = ""
+            _is_order = bool(безопасная_отправка) or _ds_похоже_на_заказ(page.url, _act)
+
+            # ── Enter отправляет форму? (пункт чек-листа) ──
+            # БЕЗОПАСНО: вешаем перехватчик submit (capture) с preventDefault -
+            # если Enter в текстовом поле вызывает отправку, ловим ФАКТ и ОТМЕНЯЕМ
+            # её (реальная заявка НЕ уходит). Перехватчик снимаем в finally, чтобы
+            # не заблокировать штатную отправку ниже. На форме заказа Enter не жмём.
+            _enter_verdict, _enter_ком = None, ""
+            if not _is_order:
+                _enter_added = False
+                try:
+                    _ei = form.evaluate(
+                        "f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');"
+                        " if(!g) return 'noform';"
+                        " window.__entSub=false;"
+                        " window.__entH=function(e){ window.__entSub=true; e.preventDefault();"
+                        " e.stopPropagation(); g.removeEventListener('submit',window.__entH,true); };"
+                        " g.addEventListener('submit',window.__entH,true); return 'ok'; }")
+                    if _ei != "noform":
+                        _enter_added = True
+                        _inp = form.locator(
+                            "input:not([type='checkbox']):not([type='radio'])"
+                            ":not([type='file']):not([type='hidden']):not([type='submit'])"
+                            ":not([type='button']):not([type='date']):not([type='range'])"
+                            " >> visible=true").first
+                        if _inp.count():
+                            _inp.press("Enter", timeout=3000)
+                            page.wait_for_timeout(350)
+                            _sub = bool(form.evaluate("f => !!window.__entSub"))
+                            _enter_verdict = "да" if _sub else "нет"
+                            if not _sub:
+                                _enter_ком = ("Форму нельзя отправить клавишей Enter (только "
+                                              "кнопкой). Часто так делают намеренно - проверьте, "
+                                              "ожидается ли отправка с клавиатуры.")
+                except Exception:  # noqa: BLE001
+                    _enter_verdict = None
+                finally:
+                    if _enter_added:
+                        try:
+                            form.evaluate(
+                                "f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');"
+                                " if(g && window.__entH) g.removeEventListener('submit',window.__entH,true); }")
+                        except Exception:  # noqa: BLE001
+                            pass
+                if _enter_verdict:
+                    try:
+                        записать_в_excel({
+                            "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                            "тип_селектора": "поля", "ид": название,
+                            "название": f"Enter отправляет форму: {название}",
+                            "имя": имя_теста,
+                            "статус": "Проверить" if _enter_verdict == "нет" else "OK",
+                            "enter_отправляет": _enter_verdict,
+                            "комментарий_готовый": _enter_ком or None,
+                            "код": "enter_submit",
+                        })
+                        print(f"   ⏎ Enter отправляет «{название}»: {_enter_verdict}")
+                    except Exception:  # noqa: BLE001
+                        pass
+
             # Кнопка отправки: по умолчанию стандартные submit-кнопки; если у сайта
             # своя (например button.send у Авиапромсталь) - задаётся ключом «кнопка_css».
             _btn_css = str(форма_config.get("кнопка_css") or "").strip()
@@ -3399,16 +3469,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # Лёгкие формы - ТОЧНО: реально жмём второй раз и считаем POST-заявки
             # (одинаковый адрес ≥2 = дубль). Всё в try, чтобы не сломать отправку.
             _ds_verdict, _ds_ком = None, ""
-            _ds_safe = bool(безопасная_отправка)
+            _ds_safe = _is_order          # заказ - без реального второго клика
             _ds_posts, _ds_on = [], None
-            try:
-                _act = form.evaluate(
-                    "f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');"
-                    " return g ? (g.getAttribute('action')||'') : ''; }")
-            except Exception:  # noqa: BLE001
-                _act = ""
-            if not _ds_safe and _ds_похоже_на_заказ(page.url, _act):
-                _ds_safe = True
             if not _ds_safe:
                 try:
                     def _ds_on(req):
