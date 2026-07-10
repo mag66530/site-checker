@@ -16,10 +16,17 @@ catalogs/filters-<pid>.json:
           "card":   ".catalog-item",         // селектор карточки товара
           "filter": ".filter-block input[type=checkbox]",  // что кликнуть
           "apply":  ".filter-submit",         // кнопка «Показать» (null = AJAX)
-          "wait_ms": 2500                      // ждать после применения
+          "wait_ms": 2500,                     // ждать после применения
+          "total":  ".found-count"             // опц.: элемент «найдено N товаров»
         }
       ]
     }
+
+Как решаем, что фильтр СРАБОТАЛ (счётчик 60/стр из-за пагинации не годится -
+10к→6к всё равно 60 на странице): сравниваем НАБОР товаров (ссылки карточек)
+на 1-й странице до и после + «найдено N» (если задан total). Сработал, если
+изменился набор товаров ИЛИ упало «найдено N» ИЛИ упал счётчик карточек.
+Не сработал - те же товары и тот же счётчик.
 
 Нет файла/пустой cases → тест пропускается (в отчёте «селекторы не заданы»).
 
@@ -41,6 +48,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -131,6 +139,172 @@ def _has_empty_text(page) -> bool:
     return any(m in txt for m in _EMPTY_MARKERS)
 
 
+def _card_ids(page, card_sel: str) -> list:
+    """Идентификаторы товаров на 1-й странице: ссылка карточки (href) или,
+    если ссылки нет, название (textContent). Нужно, чтобы понять, ИЗМЕНИЛСЯ
+    ли набор товаров после фильтра - счётчик 60/стр из-за пагинации не
+    показателен (10к→6к всё равно 60 на странице)."""
+    if not card_sel:
+        return []
+    try:
+        ids = page.eval_on_selector_all(
+            card_sel,
+            "cards => cards.slice(0,60).map(c => {"
+            " let a = c.matches && c.matches('a[href]') ? c :"
+            "         (c.querySelector ? c.querySelector('a[href]') : null);"
+            " if (a) return a.getAttribute('href');"
+            " return (c.textContent||'').replace(/\\s+/g,' ').trim().slice(0,80);"
+            "})")
+        return [x for x in ids if x]
+    except Exception:
+        return []
+
+
+def _read_total(page, sel: str):
+    """«Найдено N товаров» из элемента-счётчика (если задан селектор total).
+    Возвращает int|None. Сильный сигнал: сузилось ли реально всё, а не
+    только видимая страница."""
+    if not sel:
+        return None
+    try:
+        el = page.locator(sel).first
+        if el.count() == 0:
+            return None
+        t = el.inner_text(timeout=1500) or ''
+        m = re.search(r'\d[\d\s]*', t)
+        return int(m.group(0).replace(' ', '')) if m else None
+    except Exception:
+        return None
+
+
+MAX_FILTER_TRIES = 3     # если фильтр не сузил - пробуем ещё, до 3 групп
+
+
+def _pick_filter_indices(page, filt: str, max_groups: int = MAX_FILTER_TRIES):
+    """Индексы значений фильтра - по одному из первых max_groups РАЗНЫХ групп
+    (марка / ширина / длина…). Если групп/значений меньше - сколько есть.
+    Никогда не пусто (минимум [0]) - чтобы скрипт не запнулся."""
+    try:
+        names = page.eval_on_selector_all(
+            filt, "els => els.map(e => e.getAttribute('name')"
+                  "||e.getAttribute('id')||'')")
+    except Exception:
+        names = []
+    if not names:
+        return [0]
+    order, seen = [], set()
+    for i, nm in enumerate(names):
+        m = re.match(r'(arrFilter_\d+)_', nm or '') or re.match(r'(ocf\[\d+\])', nm or '')
+        g = m.group(1) if m else (re.sub(r'[_\-]?\d+$', '', nm or '') or f'i{i}')
+        if g not in seen:
+            seen.add(g)
+            order.append(i)
+        if len(order) >= max_groups:
+            break
+    return order or [0]
+
+
+def _clicked_label(page, idx, filt) -> str:
+    """Человеческая подпись нажатого значения фильтра #idx: «Свойство: значение»
+    (напр. «Ширина: 10 мм»). Берём текст label (по for / родительский / title)
+    и заголовок блока-свойства. Для перепроверки в отчёте."""
+    js = """(args) => {
+      const [sel, i] = args;
+      const el = document.querySelectorAll(sel)[i];
+      if (!el) return '';
+      const norm = s => (s||'').replace(/\\s+/g,' ').trim();
+      let val = '';
+      try { if (el.id) { const l = document.querySelector('label[for="'+
+        (window.CSS&&CSS.escape?CSS.escape(el.id):el.id)+'"]'); if(l) val=l.textContent; } } catch(e){}
+      if (!val) { const p = el.closest('label'); if (p) val = p.textContent; }
+      if (!val) val = el.getAttribute('title') || el.value || '';
+      val = norm(val);
+      // Название свойства (Ширина/Марка…): заголовок блока или элемент ПЕРЕД
+      // блоком значений. Не берём то, что совпадает со значением.
+      const SEL = '.dropdown-title,.bx-filter-param-text,'+
+        '.bx-filter-parameters-box-title,.prop-title,legend,'+
+        '[class*="title"],[class*="name"],dt,.caption';
+      // Название свойства ДОЛЖНО содержать букву (значения - только цифры
+      // «10 (1)» / «100 (222)», их в название не берём).
+      const isName = t => t && t.length<50 && t!==val && /[а-яёa-z]/i.test(t)
+        && !/^[\\d.,\\s]*\\(\\d+\\)$/.test(t);
+      let grp = '', node = el;
+      for (let k=0;k<7 && node;k++){
+        node = node.parentElement; if(!node) break;
+        for (const h of node.querySelectorAll(SEL)){
+          const t = norm(h.textContent);
+          if (isName(t) && !h.contains(el)){ grp=t; break; }
+        }
+        if (grp) break;
+        const ps = node.previousElementSibling;
+        if (ps){ const t = norm(ps.textContent); if (isName(t)){ grp=t; break; } }
+      }
+      return (grp ? grp+': ' : '') + val;
+    }"""
+    try:
+        s = page.evaluate(js, [filt, idx]) or ''
+        return s.strip()[:80]
+    except Exception:
+        return ''
+
+
+def _apply_filter(page, idx, filt, apply_sel, wait_ms, pre_apply_ms):
+    """Кликнуть значение фильтра #idx и применить (кнопка/AJAX). Возвращает
+    HTTP-код навигации после применения (или None). Ошибки не бросает."""
+    try:
+        _click(page.locator(filt).nth(idx))
+    except Exception:
+        pass
+    page.wait_for_timeout(pre_apply_ms)
+    nav = {'code': None}
+
+    def _on(r):
+        try:
+            if r.request.is_navigation_request() and r.frame == page.main_frame:
+                nav['code'] = r.status
+        except Exception:
+            pass
+    page.on('response', _on)
+    if apply_sel and page.locator(apply_sel).count():
+        try:
+            with page.expect_navigation(timeout=wait_ms + 4000):
+                _click(page.locator(apply_sel).first)
+        except Exception:
+            pass
+    else:
+        page.wait_for_timeout(wait_ms)
+    page.wait_for_timeout(1200)
+    try:
+        page.wait_for_load_state('networkidle', timeout=8000)
+    except Exception:
+        pass
+    try:
+        page.remove_listener('response', _on)
+    except Exception:
+        pass
+    return nav['code']
+
+
+def _count_filter_groups(page, filt: str):
+    """Сколько РАЗНЫХ групп фильтра (свойств), а не значений. Группируем по
+    имени: arrFilter_<группа>_<значение> (Bitrix), ocf[<группа>] (ИМП), иначе
+    сам name без хвостовых цифр. None, если не вышло."""
+    try:
+        names = page.eval_on_selector_all(
+            filt, "els => els.map(e => e.getAttribute('name')||"
+                  "e.getAttribute('data-name')||'').filter(Boolean)")
+    except Exception:
+        return None
+    groups = set()
+    for nm in names:
+        m = re.match(r'(arrFilter_\d+)_', nm) or re.match(r'(ocf\[\d+\])', nm)
+        if m:
+            groups.add(m.group(1))
+        else:
+            groups.add(re.sub(r'[_\-]?\d+$', '', nm) or nm)
+    return len(groups) or None
+
+
 def run_case(page, case: dict, log) -> dict:
     name = case.get('name') or case.get('category') or 'фильтр'
     url = case.get('category') or ''
@@ -139,7 +313,8 @@ def run_case(page, case: dict, log) -> dict:
     apply_sel = case.get('apply')
     wait_ms = int(case.get('wait_ms') or 2500)
     out = {'name': name, 'category': url, 'verdict': None,
-           'baseline': None, 'after': None, 'detail': ''}
+           'baseline': None, 'after': None, 'detail': '',
+           'filter_fields': None, 'filter_groups': None}
 
     if not url or not filt:
         out['verdict'] = 'config_error'
@@ -152,92 +327,106 @@ def run_case(page, case: dict, log) -> dict:
         status = resp.status if resp else None
     except Exception as e:
         out['verdict'] = 'http_error'
-        out['detail'] = f'категория не открылась: {e}'
+        out['detail'] = f'страница категории не открылась (сеть/таймаут): {e}'
         return out
     if status and status >= 400:
         out['verdict'] = 'http_error'
-        out['detail'] = f'категория отдала HTTP {status}'
+        _hint = ' — страницы нет (404)' if status == 404 else ''
+        out['detail'] = f'страница категории отдала HTTP {status}{_hint}'
         return out
     page.wait_for_timeout(1500)
 
-    # 2. Счётчик карточек (база)
+    # 2. База: счётчик карточек + НАБОР товаров (ссылки) на 1-й странице +
+    # «найдено N» (если задан total). Набор нужен, чтобы поймать смену
+    # товаров при неизменном счётчике из-за пагинации.
+    total_sel = case.get('total')
     baseline, used_sel = _best_card_count(page, card)
     out['baseline'] = baseline
     if baseline <= 0:
-        out['verdict'] = 'no_cards'
-        out['detail'] = (f'карточки не распознаны (селектор '
-                         f'{card or "авто"}) - нечего сравнивать')
+        # Авто-категория прогона без карточек = НЕ листинг товаров
+        # (подкатегория/раздел) - пропускаем, не считаем находкой. Явный
+        # кейс конфига без карточек = селектор card не тот (показываем).
+        out['verdict'] = 'skipped' if case.get('_auto') else 'no_cards'
+        out['detail'] = ('не листинг товаров (нет карточек) - пропущено'
+                         if case.get('_auto') else
+                         f'карточки не распознаны (селектор {card or "авто"})')
         return out
+    base_ids = _card_ids(page, used_sel)
+    total_before = _read_total(page, total_sel)
 
-    # 3. Кликнуть фильтр
+    # 3. Фильтр есть?
     try:
-        loc = page.locator(filt).first
-        if page.locator(filt).count() == 0:
-            out['verdict'] = 'filter_absent'
-            out['detail'] = f'селектор фильтра не найден: {filt}'
-            return out
+        _n_filt = page.locator(filt).count()
     except Exception as e:
         out['verdict'] = 'filter_absent'
         out['detail'] = f'селектор фильтра невалиден: {e}'
         return out
-    _err = _click(loc)
-    if _err:
+    if _n_filt == 0:
         out['verdict'] = 'filter_absent'
-        out['detail'] = f'по фильтру не удалось кликнуть: {_err}'
+        out['detail'] = f'селектор фильтра не найден: {filt}'
         return out
+    out['filter_fields'] = _n_filt
+    out['filter_groups'] = _count_filter_groups(page, filt)
 
-    # 4. Применить (кнопка) или дождаться AJAX.
-    # Смарт-фильтр Битрикса после клика чекбокса делает AJAX-пересчёт и
-    # только ПОТОМ кнопка «Показать» ведёт на /filter/.../ - жать её сразу
-    # бесполезно (выдача не сузится). Ждём пересчёт перед применением.
-    page.wait_for_timeout(int(case.get('pre_apply_ms') or 3000))
+    # 4. Пробуем фильтры ПО ОЧЕРЕДИ (до 3 разных групп): если выдача не
+    # изменилась - открываем следующий фильтр (марка → ширина → длина…).
+    # Изменилось с любого - ок. Меньше 3 фильтров/групп - берём сколько есть.
+    _pre = int(case.get('pre_apply_ms') or 3000)
+    indices = _pick_filter_indices(page, filt, MAX_FILTER_TRIES)
+    _tries = 0
+    _clicked = []               # какие фильтры нажали (для перепроверки)
+    last = ('not_narrowed', 'фильтр не найден для клика')
+    for attempt, idx in enumerate(indices):
+        if attempt > 0:
+            # Свежая категория под новый фильтр (прошлый увёл на /filter/…).
+            try:
+                r2 = page.goto(url, wait_until='domcontentloaded', timeout=45000)
+                if r2 and r2.status and r2.status >= 400:
+                    last = ('http_error', f'категория отдала HTTP {r2.status} '
+                            f'при повторном открытии')
+                    break
+                page.wait_for_timeout(1500)
+            except Exception:
+                break
+        _tries = attempt + 1
+        _lbl = _clicked_label(page, idx, filt)   # подпись ДО клика (пока видна)
+        if _lbl:
+            _clicked.append(_lbl)
+        nav_code = _apply_filter(page, idx, filt, apply_sel, wait_ms, _pre)
+        if nav_code and nav_code >= 400:
+            _hint = ' — отфильтрованной страницы нет (404)' if nav_code == 404 else ''
+            last = ('http_error', f'после применения фильтра HTTP {nav_code}{_hint}')
+            break
+        after, _ = _best_card_count(page, used_sel)
+        out['after'] = after
+        after_ids = _card_ids(page, used_sel)
+        total_after = _read_total(page, total_sel)
+        if after <= 0 or _has_empty_text(page):
+            last = ('empty', 'после фильтра нет товаров / «ничего не найдено»')
+            break
+        # Признаки, что фильтр РЕАЛЬНО применился (сравниваем URL товаров).
+        _total_dropped = (total_before is not None and total_after is not None
+                          and total_after < total_before)
+        _ids_changed = bool(base_ids) and bool(after_ids) and \
+            (set(after_ids) != set(base_ids))
+        _count_dropped = after < baseline
+        if _total_dropped or _ids_changed or _count_dropped:
+            _d = 'фильтр применился: набор товаров изменился'
+            if _lbl:
+                _d += f'; нажат фильтр «{_lbl}»'
+            if _tries > 1:
+                _d += f' (сработал с {_tries}-й попытки)'
+            if total_after is not None and total_before is not None:
+                _d += f'; найдено {total_before}→{total_after}'
+            last = ('ok', _d)
+            break
+        # не изменилось - пробуем следующую группу фильтра (если есть)
+        _spis = '; '.join(f'«{x}»' for x in _clicked) or 'значение фильтра'
+        last = ('not_narrowed',
+                f'выдача не изменилась - товары те же. Нажато ({_tries}): '
+                f'{_spis}. Проверить эти фильтры вручную')
 
-    nav_status = {'code': None}
-
-    def _on_resp(r):
-        try:
-            if r.request.is_navigation_request() and r.frame == page.main_frame:
-                nav_status['code'] = r.status
-        except Exception:
-            pass
-    page.on('response', _on_resp)
-
-    if apply_sel and page.locator(apply_sel).count():
-        ap = page.locator(apply_sel).first
-        # кнопка «Показать» навигирует на отфильтрованный URL - ждём переход
-        try:
-            with page.expect_navigation(timeout=wait_ms + 4000):
-                _click(ap)
-        except Exception:
-            pass
-    else:
-        # авто-применение (AJAX по клику чекбокса, без кнопки) - просто ждём
-        page.wait_for_timeout(wait_ms)
-    page.wait_for_timeout(1200)
-    try:
-        page.wait_for_load_state('networkidle', timeout=8000)
-    except Exception:
-        pass
-
-    if nav_status['code'] and nav_status['code'] >= 400:
-        out['verdict'] = 'http_error'
-        out['detail'] = f'после фильтра HTTP {nav_status["code"]}'
-        return out
-
-    # 5. Счётчик после фильтра
-    after, _ = _best_card_count(page, card)
-    out['after'] = after
-
-    if after <= 0 or _has_empty_text(page):
-        out['verdict'] = 'empty'
-        out['detail'] = 'после фильтра нет товаров / «ничего не найдено»'
-    elif after >= baseline:
-        out['verdict'] = 'not_narrowed'
-        out['detail'] = (f'выдача не сузилась (было {baseline}, стало {after}) '
-                         f'- фильтр не применился')
-    else:
-        out['verdict'] = 'ok'
-        out['detail'] = f'фильтр сузил: {baseline} → {after}'
+    out['verdict'], out['detail'] = last
     return out
 
 
@@ -286,9 +475,51 @@ def _launch_and_run(pid: str, cases: list, log) -> list:
     return results
 
 
+MAX_CATEGORIES = 20      # сколько категорий прогона тестировать фильтром
+
+
+def _cat_name(url: str) -> str:
+    """Читаемое имя категории по URL (последний сегмент пути)."""
+    from urllib.parse import urlsplit
+    parts = [p for p in (urlsplit(url).path or '').split('/') if p]
+    return parts[-1] if parts else url
+
+
+def _expand_cases_for_categories(cases: list, categories: list) -> list:
+    """По селекторам из первого кейса конфига строит кейс на КАЖДУЮ
+    категорию прогона - чтобы проверить фильтр на всех, а не на одной.
+    Селекторы у проекта общие (одна тема), меняется только URL категории."""
+    if not cases or not categories:
+        return cases
+    tpl = cases[0]
+    seen, out = set(), []
+    for url in categories:
+        url = (url or '').strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        out.append({
+            'name': _cat_name(url),
+            'category': url,
+            'card': tpl.get('card'),
+            'filter': tpl.get('filter'),
+            'apply': tpl.get('apply'),
+            'total': tpl.get('total'),
+            'pre_apply_ms': tpl.get('pre_apply_ms'),
+            'wait_ms': tpl.get('wait_ms'),
+            '_auto': True,     # авто-категория прогона (не из конфига)
+        })
+        if len(out) >= MAX_CATEGORIES:
+            break
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--project', required=True)
+    ap.add_argument('--categories-file', default='',
+                    help='JSON-список URL категорий прогона: фильтр проверяется '
+                         'на КАЖДОЙ (селекторы из конфига). Пусто = кейсы конфига.')
     a = ap.parse_args()
     pid = a.project
 
@@ -296,6 +527,18 @@ def main():
         print(msg, flush=True)
 
     cases = load_cases(pid)
+    # Категории прогона: тестируем фильтр на всех (полная картинка).
+    if a.categories_file:
+        try:
+            _cats = json.loads(Path(a.categories_file).read_text(
+                encoding='utf-8-sig')) or []
+        except Exception as e:  # noqa: BLE001
+            _cats = []
+            log(f'⚠ Список категорий не прочитан: {e}')
+        if _cats and cases:
+            cases = _expand_cases_for_categories(cases, _cats)
+            log(f'Фильтр-тест: категорий прогона {len(cases)} (селекторы '
+                f'из конфига).')
     out_path = CACHE / f'filters_{pid}.json'
     if not cases:
         log(f'Фильтр-тест: селекторы для «{pid}» не заданы '
@@ -310,6 +553,11 @@ def main():
     log(f'Фильтр-тест: кейсов {len(cases)}, запускаю браузер…')
     try:
         results = _launch_and_run(pid, cases, log)
+        # skipped (не листинг товаров) в отчёт не тащим - это не находка.
+        _skipped = sum(1 for r in results if r.get('verdict') == 'skipped')
+        results = [r for r in results if r.get('verdict') != 'skipped']
+        if _skipped:
+            log(f'Пропущено {_skipped} страниц без товаров (не листинги).')
         payload = {'available': True, 'cases': results, 'note': None}
     except Exception as e:
         log(f'⚠ Фильтр-тест: {e}')

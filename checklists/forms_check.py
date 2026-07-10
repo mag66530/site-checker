@@ -61,6 +61,10 @@ _COUNTRY_FLAG = {
     'Россия': '🇷🇺', 'Казахстан': '🇰🇿', 'Беларусь': '🇧🇾', 'Кыргызстан': '🇰🇬',
     'Киргизия': '🇰🇬', 'Узбекистан': '🇺🇿', 'Азербайджан': '🇦🇿', 'Армения': '🇦🇲',
     'Украина': '🇺🇦',
+    # Steelgroup - отдельный азербайджанский сайт (steelgroup.az), в «Проверке
+    # целей» он идёт как smu-az2. Своя группа-«страна», чтобы показывался
+    # отдельным доменом (иначе прятался за stalmetural.am под «Арменией»).
+    'Steelgroup': '🇦🇿',
 }
 
 
@@ -90,6 +94,7 @@ PROJECTS = {
     'imp': {'name': 'ИМП - Инметпром', 'domain': 'inmetprom.ru'},
     'mpe': {'name': 'МПЭ - Мепэн', 'domain': 'mepen.ru'},
     'avia': {'name': 'АПС - Авиапромсталь', 'domain': 'aviastal.ru'},
+    'metpromko': {'name': 'Метпромко', 'domain': 'metpromko.ru'},
 }
 
 # Проекты-варианты берут справочник городов у «родителя» (свой config.py,
@@ -189,6 +194,20 @@ def _project_has_admin(project: str) -> bool:
         m = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(m)
         return bool(getattr(m, 'АДМИН_ЗОНЫ', None))
+    except Exception:
+        return False
+
+
+def _project_uses_proxy(project: str) -> bool:
+    """True, если у проекта в config.py задан ИСПОЛЬЗОВАТЬ_ПРОКСИ (сайт режет
+    прямое подключение, напр. Метпромко) - тогда галочка «Вкл. Прокси» стартует
+    включённой. Остальным проектам флага нет - прокси по умолчанию выключен."""
+    p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
+    try:
+        spec = importlib.util.spec_from_file_location(f'cfg_prx_{project}', p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return bool(getattr(m, 'ИСПОЛЬЗОВАТЬ_ПРОКСИ', False))
     except Exception:
         return False
 
@@ -917,9 +936,7 @@ elif _mail_mode == _MAIL_MODES[2]:
 st.subheader('Запуск проверки')
 
 st.session_state.setdefault(f'fc_clear_{pid_key}', True)
-st.session_state.setdefault(f'fc_show_{pid_key}', False)
 clear_log = st.checkbox('Очищать лог Excel перед прогоном', key=f'fc_clear_{pid_key}')
-show_browser = st.checkbox('Показывать окно браузера', key=f'fc_show_{pid_key}')
 st.session_state.setdefault(f'fc_fileprobe_{pid_key}', False)
 file_probe = st.checkbox('Проба серверной фильтрации загрузки файлов',
                          key=f'fc_fileprobe_{pid_key}')
@@ -930,6 +947,15 @@ st.caption('Только для форм с полем загрузки файл
            '«Ошибка» = сервер принял ОПАСНЫЙ тип (фильтрации нет). ВНИМАНИЕ: '
            'каждый принятый тип = отдельная тест-заявка в админке боевого '
            'сайта.')
+st.session_state.setdefault(f'fc_xss_{pid_key}', False)
+xss_probe = st.checkbox('Проверка защиты от XSS', key=f'fc_xss_{pid_key}')
+st.caption('В поле имени уходит БЕЗВРЕДНЫЙ XSS-маркер, и после отправки '
+           'проверяется, исполнился ли он на странице-ответе (колонка «Защита '
+           'от XSS»: Защищена / УЯЗВИМА / Проверить). Маркер компьютеру и данным '
+           'НЕ вредит - просто ставит переменную; если он «сработал», значит '
+           'форма не экранирует ввод и настоящий скрипт тоже сработал бы. '
+           'ВНИМАНИЕ: создаётся тест-заявка с маркером в имени - после прогона '
+           'удалите её в админке.')
 st.caption('По умолчанию браузер работает скрыто (headless) - окно не '
            'показывается, отчёт всё равно формируется. Включи галочку выше, '
            'если хочешь видеть, как он заполняет формы.')
@@ -960,10 +986,13 @@ if _cities_none:
     st.warning('Не выбрано ни одного домена/города - отметь хотя бы один, чтобы запустить.')
 
 # Прокси + проверка доступности сайта (над кнопкой запуска)
+_forms_proxy = None
 try:
     from site_access import render_proxy_access
-    render_proxy_access(f'forms_{pid_key}',
-                        default_url=f"https://{proj['domain']}/", pid=pid_key)
+    _forms_proxy = render_proxy_access(
+        f'forms_{pid_key}',
+        default_url=f"https://{proj['domain']}/", pid=pid_key,
+        default_on=_project_uses_proxy(pid_key))
 except Exception as _e_pa:
     st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
 
@@ -989,12 +1018,12 @@ with _run_col:
             args = ['forms_run.py', '--project', pid_key]
             if not clear_log:
                 args.append('--no-clear-excel')
-            if show_browser:
-                args.append('--show-browser')
             if _project_has_admin(pid_key) and not _admin_on:
                 args.append('--no-admin')      # админку явно отключили галочкой
             if file_probe:
                 args.append('--file-probe')    # проба фильтрации загрузки файлов
+            if xss_probe:
+                args.append('--xss-probe')     # проба защиты от XSS (маркер в имени)
             if _chosen_cities:
                 args += ['--cities', ','.join(_chosen_cities)]
             # Фильтр форм: передаём только если выбрано подмножество (не все).
@@ -1010,7 +1039,12 @@ with _run_col:
                 LOG_FILE.write_text('', encoding='utf-8')
             except Exception:
                 pass
-            _launch_background(args, LOG_FILE, extra_env={**_admin_env, **_mail_env})
+            # Прокси (галочка «Вкл. Прокси» над кнопкой): пробрасываем в движок,
+            # чтобы браузер форм ходил через него - для сайтов, режущих прямое
+            # подключение (напр. Метпромко). Пусто = браузер идёт напрямую.
+            _proxy_env = {'FORMS_PROXY': _forms_proxy} if _forms_proxy else {}
+            _launch_background(args, LOG_FILE,
+                               extra_env={**_admin_env, **_mail_env, **_proxy_env})
             st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key

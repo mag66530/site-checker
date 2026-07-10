@@ -165,20 +165,30 @@ def _run_autoclicker(pid, params, log, session_b64=None):
     return {'available': True, 'sites': sites}
 
 
-def _run_filters_test(pid, params, log, session_b64=None):
+def _run_filters_test(pid, params, log, category_urls=None):
     """Фильтр-тест товаров в браузере (доп. чек-лист). Отдельный процесс
     filters_run.py (Playwright): локальный CDP-Chrome не нужен, каталог
-    публичный - гоняем свой headless. Возвращает dict для листа «Фильтрация»."""
+    публичный - гоняем свой headless. category_urls - категории прогона:
+    фильтр проверяется на КАЖДОЙ (полная картинка). Возвращает dict для
+    секции «Фильтрация»."""
     import os as _os
     import subprocess
     import sys as _sys
     root = Path(__file__).parent
     _env = dict(_os.environ)
     _env['PYTHONIOENCODING'] = 'utf-8'
+    (root / 'cache').mkdir(exist_ok=True)
     # В облаке нет локального Chrome - filters_run сам поднимет headless;
     # флаг CCR_AGENT_PROXY_ENABLED (если есть) он учитывает сам.
     args = [_sys.executable, 'filters_run.py', '--project', pid]
-    (root / 'cache').mkdir(exist_ok=True)
+    if category_urls:
+        _cat_file = root / 'cache' / f'filter_cats_{pid}.json'
+        try:
+            _cat_file.write_text(json.dumps(list(category_urls),
+                                            ensure_ascii=False), encoding='utf-8')
+            args += ['--categories-file', str(_cat_file)]
+        except Exception:
+            pass
     _res_file = root / 'cache' / f'filters_{pid}.json'
     try:
         _res_file.unlink(missing_ok=True)
@@ -201,6 +211,46 @@ def _run_filters_test(pid, params, log, session_b64=None):
     except Exception as e:
         return {'available': False, 'cases': [],
                 'note': f'результат фильтр-теста не прочитан: {e}'}
+
+
+def _run_console_check(pid, urls, log):
+    """Проверка ошибок JS в консоли (пункт 1.14). Отдельный процесс
+    console_run.py (Playwright) по СТРАНИЦАМ, которые прошёл чек-лист.
+    Возвращает dict для листа «Ошибки JavaScript»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    (root / 'cache').mkdir(exist_ok=True)
+    _urls_file = root / 'cache' / f'console_urls_{pid}.json'
+    _res_file = root / 'cache' / f'console_{pid}.json'
+    try:
+        _urls_file.write_text(json.dumps(list(urls), ensure_ascii=False),
+                              encoding='utf-8')
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    args = [_sys.executable, 'console_run.py', '--project', pid,
+            '--urls-file', str(_urls_file)]
+    log(f'Проверка консоли (JS): {len(urls)} страниц, запускаю браузер…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [консоль] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        log(f'⚠ Проверка консоли: {e}')
+        return {'available': True, 'checked': 0, 'pages': [], 'note': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'checked': 0, 'pages': [],
+                'note': f'результат проверки консоли не прочитан: {e}'}
 
 
 def run_check(pid, params, creds, log, progress):
@@ -343,6 +393,7 @@ def run_check(pid, params, creds, log, progress):
             check_layout=bool(params.get('check_layout', True)),
             check_markup=bool(params.get('check_markup', True)),
             check_security=bool(params.get('check_security', True)),
+            check_images=bool(params.get('check_images', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
 
@@ -600,9 +651,58 @@ def run_check(pid, params, creds, log, progress):
                 session_b64=creds.get('autoclick_session'))
 
         # ── Фильтр-тест товаров (доп. чек-лист) - тяжёлый браузер, по галочке ──
+        # Только листинги-КАТЕГОРИИ (последние во вложенности, где есть
+        # товары и фильтр). НЕ верхний каталог (type 'catalog' - там
+        # подкатегории, фильтровать нечего) и НЕ карточки товаров.
         _filters_test = None
         if params.get('check_filter_fn'):
-            _filters_test = _run_filters_test(pid, params, log)
+            _cat_urls = [r.url for r in results if r.is_ok
+                         and r.type_code == 'category']
+            _filters_test = _run_filters_test(pid, params, log,
+                                              category_urls=_cat_urls)
+
+        # ── Ошибки JS в консоли (п.1.14) - браузер по страницам прогона ──
+        _console_check = None
+        if params.get('check_console'):
+            _console_urls = [r.url for r in results if r.is_ok]
+            if _console_urls:
+                _console_check = _run_console_check(pid, _console_urls, log)
+
+        # ── Валидация W3C + скорость ресурсов (п.1.16) - выборка страниц ──
+        # Внешние W3C-сервисы + скачивание ресурсов = медленно, поэтому
+        # берём по одной странице каждого типа (главная/категория/товар).
+        _w3c_check = None
+        if params.get('check_w3c'):
+            def _first(tc):
+                return next((r.url for r in results
+                             if r.is_ok and r.type_code == tc), None)
+            _w3c_urls = [u for u in (_first('main'), _first('category'),
+                                     _first('product')) if u]
+            if _w3c_urls:
+                try:
+                    from w3c_perf import check_pages as _w3c_pages
+                    log(f'Валидация W3C + скорость: {len(_w3c_urls)} страниц '
+                        f'(внешние сервисы, медленно)…')
+                    _w3c_check = _w3c_pages(_w3c_urls, proxy_url,
+                                            log=lambda m: log(m))
+                    # Понятный сигнал, если W3C не проверил валидность
+                    # (Cloudflare 403 / лимит 429 / сбой сервера 502).
+                    _pp = (_w3c_check or {}).get('pages') or []
+                    _errs = [str((p.get('html') or {}).get('error') or '')
+                             or str((p.get('css') or {}).get('error') or '')
+                             for p in _pp
+                             if (p.get('html') or {}).get('error')
+                             or (p.get('css') or {}).get('error')]
+                    _reason = _errs[0] if _errs else 'лимит/блок'
+                    if _pp and len(_errs) >= len(_pp):
+                        log(f'⚠ W3C НЕ проверил валидность HTML/CSS: {_reason}. '
+                            'Скорость ресурсов измерена. Повторить проверку 1.16 '
+                            'позже (через час или на след. день).')
+                    elif _errs:
+                        log(f'⚠ W3C: часть страниц не проверена ({_reason}): '
+                            f'{len(_errs)} из {len(_pp)}.')
+                except Exception as _e:
+                    log(f'⚠ Валидация W3C: {_e}')
 
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых
@@ -638,7 +738,8 @@ def run_check(pid, params, creds, log, progress):
                                else get_latest_available_date(pid)),
             service_issues=_service_issues, autoclick=_autoclick,
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
-            filters_test=_filters_test)
+            filters_test=_filters_test, console_check=_console_check,
+            w3c_check=_w3c_check)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

@@ -227,6 +227,10 @@ class CheckResult:
     security: Optional[dict] = None
     has_security_issues: bool = False
 
+    # п.1.15 изображения: alt / webp-avif / вес. dict из image_checker | None
+    images: Optional[dict] = None
+    has_image_issues: bool = False
+
     checked_at: Optional[str] = None
 
 
@@ -372,6 +376,61 @@ def _extract_stylesheet_links(html: str, base_url: str) -> list[str]:
     return out[:12]
 
 
+_RE_IMG_ANY = re.compile(
+    r'<img\b[^>]*?(?:data-src|src)\s*=\s*["\']([^"\']+)["\']', re.I)
+
+
+def _extract_img_srcs(html: str, base_url: str, limit: int = 15) -> list[str]:
+    """Абсолютные URL картинок ТОГО ЖЕ хоста (для проверки веса, п.1.15)."""
+    host = urlsplit(base_url).netloc
+    out, seen = [], set()
+    for src in _RE_IMG_ANY.findall(html or ''):
+        src = src.strip()
+        if not src or src.startswith('data:'):
+            continue
+        absu = urljoin(base_url, src).split('#')[0]
+        sp = urlsplit(absu)
+        if sp.scheme not in ('http', 'https') or sp.netloc != host:
+            continue
+        if absu not in seen:
+            seen.add(absu)
+            out.append(absu)
+            if len(out) >= limit:
+                break
+    return out
+
+
+async def _img_size(session, url, timeout_ms, proxy_url, cache):
+    """Размер картинки по Content-Length (HEAD; при 405/нет длины - GET-стрим).
+    {'url','bytes'|None}. Кэш на батч."""
+    if url in cache:
+        return cache[url]
+    to = aiohttp.ClientTimeout(total=min(timeout_ms, 15000) / 1000)
+    size = None
+    try:
+        async with session.head(url, timeout=to, allow_redirects=True,
+                                proxy=proxy_url) as r:
+            cl = r.headers.get('Content-Length')
+            if cl and cl.isdigit():
+                size = int(cl)
+    except Exception:
+        pass
+    if size is None:
+        try:
+            async with session.get(url, timeout=to, allow_redirects=True,
+                                   proxy=proxy_url) as r:
+                cl = r.headers.get('Content-Length')
+                if cl and cl.isdigit():
+                    size = int(cl)
+                else:
+                    size = len(await r.read())
+        except Exception:
+            size = None
+    info = {'url': url, 'bytes': size}
+    cache[url] = info
+    return info
+
+
 async def _fetch_css_text(session, url, timeout_ms, proxy_url):
     """(HTTP-статус | None, текст CSS). Пара попыток: один сбой/таймаут на
     стиль не должен «ослеплять» проверку видимости для всего домена
@@ -416,10 +475,20 @@ async def _css_info_for_url(session, url, timeout_ms, proxy_url, cache, locks, g
             'url': url,
             'status': status,
             'has_media': bool(text and _RE_CSS_MEDIA_WIDTH.search(text)),
+            'minified': _looks_minified(text),
             'selectors': parse_hidden_selectors(text) if text else (),
         }
         cache[url] = info
         return info
+
+
+def _looks_minified(text) -> Optional[bool]:
+    """Минифицирован ли CSS/JS: мало переносов строк, длинные строки. None,
+    если контент не получен (не судим)."""
+    if not text:
+        return None
+    n = text.count('\n')
+    return n <= 3 or (len(text) / (n + 1)) > 200
 
 
 # ── «Ссылки реально открываются» (404) ──────────────────────────────
@@ -511,12 +580,14 @@ async def check_one(
     check_layout: bool = False,
     check_markup: bool = False,
     check_security: bool = False,
+    check_images: bool = False,
     region_ctx=None,            # RegionContext из region_checker.py
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
     get_css_hidden: Optional[Callable] = None,
     get_robots: Optional[Callable] = None,
     get_css_infos: Optional[Callable] = None,
+    get_image_infos: Optional[Callable] = None,
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
@@ -663,7 +734,8 @@ async def check_one(
             if get_css_infos is not None:
                 _css_infos = await get_css_infos(
                     a['body_text'], a['final_url'] or task.url)
-            layout = _check_layout(a['body_text'], _css_infos)
+            layout = _check_layout(a['body_text'], _css_infos,
+                                   base_url=a['final_url'] or task.url)
         except Exception:
             layout = None
         # ТЗ 2.2/2.3: переходы из меню шапки (тех. страницы + каталог).
@@ -727,6 +799,19 @@ async def check_one(
         except Exception:
             security = None
 
+    # п.1.15: изображения - alt, современные форматы, вес (HEAD своих картинок).
+    images = None
+    if check_images and is_ok and a['body_text']:
+        try:
+            from image_checker import check_images as _check_images
+            _base = a['final_url'] or task.url
+            _img_infos = None
+            if get_image_infos is not None:
+                _img_infos = await get_image_infos(a['body_text'], _base)
+            images = _check_images(a['body_text'], _base, _img_infos)
+        except Exception:
+            images = None
+
     return CheckResult(
         url=task.url,
         city=task.city,
@@ -771,6 +856,8 @@ async def check_one(
         has_markup_issues=bool(markup and markup.get('issues')),
         security=security,
         has_security_issues=bool(security and security.get('issues')),
+        images=images,
+        has_image_issues=bool(images and images.get('issues')),
         checked_at=None,
     )
 
@@ -797,6 +884,7 @@ async def run_batch(
     check_layout: bool = False,
     check_markup: bool = False,
     check_security: bool = False,
+    check_images: bool = False,
     region_ctx=None,            # RegionContext из region_checker.build_region_context
     on_progress: Optional[Callable] = None,
     is_cancelled: Optional[Callable] = None,
@@ -831,6 +919,7 @@ async def run_batch(
     css_cache: dict = {}
     css_locks: dict = {}
     css_guard = asyncio.Lock()
+    img_cache: dict = {}                 # размеры картинок (HEAD), п.1.15
 
     # Кэш robots.txt по хостам (для проверки индексации) - качаем каждый
     # поддомен один раз на батч.
@@ -855,6 +944,15 @@ async def run_batch(
             for u in _extract_stylesheet_links(html, base_url):
                 out.append(await _css_info_for_url(
                     session, u, timeout_ms, proxy_url, css_cache, css_locks, css_guard))
+            return out
+
+        async def get_image_infos(html, base_url):
+            """[{'url','bytes'}] по своим картинкам страницы (для веса, п.1.15).
+            HEAD, кэш на батч (шаблонные картинки повторяются)."""
+            out = []
+            for u in _extract_img_srcs(html, base_url):
+                out.append(await _img_size(
+                    session, u, timeout_ms, proxy_url, img_cache))
             return out
 
         async def get_robots(host):
@@ -898,12 +996,14 @@ async def run_batch(
                     check_layout=check_layout,
                     check_markup=check_markup,
                     check_security=check_security,
+                    check_images=check_images,
                     region_ctx=region_ctx,
                     proxy_url=proxy_url,
                     kp_map=kp_map,
                     get_css_hidden=get_css_hidden,
                     get_robots=get_robots if check_indexing else None,
                     get_css_infos=get_css_infos if check_layout else None,
+                    get_image_infos=get_image_infos if check_images else None,
                 )
                 done_count += 1
                 if on_progress:

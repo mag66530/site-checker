@@ -1055,7 +1055,6 @@ _FOOTER = [
 _TOP = [
     _b('breadcrumbs', 'Хлебные крошки',   True,  _d_breadcrumbs),
     _b('h1',          'Заголовок H1',     True,  _d_h1),
-    _b('img_alt',     'Alt у картинок',   True,  _d_img_alt),
 ]
 _BOTTOM = [
     _b('h2',          'Подзаголовки H2',  False, _d_h2),
@@ -1242,7 +1241,6 @@ _TECH = [
     _b('content_text', 'Текст',           True,  _d_content_text),
     _b('breadcrumbs',  'Хлебные крошки',  False, _d_breadcrumbs),
     _b('h1',           'Заголовок H1',    True,  _d_h1),
-    _b('img_alt',      'Alt у картинок',  True,  _d_img_alt),
 ]
 
 # Спец-блоки тех. страниц. Часть - ОБЯЗАТЕЛЬНЫЕ (баг, если нет): надёжные и
@@ -1298,7 +1296,6 @@ def _tech_profile_for(url: str) -> list:
 _MAIN_PROFILE = [
     *_HEADER,
     _b('h1',      'Заголовок H1',   False, _d_h1),
-    _b('img_alt', 'Alt у картинок', True,  _d_img_alt),
     _b('forms',   'Формы',          False, _d_forms),
     _b('search',  'Поиск',          False, _d_search),
     # ТЗ 2.4: карта присутствия на главной - опциональна для проекта,
@@ -1542,13 +1539,6 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
                 note = 'в коде есть, но покупатель не видит (скрыто стилями/disabled)'
         if _photo_warn:
             note = _photo_names        # названия товаров с заглушкой
-        # «Alt у картинок»: в пояснение - адреса картинок без alt (компактно,
-        # первые 3 + «и ещё N», чтобы не растягивать отчёт).
-        if blk.key == 'img_alt' and required and not present:
-            _srcs = _imgs_no_alt_srcs(ctx.html)
-            note = '; '.join(_srcs[:3])
-            if len(_srcs) > 3:
-                note += f' и ещё {len(_srcs) - 3}'
         result.blocks.append(BlockResult(
             key=blk.key,
             label=blk.label,

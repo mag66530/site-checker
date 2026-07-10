@@ -496,22 +496,18 @@ def test_tech_per_page_profiles():
     assert vac.bug_count == 0 and sr.bug_count == 0 and us.bug_count == 0
 
 
-def test_img_alt_required_everywhere():
-    """Все <img> должны иметь атрибут alt. Пустой alt="" – легален
-    (декоративные), data-alt не считается, комментарии не считаются."""
-    base = '<div class="breadcrumb">x</div><h1>T</h1>'
-    bad = check_content(
-        base + '<img src="a.jpg" alt="Фото"><img src="b.jpg" alt="">'
-               '<img src="c.jpg"><img src="d.jpg" data-alt="x">'
-               '<!-- <img src="e.jpg"> -->', 'custom')
-    blk = _by_key(bad)['img_alt']
-    assert not blk.present and blk.count == 2      # c.jpg и d.jpg – без alt
-    assert 'img_alt' in {b.key for b in bad.bugs}
-
-    ok = check_content(
-        base + '<img src="a.jpg" alt="Фото"><img alt src="b.jpg">', 'custom')
-    assert _by_key(ok)['img_alt'].present
-    assert 'img_alt' not in {b.key for b in ok.bugs}
+def test_img_alt_moved_to_image_checker():
+    """Alt у картинок теперь проверяет image_checker (п.1.15), не content."""
+    from image_checker import check_images
+    html = ('<img src="a.jpg" alt="Фото"><img src="b.jpg" alt="">'
+            '<img src="c.jpg"><img src="d.jpg" data-alt="x">'
+            '<!-- <img src="e.jpg"> -->')
+    res = check_images(html, base_url='https://x.ru/p/')
+    assert len(res['no_alt']) == 2                 # c.jpg и d.jpg - без alt
+    assert res['issues']                           # баг про alt есть
+    ok = check_images('<img src="a.jpg" alt="Фото"><img alt src="b.jpg">',
+                      base_url='https://x.ru/p/')
+    assert not ok['no_alt'] and not ok['issues']
 
 
 def test_extract_content_links_filters_and_dedup():

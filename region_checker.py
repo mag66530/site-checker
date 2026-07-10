@@ -144,6 +144,20 @@ _RE_PHONE_LIKE = re.compile(r'\+?\d[\d\s\-(). ]{8,18}\d')
 _RE_EMAIL = re.compile(r'[\w.+-]+@[\w-]+\.[\w.-]{2,}', re.I)
 
 
+def _city_match_propernoun(rx, text: str):
+    """Ищет упоминание города, но берёт ТОЛЬКО имя собственное (с заглавной
+    буквы). Многие города-названия совпадают с прилагательными («костыль
+    железнодорожный» ≠ город Железнодорожный, «первомайская лента» ≠
+    Первомайск): реальная подстановка города в title/description всегда с
+    большой буквы («в Железнодорожном»), прилагательное - со строчной.
+    Берём первое совпадение, где имя начинается с заглавной."""
+    for m in rx.finditer(text):
+        first = next((ch for ch in m.group(0) if ch.isalpha()), '')
+        if first and first.isupper():
+            return m
+    return None
+
+
 def check_region_vars(html: str, host: str, ctx: RegionContext) -> dict | None:
     """Проверка «верных переменных» страницы поддомена (пункт 1.4.1).
     Возвращает {'город': ..., 'issues': [...]} или None, если город хоста не известен."""
@@ -164,7 +178,7 @@ def check_region_vars(html: str, host: str, ctx: RegionContext) -> dict | None:
             # города-«вложения» («Новгород» в «Нижний Новгород») не сравниваем
             if город in свой_город or свой_город in город:
                 continue
-            m = rx.search(t)
+            m = _city_match_propernoun(rx, t)
             if m:
                 issues.append({
                     'тип': 'город', 'зона': зона,

@@ -101,12 +101,15 @@ def probe_site(url: str, proxy: str | None = None, timeout: int = 12) -> dict:
 
 
 def render_proxy_access(key_prefix: str, default_url: str = "",
-                        pid: str = "") -> str | None:
+                        pid: str = "", default_on: bool | None = None) -> str | None:
     """Рисует блок (поле прокси + проверка доступа) НАД кнопкой запуска.
     Возвращает эффективный прокси (переопределение или из секретов, либо
     None, если чекбокс выключен) - страница может использовать его в прогоне.
 
-    key_prefix - уникальный префикс ключей session_state на страницу."""
+    key_prefix - уникальный префикс ключей session_state на страницу.
+    default_on - стартовое состояние галочки «Вкл. Прокси»: None (по умолчанию) -
+    как раньше, включена при наличии секрета; True/False - явно задать (напр. на
+    «Проверке форм» прокси нужен только части проектов, остальным - выключен)."""
     sec_proxy = secret_proxy(pid)
 
     # ── Текущий IP напрямую (кэшируем на сессию - не дёргаем сеть на каждый rerun) ──
@@ -125,8 +128,9 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
         "Прокси", key=f"{key_prefix}_proxy_field",
         placeholder="http://user:pass@host:port (пусто = без прокси)",
         label_visibility="collapsed")
+    _chk_default = bool(sec_proxy) if default_on is None else bool(default_on)
     use_proxy = c2.checkbox("Вкл. Прокси", key=f"{key_prefix}_proxy_on",
-                            value=bool(sec_proxy))
+                            value=_chk_default)
 
     field = (proxy_field or "").strip()
     if use_proxy:
@@ -145,60 +149,29 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
         st.caption("Прокси выключен - запросы напрямую.")
 
     # ── Блок проверки доступа ──
-    with st.expander("🔒 Проверка реального IP / доступа к моему сайту "
-                     "(без прокси / с прокси)", expanded=False):
+    with st.expander("🔒 Проверка доступа к сайту (по текущим настройкам "
+                     "прокси)", expanded=False):
         url = st.text_input("URL для проверки", value=default_url or "",
                             key=f"{key_prefix}_probe_url",
                             placeholder="https://example.ru/")
         if st.button("Запустить проверку", key=f"{key_prefix}_probe_btn"):
-            with st.spinner("Проверяю доступ…"):
-                d_ip, d_ms, d_err = outbound_ip(None)
-                a_ip, a_ms, a_err = outbound_ip(effective)
-                _u = url.strip()
-                site = probe_site(_u, None) if _u else None
-                site_px = probe_site(_u, effective) if (_u and effective) else None
-
-            # 1. IP напрямую
-            st.markdown("**Outbound IP (без прокси, прямое подключение):** "
-                        + (f"`{d_ip}` · {d_ms} мс" if d_ip else f"— {d_err}"))
-            # 2. IP с настройками приложения
-            _pm = "через прокси" if effective else "напрямую"
-            st.markdown("**Outbound IP (с текущими настройками приложения):** "
-                        + (f"`{a_ip}` · {_pm} · {a_ms} мс" if a_ip
-                           else f"— ({_pm}) {a_err}"))
-
-            def _показать(site_res, подпись):
-                if site_res["error"]:
-                    st.error(f"❌ Запрос к {url} ({подпись}): "
-                             f"{site_res['error']} · {site_res['ms']} мс")
-                    return
-                _line = (f"Запрос к {url} ({подпись}): "
-                         f"HTTP {site_res['status']} · {site_res['ms']} мс · "
-                         f"{site_res['size']} байт · Server: "
-                         f"{site_res['server'] or '—'}")
-                if site_res["status"] == 200:
-                    st.success("✅ " + _line)
-                elif 400 <= (site_res["status"] or 0) < 600:
-                    st.warning("⚠️ " + _line + "  — возможно блокировка по "
-                               "IP/региону, нужен прокси")
-                else:
-                    st.info(_line)
-
-            # 3. Прямой запрос (всегда без прокси - проверяем блокировку)
-            if not site:
-                st.caption("URL не задан - запрос к сайту пропущен.")
+            _u = url.strip()
+            if not _u:
+                st.caption("URL не задан - вписать адрес для проверки.")
             else:
-                _показать(site, "НАПРЯМУЮ, без прокси")
-            # 4. Запрос через прокси (если прокси включён и задан)
-            if site_px is not None:
-                _показать(site_px, "ЧЕРЕЗ ПРОКСИ")
-                # подсказка: помог ли прокси обойти блокировку
-                if (site and site.get("status") and site["status"] != 200
-                        and site_px.get("status") == 200):
-                    st.caption("→ прокси обходит блокировку (напрямую "
-                               f"{site['status']}, через прокси 200)")
-            elif effective is None and site:
-                st.caption("Прокси выключен - строка «через прокси» пропущена. "
-                           "Включи «Вкл. Прокси» и задай прокси, чтобы сравнить.")
+                with st.spinner("Проверяю доступ…"):
+                    site = probe_site(_u, effective)
+                _pm = "через прокси" if effective else "напрямую"
+                if site["error"]:
+                    st.error(f"❌ Не доступен ({_pm}) — {site['error']} · "
+                             f"{site['ms']} мс")
+                elif site["status"] == 200:
+                    st.success(f"✅ Доступен — HTTP 200 ({_pm}) · "
+                               f"Server {site['server'] or '—'} · {site['ms']} мс")
+                else:
+                    st.error(f"❌ Не доступен — HTTP {site['status']} ({_pm}) · "
+                             f"{site['ms']} мс"
+                             + (" · возможно блок по IP/региону, включи прокси"
+                                if effective is None else ""))
 
     return effective

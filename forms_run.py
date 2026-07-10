@@ -36,6 +36,7 @@ PROJECT_NAMES = {
     'mpe': 'МПЭ - Мепэн',
     'mpe_cart': 'МПЭ - Корзина',
     'avia': 'АПС - Авиапромсталь',
+    'metpromko': 'Метпромко',
 }
 
 
@@ -63,6 +64,26 @@ def _имена_заказов(src_config: Path) -> list[str]:
                     if шаг.get('название'):
                         имена.add(str(шаг['название']).strip())
     return sorted(имена)
+
+
+def _страницы_форм(src_config: Path) -> list[tuple[str, str]]:
+    """Список (тип, url) страниц форм из СТРАНИЦЫ конфига - для проверки мобильной
+    вёрстки. Дедуп по url (у карточки товара и оформления часто один адрес)."""
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location('cfg_pages', src_config)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+    except Exception:
+        return []
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for тип, url in (getattr(m, 'СТРАНИЦЫ', {}) or {}).items():
+        u = str(url or '').strip()
+        if u and u not in seen:
+            seen.add(u)
+            out.append((str(тип), u))
+    return out
 
 # Проекты-варианты со своим config.py, но БЕЗ своего cities.csv - берут
 # справочник городов у «родителя». Так «МПЭ - Корзина» гоняет те же города,
@@ -138,7 +159,22 @@ def main() -> int:
     ap.add_argument('--check-goals', action='store_true',
                     help='Ловить цели Яндекс.Метрики (для «Проверки целей»). В '
                          'обычной «Проверке форм» НЕ ставится - формы без целей.')
+    ap.add_argument('--xss-probe', action='store_true',
+                    help='Проба защиты от XSS: в поле имени шлёт безвредный '
+                         'payload-маркер и смотрит, исполнился ли он на ответе '
+                         '(колонка «Защита от XSS»). Создаёт тест-заявку с маркером.')
     a = ap.parse_args()
+
+    # Видимый браузер (show-browser) физически невозможен без дисплея: на сервере/
+    # в облаке (Streamlit Cloud - нет $DISPLAY) headed-запуск падает с «launched a
+    # headed browser without XServer» на КАЖДОЙ форме (весь прогон = «Ошибка»). Если
+    # дисплея нет - принудительно гоним скрыто (headless), отчёт формируется как
+    # обычно. Локально (Windows/Mac/Linux с X-сервером) галочка работает как раньше.
+    show_browser = a.show_browser
+    if show_browser and sys.platform.startswith('linux') and not os.environ.get('DISPLAY'):
+        _stamp('⚠️ «Показывать окно браузера» недоступно без дисплея (сервер/облако) '
+               '- гоню скрыто (headless). На отчёт это не влияет.')
+        show_browser = False
 
     name = PROJECT_NAMES[a.project]
     src_config = PROJECTS_ROOT / a.project / 'config.py'
@@ -161,6 +197,10 @@ def main() -> int:
 
     _stamp(f'ПРОВЕРКА ФОРМ СТАРТ - проект {name}'
            + (f' - городов: {len(run_cities)}' if run_cities and run_cities[0][0] else ''))
+    if a.xss_probe:
+        _stamp('🛡️ Проба защиты от XSS ВКЛючена: в поле имени уходит безвредный '
+               'payload-маркер. Создаётся тест-заявка с маркером - после прогона '
+               'удалите её в админке (компьютеру/данным маркер не вредит).')
 
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
@@ -232,10 +272,11 @@ def main() -> int:
             run_test(
                 ОЧИСТИТЬ_EXCEL=(not a.no_clear_excel and i == 0),   # чистим лог только перед первым
                 stop_flag=stop,
-                headless=not a.show_browser,
+                headless=not show_browser,
                 город=city,
                 почта_получателя=city_mail,
                 проба_файлов=a.file_probe,
+                xss_проба=a.xss_probe,
                 проверять_цели=a.check_goals,
             )
 
@@ -252,9 +293,32 @@ def main() -> int:
                 if _города_212:
                     privacy_check.выполнить_проверку(
                         _города_212, excel_path='log_forms.xlsx',
-                        show=a.show_browser, log=_stamp)
+                        show=show_browser, log=_stamp)
             except Exception as e:  # noqa: BLE001
                 _stamp(f'⚠️ Проверка 2.12 (cookie/чат) не выполнена: {e}')
+
+        # ── Мобильная вёрстка форм (горизонтальный скролл + тач-размеры) ──
+        # Тоже через append_log_row, поэтому ДО проверок админки (иначе колонки
+        # разъедутся). Меряем на домене первого выбранного города - шаблон вёрстки
+        # у поддоменов один, гонять по всем городам смысла нет.
+        if not (stop and stop()):
+            try:
+                import mobile_check
+                _pages = _страницы_форм(src_config)
+                if _pages and run_cities:
+                    _c0_url = run_cities[0][1]
+                    _c0_host = urlparse(_c0_url).netloc
+                    _моб = []
+                    for _тип, _purl in _pages:
+                        _u = _purl
+                        if main_host and _c0_host and _c0_host != main_host:
+                            _u = _u.replace(f'//{main_host}', f'//{_c0_host}')
+                        _моб.append((_тип, _u))
+                    mobile_check.выполнить_проверку(
+                        _моб, excel_path='log_forms.xlsx',
+                        show=show_browser, log=_stamp)
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠️ Проверка мобильной вёрстки не выполнена: {e}')
 
         # ── Уровень 1: проверка админки (если заданы креды admin.local.json) ──
         # У СМУ разные админки для РФ / СНГ / Steelgroup (АДМИН_ЗОНЫ в конфиге), но
@@ -273,7 +337,8 @@ def main() -> int:
                         str(проект_дир), зоны,
                         excel_path='log_forms.xlsx',
                         submitted_path='submitted_forms.json',
-                        show=a.show_browser, log=_stamp,
+                        show=show_browser, log=_stamp,
+                        xss_проба=a.xss_probe,
                     )
                     # ── Пункт 2.11: заказы из корзины → список «Заказы» админки ──
                     # Тот же логин и зоны, но другой раздел (sale_order.php).
@@ -284,7 +349,7 @@ def main() -> int:
                             str(проект_дир), зоны,
                             orders_path='placed_orders.json',
                             excel_path='log_forms.xlsx',
-                            show=a.show_browser, log=_stamp,
+                            show=show_browser, log=_stamp,
                         )
                     except Exception as e:  # noqa: BLE001
                         _stamp(f'⚠️ Проверка заказов в админке не выполнена: {e}')

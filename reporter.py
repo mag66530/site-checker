@@ -2015,11 +2015,12 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None):
 # ── Лист «Вёрстка» (п.1.11, ТЗ 2.1/2.1.1: viewport, стили, @media) ──
 
 
-def _build_layout_sheet(wb, results):
+def _build_layout_sheet(wb, results, filters_test=None):
     """Лист вёрстки и адаптивности: страницы без viewport, битые CSS,
-    отсутствие @media. Добавляется только если проверка выполнялась."""
+    отсутствие @media. Плюс секция «Фильтрация товаров» (браузерный тест
+    фильтра). Добавляется, если выполнялась вёрстка ИЛИ фильтр-тест."""
     checked = [r for r in results if getattr(r, 'layout', None)]
-    if not checked:
+    if not checked and not filters_test:
         return
 
     bad = [r for r in checked if r.layout.get('issues')]
@@ -2052,11 +2053,13 @@ def _build_layout_sheet(wb, results):
                '@media-запросы по ширине (признак адаптивности; отсутствие - '
                'предупреждение). ТЗ 2.2/2.3: переходы из меню шапки работают - '
                'все ссылки меню (тех. страницы и каталог) прозваниваются с '
-               'главной каждого поддомена, 404/410 = баг. Полный визуальный '
-               'рендер это не заменяет - выборочный ручной просмотр остаётся.')
+               'главной каждого поддомена, 404/410 = баг. Плюс: свои CSS/JS '
+               'минифицированы и объединены (много отдельных файлов / лишние '
+               'пробелы = предупреждение). Полный визуальный рендер это не '
+               'заменяет - выборочный ручной просмотр остаётся.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
+    ws.row_dimensions[3].height = 60
 
     row = 5
 
@@ -2123,6 +2126,11 @@ def _build_layout_sheet(wb, results):
         row = _render_issue_groups(
             ws, row, _issue_groups(warned, 'layout', 'warnings'), C.warn)
 
+    # Секция 5: фильтрация товаров (браузерный тест) - если запускался
+    if filters_test:
+        row += 1
+        row = _render_filters_section(ws, row, filters_test)
+
 
 # ── Лист «Разметка» (п.1.12, ТЗ 3.5: Schema.org + OpenGraph) ────────
 
@@ -2187,16 +2195,6 @@ def _build_markup_sheet(wb, results):
 
     # Что реально нашлось на странице - чтобы было видно: «нет разметки»
     # значит нет НИ ОДНОГО типа из требуемых, а не «часть есть».
-    def _markup_found(r):
-        m = getattr(r, 'markup', None) or {}
-        bits = []
-        if m.get('micro_types'):
-            bits.append('microdata: ' + ', '.join(m['micro_types']))
-        if m.get('ld_types'):
-            bits.append('JSON-LD: ' + ', '.join(m['ld_types']))
-        return ('найдено на странице - ' + ' · '.join(bits)
-                if bits else 'Schema.org-разметки на странице нет вообще')
-
     _meta_section_title(ws, row, f'Проблемы разметки  ({len(bad)})',
                         C.err if bad else C.ok)
     row += 1
@@ -2206,15 +2204,13 @@ def _build_markup_sheet(wb, results):
         row += 2
     else:
         row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err,
-            extra=_markup_found)
+            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err)
 
     if warned:
         _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
         row += 1
         row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn,
-            extra=_markup_found)
+            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn)
 
 
 # ── Лист «Безопасность» (доп. 1.8: заголовки безопасности HTTP) ────
@@ -2296,6 +2292,348 @@ def _build_security_sheet(wb, results):
         row = _render_issue_groups(
             ws, row, _issue_groups(warned, 'security', 'warnings'), C.warn,
             extra=_sec_found)
+
+
+# ── Лист «Изображения» (п.1.15: alt, webp/avif, вес) ───────────────
+
+_IMG_HEAVY_KB = 300      # порог «тяжёлой» картинки (синхронно с image_checker)
+
+
+def _build_images_sheet(wb, results):
+    """Лист изображений: alt у картинок, современные форматы (webp/avif),
+    вес (оптимизация). Добавляется только если проверка выполнялась."""
+    checked = [r for r in results if getattr(r, 'images', None)]
+    if not checked:
+        return
+    bad = [r for r in checked if r.images.get('issues')]
+    warned = [r for r in checked if (not r.images.get('issues')
+                                     and r.images.get('warnings'))]
+    has_bugs = bool(bad)
+
+    ws = wb.create_sheet('Изображения')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 18
+    ws.column_dimensions['C'].width = 14
+    ws.column_dimensions['D'].width = 60
+    ws.column_dimensions['E'].width = 60
+    ws.column_dimensions['F'].width = 3
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Изображения (п.1.15)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('Три проверки по картинкам страницы: (1) Alt - у каждого <img> '
+               'есть атрибут alt (пустой alt="" ок для декоративных; баг - '
+               'полное отсутствие). (2) Современные форматы - используются '
+               'webp/avif, а не только jpg/png/gif (устаревшие без webp/avif = '
+               'предупреждение). (3) Оптимизация - свои картинки не тяжелее '
+               f'{_IMG_HEAVY_KB} КБ (тяжелее = вероятно не оптимизированы, '
+               'предупреждение). (4) Lazy loading - у картинок/видео есть '
+               'ленивая загрузка (loading="lazy"/data-src/preload="none"). '
+               'Вес берётся по Content-Length.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Проверено страниц: {len(checked)} · без alt: {len(bad)} · '
+               f'с предупреждениями (форматы/вес): {len(warned)}')
+    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 26
+    row += 2
+
+    def _img_extra(r):
+        im = getattr(r, 'images', None) or {}
+        bits = []
+        if im.get('no_alt'):
+            bits.append('без alt: ' + ', '.join(im['no_alt'][:3])
+                        + (f' … +{len(im["no_alt"]) - 3}'
+                           if len(im['no_alt']) > 3 else ''))
+        if im.get('legacy'):
+            bits.append(f'устаревших: {len(im["legacy"])}')
+        if im.get('heavy'):
+            bits.append('тяжёлые: ' + ', '.join(
+                f'{h["url"].rsplit("/", 1)[-1]} {h["kb"]}КБ'
+                for h in im['heavy'][:3]))
+        return ' · '.join(bits)
+
+    _meta_section_title(ws, row, f'Проблемы (нет alt)  ({len(bad)})',
+                        C.err if bad else C.ok)
+    row += 1
+    if not bad:
+        _meta_ok_line(ws, row, '✅ У всех картинок на проверенных страницах '
+                               'есть атрибут alt.')
+        row += 2
+    else:
+        row = _render_issue_groups(
+            ws, row, _issue_groups(bad, 'images', 'issues'), C.err,
+            extra=_img_extra)
+
+    if warned:
+        _meta_section_title(ws, row,
+                            f'Форматы, вес, lazy loading (предупреждения)  '
+                            f'({len(warned)})', C.warn)
+        row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(warned, 'images', 'warnings'), C.warn,
+            extra=_img_extra)
+
+
+# ── Лист «Валидация и скорость» (п.1.16: W3C HTML/CSS + время ресурсов) ─
+
+
+def _build_w3c_sheet(wb, w3c_check):
+    """Лист валидации W3C (HTML/CSS) и скорости загрузки ресурсов по выборке
+    страниц. Добавляется, только если проверка выполнялась."""
+    if not w3c_check:
+        return
+    pages = w3c_check.get('pages') or []
+
+    ws = wb.create_sheet('Валидация и скорость')
+    ws.sheet_view.showGridLines = False
+    def _page_fail(p):
+        """Причина, по которой валидность не проверена (403/429/502…), или ''."""
+        return (str((p.get('html') or {}).get('error') or '')
+                or str((p.get('css') or {}).get('error') or ''))
+
+    _any_err = any((p.get('html') or {}).get('errors')
+                   or (p.get('css') or {}).get('errors') for p in pages)
+    _any_blocked = any(_page_fail(p) for p in pages)
+    ws.sheet_properties.tabColor = C.warn if (_any_err or _any_blocked) else C.ok
+
+    for col, w in (('A', 3), ('B', 50), ('C', 20), ('D', 20), ('E', 46), ('F', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Валидация W3C и скорость ресурсов (п.1.16)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('По ВЫБОРКЕ страниц (главная/категория/товар - у W3C лимиты): '
+               '(1) HTML валиден - W3C Nu (validator.w3.org); (2) CSS валиден - '
+               'W3C CSS Validator (jigsaw.w3.org); (3) время загрузки ресурсов - '
+               'скачиваем HTML/CSS/JS/шрифты/картинки и суммируем по типам. '
+               'Ошибки валидатора = предупреждение (у боевых сайтов их часто '
+               'много). Полный список ошибок - в самих валидаторах по ссылке.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+    if not w3c_check.get('available') or not pages:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = w3c_check.get('note') or 'Проверка не выполнялась.'
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True)
+        return
+
+    # Баннер: W3C не проверил валидность (403 Cloudflare / 429 лимит / 502 сбой).
+    _fails = [_page_fail(p) for p in pages if _page_fail(p)]
+    _blocked = len(_fails)
+    _reason = _fails[0] if _fails else ''
+    if _blocked:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = (f'⚠ W3C не проверил валидность HTML/CSS на '
+                   f'{_blocked} из {len(pages)} страниц ({_reason}). Это не '
+                   f'ошибка сайта, а лимит/сбой бесплатного сервиса W3C: '
+                   f'повторить проверку 1.16 позже (через час/на следующий '
+                   f'день) и реже включать. Время загрузки ресурсов ниже '
+                   f'измерено корректно.')
+        c.font = _font(size=10, bold=True, color=C.warn)
+        c.fill = _fill(C.warn_soft)
+        c.alignment = _align(wrap=True, vertical='top')
+        ws.row_dimensions[row].height = 56
+        row += 2
+
+    for p in pages:
+        # Заголовок страницы
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = p.get('url', '')
+        c.hyperlink = p.get('url', '')
+        c.font = _font(size=11, bold=True, color=C.accent, underline='single')
+        c.fill = _fill(C.surface)
+        c.alignment = _align(indent=1)
+        c.border = _border()
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+        if p.get('error'):
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = '⚠ ' + p['error']
+            c.font = _font(size=10, color=C.warn)
+            c.alignment = _align(indent=2)
+            ws.row_dimensions[row].height = 18
+            row += 2
+            continue
+
+        def _line(label, value, color=C.text):
+            nonlocal row
+            k = ws.cell(row=row, column=2, value=label)
+            k.font = _font(size=10, color=C.text_muted)
+            k.alignment = _align(indent=2)
+            ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
+            v = ws.cell(row=row, column=3, value=value)
+            v.font = _font(size=10, color=color)
+            v.alignment = _align(wrap=True)
+            ws.row_dimensions[row].height = 18
+            row += 1
+
+        # HTML
+        _h = p.get('html') or {}
+        if _h.get('error'):
+            _line('HTML (W3C Nu):', f'не проверено — {_h["error"]}', C.text_muted)
+        else:
+            _he = _h.get('errors')
+            _line('HTML (W3C Nu):',
+                  ('✅ валиден (0 ошибок)' if _he == 0
+                   else f'⚠ {_he} ошибок, {_h.get("warnings", 0)} замечаний'),
+                  C.ok if _he == 0 else C.warn)
+            if _he and _h.get('samples'):
+                _line('  примеры:', '; '.join(_h['samples'][:2]), C.text_soft)
+        # CSS
+        _cs = p.get('css') or {}
+        if _cs.get('error'):
+            _line('CSS (W3C):', f'не проверено — {_cs["error"]}', C.text_muted)
+        else:
+            _ce = _cs.get('errors')
+            _line('CSS (W3C):',
+                  ('✅ валиден (0 ошибок)' if _ce == 0
+                   else f'⚠ {_ce} ошибок, {_cs.get("warnings", 0)} замечаний'),
+                  C.ok if _ce == 0 else C.warn)
+        # Скорость
+        _t = p.get('timings') or {}
+        if _t:
+            bt = _t.get('by_type', {})
+            _parts = [f'HTML {_t.get("html_ms", 0)}мс']
+            for k, ru in (('css', 'CSS'), ('js', 'JS'), ('font', 'шрифты'),
+                          ('img', 'картинки')):
+                d = bt.get(k) or {}
+                if d.get('count'):
+                    _parts.append(f'{ru} {d["ms"]}мс/{d["count"]}шт/{d["kb"]}КБ')
+            _line('Скорость ресурсов:', ' · '.join(_parts), C.text)
+            _sl = _t.get('slowest') or {}
+            if _sl.get('url'):
+                _line('  самый долгий:',
+                      f'{_sl["ms"]}мс — {_sl["url"].rsplit("/", 1)[-1]} '
+                      f'({_sl.get("kind", "")})', C.text_soft)
+            _line('  итого загрузка:', f'{_t.get("total_ms", 0)} мс',
+                  C.warn if _t.get('total_ms', 0) > 8000 else C.text)
+        row += 1
+
+
+# ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
+
+
+def _build_console_sheet(wb, console_check):
+    """Лист ошибок JS в консоли: браузер открывал страницы прогона и слушал
+    console.error / необработанные исключения. Добавляется, только если
+    проверка выполнялась (console_check передан)."""
+    if not console_check:
+        return
+    pages = console_check.get('pages') or []
+    bad = [p for p in pages if p.get('errors')]
+
+    ws = wb.create_sheet('Ошибки JavaScript')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if bad else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 66   # URL
+    ws.column_dimensions['C'].width = 80   # Ошибки
+    ws.column_dimensions['D'].width = 3
+
+    ws.merge_cells('B2:C2')
+    c = ws['B2']
+    c.value = 'Ошибки JavaScript в консоли (п.1.14)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:C3')
+    c = ws['B3']
+    c.value = ('Браузер (Playwright) открывал страницы, по которым прошёл '
+               'чек-лист (главная, каталог, категории, фильтры, товары, тех.), '
+               'и слушал консоль: console.error и необработанные исключения '
+               'JavaScript. Шум сторонних сервисов (Метрика, виджеты, чаты, '
+               'reCAPTCHA, блокировщики) отсеивается - показываем ошибки '
+               'самого сайта. Страница с ошибками = баг.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 48
+
+    row = 5
+    if not console_check.get('available') or not pages:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+        c = ws.cell(row=row, column=2)
+        c.value = console_check.get('note') or (
+            'Проверка консоли не выполнялась (нет страниц / браузер недоступен).')
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True, vertical='top')
+        ws.row_dimensions[row].height = 40
+        return
+
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Проверено страниц: {console_check.get("checked", len(pages))} · '
+               f'с ошибками JS: {len(bad)}')
+    c.font = _font(size=10, bold=True, color=C.err if bad else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 26
+    row += 2
+
+    if not bad:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+        c = ws.cell(row=row, column=2)
+        c.value = '✅ Ошибок JavaScript в консоли ни на одной странице нет.'
+        c.font = _font(size=11, color=C.ok)
+        c.alignment = _align(indent=1)
+        return
+
+    # Заголовки
+    for ci, h in enumerate(['Страница', 'Ошибки в консоли'], 2):
+        cell = ws.cell(row=row, column=ci)
+        cell.value = h
+        cell.font = _font(size=9, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align()
+        cell.border = _border()
+    ws.row_dimensions[row].height = 20
+    row += 1
+    for p in bad:
+        errs = p.get('errors') or []
+        ws.row_dimensions[row].height = max(20, 14 * min(len(errs), 6))
+        # URL
+        c = ws.cell(row=row, column=2)
+        c.value = p.get('url', '')
+        c.hyperlink = p.get('url', '')
+        c.font = _font(size=9, color=C.accent, underline='single')
+        c.alignment = _align(wrap=True, vertical='top')
+        c.border = _border(color=C.border_light)
+        # Ошибки
+        c = ws.cell(row=row, column=3)
+        c.value = '\n'.join(f'• {e}' for e in errs[:6]) + (
+            f'\n… и ещё {len(errs) - 6}' if len(errs) > 6 else '')
+        c.font = _font(size=9, color=C.err)
+        c.alignment = _align(wrap=True, vertical='top')
+        c.border = _border(color=C.border_light)
+        row += 1
 
 
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
@@ -2693,119 +3031,98 @@ def _country_by_url(url: str) -> str:
 
 # ── Лист «Фильтрация» (доп. чек-лист: фильтры товаров работают) ────
 
-# Вердикт → (метка, цвет, это баг?)
+# Вердикт → (метка «работает/не работает» + причина, цвет, это баг?)
 _FILTER_VERDICT = {
-    'ok':            ('✅ фильтр сузил выдачу',           'ok',  False),
-    'empty':         ('❌ пустая выдача после фильтра',   'err', True),
-    'not_narrowed':  ('❌ выдача не сузилась (дубль категории)', 'err', True),
-    'http_error':    ('❌ ошибка HTTP на фильтре',        'err', True),
-    'no_cards':      ('⚠ карточки не распознаны (проверить селектор card)', 'warn', False),
-    'filter_absent': ('⚠ селектор фильтра не найден',     'warn', False),
-    'config_error':  ('⚠ ошибка конфига кейса',           'warn', False),
+    'ok':            ('✅ работает',                                   'ok',  False),
+    'empty':         ('❌ не работает — после фильтра пусто (ничего не найдено)', 'err', True),
+    'not_narrowed':  ('❌ не работает — фильтр не применился (товары не изменились)', 'err', True),
+    'http_error':    ('❌ не работает — ошибка загрузки страницы',     'err', True),
+    'no_cards':      ('⚠ не проверено — карточки не распознаны (селектор card)', 'warn', False),
+    'filter_absent': ('⚠ не проверено — фильтр не найден на странице (селектор filter)', 'warn', False),
+    'config_error':  ('⚠ не проверено — ошибка конфига кейса',        'warn', False),
 }
 
 
-def _build_filters_sheet(wb, filters_test):
-    """Лист «Фильтрация»: корректно ли работают фильтры товаров (живой
-    драйв в браузере по пер-проектным селекторам). Добавляется, только
-    если фильтр-тест запускался."""
+def _render_filters_section(ws, row, filters_test):
+    """Секция «Фильтрация товаров» на листе «Вёрстка» (колонки B:E). Живой
+    драйв фильтра в браузере по пер-проектным селекторам. Возвращает
+    следующую свободную строку."""
     if not filters_test:
-        return
+        return row
     cases = filters_test.get('cases') or []
     _bad = sum(1 for c in cases
                if _FILTER_VERDICT.get(c.get('verdict'), (None, None, False))[2])
-    ws = wb.create_sheet('Фильтрация')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if _bad else C.ok
 
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 30   # Кейс
-    ws.column_dimensions['C'].width = 46   # Категория
-    ws.column_dimensions['D'].width = 40   # Вердикт
-    ws.column_dimensions['E'].width = 26   # Было → стало
-    ws.column_dimensions['F'].width = 3
+    _ok = sum(1 for c in cases if c.get('verdict') == 'ok')
+    _meta_section_title(
+        ws, row, f'Фильтрация товаров (браузер)  ({len(cases)})',
+        C.err if _bad else C.ok)
+    row += 1
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = ('Проверено категорий прогона: '
+               + (f'{len(cases)} · работают: {_ok} · не работают: {_bad}. '
+                  if filters_test.get('available') and cases else '')
+               + 'На каждой применяем фильтр и сравниваем набор товаров '
+               '(ссылки карточек) на 1-й странице до/после - изменился = '
+               'фильтр применился. Ниже - результат по КАЖДОЙ категории.')
+    c.font = _font(size=9, italic=True, color=C.text_muted)
+    c.alignment = _align(wrap=True, indent=1)
+    ws.row_dimensions[row].height = 30
+    row += 1
 
-    ws.merge_cells('B2:E2')
-    c = ws['B2']
-    c.value = 'Фильтрация товаров'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:E3')
-    c = ws['B3']
-    c.value = ('Проверка, что фильтр реально сужает список товаров. Браузер '
-               'открывает категорию, применяет фильтр по заданному селектору '
-               'и сравнивает число карточек. Баг: после фильтра пусто, '
-               'выдача не изменилась (фильтр не применился) или страница '
-               'отдала ошибку. Селекторы задаются на проект в '
-               'catalogs/filters-<проект>.json.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 44
-
-    row = 5
     # Тест не выполнялся / нет конфига
     if not filters_test.get('available') or not cases:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
         c.value = filters_test.get('note') or (
-            'Фильтр-тест не выполнялся: не заданы селекторы фильтра для '
-            'проекта (catalogs/filters-<проект>.json).')
-        c.font = _font(size=11, color=C.text_soft)
-        c.alignment = _align(wrap=True, vertical='top')
-        ws.row_dimensions[row].height = 44
-        return
+            'Фильтр-тест не выполнялся: не заданы селекторы фильтра '
+            '(catalogs/filters-<проект>.json).')
+        c.font = _font(size=10, color=C.text_soft)
+        c.alignment = _align(wrap=True, indent=1)
+        ws.row_dimensions[row].height = 22
+        return row + 2
 
-    _ok = sum(1 for c in cases if c.get('verdict') == 'ok')
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = (f'Кейсов проверено: {len(cases)} · работают: {_ok} · '
-               f'ошибок фильтрации: {_bad}')
-    c.font = _font(size=10, bold=True, color=C.err if _bad else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 26
-    row += 2
-
-    # Заголовки таблицы
-    _meta_table_header(ws, row, ['Кейс', 'Категория', 'Вердикт',
-                                 'Было → стало'])
-    row += 1
     _CMAP = {'ok': C.ok, 'err': C.err, 'warn': C.warn}
     for cs in cases:
         label, ckey, _is_bad = _FILTER_VERDICT.get(
             cs.get('verdict'), (cs.get('verdict') or '?', 'warn', False))
         color = _CMAP.get(ckey, C.text_soft)
-        _b = cs.get('baseline')
-        _a = cs.get('after')
-        _ba = (f'{_b} → {_a}' if _b is not None and _a is not None
-               else (f'{_b} → -' if _b is not None else '-'))
+        _ff, _fg = cs.get('filter_fields'), cs.get('filter_groups')
+        _ff_txt = ('' if _ff is None else
+                   (f'полей {_ff} (групп {_fg})' if _fg else f'полей {_ff}'))
+        # строка 1: имя + работает/не работает (+ сколько полей фильтра)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = (f'{cs.get("name", "")}: {label}'
+                   + (f'   ({_ff_txt})' if _ff_txt else ''))
+        c.font = _font(size=10, bold=_is_bad, color=color)
+        c.fill = _fill(C.surface)
+        c.alignment = _align(wrap=True, indent=1)
+        c.border = _border()
         ws.row_dimensions[row].height = 20
-        vals = [
-            (cs.get('name', ''), {'size': 10, 'color': C.text}),
-            (cs.get('category', ''), {'size': 9, 'color': C.accent,
-                                      'underline': 'single'}),
-            (label, {'size': 10, 'color': color, 'bold': _is_bad}),
-            (_ba, {'size': 10, 'color': C.text_muted}),
-        ]
-        for ci, (val, kw) in enumerate(vals, 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = val
-            cell.font = _font(**kw)
-            cell.alignment = _align(wrap=True, vertical='top')
-            cell.border = _border(color=C.border_light)
-            if ci == 3 and val:
-                cell.hyperlink = val
         row += 1
-        # деталь под строкой (если не «ok»)
+        # строка 2: категория (ссылка)
+        _cat = cs.get('category', '')
+        if _cat:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = _cat
+            c.hyperlink = _cat
+            c.font = _font(size=9, color=C.accent, underline='single')
+            c.alignment = _align(indent=2)
+            ws.row_dimensions[row].height = 16
+            row += 1
+        # строка 3: причина (если не «ok») - подробность из движка
         if cs.get('verdict') != 'ok' and cs.get('detail'):
             ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
             c = ws.cell(row=row, column=2)
-            c.value = cs['detail']
+            c.value = 'причина: ' + cs['detail']
             c.font = _font(size=9, italic=True, color=C.text_muted)
-            c.alignment = _align(indent=1)
+            c.alignment = _align(wrap=True, indent=2)
             ws.row_dimensions[row].height = 16
             row += 1
+    return row + 1
 
 
 def _build_autoclick_sheet(wb, autoclick):
@@ -3146,7 +3463,9 @@ def build_report(
     autoclick: dict = None,        # итоги автокликера - добавит лист «Автокликер»
     indexing_summary: dict = None, # sitemap↔robots (п.1.7) - в лист «Индексация»
     meta_summary: dict = None,     # дубли мета/URL (п.1.8) - в лист «Метаданные»
-    filters_test: dict = None,     # итоги фильтр-теста - добавит лист «Фильтрация»
+    filters_test: dict = None,     # итоги фильтр-теста - секция на листе «Вёрстка»
+    console_check: dict = None,    # ошибки JS в консоли (п.1.14) - лист «Ошибки JavaScript»
+    w3c_check: dict = None,        # валидация W3C + скорость (п.1.16) - лист «Валидация и скорость»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -3186,6 +3505,10 @@ def build_report(
     # Заголовки безопасности (доп. 1.8): битые значения HSTS/CSP/X-Frame
     security_bad_pages = [r for r in results
                           if getattr(r, 'has_security_issues', False)]
+
+    # Изображения (п.1.15): картинки без alt
+    images_bad_pages = [r for r in results
+                        if getattr(r, 'has_image_issues', False)]
     _mdups = (meta_summary or {}).get('duplicates') or {}
     meta_dup_groups = (len(_mdups.get('same_city') or [])
                        + len(_mdups.get('cross_city') or [])
@@ -3331,6 +3654,11 @@ def build_report(
                          f'{len(security_bad_pages)} '
                          f'{_plural_pages(len(security_bad_pages))} - '
                          f'см. лист «Безопасность».')
+    if images_bad_pages:
+        summary_text += (f'\nИзображения: картинки без alt на '
+                         f'{len(images_bad_pages)} '
+                         f'{_plural_pages(len(images_bad_pages))} - '
+                         f'см. лист «Изображения».')
     _filters_cases = (filters_test or {}).get('cases') or []
     _filters_bad = sum(1 for c in _filters_cases
                        if _FILTER_VERDICT.get(c.get('verdict'),
@@ -3338,7 +3666,13 @@ def build_report(
     if _filters_bad:
         summary_text += (f'\nФильтрация: {_filters_bad} '
                          f'{"фильтр" if _filters_bad == 1 else "фильтров"} '
-                         f'работают некорректно - см. лист «Фильтрация».')
+                         f'работают некорректно - см. лист «Вёрстка».')
+    _console_bad = sum(1 for p in ((console_check or {}).get('pages') or [])
+                       if p.get('errors'))
+    if _console_bad:
+        summary_text += (f'\nОшибки JavaScript: на {_console_bad} '
+                         f'{_plural_pages(_console_bad)} есть ошибки в консоли '
+                         f'- см. лист «Ошибки JavaScript».')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -3389,9 +3723,12 @@ def build_report(
         ('Индексация', 'если есть лист - расхождения сигналов страниц с robots.txt (noindex, canonical) и sitemap↔robots.'),
         ('Метаданные', 'если есть лист - title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
         ('Заголовки и мета', 'если есть лист - единственность title/description/H1, дубли H2 и заголовки вне текста.'),
-        ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media) и переходы из меню шапки.'),
+        ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media), переходы из меню шапки и работа фильтров товаров (браузерный тест).'),
         ('Разметка', 'если есть лист - OpenGraph-теги и Schema.org (крошки, компания, товар, цены, фото).'),
+        ('Изображения', 'если есть лист - alt у картинок, современные форматы (webp/avif) и вес (п.1.15).'),
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
+        ('Ошибки JavaScript', 'если есть лист - страницы, где в консоли браузера есть ошибки JS (п.1.14).'),
+        ('Валидация и скорость', 'если есть лист - валидность HTML/CSS (W3C) и время загрузки ресурсов по выборке (п.1.16).'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
@@ -3423,14 +3760,23 @@ def build_report(
     # ─── Лист метаданных (п.1.8) - если проверка выполнялась ────────
     _build_meta_sheet(wb, results, meta_summary)
 
-    # ─── Лист вёрстки (п.1.11) - если проверка выполнялась ──────────
-    _build_layout_sheet(wb, results)
+    # ─── Лист вёрстки (п.1.11) + секция фильтрации (браузер) ────────
+    _build_layout_sheet(wb, results, filters_test)
 
     # ─── Лист разметки (п.1.12) - если проверка выполнялась ─────────
     _build_markup_sheet(wb, results)
 
     # ─── Лист заголовков безопасности (доп. 1.8) - если проверялась ──
     _build_security_sheet(wb, results)
+
+    # ─── Лист изображений (п.1.15) - если проверка выполнялась ──────
+    _build_images_sheet(wb, results)
+
+    # ─── Лист ошибок JS в консоли (п.1.14) - если проверка выполнялась ──
+    _build_console_sheet(wb, console_check)
+
+    # ─── Лист валидации W3C + скорости (п.1.16) - если выполнялась ──────
+    _build_w3c_sheet(wb, w3c_check)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
@@ -3873,8 +4219,7 @@ def build_report(
     # ЛИСТ: «Автокликер» - итоги перекликивания ошибок (если запускался).
     _build_autoclick_sheet(wb, autoclick)
 
-    # ЛИСТ: «Фильтрация» - работают ли фильтры товаров (если тест запускался).
-    _build_filters_sheet(wb, filters_test)
+    # Фильтрация товаров - теперь секцией на листе «Вёрстка» (см. выше).
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)

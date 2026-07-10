@@ -99,8 +99,11 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'check_layout': True,    # п.1.11 - вёрстка и адаптивность (viewport, CSS)
         'check_markup': True,    # п.1.12 - микроразметка Schema.org + OpenGraph
         'check_security': True,  # доп. 1.8 - заголовки безопасности HTTP
+        'check_images': True,    # п.1.15 - изображения (alt/webp/вес)
         'check_links': False,   # «ссылки открываются (404)» - тяжёлая, по запросу
         'check_filter_fn': False,  # фильтр-тест (браузер) - по запросу, не в расписании
+        'check_console': False,    # п.1.14 ошибки JS (браузер) - по запросу
+        'check_w3c': False,        # п.1.16 валидация W3C + скорость - по запросу, не в расписании
         'fetch_notifications': fetch_notifications,
         'notify_days': int(days),
     }
