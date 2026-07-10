@@ -10,8 +10,31 @@ cookie - значит «новый пользователь», плашка до
 в лист «Логи» лога форм. Детект - эвристический (как в 2.7): по видимому тексту и
 характерным признакам виджетов. Вызывается из forms_run после прогона форм.
 """
+import os
 import re
 from datetime import datetime
+
+
+def _playwright_proxy_from_env():
+    """Прокси для Playwright из env FORMS_PROXY (http://user:pass@host:port) или
+    None. Тот же прокси, что и у основного прогона форм (см. test_all.py) - чтобы
+    2.12 не падала на сайтах, режущих прямое подключение (напр. Метпромко)."""
+    from urllib.parse import urlparse, unquote
+    raw = (os.environ.get("FORMS_PROXY") or "").strip()
+    if not raw:
+        return None
+    pr = urlparse(raw if "://" in raw else "http://" + raw)
+    if not pr.hostname:
+        return None
+    server = f"{pr.scheme or 'http'}://{pr.hostname}"
+    if pr.port:
+        server += f":{pr.port}"
+    conf = {"server": server}
+    if pr.username:
+        conf["username"] = unquote(pr.username)
+    if pr.password:
+        conf["password"] = unquote(pr.password)
+    return conf
 
 
 # ── Чистые функции (тестируются без браузера) ────────────────────────
@@ -149,8 +172,12 @@ def выполнить_проверку(города, excel_path: str = "log_for
     log(f"🍪 Проверка 2.12 (cookie/политика/живочат) на {len(города)} главных …")
     есть_c = есть_ч = 0
     with sync_playwright() as pw:
-        b = pw.chromium.launch(headless=not show,
-                               args=["--disable-blink-features=AutomationControlled"])
+        _kw = dict(headless=not show,
+                   args=["--disable-blink-features=AutomationControlled"])
+        _prx = _playwright_proxy_from_env()
+        if _prx:
+            _kw["proxy"] = _prx
+        b = pw.chromium.launch(**_kw)
         # ВАЖНО: свежий контекст без cookie = «новый пользователь» → плашка покажется.
         ctx = b.new_context(locale="ru-RU")
         try:
