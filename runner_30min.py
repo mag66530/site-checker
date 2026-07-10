@@ -685,6 +685,20 @@ def run_check(pid, params, creds, log, progress):
                         f'(внешние сервисы, медленно)…')
                     _w3c_check = _w3c_pages(_w3c_urls, proxy_url,
                                             log=lambda m: log(m))
+                    # Понятный сигнал, если W3C заблокировал (лимит запросов).
+                    _pp = (_w3c_check or {}).get('pages') or []
+                    _blocked = sum(
+                        1 for p in _pp
+                        if '403' in str((p.get('html') or {}).get('error') or '')
+                        or '403' in str((p.get('css') or {}).get('error') or ''))
+                    if _pp and _blocked >= len(_pp):
+                        log('⚠ W3C ЗАБЛОКИРОВАЛ запросы (HTTP 403, лимит) - '
+                            'валидность HTML/CSS не проверена. Скорость ресурсов '
+                            'измерена. Повторить проверку 1.16 позже (через час '
+                            'или на след. день).')
+                    elif _blocked:
+                        log(f'⚠ W3C: часть страниц не проверена (лимит 403): '
+                            f'{_blocked} из {len(_pp)}.')
                 except Exception as _e:
                     log(f'⚠ Валидация W3C: {_e}')
 
