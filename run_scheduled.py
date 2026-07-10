@@ -101,6 +101,7 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'check_security': True,  # доп. 1.8 - заголовки безопасности HTTP
         'check_links': False,   # «ссылки открываются (404)» - тяжёлая, по запросу
         'check_filter_fn': False,  # фильтр-тест (браузер) - по запросу, не в расписании
+        'check_console': False,    # п.1.14 ошибки JS (браузер) - по запросу, не в расписании
         'fetch_notifications': fetch_notifications,
         'notify_days': int(days),
     }

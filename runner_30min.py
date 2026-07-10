@@ -203,6 +203,46 @@ def _run_filters_test(pid, params, log, session_b64=None):
                 'note': f'результат фильтр-теста не прочитан: {e}'}
 
 
+def _run_console_check(pid, urls, log):
+    """Проверка ошибок JS в консоли (пункт 1.14). Отдельный процесс
+    console_run.py (Playwright) по СТРАНИЦАМ, которые прошёл чек-лист.
+    Возвращает dict для листа «Ошибки JavaScript»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    (root / 'cache').mkdir(exist_ok=True)
+    _urls_file = root / 'cache' / f'console_urls_{pid}.json'
+    _res_file = root / 'cache' / f'console_{pid}.json'
+    try:
+        _urls_file.write_text(json.dumps(list(urls), ensure_ascii=False),
+                              encoding='utf-8')
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    args = [_sys.executable, 'console_run.py', '--project', pid,
+            '--urls-file', str(_urls_file)]
+    log(f'Проверка консоли (JS): {len(urls)} страниц, запускаю браузер…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [консоль] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        log(f'⚠ Проверка консоли: {e}')
+        return {'available': True, 'checked': 0, 'pages': [], 'note': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'checked': 0, 'pages': [],
+                'note': f'результат проверки консоли не прочитан: {e}'}
+
+
 def run_check(pid, params, creds, log, progress):
     """Выполнить прогон. log(msg), progress(frac, text) - колбэки.
     Возвращает dict с results / report_path / started_at / finished_at / error."""
@@ -604,6 +644,13 @@ def run_check(pid, params, creds, log, progress):
         if params.get('check_filter_fn'):
             _filters_test = _run_filters_test(pid, params, log)
 
+        # ── Ошибки JS в консоли (п.1.14) - браузер по страницам прогона ──
+        _console_check = None
+        if params.get('check_console'):
+            _console_urls = [r.url for r in results if r.is_ok]
+            if _console_urls:
+                _console_check = _run_console_check(pid, _console_urls, log)
+
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых
         # галочках: выключил сбор - листов «Уведомления» / «404 из Метрики» /
@@ -638,7 +685,7 @@ def run_check(pid, params, creds, log, progress):
                                else get_latest_available_date(pid)),
             service_issues=_service_issues, autoclick=_autoclick,
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
-            filters_test=_filters_test)
+            filters_test=_filters_test, console_check=_console_check)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

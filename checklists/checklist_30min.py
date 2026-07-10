@@ -654,6 +654,7 @@ def init_session():
         'c30_check_security': True,    # доп. 1.8 - заголовки безопасности HTTP
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
+        'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -1203,6 +1204,13 @@ if pid:
                          '(не пусто, не дубль категории, без ошибок). Тяжёлый '
                          'браузерный тест - по запросу. Селекторы задаются на '
                          'проект в catalogs/filters-<проект>.json.')
+        st.checkbox('1.14  Ошибки JavaScript в консоли (браузер)',
+                    key='c30_check_console',
+                    help='Открывает в браузере КАЖДУЮ страницу прогона (главная, '
+                         'каталог, категории, фильтры, товары, тех.) и ловит '
+                         'ошибки JS в консоли (console.error + исключения). Шум '
+                         'аналитики/виджетов отсеивается. Тяжёлый браузерный '
+                         'проход - по запросу.')
 
         # ── Автокликер (локальный Chrome или облако с сессией) ──────
         _ck_ac = st.checkbox(
@@ -1286,6 +1294,7 @@ if pid:
         bool(st.session_state.get('c30_check_security', True)),
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_check_filter_fn', False)),
+        bool(st.session_state.get('c30_check_console', False)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
 
@@ -1338,6 +1347,7 @@ if pid:
                 'check_security': st.session_state.get('c30_check_security', True),
                 'check_links': st.session_state.get('c30_check_links', False),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
+                'check_console': st.session_state.get('c30_check_console', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
                 'fetch_metrika_404': st.session_state.get('c30_fetch_metrika_404', True),

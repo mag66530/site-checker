@@ -2055,12 +2055,11 @@ def _build_layout_sheet(wb, results, filters_test=None):
                'все ссылки меню (тех. страницы и каталог) прозваниваются с '
                'главной каждого поддомена, 404/410 = баг. Плюс: свои CSS/JS '
                'минифицированы и объединены (много отдельных файлов / лишние '
-               'пробелы = предупреждение). Ошибки JavaScript в консоли '
-               'браузера - в секции «Фильтрация» (браузерный тест). Полный '
-               'визуальный рендер это не заменяет - ручной просмотр остаётся.')
+               'пробелы = предупреждение). Полный визуальный рендер это не '
+               'заменяет - выборочный ручной просмотр остаётся.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 68
+    ws.row_dimensions[3].height = 60
 
     row = 5
 
@@ -2293,6 +2292,104 @@ def _build_security_sheet(wb, results):
         row = _render_issue_groups(
             ws, row, _issue_groups(warned, 'security', 'warnings'), C.warn,
             extra=_sec_found)
+
+
+# ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
+
+
+def _build_console_sheet(wb, console_check):
+    """Лист ошибок JS в консоли: браузер открывал страницы прогона и слушал
+    console.error / необработанные исключения. Добавляется, только если
+    проверка выполнялась (console_check передан)."""
+    if not console_check:
+        return
+    pages = console_check.get('pages') or []
+    bad = [p for p in pages if p.get('errors')]
+
+    ws = wb.create_sheet('Ошибки JavaScript')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if bad else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 66   # URL
+    ws.column_dimensions['C'].width = 80   # Ошибки
+    ws.column_dimensions['D'].width = 3
+
+    ws.merge_cells('B2:C2')
+    c = ws['B2']
+    c.value = 'Ошибки JavaScript в консоли (п.1.14)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:C3')
+    c = ws['B3']
+    c.value = ('Браузер (Playwright) открывал страницы, по которым прошёл '
+               'чек-лист (главная, каталог, категории, фильтры, товары, тех.), '
+               'и слушал консоль: console.error и необработанные исключения '
+               'JavaScript. Шум сторонних сервисов (Метрика, виджеты, чаты, '
+               'reCAPTCHA, блокировщики) отсеивается - показываем ошибки '
+               'самого сайта. Страница с ошибками = баг.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 48
+
+    row = 5
+    if not console_check.get('available') or not pages:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+        c = ws.cell(row=row, column=2)
+        c.value = console_check.get('note') or (
+            'Проверка консоли не выполнялась (нет страниц / браузер недоступен).')
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True, vertical='top')
+        ws.row_dimensions[row].height = 40
+        return
+
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Проверено страниц: {console_check.get("checked", len(pages))} · '
+               f'с ошибками JS: {len(bad)}')
+    c.font = _font(size=10, bold=True, color=C.err if bad else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 26
+    row += 2
+
+    if not bad:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+        c = ws.cell(row=row, column=2)
+        c.value = '✅ Ошибок JavaScript в консоли ни на одной странице нет.'
+        c.font = _font(size=11, color=C.ok)
+        c.alignment = _align(indent=1)
+        return
+
+    # Заголовки
+    for ci, h in enumerate(['Страница', 'Ошибки в консоли'], 2):
+        cell = ws.cell(row=row, column=ci)
+        cell.value = h
+        cell.font = _font(size=9, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align()
+        cell.border = _border()
+    ws.row_dimensions[row].height = 20
+    row += 1
+    for p in bad:
+        errs = p.get('errors') or []
+        ws.row_dimensions[row].height = max(20, 14 * min(len(errs), 6))
+        # URL
+        c = ws.cell(row=row, column=2)
+        c.value = p.get('url', '')
+        c.hyperlink = p.get('url', '')
+        c.font = _font(size=9, color=C.accent, underline='single')
+        c.alignment = _align(wrap=True, vertical='top')
+        c.border = _border(color=C.border_light)
+        # Ошибки
+        c = ws.cell(row=row, column=3)
+        c.value = '\n'.join(f'• {e}' for e in errs[:6]) + (
+            f'\n… и ещё {len(errs) - 6}' if len(errs) > 6 else '')
+        c.font = _font(size=9, color=C.err)
+        c.alignment = _align(wrap=True, vertical='top')
+        c.border = _border(color=C.border_light)
+        row += 1
 
 
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
@@ -2779,17 +2876,6 @@ def _render_filters_section(ws, row, filters_test):
             c.alignment = _align(wrap=True, indent=2)
             ws.row_dimensions[row].height = 16
             row += 1
-        # строка 4: ошибки JS в консоли на этой странице (доп. чек-лист)
-        _jse = cs.get('js_errors') or []
-        if _jse:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = (f'⚠ ошибки JS в консоли: {len(_jse)} · '
-                       + ' | '.join(_jse[:3]))[:300]
-            c.font = _font(size=9, color=C.warn)
-            c.alignment = _align(wrap=True, indent=2)
-            ws.row_dimensions[row].height = 16
-            row += 1
     return row + 1
 
 
@@ -3131,7 +3217,8 @@ def build_report(
     autoclick: dict = None,        # итоги автокликера - добавит лист «Автокликер»
     indexing_summary: dict = None, # sitemap↔robots (п.1.7) - в лист «Индексация»
     meta_summary: dict = None,     # дубли мета/URL (п.1.8) - в лист «Метаданные»
-    filters_test: dict = None,     # итоги фильтр-теста - добавит лист «Фильтрация»
+    filters_test: dict = None,     # итоги фильтр-теста - секция на листе «Вёрстка»
+    console_check: dict = None,    # ошибки JS в консоли (п.1.14) - лист «Ошибки JavaScript»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -3324,6 +3411,12 @@ def build_report(
         summary_text += (f'\nФильтрация: {_filters_bad} '
                          f'{"фильтр" if _filters_bad == 1 else "фильтров"} '
                          f'работают некорректно - см. лист «Вёрстка».')
+    _console_bad = sum(1 for p in ((console_check or {}).get('pages') or [])
+                       if p.get('errors'))
+    if _console_bad:
+        summary_text += (f'\nОшибки JavaScript: на {_console_bad} '
+                         f'{_plural_pages(_console_bad)} есть ошибки в консоли '
+                         f'- см. лист «Ошибки JavaScript».')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -3377,6 +3470,7 @@ def build_report(
         ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media), переходы из меню шапки и работа фильтров товаров (браузерный тест).'),
         ('Разметка', 'если есть лист - OpenGraph-теги и Schema.org (крошки, компания, товар, цены, фото).'),
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
+        ('Ошибки JavaScript', 'если есть лист - страницы, где в консоли браузера есть ошибки JS (п.1.14).'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
@@ -3416,6 +3510,9 @@ def build_report(
 
     # ─── Лист заголовков безопасности (доп. 1.8) - если проверялась ──
     _build_security_sheet(wb, results)
+
+    # ─── Лист ошибок JS в консоли (п.1.14) - если проверка выполнялась ──
+    _build_console_sheet(wb, console_check)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
