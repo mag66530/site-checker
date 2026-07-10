@@ -2053,11 +2053,14 @@ def _build_layout_sheet(wb, results, filters_test=None):
                '@media-запросы по ширине (признак адаптивности; отсутствие - '
                'предупреждение). ТЗ 2.2/2.3: переходы из меню шапки работают - '
                'все ссылки меню (тех. страницы и каталог) прозваниваются с '
-               'главной каждого поддомена, 404/410 = баг. Полный визуальный '
-               'рендер это не заменяет - выборочный ручной просмотр остаётся.')
+               'главной каждого поддомена, 404/410 = баг. Плюс: свои CSS/JS '
+               'минифицированы и объединены (много отдельных файлов / лишние '
+               'пробелы = предупреждение). Ошибки JavaScript в консоли '
+               'браузера - в секции «Фильтрация» (браузерный тест). Полный '
+               'визуальный рендер это не заменяет - ручной просмотр остаётся.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
+    ws.row_dimensions[3].height = 68
 
     row = 5
 
@@ -2773,6 +2776,17 @@ def _render_filters_section(ws, row, filters_test):
             c = ws.cell(row=row, column=2)
             c.value = 'причина: ' + cs['detail']
             c.font = _font(size=9, italic=True, color=C.text_muted)
+            c.alignment = _align(wrap=True, indent=2)
+            ws.row_dimensions[row].height = 16
+            row += 1
+        # строка 4: ошибки JS в консоли на этой странице (доп. чек-лист)
+        _jse = cs.get('js_errors') or []
+        if _jse:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = (f'⚠ ошибки JS в консоли: {len(_jse)} · '
+                       + ' | '.join(_jse[:3]))[:300]
+            c.font = _font(size=9, color=C.warn)
             c.alignment = _align(wrap=True, indent=2)
             ws.row_dimensions[row].height = 16
             row += 1

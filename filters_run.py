@@ -206,12 +206,19 @@ def run_case(page, case: dict, log) -> dict:
     wait_ms = int(case.get('wait_ms') or 2500)
     out = {'name': name, 'category': url, 'verdict': None,
            'baseline': None, 'after': None, 'detail': '',
-           'filter_fields': None, 'filter_groups': None}
+           'filter_fields': None, 'filter_groups': None, 'js_errors': []}
 
     if not url or not filt:
         out['verdict'] = 'config_error'
         out['detail'] = 'в кейсе нет category или filter'
         return out
+
+    # Чистим накопитель ошибок консоли перед загрузкой (доп. чек-лист:
+    # «в консоли браузера нет ошибок JavaScript»).
+    try:
+        page._jserr.clear()
+    except Exception:
+        pass
 
     # 1. Открыть категорию
     try:
@@ -227,6 +234,11 @@ def run_case(page, case: dict, log) -> dict:
         out['detail'] = f'страница категории отдала HTTP {status}{_hint}'
         return out
     page.wait_for_timeout(1500)
+    # Ошибки JS в консоли при загрузке страницы (уникальные тексты).
+    try:
+        out['js_errors'] = list(dict.fromkeys(getattr(page, '_jserr', [])))[:10]
+    except Exception:
+        out['js_errors'] = []
 
     # 2. База: счётчик карточек + НАБОР товаров (ссылки) на 1-й странице +
     # «найдено N» (если задан total). Набор нужен, чтобы поймать смену
@@ -375,6 +387,22 @@ def _launch_and_run(pid: str, cases: list, log) -> list:
             ctx.route('**/*', _route)
         page = ctx.new_page()
         ctx.on('page', lambda p: p != page and p.close())
+
+        # Накопитель ошибок JS консоли (доп. чек-лист): console.error и
+        # необработанные исключения страницы. run_case чистит перед каждой
+        # категорией и снимает после загрузки.
+        page._jserr = []
+
+        def _on_console(msg):
+            try:
+                if msg.type == 'error':
+                    page._jserr.append((msg.text or '').strip()[:200])
+            except Exception:
+                pass
+
+        page.on('console', _on_console)
+        page.on('pageerror', lambda e: page._jserr.append(
+            ('PageError: ' + str(e))[:200]))
         for i, case in enumerate(cases, 1):
             log(f'  [{i}/{len(cases)}] {case.get("name", "")}…')
             try:

@@ -416,10 +416,20 @@ async def _css_info_for_url(session, url, timeout_ms, proxy_url, cache, locks, g
             'url': url,
             'status': status,
             'has_media': bool(text and _RE_CSS_MEDIA_WIDTH.search(text)),
+            'minified': _looks_minified(text),
             'selectors': parse_hidden_selectors(text) if text else (),
         }
         cache[url] = info
         return info
+
+
+def _looks_minified(text) -> Optional[bool]:
+    """Минифицирован ли CSS/JS: мало переносов строк, длинные строки. None,
+    если контент не получен (не судим)."""
+    if not text:
+        return None
+    n = text.count('\n')
+    return n <= 3 or (len(text) / (n + 1)) > 200
 
 
 # ── «Ссылки реально открываются» (404) ──────────────────────────────
@@ -663,7 +673,8 @@ async def check_one(
             if get_css_infos is not None:
                 _css_infos = await get_css_infos(
                     a['body_text'], a['final_url'] or task.url)
-            layout = _check_layout(a['body_text'], _css_infos)
+            layout = _check_layout(a['body_text'], _css_infos,
+                                   base_url=a['final_url'] or task.url)
         except Exception:
             layout = None
         # ТЗ 2.2/2.3: переходы из меню шапки (тех. страницы + каталог).
