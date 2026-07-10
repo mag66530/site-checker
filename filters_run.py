@@ -177,6 +177,26 @@ def _read_total(page, sel: str):
         return None
 
 
+def _count_filter_groups(page, filt: str):
+    """Сколько РАЗНЫХ групп фильтра (свойств), а не значений. Группируем по
+    имени: arrFilter_<группа>_<значение> (Bitrix), ocf[<группа>] (ИМП), иначе
+    сам name без хвостовых цифр. None, если не вышло."""
+    try:
+        names = page.eval_on_selector_all(
+            filt, "els => els.map(e => e.getAttribute('name')||"
+                  "e.getAttribute('data-name')||'').filter(Boolean)")
+    except Exception:
+        return None
+    groups = set()
+    for nm in names:
+        m = re.match(r'(arrFilter_\d+)_', nm) or re.match(r'(ocf\[\d+\])', nm)
+        if m:
+            groups.add(m.group(1))
+        else:
+            groups.add(re.sub(r'[_\-]?\d+$', '', nm) or nm)
+    return len(groups) or None
+
+
 def run_case(page, case: dict, log) -> dict:
     name = case.get('name') or case.get('category') or 'фильтр'
     url = case.get('category') or ''
@@ -185,7 +205,8 @@ def run_case(page, case: dict, log) -> dict:
     apply_sel = case.get('apply')
     wait_ms = int(case.get('wait_ms') or 2500)
     out = {'name': name, 'category': url, 'verdict': None,
-           'baseline': None, 'after': None, 'detail': ''}
+           'baseline': None, 'after': None, 'detail': '',
+           'filter_fields': None, 'filter_groups': None}
 
     if not url or not filt:
         out['verdict'] = 'config_error'
@@ -222,8 +243,9 @@ def run_case(page, case: dict, log) -> dict:
 
     # 3. Кликнуть фильтр
     try:
+        _n_filt = page.locator(filt).count()
         loc = page.locator(filt).first
-        if page.locator(filt).count() == 0:
+        if _n_filt == 0:
             out['verdict'] = 'filter_absent'
             out['detail'] = f'селектор фильтра не найден: {filt}'
             return out
@@ -231,6 +253,9 @@ def run_case(page, case: dict, log) -> dict:
         out['verdict'] = 'filter_absent'
         out['detail'] = f'селектор фильтра невалиден: {e}'
         return out
+    # Сколько полей/групп фильтра на странице (для отчёта; меняем только 1).
+    out['filter_fields'] = _n_filt
+    out['filter_groups'] = _count_filter_groups(page, filt)
     _err = _click(loc)
     if _err:
         out['verdict'] = 'filter_absent'

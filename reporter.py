@@ -2720,33 +2720,35 @@ def _build_filters_sheet(wb, filters_test):
 
     ws.column_dimensions['A'].width = 3
     ws.column_dimensions['B'].width = 30   # Кейс
-    ws.column_dimensions['C'].width = 46   # Категория
+    ws.column_dimensions['C'].width = 44   # Категория
     ws.column_dimensions['D'].width = 40   # Вердикт
-    ws.column_dimensions['E'].width = 26   # Было → стало
-    ws.column_dimensions['F'].width = 3
+    ws.column_dimensions['E'].width = 22   # Было → стало
+    ws.column_dimensions['F'].width = 16   # Полей фильтра
+    ws.column_dimensions['G'].width = 3
 
-    ws.merge_cells('B2:E2')
+    ws.merge_cells('B2:F2')
     c = ws['B2']
     c.value = 'Фильтрация товаров'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
-    ws.merge_cells('B3:E3')
+    ws.merge_cells('B3:F3')
     c = ws['B3']
-    c.value = ('Проверка, что фильтр реально сужает список товаров. Браузер '
-               'открывает категорию, применяет фильтр по заданному селектору '
-               'и сравнивает число карточек. Баг: после фильтра пусто, '
-               'выдача не изменилась (фильтр не применился) или страница '
-               'отдала ошибку. Селекторы задаются на проект в '
-               'catalogs/filters-<проект>.json.')
+    c.value = ('Проверка, что фильтр реально РАБОТАЕТ: браузер открывает '
+               'категорию, применяет ОДИН фильтр и сравнивает НАБОР товаров '
+               '(ссылки карточек) на 1-й странице до и после - изменился = '
+               'фильтр применился. Баг: после фильтра пусто, товары не '
+               'изменились (не применился) или ошибка. Колонка «Полей '
+               'фильтра» - сколько значений/групп фильтра на странице (меняем '
+               'один). Селекторы - в catalogs/filters-<проект>.json.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 44
+    ws.row_dimensions[3].height = 56
 
     row = 5
     # Тест не выполнялся / нет конфига
     if not filters_test.get('available') or not cases:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
         c = ws.cell(row=row, column=2)
         c.value = filters_test.get('note') or (
             'Фильтр-тест не выполнялся: не заданы селекторы фильтра для '
@@ -2757,7 +2759,7 @@ def _build_filters_sheet(wb, filters_test):
         return
 
     _ok = sum(1 for c in cases if c.get('verdict') == 'ok')
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
     c = ws.cell(row=row, column=2)
     c.value = (f'Кейсов проверено: {len(cases)} · работают: {_ok} · '
                f'ошибок фильтрации: {_bad}')
@@ -2769,7 +2771,7 @@ def _build_filters_sheet(wb, filters_test):
 
     # Заголовки таблицы
     _meta_table_header(ws, row, ['Кейс', 'Категория', 'Вердикт',
-                                 'Было → стало'])
+                                 'Было → стало', 'Полей фильтра'])
     row += 1
     _CMAP = {'ok': C.ok, 'err': C.err, 'warn': C.warn}
     for cs in cases:
@@ -2780,6 +2782,10 @@ def _build_filters_sheet(wb, filters_test):
         _a = cs.get('after')
         _ba = (f'{_b} → {_a}' if _b is not None and _a is not None
                else (f'{_b} → -' if _b is not None else '-'))
+        _ff = cs.get('filter_fields')
+        _fg = cs.get('filter_groups')
+        _ff_txt = ('-' if _ff is None else
+                   (f'{_ff} (групп {_fg})' if _fg else str(_ff)))
         ws.row_dimensions[row].height = 20
         vals = [
             (cs.get('name', ''), {'size': 10, 'color': C.text}),
@@ -2787,6 +2793,7 @@ def _build_filters_sheet(wb, filters_test):
                                       'underline': 'single'}),
             (label, {'size': 10, 'color': color, 'bold': _is_bad}),
             (_ba, {'size': 10, 'color': C.text_muted}),
+            (_ff_txt, {'size': 10, 'color': C.text_muted}),
         ]
         for ci, (val, kw) in enumerate(vals, 2):
             cell = ws.cell(row=row, column=ci)
@@ -2799,7 +2806,7 @@ def _build_filters_sheet(wb, filters_test):
         row += 1
         # деталь под строкой (если не «ok»)
         if cs.get('verdict') != 'ok' and cs.get('detail'):
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
             c = ws.cell(row=row, column=2)
             c.value = cs['detail']
             c.font = _font(size=9, italic=True, color=C.text_muted)
