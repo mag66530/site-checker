@@ -296,6 +296,7 @@ def проверка_полей_форм(scope, page) -> dict:
     файл_типы, файл_любые}."""
     res = {"телефон_ограничен": None, "телефон_детали": "поле телефона не найдено",
            "почта_ок": None, "почта_детали": "поле почты не найдено",
+           "дата_ок": None, "дата_детали": "поле даты не найдено",
            "обязательность_ок": None, "обязательность_детали": "не определено",
            "длина_ок": None, "длина_детали": "поля с ограничением длины не найдены",
            "файл_есть": False, "файл_типы": [], "файл_любые": False}
@@ -383,6 +384,56 @@ def проверка_полей_форм(scope, page) -> dict:
             else:
                 res["почта_ок"] = False
                 res["почта_детали"] = "НЕ проверяет формат (примет любой текст без @)"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ── Дата: валидируется ли формат (пункт 2.14) ──
+    # Находим поле даты (type=date или текстовое «дата/дд.мм/дата рождения»).
+    # type=date - формат гарантирует браузер; readonly = датапикер (руками
+    # некорректное не ввести); pattern - РЕАЛЬНО проверяем, что мусорную дату
+    # он отклоняет (checkValidity, форму не отправляем); маска/inputmode - тоже
+    # ограничение. Иначе поле принимает любой текст = формат не проверяется.
+    try:
+        _dt = scope.evaluate(
+            "f => {"
+            " const e = f.querySelector(\"input[type='date'], input[name*='date' i],"
+            " input[name*='дата' i], input[placeholder*='дата' i],"
+            " input[placeholder*='дд.мм' i], input[placeholder*='dd.mm' i],"
+            " input[placeholder*='дд/мм' i], input[name*='birth' i],"
+            " input[autocomplete='bday']\");"
+            " if(!e) return {found:false};"
+            " const t=(e.type||'').toLowerCase();"
+            " if(t==='date') return {found:true, typeDate:true};"
+            " const pattern=e.getAttribute('pattern');"
+            " let vinv=null;"
+            " if(pattern){ const s=e.value; try{ e.value='зз.зз.зззз';"
+            " vinv=e.checkValidity(); }catch(_){} e.value=s; }"
+            " return {found:true, typeDate:false, ro:!!e.readOnly, pattern:!!pattern,"
+            " vinv:vinv, ml:e.maxLength, im:(e.getAttribute('inputmode')||'').toLowerCase(),"
+            " mask:e.getAttribute('data-mask')||e.getAttribute('data-date-mask')||'',"
+            " cls:e.className||''};"
+            "}")
+        if _dt and _dt.get("found"):
+            _ml_d = _dt.get("ml")
+            _mask_d = bool(_dt.get("mask")) or bool(
+                re.search(r"(mask|datepicker|flatpickr|calendar|air-?datepicker)",
+                          _dt.get("cls", ""), re.I))
+            if _dt.get("typeDate"):
+                res["дата_ок"] = True
+                res["дата_детали"] = "type=date (браузер проверяет формат)"
+            elif _dt.get("ro"):
+                res["дата_ок"] = True
+                res["дата_детали"] = "датапикер (дата выбирается из календаря, руками не ввести)"
+            elif _dt.get("pattern") and _dt.get("vinv") is False:
+                res["дата_ок"] = True
+                res["дата_детали"] = "проверяет формат (pattern отклоняет некорректную дату)"
+            elif _mask_d or (isinstance(_ml_d, int) and 0 < _ml_d <= 10
+                             and _dt.get("im") in ("numeric", "tel")):
+                res["дата_ок"] = True
+                res["дата_детали"] = "маска даты (ввод ограничен по формату)"
+            else:
+                res["дата_ок"] = False
+                res["дата_детали"] = "НЕ проверяет формат (примет любой текст)"
     except Exception:  # noqa: BLE001
         pass
 
@@ -664,6 +715,30 @@ def проверка_чекбоксов(scope) -> dict:
         return {"состояние": "ошибка",
                 "коммент": "Не реагируют на клик: " + "; ".join(сломаны[:4]) + "."}
     return {"состояние": "корректно", "коммент": ""}
+
+
+# ── Двойная отправка (двойной клик по кнопке) ────────────────────────
+_DS_ТРЕКЕРЫ = ("mc.yandex", "metri", "google-analytics", "googletagmanager",
+               "doubleclick", "top-fwz1", "vk.com", "facebook.", "criteo",
+               "/collect", "stat.", "counter", "analytics")
+
+
+def _ds_это_трекер(url: str) -> bool:
+    """POST к аналитике/счётчикам (Метрика, GA и т.п.) - это НЕ отправка формы,
+    в подсчёте заявок его игнорируем."""
+    u = (url or "").lower()
+    return any(t in u for t in _DS_ТРЕКЕРЫ)
+
+
+def _ds_похоже_на_заказ(url: str, action: str) -> bool:
+    """Похоже ли на форму ОФОРМЛЕНИЯ ЗАКАЗА по URL/action (тогда двойную отправку
+    проверяем БЕЗОПАСНО - один клик, чтобы не создать второй заказ). Основной
+    признак - тип блока «Оформление…» (передаётся отдельно); это запасная сетка.
+    Слово «заказ» из названия НЕ берём: его содержит и «Заказать звонок»."""
+    s = ((url or "") + " " + (action or "")).lower()
+    return any(k in s for k in ("onepagecheckout", "/checkout", "checkout/",
+                                "saveorder", "opc_submit", "/order", "/cart",
+                                "korzin"))
 
 
 # Типы для пробы серверной фильтрации загрузки: (расширение, опасное?).
@@ -1922,7 +1997,7 @@ LOG_HEADERS = [
     "Дата", "Время", "Город", "Страница", "URL",
     "Название", "Где находится", "Имя", "Телефон", "Почта", "Почта получателя",
     "Статус", "Уведомление пользователю", "Типы файлов формы",
-    "Выпадающие списки", "Чекбоксы/радио", "Комментарий",
+    "Выпадающие списки", "Чекбоксы/радио", "Двойная отправка", "Комментарий",
 ]
 
 # Ключи строки-словаря в порядке колонок LOG_HEADERS.
@@ -1930,7 +2005,7 @@ LOG_KEYS_ORDER = [
     "дата", "время", "город", "страница", "url",
     "название", "где", "имя", "телефон", "почта", "почта_получателя",
     "статус", "уведомление", "типы_файлов", "выпадающие_списки",
-    "чекбоксы_радио", "комментарий",
+    "чекбоксы_радио", "двойная_отправка", "комментарий",
 ]
 
 # Отдельный лист «Цели» (Яндекс.Метрика): свои колонки - форма/кнопка + идентификатор цели.
@@ -2844,9 +2919,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         initial_url=None,
         название_контекста=None,
         цели_seen=None,
+        безопасная_отправка=False,
     ):
         """
         Заполнение и отправка формы на уже открытой странице.
+        безопасная_отправка=True (формы «Оформление…» заказа): двойную отправку
+        проверяем БЕЗ реального второго клика (смотрим блокировку кнопки), чтобы
+        не создать второй заказ. Иначе - реальный двойной клик с подсчётом заявок.
         initial_url: если задан - сначала переход; иначе считаем, что нужная страница уже загружена.
         """
         nctx = название_контекста if название_контекста is not None else название
@@ -3138,9 +3217,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 # о заполнении). None - поле не найдено, не считаем багом.
                 _phone_bug = _pf["телефон_ограничен"] is False
                 _mail_bug = _pf["почта_ок"] is False
+                _date_bug = _pf["дата_ок"] is False
                 _req_bug = _pf["обязательность_ок"] is False
                 _len_bug = _pf["длина_ок"] is False
-                _есть_баг = _phone_bug or _mail_bug or _req_bug or _len_bug
+                _есть_баг = _phone_bug or _mail_bug or _date_bug or _req_bug or _len_bug
                 # Телефон - в «Комментарий»; типы файлов - в отдельную
                 # колонку «Типы файлов формы» (пусто, если поля загрузки нет).
                 if not _pf["файл_есть"]:
@@ -3149,8 +3229,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     _файлы_кол = "⚠ ЛЮБЫЕ типы (accept не задан)"
                 else:
                     _файлы_кол = ", ".join(_pf["файл_типы"])
+                # Дату упоминаем в комментарии, только если поле даты реально
+                # есть (дата_ок не None) - иначе на каждой форме шумит «не найдено».
+                _дата_txt = (f"дата (формат): {_pf['дата_детали']}; "
+                             if _pf["дата_ок"] is not None else "")
                 _ком214 = (f"телефон (маска): {_pf['телефон_детали']}; "
                            f"почта (валидация): {_pf['почта_детали']}; "
+                           f"{_дата_txt}"
                            f"обязательность/уведомления: {_pf['обязательность_детали']}; "
                            f"ограничение длины: {_pf['длина_детали']}")
                 записать_в_excel({
@@ -3307,6 +3392,35 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             except Exception:
                 _btn_текст_до = ""
             _t_отправки = _time.time()   # цели Метрики считаем с момента отправки
+
+            # ── Двойная отправка (пункт чек-листа): гибрид ──
+            # Заказ (безопасная_отправка / URL-признак) - БЕЗОПАСНО: один клик,
+            # потом смотрим, заблокировалась ли кнопка (не создаём второй заказ).
+            # Лёгкие формы - ТОЧНО: реально жмём второй раз и считаем POST-заявки
+            # (одинаковый адрес ≥2 = дубль). Всё в try, чтобы не сломать отправку.
+            _ds_verdict, _ds_ком = None, ""
+            _ds_safe = bool(безопасная_отправка)
+            _ds_posts, _ds_on = [], None
+            try:
+                _act = form.evaluate(
+                    "f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');"
+                    " return g ? (g.getAttribute('action')||'') : ''; }")
+            except Exception:  # noqa: BLE001
+                _act = ""
+            if not _ds_safe and _ds_похоже_на_заказ(page.url, _act):
+                _ds_safe = True
+            if not _ds_safe:
+                try:
+                    def _ds_on(req):
+                        try:
+                            if (req.method or "").upper() == "POST" and not _ds_это_трекер(req.url):
+                                _ds_posts.append(req.url.split("?")[0])
+                        except Exception:  # noqa: BLE001
+                            pass
+                    page.on("request", _ds_on)
+                except Exception:  # noqa: BLE001
+                    _ds_on = None
+
             try:
                 sub.click(timeout=5000)
             except Exception:
@@ -3315,7 +3429,59 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 # срабатывает так же, как при обычном клике.
                 print("      ↻ Обычный клик по кнопке перекрыт - кликаем принудительно (force)")
                 sub.click(timeout=5000, force=True)
+
+            # Сам тест двойной отправки (guarded - никогда не роняет отправку).
+            try:
+                if _ds_safe:
+                    _locked = False
+                    for _ in range(6):                 # ~600 мс наблюдения
+                        try:
+                            _locked = bool(sub.evaluate(
+                                "b => !!(b.disabled || b.getAttribute('aria-disabled')==='true'"
+                                " || /disabl|load|sending|wait|process|отправ/i.test(b.className||'')"
+                                " || getComputedStyle(b).pointerEvents==='none'"
+                                " || b.offsetParent===null)"))
+                        except Exception:  # noqa: BLE001
+                            _locked = True             # кнопка исчезла = форма ушла
+                        if _locked:
+                            break
+                        page.wait_for_timeout(100)
+                    _ds_verdict = "защищена" if _locked else "под вопросом"
+                    if not _locked:
+                        _ds_ком = ("Кнопка не блокируется при отправке - двойное "
+                                   "нажатие теоретически возможно, проверьте вручную.")
+                else:
+                    page.wait_for_timeout(140)         # как «нетерпеливый» второй клик
+                    try:
+                        sub.click(timeout=1200, force=True)
+                    except Exception:  # noqa: BLE001
+                        pass    # кнопка заблокировалась/исчезла - второй отправки не будет
+            except Exception:  # noqa: BLE001
+                pass
+
             page.wait_for_timeout(1200)
+
+            # Подсчёт отправок (точный режим): один и тот же POST-адрес ≥2 = дубль.
+            try:
+                if _ds_on is not None:
+                    page.remove_listener("request", _ds_on)
+                if not _ds_safe:
+                    _cnt = {}
+                    for _u in _ds_posts:
+                        _cnt[_u] = _cnt.get(_u, 0) + 1
+                    _mx = max(_cnt.values()) if _cnt else 0
+                    if _mx >= 2:
+                        _ds_verdict = "не защищена"
+                        _ds_ком = ("Двойной клик отправил форму ДВАЖДЫ - защиты от "
+                                   "повторной отправки нет (ушли две заявки).")
+                    elif _mx == 1:
+                        _ds_verdict = "защищена"
+                    else:
+                        _ds_verdict = "под вопросом"
+                        _ds_ком = ("Не удалось посчитать отправки (форма без POST/"
+                                   "переход) - двойную отправку проверьте вручную.")
+            except Exception:  # noqa: BLE001
+                pass
 
             html = page.content()
             _form_err = response_indicates_form_error(html)
@@ -3359,6 +3525,25 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 }
             )
             print(f"   ✅ {название} - {статус}  ·  уведомление польз.: {_уведомл_польз}")
+
+            # Двойная отправка: отдельная строка отчёта (колонка «Двойная отправка»).
+            # Коммент - только когда есть что пояснить (не защищена / под вопросом).
+            if _ds_verdict:
+                try:
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "поля", "ид": название,
+                        "название": f"Двойная отправка (двойной клик): {название}",
+                        "имя": имя_теста,
+                        "статус": "Проверить" if _ds_verdict == "не защищена" else "OK",
+                        "двойная_отправка": _ds_verdict,
+                        "комментарий_готовый": _ds_ком or None,
+                        "код": "double_submit",
+                    })
+                    print(f"   🔁 Двойная отправка «{название}»: {_ds_verdict}"
+                          + (f" — {_ds_ком}" if _ds_ком else ""))
+                except Exception:  # noqa: BLE001
+                    pass
 
             # Цель Метрики этой формы (ключ «цель»): ждём немного (летит ajax-ом)
             # и пишем в отчёт «сработала / НЕ сработала». Причину показываем,
@@ -3705,9 +3890,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         )
 
     def run_scenario_playwright(
-        base_url: str, шаги: list, *, название_сценария: str = ""
+        base_url: str, шаги: list, *, название_сценария: str = "", тип_блока: str = ""
     ):
-        """Один сеанс браузера: цепочка шагов (пауза, переход, клик, форма, модалка)."""
+        """Один сеанс браузера: цепочка шагов (пауза, переход, клик, форма, модалка).
+        тип_блока - тип страницы («Оформление…» = заказ): по нему форм-шаг решает,
+        проверять двойную отправку БЕЗОПАСНО (без реального второго клика)."""
         if not шаги:
             print("   ⚠️ Сценарий пуст - пропуск.")
             return
@@ -3878,6 +4065,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 step, cap
                             ),
                             цели_seen=_scn_цели_seen,
+                            безопасная_отправка=str(тип_блока).startswith("Оформление"),
                         )
 
                     elif act == "модалка":
@@ -4246,7 +4434,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _scn_err = None
                 for _попытка in (1, 2):
                     try:
-                        run_scenario_playwright(url, steps, название_сценария=cap)
+                        run_scenario_playwright(url, steps, название_сценария=cap,
+                                                тип_блока=тип_страницы)
                         _scn_err = None
                         break
                     except Exception as _e:  # noqa: BLE001
