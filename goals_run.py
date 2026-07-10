@@ -37,7 +37,8 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
     import json
     _что = 'заказ (корзина → оформление)' if only_orders else 'все формы'
     _stamp(f'ФОРМЫ: запускаю прогон ({_что}) для «{base}» (Москва) - поймать цели')
-    args = [sys.executable, 'forms_run.py', '--project', base, '--no-admin']
+    args = [sys.executable, 'forms_run.py', '--project', base, '--no-admin',
+            '--check-goals']       # цели ловим ЗДЕСЬ (в «Проверке целей»)
     if only_orders:
         args.append('--only-orders')
     if show:

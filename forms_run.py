@@ -135,6 +135,9 @@ def main() -> int:
     ap.add_argument('--only-orders', action='store_true',
                     help='Прогнать ТОЛЬКО сквозной заказ (блоки «Оформление») - '
                          'для подтверждения заказ-целей из «Проверки целей».')
+    ap.add_argument('--check-goals', action='store_true',
+                    help='Ловить цели Яндекс.Метрики (для «Проверки целей»). В '
+                         'обычной «Проверке форм» НЕ ставится - формы без целей.')
     a = ap.parse_args()
 
     name = PROJECT_NAMES[a.project]
@@ -233,6 +236,7 @@ def main() -> int:
                 город=city,
                 почта_получателя=city_mail,
                 проба_файлов=a.file_probe,
+                проверять_цели=a.check_goals,
             )
 
         # ── Пункт 2.12: cookie-уведомление + ссылка на политику + живочат ──
