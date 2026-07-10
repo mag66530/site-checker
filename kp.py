@@ -118,7 +118,9 @@ def normalize_phone(s: Optional[str]) -> str:
 _PHONE_FIND = re.compile(
     r'\+?998[\s\-()]*\d{2}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'   # Узбекистан
     r'|\+?375[\s\-()]*\d{2}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'  # Беларусь
-    r'|\+?[78][\s\-()]*\d{3}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'  # Россия/Казахстан
+    # Россия/Казахстан: 8/+7 и ещё 10 цифр при ЛЮБОЙ группировке - и «(495) 266-29-46»
+    # (3-3-2-2), и «(4852) 66-29-46» (4-значный код малых городов, 4-2-2-2).
+    r'|(?<!\d)\+?[78](?:[\s\-()]*\d){10}(?!\d)'
     r'|\b\d{11,12}\b'                                               # «голый» из tel:/числа
 )
 
@@ -349,12 +351,27 @@ def extract_site_contacts(html: str) -> dict:
               if not p.startswith('000')]
     emails = [e.lower() for e in re.findall(
         r'[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}', region_html, re.IGNORECASE)]
-    # Текст адреса - кусок видимого текста вокруг уличного маркера
+    # Текст адреса. Сначала - после метки «Адрес:» (там он на сайтах МПЭ/АПС),
+    # обрезаем на следующем поле (телефон/почта/часы/индекс). Если метки нет -
+    # берём кусок вокруг уличного маркера, включая СОКРАЩЕНИЯ (ул./пр-кт/пер./наб.),
+    # иначе «ул.Свердлова» не ловилось и выходило «По факту: —».
     addr = ''
-    m = re.search(r'.{0,40}(?:улиц|пр\.|проспект|шоссе|переул|набережн|бульвар)'
-                  r'.{0,40}', text, re.IGNORECASE)
+    m = re.search(r'адрес[:\s]+(.{6,90}?)(?:\s*(?:телефон|тел\.|e-?mail|почт|'
+                  r'часы|режим|график|индекс|\d{1,2}:\d{2})|$)', text, re.IGNORECASE)
     if m:
-        addr = m.group(0).strip()
+        addr = m.group(1).strip(' ,;·|')
+    if not addr:
+        # От уличного маркера ВПЕРЁД (не тянем мусор слева: индекс, e-mail,
+        # «сать в Telegram») и обрезаем по номеру дома (+литер/офис).
+        m = re.search(r'(?:улиц\w*|\bул\.?\s?[А-ЯЁ]|проспект|пр-?кт|\bпр\.\s|'
+                      r'шоссе|переул\w*|\bпер\.|набережн\w*|\bнаб\.|бульвар|\bб-р|'
+                      r'микрорайон|\bмкр)[^;|№\n]{0,45}', text, re.IGNORECASE)
+        if m:
+            addr = m.group(0).strip(' ,;·|')
+            m2 = re.match(r'.*?\d[\d/]*(?:\s*(?:литер\w*|лит|корп\w*|стр\w*|офис|оф)'
+                          r'\.?\s*[\w/]*)?', addr, re.IGNORECASE)
+            if m2 and m2.group(0).strip(' ,;·|'):
+                addr = m2.group(0).strip(' ,;·|')
     # Мессенджеры ищем по ВСЕМУ html: кнопки часто плавающие/виджеты вне шапки-подвала.
     tg = re.findall(r'(?:t\.me|telegram\.me)/([A-Za-z0-9_]{3,})', html, re.I)
     tg += re.findall(r'tg://resolve\?domain=([A-Za-z0-9_]{3,})', html, re.I)
@@ -365,12 +382,23 @@ def extract_site_contacts(html: str) -> dict:
         r'(?:wa\.me/|api\.whatsapp\.com/send[^"\'\s]*?phone=|whatsapp://send\?phone=)'
         r'(\+?\d[\d\-()\s]{7,})', html, re.I)
     wa = [n for n in (normalize_phone(w) for w in wa_raw) if n]
+    # Рабочие chat-ссылки вотсапа (по ним кнопка «переходит в WhatsApp»).
+    wa_urls = re.findall(
+        r'href=["\']((?:https?:)?//(?:wa\.me|api\.whatsapp\.com|chat\.whatsapp\.com)'
+        r'[^"\']*)["\']', html, re.I)
+    # Кнопка вотсапа ВООБЩЕ есть? (ссылка на wa.me ИЛИ <a> с текстом про вотсап -
+    # тогда, если рабочей chat-ссылки нет, кнопка «битая»). Ищем по <a>-тегам.
+    wa_anchor_urls = re.findall(
+        r'<a\b[^>]*?href=["\']([^"\']+)["\'][^>]*>(?:(?!</a>).){0,200}?'
+        r'(?:whatsapp|вотсап|ватсап|вацап)', html, re.I | re.S)
     return {
         'phones': list(dict.fromkeys(phones)),
         'emails': list(dict.fromkeys(emails)),
         'address': addr,
         'telegram': list(dict.fromkeys(tg)),
         'whatsapp': list(dict.fromkeys(wa)),
+        'whatsapp_urls': list(dict.fromkeys(wa_urls)),
+        'whatsapp_anchor_urls': list(dict.fromkeys(wa_anchor_urls)),
         'full_text': text,
     }
 
@@ -557,15 +585,48 @@ def _fmt(norm10: str) -> str:
 # ── Пункт 1.4: сверка «главных переменных» поддомена с КП (для вкладки) ──
 
 
+def _site_address_full(html: str) -> str:
+    """Адрес со ВСЕЙ страницы (не только шапка/подвал) по метке «Адрес:» - для
+    наглядного «По факту (на сайте): …» в расхождении. На страницах «Контакты»
+    адрес лежит в основном блоке, куда экстрактор шапки/подвала не смотрит. '' -
+    если метки нет."""
+    try:
+        from text_checker import html_to_visible_text
+        txt = html_to_visible_text(html)
+    except Exception:
+        txt = html or ''
+    m = re.search(r'адрес[:\s]+(.{6,90}?)(?:\s*(?:телефон|тел\.|e-?mail|почт|часы|'
+                  r'режим|график|индекс|\d{1,2}:\d{2})|$)', txt, re.IGNORECASE)
+    return m.group(1).strip(' ,;·|') if m else ''
+
+
+_STREET_PREFIX_RE = re.compile(
+    r'((?:ул|улиц\w*|просп\w*|проспект|пр|шоссе|переул\w*|наб|набережн\w*|'
+    r'бульвар|б-р|мкр|микрорайон)\.?\s*)$', re.I)
+
+
 def _addr_on_page(text: str, kp_addr: str) -> str:
-    """Короткий фрагмент адреса со страницы - вокруг названия улицы из КП (для
-    наглядного «на сайте: …»). '' если не нашли."""
+    """Короткий ЧИСТЫЙ фрагмент адреса со страницы - от названия улицы из КП
+    ВПЕРЁД (+ уличный префикс «ул.»/«просп.», если он слева). Так не тянем мусор
+    слева («сать в Telegram», индекс, e-mail). '' если не нашли."""
     words = sorted((w for w in re.findall(r'[А-Яа-яЁё]{5,}', kp_addr or '')
                     if w.lower() not in _STREET_WORDS), key=len, reverse=True)
     for w in words:
-        m = re.search(r'.{0,25}' + re.escape(w) + r'.{0,25}', text)
-        if m:
-            return re.sub(r'\s+', ' ', m.group(0)).strip()
+        m = re.search(re.escape(w) + r'[^;|№\n]{0,32}', text)
+        if not m:
+            continue
+        snip = m.group(0)
+        pm = _STREET_PREFIX_RE.search(text[:m.start()])   # «ул. » / «просп. » слева
+        if pm:
+            snip = pm.group(1) + snip
+        snip = re.sub(r'\s+', ' ', snip).strip(' ,;|·-')
+        # Обрезаем хвост после номера дома (+ литер/корп/строение/офис), чтобы не
+        # тянуть соседний текст («Экспресс заявка», кнопки и т.п.).
+        m2 = re.match(r'.*?\d[\d/]*(?:\s*(?:литер\w*|лит|корп\w*|стр\w*|офис|оф)\.?'
+                      r'\s*[\w/]*)?', snip, re.I)
+        if m2 and m2.group(0).strip(' ,;|·-'):
+            snip = m2.group(0).strip(' ,;|·-')
+        return snip
     return ''
 
 
@@ -636,8 +697,17 @@ def check_variables(html: str, domain: str) -> dict:
         add("Адрес", row.address,
             _addr_on_page(haystack, row.address) or "совпадает с КП", "ok")
     else:
-        add("Адрес", row.address, "—", "warn",
-            "адрес из КП не найден в шапке/подвале - проверьте вручную")
+        # Адрес из КП не совпал. Показываем, ЧТО реально на сайте (иначе выходило
+        # непонятное «По факту: —», хотя адрес на странице есть - просто другой).
+        # Предпочитаем адрес по метке «Адрес:» со всей страницы (чистый), и только
+        # если его нет - берём из шапки/подвала. Так в «на сайте» нет мусора.
+        site_addr = _site_address_full(html) or (site.get("address") or "").strip()
+        if site_addr:
+            add("Адрес", row.address, site_addr, "warn",
+                "на сайте другой адрес (не совпадает с КП) - проверьте")
+        else:
+            add("Адрес", row.address, "—", "warn",
+                "адрес на сайте не найден - проверьте вручную")
 
     # Мессенджеры (Telegram / WhatsApp) проверяем по НАЛИЧИЮ канала, а НЕ по
     # совпадению номера/аккаунта. На сайте это кнопки «Написать в Telegram» /
@@ -656,17 +726,29 @@ def check_variables(html: str, domain: str) -> dict:
     else:
         add("Telegram", "—", "—", "na", "нет в КП и на сайте")
 
+    # WhatsApp (по просьбе заказчика):
+    #   • кнопки нет вовсе → прочерк (—), это не ошибка;
+    #   • кнопка есть и ссылка ведёт в WhatsApp (wa.me/api.whatsapp) → ✓;
+    #   • кнопка «Чат в WhatsApp» есть, но ссылка НЕ ведёт в WhatsApp (битая) →
+    #     ✗ «при переходе ошибка» (точный код 404 уточняет проверка в variables_run).
     exp_wa = row.whatsapp_norm()
     site_wa = set(site.get("whatsapp", []))
-    if site_wa:
-        add("WhatsApp", _fmt(exp_wa) if exp_wa else "—",
-            "кнопка есть (" + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]) + ")", "ok",
+    wa_links = site.get("whatsapp_urls", [])            # рабочие chat-ссылки
+    wa_anchor = site.get("whatsapp_anchor_urls", [])    # <a> с текстом «вотсап»
+    if wa_links or site_wa:
+        _найд = "кнопка WhatsApp есть"
+        if site_wa:
+            _найд += " (" + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]) + ")"
+        add("WhatsApp", _fmt(exp_wa) if exp_wa else "—", _найд, "ok",
             "кнопка WhatsApp на сайте есть; номер скрыт в ссылке и обычно общий - не сверяем")
-    elif exp_wa:
-        add("WhatsApp", _fmt(exp_wa), "—", "warn",
-            "на сайте нет кнопки WhatsApp (в КП номер указан)")
+    elif wa_anchor:
+        add("WhatsApp", _fmt(exp_wa) if exp_wa else "—",
+            "кнопка есть, но ссылка не ведёт в WhatsApp", "bug",
+            "кнопка «Чат в WhatsApp» есть, но при переходе ошибка "
+            "(ссылка не ведёт в WhatsApp)")
+        fields[-1]["check_url"] = wa_anchor[0]
     else:
-        add("WhatsApp", "—", "—", "na", "нет в КП и на сайте")
+        add("WhatsApp", "—", "—", "na", "кнопки WhatsApp на сайте нет")
 
     return out
 
