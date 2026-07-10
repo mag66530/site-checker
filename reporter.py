@@ -2294,6 +2294,99 @@ def _build_security_sheet(wb, results):
             extra=_sec_found)
 
 
+# ── Лист «Изображения» (п.1.15: alt, webp/avif, вес) ───────────────
+
+_IMG_HEAVY_KB = 300      # порог «тяжёлой» картинки (синхронно с image_checker)
+
+
+def _build_images_sheet(wb, results):
+    """Лист изображений: alt у картинок, современные форматы (webp/avif),
+    вес (оптимизация). Добавляется только если проверка выполнялась."""
+    checked = [r for r in results if getattr(r, 'images', None)]
+    if not checked:
+        return
+    bad = [r for r in checked if r.images.get('issues')]
+    warned = [r for r in checked if (not r.images.get('issues')
+                                     and r.images.get('warnings'))]
+    has_bugs = bool(bad)
+
+    ws = wb.create_sheet('Изображения')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 18
+    ws.column_dimensions['C'].width = 14
+    ws.column_dimensions['D'].width = 60
+    ws.column_dimensions['E'].width = 60
+    ws.column_dimensions['F'].width = 3
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Изображения (п.1.15)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('Три проверки по картинкам страницы: (1) Alt - у каждого <img> '
+               'есть атрибут alt (пустой alt="" ок для декоративных; баг - '
+               'полное отсутствие). (2) Современные форматы - используются '
+               'webp/avif, а не только jpg/png/gif (устаревшие без webp/avif = '
+               'предупреждение). (3) Оптимизация - свои картинки не тяжелее '
+               f'{_IMG_HEAVY_KB} КБ (тяжелее = вероятно не оптимизированы, '
+               'предупреждение). Вес берётся по Content-Length.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Проверено страниц: {len(checked)} · без alt: {len(bad)} · '
+               f'с предупреждениями (форматы/вес): {len(warned)}')
+    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 26
+    row += 2
+
+    def _img_extra(r):
+        im = getattr(r, 'images', None) or {}
+        bits = []
+        if im.get('no_alt'):
+            bits.append('без alt: ' + ', '.join(im['no_alt'][:3])
+                        + (f' … +{len(im["no_alt"]) - 3}'
+                           if len(im['no_alt']) > 3 else ''))
+        if im.get('legacy'):
+            bits.append(f'устаревших: {len(im["legacy"])}')
+        if im.get('heavy'):
+            bits.append('тяжёлые: ' + ', '.join(
+                f'{h["url"].rsplit("/", 1)[-1]} {h["kb"]}КБ'
+                for h in im['heavy'][:3]))
+        return ' · '.join(bits)
+
+    _meta_section_title(ws, row, f'Проблемы (нет alt)  ({len(bad)})',
+                        C.err if bad else C.ok)
+    row += 1
+    if not bad:
+        _meta_ok_line(ws, row, '✅ У всех картинок на проверенных страницах '
+                               'есть атрибут alt.')
+        row += 2
+    else:
+        row = _render_issue_groups(
+            ws, row, _issue_groups(bad, 'images', 'issues'), C.err,
+            extra=_img_extra)
+
+    if warned:
+        _meta_section_title(ws, row,
+                            f'Форматы и вес (предупреждения)  ({len(warned)})',
+                            C.warn)
+        row += 1
+        row = _render_issue_groups(
+            ws, row, _issue_groups(warned, 'images', 'warnings'), C.warn,
+            extra=_img_extra)
+
+
 # ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
 
 
@@ -3260,6 +3353,10 @@ def build_report(
     # Заголовки безопасности (доп. 1.8): битые значения HSTS/CSP/X-Frame
     security_bad_pages = [r for r in results
                           if getattr(r, 'has_security_issues', False)]
+
+    # Изображения (п.1.15): картинки без alt
+    images_bad_pages = [r for r in results
+                        if getattr(r, 'has_image_issues', False)]
     _mdups = (meta_summary or {}).get('duplicates') or {}
     meta_dup_groups = (len(_mdups.get('same_city') or [])
                        + len(_mdups.get('cross_city') or [])
@@ -3405,6 +3502,11 @@ def build_report(
                          f'{len(security_bad_pages)} '
                          f'{_plural_pages(len(security_bad_pages))} - '
                          f'см. лист «Безопасность».')
+    if images_bad_pages:
+        summary_text += (f'\nИзображения: картинки без alt на '
+                         f'{len(images_bad_pages)} '
+                         f'{_plural_pages(len(images_bad_pages))} - '
+                         f'см. лист «Изображения».')
     _filters_cases = (filters_test or {}).get('cases') or []
     _filters_bad = sum(1 for c in _filters_cases
                        if _FILTER_VERDICT.get(c.get('verdict'),
@@ -3471,6 +3573,7 @@ def build_report(
         ('Заголовки и мета', 'если есть лист - единственность title/description/H1, дубли H2 и заголовки вне текста.'),
         ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media), переходы из меню шапки и работа фильтров товаров (браузерный тест).'),
         ('Разметка', 'если есть лист - OpenGraph-теги и Schema.org (крошки, компания, товар, цены, фото).'),
+        ('Изображения', 'если есть лист - alt у картинок, современные форматы (webp/avif) и вес (п.1.15).'),
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Ошибки JavaScript', 'если есть лист - страницы, где в консоли браузера есть ошибки JS (п.1.14).'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
@@ -3512,6 +3615,9 @@ def build_report(
 
     # ─── Лист заголовков безопасности (доп. 1.8) - если проверялась ──
     _build_security_sheet(wb, results)
+
+    # ─── Лист изображений (п.1.15) - если проверка выполнялась ──────
+    _build_images_sheet(wb, results)
 
     # ─── Лист ошибок JS в консоли (п.1.14) - если проверка выполнялась ──
     _build_console_sheet(wb, console_check)

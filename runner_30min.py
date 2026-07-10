@@ -393,6 +393,7 @@ def run_check(pid, params, creds, log, progress):
             check_layout=bool(params.get('check_layout', True)),
             check_markup=bool(params.get('check_markup', True)),
             check_security=bool(params.get('check_security', True)),
+            check_images=bool(params.get('check_images', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
 

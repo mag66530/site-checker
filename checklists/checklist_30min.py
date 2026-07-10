@@ -652,6 +652,7 @@ def init_session():
         'c30_check_layout': True,      # пункт 1.11 - вёрстка и адаптивность (viewport, CSS)
         'c30_check_markup': True,      # пункт 1.12 - микроразметка Schema.org + OpenGraph
         'c30_check_security': True,    # доп. 1.8 - заголовки безопасности HTTP
+        'c30_check_images': True,      # пункт 1.15 - изображения (alt/webp/вес)
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
@@ -907,7 +908,7 @@ with st.container(border=True):
                    'c30_check_filters', 'c30_check_products', 'c30_check_text',
                    'c30_check_indexing', 'c30_check_meta',
                    'c30_check_region', 'c30_check_cis', 'c30_check_layout',
-                   'c30_check_markup', 'c30_check_security'):
+                   'c30_check_markup', 'c30_check_security', 'c30_check_images'):
             st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
@@ -1149,6 +1150,13 @@ if pid:
                              'от кликджекинга = предупреждение; битое значение '
                              '(HSTS max-age=0, ALLOW-FROM, не-nosniff, конфликт '
                              'дублей) = баг. CSP отсутствие не ругаем.')
+            st.checkbox('1.15  Изображения (alt, webp/avif, вес)',
+                        key='c30_check_images',
+                        help='Alt у всех <img> (пустой alt="" ок; баг - полное '
+                             'отсутствие). Современные форматы webp/avif (иначе '
+                             'предупреждение). Вес своих картинок по '
+                             'Content-Length: тяжелее 300 КБ = не оптимизировано '
+                             '(предупреждение). Отдельный лист «Изображения».')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1292,6 +1300,7 @@ if pid:
         bool(st.session_state.get('c30_check_layout', True)),
         bool(st.session_state.get('c30_check_markup', True)),
         bool(st.session_state.get('c30_check_security', True)),
+        bool(st.session_state.get('c30_check_images', True)),
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_check_filter_fn', False)),
         bool(st.session_state.get('c30_check_console', False)),
@@ -1345,6 +1354,7 @@ if pid:
                 'check_layout': st.session_state.get('c30_check_layout', True),
                 'check_markup': st.session_state.get('c30_check_markup', True),
                 'check_security': st.session_state.get('c30_check_security', True),
+                'check_images': st.session_state.get('c30_check_images', True),
                 'check_links': st.session_state.get('c30_check_links', False),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'check_console': st.session_state.get('c30_check_console', False),
