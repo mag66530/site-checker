@@ -1998,7 +1998,7 @@ LOG_HEADERS = [
     "Название", "Где находится", "Имя", "Телефон", "Почта", "Почта получателя",
     "Статус", "Уведомление пользователю", "Типы файлов формы",
     "Выпадающие списки", "Чекбоксы/радио", "Двойная отправка",
-    "Enter отправляет", "Комментарий",
+    "Enter отправляет", "Поля очищены", "Комментарий",
 ]
 
 # Ключи строки-словаря в порядке колонок LOG_HEADERS.
@@ -2006,7 +2006,8 @@ LOG_KEYS_ORDER = [
     "дата", "время", "город", "страница", "url",
     "название", "где", "имя", "телефон", "почта", "почта_получателя",
     "статус", "уведомление", "типы_файлов", "выпадающие_списки",
-    "чекбоксы_радио", "двойная_отправка", "enter_отправляет", "комментарий",
+    "чекбоксы_радио", "двойная_отправка", "enter_отправляет",
+    "поля_очищены", "комментарий",
 ]
 
 # Отдельный лист «Цели» (Яндекс.Метрика): свои колонки - форма/кнопка + идентификатор цели.
@@ -3448,6 +3449,19 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     except Exception:  # noqa: BLE001
                         pass
 
+            # Имена заполненных полей ДО отправки - чтобы после успеха проверить,
+            # очистились ли они (пункт «если требуется»).
+            try:
+                _pre_keys = form.evaluate(
+                    "f => [...f.querySelectorAll('input,textarea')]"
+                    ".filter(e => { const t=(e.type||'').toLowerCase();"
+                    " return !['hidden','submit','button','checkbox','radio','file'].includes(t)"
+                    " && (e.offsetWidth||e.offsetHeight||e.getClientRects().length)"
+                    " && (e.value||'').trim() && (e.name||e.id); })"
+                    ".map(e => e.name || e.id)")
+            except Exception:  # noqa: BLE001
+                _pre_keys = []
+
             # Кнопка отправки: по умолчанию стандартные submit-кнопки; если у сайта
             # своя (например button.send у Авиапромсталь) - задаётся ключом «кнопка_css».
             _btn_css = str(форма_config.get("кнопка_css") or "").strip()
@@ -3604,6 +3618,48 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     })
                     print(f"   🔁 Двойная отправка «{название}»: {_ds_verdict}"
                           + (f" — {_ds_ком}" if _ds_ком else ""))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # Поля очищаются после успешной отправки (пункт «если требуется» -
+            # справочно, не ошибка). Читаем те же поля после успеха: пусты - очищены.
+            # Только при успехе и пока поля ещё на странице (AJAX-форма не ушла).
+            if _pre_keys and str(статус).startswith("УСПЕШНО"):
+                try:
+                    _after = form.evaluate(
+                        "(f, keys) => { const set = new Set(keys.map(String));"
+                        " const seen = new Set(); const out = [];"
+                        " for (const e of f.querySelectorAll('input,textarea')) {"
+                        "   const k = (e.name || e.id || ''); if (!k) continue; seen.add(k);"
+                        "   if (set.has(k)) out.push(((e.value||'').trim()) ? 'full' : 'empty'); }"
+                        " for (const k of keys) { if (!seen.has(String(k))) out.push('gone'); }"
+                        " return out; }",
+                        _pre_keys)
+                    _present = [s for s in (_after or []) if s != "gone"]
+                    _clr = None
+                    if _present:
+                        _empty = sum(1 for s in _present if s == "empty")
+                        if _empty == len(_present):
+                            _clr = "очищены"
+                        elif _empty == 0:
+                            _clr = "не очищены"
+                        else:
+                            _clr = "очищены частично"
+                    if _clr:
+                        записать_в_excel({
+                            "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                            "тип_селектора": "поля", "ид": название,
+                            "название": f"Поля очищаются после отправки: {название}",
+                            "имя": имя_теста,
+                            "статус": "OK",   # «если требуется» - не ошибка, справочно
+                            "поля_очищены": _clr,
+                            "комментарий_готовый": (
+                                "Поля не очистились после отправки - если форму заполняют "
+                                "повторно, стоит очищать (не критично)."
+                                if _clr == "не очищены" else None),
+                            "код": "fields_cleared",
+                        })
+                        print(f"   🧹 Поля очищаются «{название}»: {_clr}")
                 except Exception:  # noqa: BLE001
                     pass
 
