@@ -817,6 +817,15 @@ st.markdown(
     [data-testid="stMetricLabel"] [data-testid="stTooltipIcon"] svg {
         width: 15px !important; height: 15px !important; opacity: .7;
     }
+    /* Пункт 1.16: «?» с предупреждением про лимиты W3C - возвращаем точечно
+       (глобально иконка скрыта в app.py). Ключ чекбокса = c30_check_w3c. */
+    .st-key-c30_check_w3c [data-testid="stTooltipIcon"] {
+        display: inline-flex !important; align-items: center;
+        margin-left: 5px; cursor: help;
+    }
+    .st-key-c30_check_w3c [data-testid="stTooltipIcon"] svg {
+        width: 15px !important; height: 15px !important; opacity: .7;
+    }
 
     /* Пресеты как карточки (radio с подписями): клик = выбор, выбранная -
        рамка подсвечивается; равные, по центру, без кружка и кнопки «Выбрать». */
