@@ -204,6 +204,50 @@ def _pick_filter_indices(page, filt: str, max_groups: int = MAX_FILTER_TRIES):
     return order or [0]
 
 
+def _clicked_label(page, idx, filt) -> str:
+    """Человеческая подпись нажатого значения фильтра #idx: «Свойство: значение»
+    (напр. «Ширина: 10 мм»). Берём текст label (по for / родительский / title)
+    и заголовок блока-свойства. Для перепроверки в отчёте."""
+    js = """(args) => {
+      const [sel, i] = args;
+      const el = document.querySelectorAll(sel)[i];
+      if (!el) return '';
+      const norm = s => (s||'').replace(/\\s+/g,' ').trim();
+      let val = '';
+      try { if (el.id) { const l = document.querySelector('label[for="'+
+        (window.CSS&&CSS.escape?CSS.escape(el.id):el.id)+'"]'); if(l) val=l.textContent; } } catch(e){}
+      if (!val) { const p = el.closest('label'); if (p) val = p.textContent; }
+      if (!val) val = el.getAttribute('title') || el.value || '';
+      val = norm(val);
+      // Название свойства (Ширина/Марка…): заголовок блока или элемент ПЕРЕД
+      // блоком значений. Не берём то, что совпадает со значением.
+      const SEL = '.dropdown-title,.bx-filter-param-text,'+
+        '.bx-filter-parameters-box-title,.prop-title,legend,'+
+        '[class*="title"],[class*="name"],dt,.caption';
+      // Название свойства ДОЛЖНО содержать букву (значения - только цифры
+      // «10 (1)» / «100 (222)», их в название не берём).
+      const isName = t => t && t.length<50 && t!==val && /[а-яёa-z]/i.test(t)
+        && !/^[\\d.,\\s]*\\(\\d+\\)$/.test(t);
+      let grp = '', node = el;
+      for (let k=0;k<7 && node;k++){
+        node = node.parentElement; if(!node) break;
+        for (const h of node.querySelectorAll(SEL)){
+          const t = norm(h.textContent);
+          if (isName(t) && !h.contains(el)){ grp=t; break; }
+        }
+        if (grp) break;
+        const ps = node.previousElementSibling;
+        if (ps){ const t = norm(ps.textContent); if (isName(t)){ grp=t; break; } }
+      }
+      return (grp ? grp+': ' : '') + val;
+    }"""
+    try:
+        s = page.evaluate(js, [filt, idx]) or ''
+        return s.strip()[:80]
+    except Exception:
+        return ''
+
+
 def _apply_filter(page, idx, filt, apply_sel, wait_ms, pre_apply_ms):
     """Кликнуть значение фильтра #idx и применить (кнопка/AJAX). Возвращает
     HTTP-код навигации после применения (или None). Ошибки не бросает."""
@@ -330,6 +374,7 @@ def run_case(page, case: dict, log) -> dict:
     _pre = int(case.get('pre_apply_ms') or 3000)
     indices = _pick_filter_indices(page, filt, MAX_FILTER_TRIES)
     _tries = 0
+    _clicked = []               # какие фильтры нажали (для перепроверки)
     last = ('not_narrowed', 'фильтр не найден для клика')
     for attempt, idx in enumerate(indices):
         if attempt > 0:
@@ -344,6 +389,9 @@ def run_case(page, case: dict, log) -> dict:
             except Exception:
                 break
         _tries = attempt + 1
+        _lbl = _clicked_label(page, idx, filt)   # подпись ДО клика (пока видна)
+        if _lbl:
+            _clicked.append(_lbl)
         nav_code = _apply_filter(page, idx, filt, apply_sel, wait_ms, _pre)
         if nav_code and nav_code >= 400:
             _hint = ' — отфильтрованной страницы нет (404)' if nav_code == 404 else ''
@@ -364,6 +412,8 @@ def run_case(page, case: dict, log) -> dict:
         _count_dropped = after < baseline
         if _total_dropped or _ids_changed or _count_dropped:
             _d = 'фильтр применился: набор товаров изменился'
+            if _lbl:
+                _d += f'; нажат фильтр «{_lbl}»'
             if _tries > 1:
                 _d += f' (сработал с {_tries}-й попытки)'
             if total_after is not None and total_before is not None:
@@ -371,9 +421,10 @@ def run_case(page, case: dict, log) -> dict:
             last = ('ok', _d)
             break
         # не изменилось - пробуем следующую группу фильтра (если есть)
+        _spis = '; '.join(f'«{x}»' for x in _clicked) or 'значение фильтра'
         last = ('not_narrowed',
-                f'проверено фильтров: {_tries} (из разных групп) - выдача не '
-                f'изменилась, товары те же (фильтр не применяется)')
+                f'выдача не изменилась - товары те же. Нажато ({_tries}): '
+                f'{_spis}. Проверить эти фильтры вручную')
 
     out['verdict'], out['detail'] = last
     return out
