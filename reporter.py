@@ -2401,12 +2401,14 @@ def _build_w3c_sheet(wb, w3c_check):
 
     ws = wb.create_sheet('Валидация и скорость')
     ws.sheet_view.showGridLines = False
+    def _page_fail(p):
+        """Причина, по которой валидность не проверена (403/429/502…), или ''."""
+        return (str((p.get('html') or {}).get('error') or '')
+                or str((p.get('css') or {}).get('error') or ''))
+
     _any_err = any((p.get('html') or {}).get('errors')
                    or (p.get('css') or {}).get('errors') for p in pages)
-    _any_blocked = any(
-        '403' in str((p.get('html') or {}).get('error') or '')
-        or '403' in str((p.get('css') or {}).get('error') or '')
-        for p in pages)
+    _any_blocked = any(_page_fail(p) for p in pages)
     ws.sheet_properties.tabColor = C.warn if (_any_err or _any_blocked) else C.ok
 
     for col, w in (('A', 3), ('B', 50), ('C', 20), ('D', 20), ('E', 46), ('F', 3)):
@@ -2439,19 +2441,19 @@ def _build_w3c_sheet(wb, w3c_check):
         c.alignment = _align(wrap=True)
         return
 
-    # Баннер: W3C заблокировал (лимит 403) - валидность не проверена.
-    _blocked = sum(1 for p in pages
-                   if '403' in str((p.get('html') or {}).get('error') or '')
-                   or '403' in str((p.get('css') or {}).get('error') or ''))
+    # Баннер: W3C не проверил валидность (403 Cloudflare / 429 лимит / 502 сбой).
+    _fails = [_page_fail(p) for p in pages if _page_fail(p)]
+    _blocked = len(_fails)
+    _reason = _fails[0] if _fails else ''
     if _blocked:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
-        c.value = (f'⚠ W3C заблокировал запросы (лимит, HTTP 403) на '
-                   f'{_blocked} из {len(pages)} страниц - валидность HTML/CSS '
-                   f'здесь НЕ проверена. Это не ошибка сайта, а лимит '
-                   f'бесплатного сервиса W3C: повторить проверку 1.16 позже '
-                   f'(через час/на следующий день) и реже включать. Время '
-                   f'загрузки ресурсов ниже измерено корректно.')
+        c.value = (f'⚠ W3C не проверил валидность HTML/CSS на '
+                   f'{_blocked} из {len(pages)} страниц ({_reason}). Это не '
+                   f'ошибка сайта, а лимит/сбой бесплатного сервиса W3C: '
+                   f'повторить проверку 1.16 позже (через час/на следующий '
+                   f'день) и реже включать. Время загрузки ресурсов ниже '
+                   f'измерено корректно.')
         c.font = _font(size=10, bold=True, color=C.warn)
         c.fill = _fill(C.warn_soft)
         c.alignment = _align(wrap=True, vertical='top')
