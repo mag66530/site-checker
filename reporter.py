@@ -2334,7 +2334,9 @@ def _build_images_sheet(wb, results):
                'webp/avif, а не только jpg/png/gif (устаревшие без webp/avif = '
                'предупреждение). (3) Оптимизация - свои картинки не тяжелее '
                f'{_IMG_HEAVY_KB} КБ (тяжелее = вероятно не оптимизированы, '
-               'предупреждение). Вес берётся по Content-Length.')
+               'предупреждение). (4) Lazy loading - у картинок/видео есть '
+               'ленивая загрузка (loading="lazy"/data-src/preload="none"). '
+               'Вес берётся по Content-Length.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
@@ -2379,8 +2381,8 @@ def _build_images_sheet(wb, results):
 
     if warned:
         _meta_section_title(ws, row,
-                            f'Форматы и вес (предупреждения)  ({len(warned)})',
-                            C.warn)
+                            f'Форматы, вес, lazy loading (предупреждения)  '
+                            f'({len(warned)})', C.warn)
         row += 1
         row = _render_issue_groups(
             ws, row, _issue_groups(warned, 'images', 'warnings'), C.warn,

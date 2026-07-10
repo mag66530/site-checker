@@ -9,6 +9,8 @@ image_checker.py - проверка изображений (пункт 1.15).
   • Оптимизация (вес): свои картинки не должны быть тяжёлыми. Размер берём
     по Content-Length (HEAD, качает http_checker) - тяжелее порога = не
     оптимизировано (предупреждение).
+  • Lazy loading: у изображений/видео есть ленивая загрузка (loading="lazy"
+    / data-src / preload="none"). Много картинок и ни одной lazy = предупр.
 
 Alt и форматы - статикой по HTML; вес - по image_infos [{url, bytes}]
 (HEAD своих картинок, собирает http_checker; None - вес не проверяем).
@@ -25,9 +27,17 @@ _RE_SOURCE = re.compile(r'<source\b[^>]*>', re.I)
 _RE_TYPE = re.compile(r'type\s*=\s*["\']image/(webp|avif)["\']', re.I)
 _RE_SRCSET = re.compile(r'srcset\s*=\s*["\']([^"\']+)["\']', re.I)
 
+_RE_MEDIA = re.compile(r'<(?:video|iframe)\b[^>]*>', re.I)
+_RE_LAZY = re.compile(
+    r'loading\s*=\s*["\']lazy|data-src|data-lazy|class\s*=\s*["\'][^"\']*lazy',
+    re.I)
+_RE_LAZY_MEDIA = re.compile(
+    r'loading\s*=\s*["\']lazy|preload\s*=\s*["\']none|data-src', re.I)
+
 _LEGACY_EXT = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
 _MODERN_EXT = ('.webp', '.avif')
 HEAVY_BYTES = 300 * 1024        # тяжёлая картинка (не оптимизирована)
+LAZY_MIN_IMGS = 4               # с этого числа картинок ждём lazy loading
 
 
 def _ext(url: str) -> str:
@@ -95,6 +105,19 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
         warnings.append(f'современные форматы (webp/avif) не используются - '
                         f'{len(legacy)} картинок в устаревших jpg/png/gif')
 
+    # ── Lazy loading (изображения и видео) ──
+    img_tags = _RE_IMG_TAG.findall(clean)
+    lazy_imgs = sum(1 for t in img_tags if _RE_LAZY.search(t))
+    media_tags = _RE_MEDIA.findall(clean)
+    lazy_media = sum(1 for m in media_tags if _RE_LAZY_MEDIA.search(m))
+    if len(img_tags) >= LAZY_MIN_IMGS and lazy_imgs == 0:
+        warnings.append(f'ленивая загрузка (lazy loading) не используется - '
+                        f'{len(img_tags)} картинок грузятся сразу '
+                        f'(нет loading="lazy"/data-src)')
+    if media_tags and lazy_media == 0:
+        warnings.append(f'видео/iframe ({len(media_tags)}) без ленивой загрузки '
+                        f'(нет loading="lazy"/preload="none")')
+
     # ── Оптимизация (вес) ──
     heavy = []
     if image_infos:
@@ -111,7 +134,10 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
         'modern_count': modern,
         'heavy': [{'url': i.get('url', ''), 'kb': (i.get('bytes') or 0) // 1024}
                   for i in heavy][:50],
-        'img_total': len(_RE_IMG_TAG.findall(clean)),
+        'img_total': len(img_tags),
+        'lazy_imgs': lazy_imgs,
+        'media_total': len(media_tags),
+        'lazy_media': lazy_media,
         'issues': issues,
         'warnings': warnings,
     }
