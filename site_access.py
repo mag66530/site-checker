@@ -101,12 +101,15 @@ def probe_site(url: str, proxy: str | None = None, timeout: int = 12) -> dict:
 
 
 def render_proxy_access(key_prefix: str, default_url: str = "",
-                        pid: str = "") -> str | None:
+                        pid: str = "", default_on: bool | None = None) -> str | None:
     """Рисует блок (поле прокси + проверка доступа) НАД кнопкой запуска.
     Возвращает эффективный прокси (переопределение или из секретов, либо
     None, если чекбокс выключен) - страница может использовать его в прогоне.
 
-    key_prefix - уникальный префикс ключей session_state на страницу."""
+    key_prefix - уникальный префикс ключей session_state на страницу.
+    default_on - стартовое состояние галочки «Вкл. Прокси»: None (по умолчанию) -
+    как раньше, включена при наличии секрета; True/False - явно задать (напр. на
+    «Проверке форм» прокси нужен только части проектов, остальным - выключен)."""
     sec_proxy = secret_proxy(pid)
 
     # ── Текущий IP напрямую (кэшируем на сессию - не дёргаем сеть на каждый rerun) ──
@@ -125,8 +128,9 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
         "Прокси", key=f"{key_prefix}_proxy_field",
         placeholder="http://user:pass@host:port (пусто = без прокси)",
         label_visibility="collapsed")
+    _chk_default = bool(sec_proxy) if default_on is None else bool(default_on)
     use_proxy = c2.checkbox("Вкл. Прокси", key=f"{key_prefix}_proxy_on",
-                            value=bool(sec_proxy))
+                            value=_chk_default)
 
     field = (proxy_field or "").strip()
     if use_proxy:

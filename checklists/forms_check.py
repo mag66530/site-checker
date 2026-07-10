@@ -198,6 +198,20 @@ def _project_has_admin(project: str) -> bool:
         return False
 
 
+def _project_uses_proxy(project: str) -> bool:
+    """True, если у проекта в config.py задан ИСПОЛЬЗОВАТЬ_ПРОКСИ (сайт режет
+    прямое подключение, напр. Метпромко) - тогда галочка «Вкл. Прокси» стартует
+    включённой. Остальным проектам флага нет - прокси по умолчанию выключен."""
+    p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
+    try:
+        spec = importlib.util.spec_from_file_location(f'cfg_prx_{project}', p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return bool(getattr(m, 'ИСПОЛЬЗОВАТЬ_ПРОКСИ', False))
+    except Exception:
+        return False
+
+
 def _count_expected(project: str) -> int:
     """Сколько форм ожидается проверить (для шкалы прогресса). Best-effort:
     считаем включённые формы/модалки + шаги-формы в сценариях. Если не вышло - 0."""
@@ -963,10 +977,13 @@ if _cities_none:
     st.warning('Не выбрано ни одного домена/города - отметь хотя бы один, чтобы запустить.')
 
 # Прокси + проверка доступности сайта (над кнопкой запуска)
+_forms_proxy = None
 try:
     from site_access import render_proxy_access
-    render_proxy_access(f'forms_{pid_key}',
-                        default_url=f"https://{proj['domain']}/", pid=pid_key)
+    _forms_proxy = render_proxy_access(
+        f'forms_{pid_key}',
+        default_url=f"https://{proj['domain']}/", pid=pid_key,
+        default_on=_project_uses_proxy(pid_key))
 except Exception as _e_pa:
     st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
 
@@ -1011,7 +1028,12 @@ with _run_col:
                 LOG_FILE.write_text('', encoding='utf-8')
             except Exception:
                 pass
-            _launch_background(args, LOG_FILE, extra_env={**_admin_env, **_mail_env})
+            # Прокси (галочка «Вкл. Прокси» над кнопкой): пробрасываем в движок,
+            # чтобы браузер форм ходил через него - для сайтов, режущих прямое
+            # подключение (напр. Метпромко). Пусто = браузер идёт напрямую.
+            _proxy_env = {'FORMS_PROXY': _forms_proxy} if _forms_proxy else {}
+            _launch_background(args, LOG_FILE,
+                               extra_env={**_admin_env, **_mail_env, **_proxy_env})
             st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key

@@ -2234,6 +2234,29 @@ def _значение_формы_для_имени(fc: dict):
     return "unknown"
 
 
+def _playwright_proxy_from_env():
+    """Прокси для Playwright из env FORMS_PROXY (http://user:pass@host:port).
+    Нужен сайтам, которые режут прямое подключение автоматизации (напр. Метпромко):
+    браузер тогда ходит через тот же прокси, что и вкладка «Переменные». Пусто -
+    возвращаем None (браузер идёт напрямую, как и раньше для всех проектов)."""
+    from urllib.parse import urlparse
+    raw = (os.environ.get("FORMS_PROXY") or "").strip()
+    if not raw:
+        return None
+    pr = urlparse(raw if "://" in raw else "http://" + raw)
+    if not pr.hostname:
+        return None
+    server = f"{pr.scheme or 'http'}://{pr.hostname}"
+    if pr.port:
+        server += f":{pr.port}"
+    conf = {"server": server}
+    if pr.username:
+        conf["username"] = unquote(pr.username)
+    if pr.password:
+        conf["password"] = unquote(pr.password)
+    return conf
+
+
 def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
              город="", почта_получателя="", проба_файлов=False):
     # headless=True - браузер работает скрыто (окно не показывается); False - видимый.
@@ -3466,10 +3489,15 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # Маскируем автоматизацию: иначе часть сайтов (Bitrix) не навешивает свой
             # JS-обработчик отправки на «робота», форма уходит обычным POST и сервер
             # отвечает «Доступ запрещён». Флаг + init-скрипт убирают признак webdriver.
-            h["browser"] = h["play"].chromium.launch(
+            _launch_kw = dict(
                 headless=headless,
                 args=["--disable-blink-features=AutomationControlled"],
             )
+            _prx = _playwright_proxy_from_env()
+            if _prx:
+                _launch_kw["proxy"] = _prx
+                print(f"🔌 Формы идут через прокси: {_prx['server']}")
+            h["browser"] = h["play"].chromium.launch(**_launch_kw)
             h["context"] = h["browser"].new_context(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
