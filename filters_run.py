@@ -393,9 +393,50 @@ def _launch_and_run(pid: str, cases: list, log) -> list:
     return results
 
 
+MAX_CATEGORIES = 20      # сколько категорий прогона тестировать фильтром
+
+
+def _cat_name(url: str) -> str:
+    """Читаемое имя категории по URL (последний сегмент пути)."""
+    from urllib.parse import urlsplit
+    parts = [p for p in (urlsplit(url).path or '').split('/') if p]
+    return parts[-1] if parts else url
+
+
+def _expand_cases_for_categories(cases: list, categories: list) -> list:
+    """По селекторам из первого кейса конфига строит кейс на КАЖДУЮ
+    категорию прогона - чтобы проверить фильтр на всех, а не на одной.
+    Селекторы у проекта общие (одна тема), меняется только URL категории."""
+    if not cases or not categories:
+        return cases
+    tpl = cases[0]
+    seen, out = set(), []
+    for url in categories:
+        url = (url or '').strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        out.append({
+            'name': _cat_name(url),
+            'category': url,
+            'card': tpl.get('card'),
+            'filter': tpl.get('filter'),
+            'apply': tpl.get('apply'),
+            'total': tpl.get('total'),
+            'pre_apply_ms': tpl.get('pre_apply_ms'),
+            'wait_ms': tpl.get('wait_ms'),
+        })
+        if len(out) >= MAX_CATEGORIES:
+            break
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--project', required=True)
+    ap.add_argument('--categories-file', default='',
+                    help='JSON-список URL категорий прогона: фильтр проверяется '
+                         'на КАЖДОЙ (селекторы из конфига). Пусто = кейсы конфига.')
     a = ap.parse_args()
     pid = a.project
 
@@ -403,6 +444,18 @@ def main():
         print(msg, flush=True)
 
     cases = load_cases(pid)
+    # Категории прогона: тестируем фильтр на всех (полная картинка).
+    if a.categories_file:
+        try:
+            _cats = json.loads(Path(a.categories_file).read_text(
+                encoding='utf-8-sig')) or []
+        except Exception as e:  # noqa: BLE001
+            _cats = []
+            log(f'⚠ Список категорий не прочитан: {e}')
+        if _cats and cases:
+            cases = _expand_cases_for_categories(cases, _cats)
+            log(f'Фильтр-тест: категорий прогона {len(cases)} (селекторы '
+                f'из конфига).')
     out_path = CACHE / f'filters_{pid}.json'
     if not cases:
         log(f'Фильтр-тест: селекторы для «{pid}» не заданы '

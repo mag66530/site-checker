@@ -165,20 +165,30 @@ def _run_autoclicker(pid, params, log, session_b64=None):
     return {'available': True, 'sites': sites}
 
 
-def _run_filters_test(pid, params, log, session_b64=None):
+def _run_filters_test(pid, params, log, category_urls=None):
     """Фильтр-тест товаров в браузере (доп. чек-лист). Отдельный процесс
     filters_run.py (Playwright): локальный CDP-Chrome не нужен, каталог
-    публичный - гоняем свой headless. Возвращает dict для листа «Фильтрация»."""
+    публичный - гоняем свой headless. category_urls - категории прогона:
+    фильтр проверяется на КАЖДОЙ (полная картинка). Возвращает dict для
+    секции «Фильтрация»."""
     import os as _os
     import subprocess
     import sys as _sys
     root = Path(__file__).parent
     _env = dict(_os.environ)
     _env['PYTHONIOENCODING'] = 'utf-8'
+    (root / 'cache').mkdir(exist_ok=True)
     # В облаке нет локального Chrome - filters_run сам поднимет headless;
     # флаг CCR_AGENT_PROXY_ENABLED (если есть) он учитывает сам.
     args = [_sys.executable, 'filters_run.py', '--project', pid]
-    (root / 'cache').mkdir(exist_ok=True)
+    if category_urls:
+        _cat_file = root / 'cache' / f'filter_cats_{pid}.json'
+        try:
+            _cat_file.write_text(json.dumps(list(category_urls),
+                                            ensure_ascii=False), encoding='utf-8')
+            args += ['--categories-file', str(_cat_file)]
+        except Exception:
+            pass
     _res_file = root / 'cache' / f'filters_{pid}.json'
     try:
         _res_file.unlink(missing_ok=True)
@@ -640,9 +650,13 @@ def run_check(pid, params, creds, log, progress):
                 session_b64=creds.get('autoclick_session'))
 
         # ── Фильтр-тест товаров (доп. чек-лист) - тяжёлый браузер, по галочке ──
+        # Проверяем фильтр на ВСЕХ категориях прогона (каталог/категория).
         _filters_test = None
         if params.get('check_filter_fn'):
-            _filters_test = _run_filters_test(pid, params, log)
+            _cat_urls = [r.url for r in results if r.is_ok
+                         and r.type_code in ('catalog', 'category')]
+            _filters_test = _run_filters_test(pid, params, log,
+                                              category_urls=_cat_urls)
 
         # ── Ошибки JS в консоли (п.1.14) - браузер по страницам прогона ──
         _console_check = None
