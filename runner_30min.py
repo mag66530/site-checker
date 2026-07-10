@@ -668,6 +668,26 @@ def run_check(pid, params, creds, log, progress):
             if _console_urls:
                 _console_check = _run_console_check(pid, _console_urls, log)
 
+        # ── Валидация W3C + скорость ресурсов (п.1.16) - выборка страниц ──
+        # Внешние W3C-сервисы + скачивание ресурсов = медленно, поэтому
+        # берём по одной странице каждого типа (главная/категория/товар).
+        _w3c_check = None
+        if params.get('check_w3c'):
+            def _first(tc):
+                return next((r.url for r in results
+                             if r.is_ok and r.type_code == tc), None)
+            _w3c_urls = [u for u in (_first('main'), _first('category'),
+                                     _first('product')) if u]
+            if _w3c_urls:
+                try:
+                    from w3c_perf import check_pages as _w3c_pages
+                    log(f'Валидация W3C + скорость: {len(_w3c_urls)} страниц '
+                        f'(внешние сервисы, медленно)…')
+                    _w3c_check = _w3c_pages(_w3c_urls, proxy_url,
+                                            log=lambda m: log(m))
+                except Exception as _e:
+                    log(f'⚠ Валидация W3C: {_e}')
+
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых
         # галочках: выключил сбор - листов «Уведомления» / «404 из Метрики» /
@@ -702,7 +722,8 @@ def run_check(pid, params, creds, log, progress):
                                else get_latest_available_date(pid)),
             service_issues=_service_issues, autoclick=_autoclick,
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
-            filters_test=_filters_test, console_check=_console_check)
+            filters_test=_filters_test, console_check=_console_check,
+            w3c_check=_w3c_check)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

@@ -656,6 +656,7 @@ def init_session():
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
+        'c30_check_w3c': False,        # п.1.16 - валидация W3C + скорость - по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -1219,6 +1220,13 @@ if pid:
                          'ошибки JS в консоли (console.error + исключения). Шум '
                          'аналитики/виджетов отсеивается. Тяжёлый браузерный '
                          'проход - по запросу.')
+        st.checkbox('1.16  Валидация W3C (HTML/CSS) + скорость ресурсов',
+                    key='c30_check_w3c',
+                    help='По выборке страниц (главная/категория/товар): HTML '
+                         'через W3C Nu, CSS через W3C CSS Validator, время '
+                         'загрузки ресурсов (HTML/CSS/JS/шрифты/картинки). '
+                         'Внешние сервисы + скачивание - медленно, по запросу. '
+                         'Отдельный лист «Валидация и скорость».')
 
         # ── Автокликер (локальный Chrome или облако с сессией) ──────
         _ck_ac = st.checkbox(
@@ -1304,6 +1312,7 @@ if pid:
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_check_filter_fn', False)),
         bool(st.session_state.get('c30_check_console', False)),
+        bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
 
@@ -1358,6 +1367,7 @@ if pid:
                 'check_links': st.session_state.get('c30_check_links', False),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'check_console': st.session_state.get('c30_check_console', False),
+                'check_w3c': st.session_state.get('c30_check_w3c', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
                 'fetch_metrika_404': st.session_state.get('c30_fetch_metrika_404', True),

@@ -2389,6 +2389,130 @@ def _build_images_sheet(wb, results):
             extra=_img_extra)
 
 
+# ── Лист «Валидация и скорость» (п.1.16: W3C HTML/CSS + время ресурсов) ─
+
+
+def _build_w3c_sheet(wb, w3c_check):
+    """Лист валидации W3C (HTML/CSS) и скорости загрузки ресурсов по выборке
+    страниц. Добавляется, только если проверка выполнялась."""
+    if not w3c_check:
+        return
+    pages = w3c_check.get('pages') or []
+
+    ws = wb.create_sheet('Валидация и скорость')
+    ws.sheet_view.showGridLines = False
+    _any_err = any((p.get('html') or {}).get('errors')
+                   or (p.get('css') or {}).get('errors') for p in pages)
+    ws.sheet_properties.tabColor = C.warn if _any_err else C.ok
+
+    for col, w in (('A', 3), ('B', 50), ('C', 20), ('D', 20), ('E', 46), ('F', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Валидация W3C и скорость ресурсов (п.1.16)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('По ВЫБОРКЕ страниц (главная/категория/товар - у W3C лимиты): '
+               '(1) HTML валиден - W3C Nu (validator.w3.org); (2) CSS валиден - '
+               'W3C CSS Validator (jigsaw.w3.org); (3) время загрузки ресурсов - '
+               'скачиваем HTML/CSS/JS/шрифты/картинки и суммируем по типам. '
+               'Ошибки валидатора = предупреждение (у боевых сайтов их часто '
+               'много). Полный список ошибок - в самих валидаторах по ссылке.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+    if not w3c_check.get('available') or not pages:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = w3c_check.get('note') or 'Проверка не выполнялась.'
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True)
+        return
+
+    for p in pages:
+        # Заголовок страницы
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = p.get('url', '')
+        c.hyperlink = p.get('url', '')
+        c.font = _font(size=11, bold=True, color=C.accent, underline='single')
+        c.fill = _fill(C.surface)
+        c.alignment = _align(indent=1)
+        c.border = _border()
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+        if p.get('error'):
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = '⚠ ' + p['error']
+            c.font = _font(size=10, color=C.warn)
+            c.alignment = _align(indent=2)
+            ws.row_dimensions[row].height = 18
+            row += 2
+            continue
+
+        def _line(label, value, color=C.text):
+            nonlocal row
+            k = ws.cell(row=row, column=2, value=label)
+            k.font = _font(size=10, color=C.text_muted)
+            k.alignment = _align(indent=2)
+            ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
+            v = ws.cell(row=row, column=3, value=value)
+            v.font = _font(size=10, color=color)
+            v.alignment = _align(wrap=True)
+            ws.row_dimensions[row].height = 18
+            row += 1
+
+        # HTML
+        _h = p.get('html') or {}
+        if _h.get('error'):
+            _line('HTML (W3C Nu):', f'не проверено — {_h["error"]}', C.text_muted)
+        else:
+            _he = _h.get('errors')
+            _line('HTML (W3C Nu):',
+                  ('✅ валиден (0 ошибок)' if _he == 0
+                   else f'⚠ {_he} ошибок, {_h.get("warnings", 0)} замечаний'),
+                  C.ok if _he == 0 else C.warn)
+            if _he and _h.get('samples'):
+                _line('  примеры:', '; '.join(_h['samples'][:2]), C.text_soft)
+        # CSS
+        _cs = p.get('css') or {}
+        if _cs.get('error'):
+            _line('CSS (W3C):', f'не проверено — {_cs["error"]}', C.text_muted)
+        else:
+            _ce = _cs.get('errors')
+            _line('CSS (W3C):',
+                  ('✅ валиден (0 ошибок)' if _ce == 0
+                   else f'⚠ {_ce} ошибок, {_cs.get("warnings", 0)} замечаний'),
+                  C.ok if _ce == 0 else C.warn)
+        # Скорость
+        _t = p.get('timings') or {}
+        if _t:
+            bt = _t.get('by_type', {})
+            _parts = [f'HTML {_t.get("html_ms", 0)}мс']
+            for k, ru in (('css', 'CSS'), ('js', 'JS'), ('font', 'шрифты'),
+                          ('img', 'картинки')):
+                d = bt.get(k) or {}
+                if d.get('count'):
+                    _parts.append(f'{ru} {d["ms"]}мс/{d["count"]}шт/{d["kb"]}КБ')
+            _line('Скорость ресурсов:', ' · '.join(_parts), C.text)
+            _sl = _t.get('slowest') or {}
+            if _sl.get('url'):
+                _line('  самый долгий:',
+                      f'{_sl["ms"]}мс — {_sl["url"].rsplit("/", 1)[-1]} '
+                      f'({_sl.get("kind", "")})', C.text_soft)
+            _line('  итого загрузка:', f'{_t.get("total_ms", 0)} мс',
+                  C.warn if _t.get('total_ms', 0) > 8000 else C.text)
+        row += 1
+
+
 # ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
 
 
@@ -3316,6 +3440,7 @@ def build_report(
     meta_summary: dict = None,     # дубли мета/URL (п.1.8) - в лист «Метаданные»
     filters_test: dict = None,     # итоги фильтр-теста - секция на листе «Вёрстка»
     console_check: dict = None,    # ошибки JS в консоли (п.1.14) - лист «Ошибки JavaScript»
+    w3c_check: dict = None,        # валидация W3C + скорость (п.1.16) - лист «Валидация и скорость»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -3578,6 +3703,7 @@ def build_report(
         ('Изображения', 'если есть лист - alt у картинок, современные форматы (webp/avif) и вес (п.1.15).'),
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Ошибки JavaScript', 'если есть лист - страницы, где в консоли браузера есть ошибки JS (п.1.14).'),
+        ('Валидация и скорость', 'если есть лист - валидность HTML/CSS (W3C) и время загрузки ресурсов по выборке (п.1.16).'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
@@ -3623,6 +3749,9 @@ def build_report(
 
     # ─── Лист ошибок JS в консоли (п.1.14) - если проверка выполнялась ──
     _build_console_sheet(wb, console_check)
+
+    # ─── Лист валидации W3C + скорости (п.1.16) - если выполнялась ──────
+    _build_w3c_sheet(wb, w3c_check)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
