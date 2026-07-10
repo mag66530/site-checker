@@ -984,7 +984,17 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
             # просмотренные», «с этим товаром покупают», «акции» - у каждой СВОЯ
             # цель. Escape ДО клика снимает модалку прошлого (перекрытие - причина
             # «через раз»), Escape ПОСЛЕ закрывает открытую.
-            for sel in клики:
+            # Индекс ПОСЛЕДНЕГО кликабельного селектора. После него восстанавливать
+            # страницу (go_back) на клике-переходе не нужно - кликать больше нечего,
+            # а следующая страница плана всё равно грузится своим goto. Экономит
+            # лишнюю перезагрузку. Не кликабельны: '!' (уже выполнен) и 'цель_модалка'
+            # (обработана чистым проходом). Вердикты целей это не меняет.
+            _last_click_idx = max(
+                (k for k, s in enumerate(клики)
+                 if (isinstance(s, str) and not s.startswith('!'))
+                 or (isinstance(s, dict) and not s.get('цель_модалка'))),
+                default=-1)
+            for _si_k, sel in enumerate(клики):
                 if isinstance(sel, str) and sel.startswith('!'):
                     continue        # срочный - уже выполнен сразу после загрузки
                 if isinstance(sel, dict) and sel.get('цель_модалка'):
@@ -1033,7 +1043,7 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                         _добрать_цели_из_dom()   # цепочка открыла модалку (напр. авторизация) - берём её цели
                         page.keyboard.press('Escape')
                         page.wait_for_timeout(200)
-                        if page.url != url:
+                        if page.url != url and _si_k < _last_click_idx:
                             try:
                                 page.go_back(wait_until='domcontentloaded', timeout=15000)
                             except Exception:
@@ -1064,12 +1074,13 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                         # клик мог быть по ссылке-переходу (Каталог/Акции/Прайс в
                         # шапке): цель сработала, но нужно вернуться и кликать дальше.
                         if page.url != url:
-                            try:
-                                page.go_back(wait_until='domcontentloaded', timeout=15000)
-                            except Exception:
-                                page.goto(url, wait_until='domcontentloaded', timeout=30000)
-                            page.wait_for_timeout(500)
-                            break   # после ухода нумерация сбилась - к следующему селектору
+                            if _si_k < _last_click_idx:   # ещё есть что кликать - вернуть страницу
+                                try:
+                                    page.go_back(wait_until='domcontentloaded', timeout=15000)
+                                except Exception:
+                                    page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                                page.wait_for_timeout(500)
+                            break   # после ухода нумерация сбилась - к следующему селектору (или конец)
                         page.keyboard.press('Escape')
                         page.wait_for_timeout(100)
                     except Exception:
