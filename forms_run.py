@@ -65,6 +65,26 @@ def _имена_заказов(src_config: Path) -> list[str]:
                         имена.add(str(шаг['название']).strip())
     return sorted(имена)
 
+
+def _страницы_форм(src_config: Path) -> list[tuple[str, str]]:
+    """Список (тип, url) страниц форм из СТРАНИЦЫ конфига - для проверки мобильной
+    вёрстки. Дедуп по url (у карточки товара и оформления часто один адрес)."""
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location('cfg_pages', src_config)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+    except Exception:
+        return []
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for тип, url in (getattr(m, 'СТРАНИЦЫ', {}) or {}).items():
+        u = str(url or '').strip()
+        if u and u not in seen:
+            seen.add(u)
+            out.append((str(тип), u))
+    return out
+
 # Проекты-варианты со своим config.py, но БЕЗ своего cities.csv - берут
 # справочник городов у «родителя». Так «МПЭ - Корзина» гоняет те же города,
 # что и Мепэн, без дублирования файла на 160 строк.
@@ -272,6 +292,29 @@ def main() -> int:
                         show=show_browser, log=_stamp)
             except Exception as e:  # noqa: BLE001
                 _stamp(f'⚠️ Проверка 2.12 (cookie/чат) не выполнена: {e}')
+
+        # ── Мобильная вёрстка форм (горизонтальный скролл + тач-размеры) ──
+        # Тоже через append_log_row, поэтому ДО проверок админки (иначе колонки
+        # разъедутся). Меряем на домене первого выбранного города - шаблон вёрстки
+        # у поддоменов один, гонять по всем городам смысла нет.
+        if not (stop and stop()):
+            try:
+                import mobile_check
+                _pages = _страницы_форм(src_config)
+                if _pages and run_cities:
+                    _c0_url = run_cities[0][1]
+                    _c0_host = urlparse(_c0_url).netloc
+                    _моб = []
+                    for _тип, _purl in _pages:
+                        _u = _purl
+                        if main_host and _c0_host and _c0_host != main_host:
+                            _u = _u.replace(f'//{main_host}', f'//{_c0_host}')
+                        _моб.append((_тип, _u))
+                    mobile_check.выполнить_проверку(
+                        _моб, excel_path='log_forms.xlsx',
+                        show=show_browser, log=_stamp)
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠️ Проверка мобильной вёрстки не выполнена: {e}')
 
         # ── Уровень 1: проверка админки (если заданы креды admin.local.json) ──
         # У СМУ разные админки для РФ / СНГ / Steelgroup (АДМИН_ЗОНЫ в конфиге), но
