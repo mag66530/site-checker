@@ -150,6 +150,11 @@ def check_meta(meta: dict, city: str, type_code: str) -> dict:
         if len(title) < TITLE_MIN:
             warnings.append(f'title короткий (меньше {TITLE_MIN} символов; '
                             f'рекомендуется {TITLE_MIN}–{TITLE_MAX})')
+        elif len(title) > 110:
+            # Отдельный текст: сильное превышение группируется своей
+            # строкой - сразу видно масштаб «массовой» проблемы шаблона.
+            warnings.append('title очень длинный (больше 110 символов) - '
+                            'шаблон title переполнен')
         elif len(title) > TITLE_MAX:
             warnings.append(f'title длинный (больше {TITLE_MAX} символов; '
                             f'рекомендуется {TITLE_MIN}–{TITLE_MAX})')
@@ -160,6 +165,12 @@ def check_meta(meta: dict, city: str, type_code: str) -> dict:
         elif len(desc) > DESC_MAX:
             warnings.append(f'description длинный (больше {DESC_MAX} символов; '
                             f'рекомендуется {DESC_MIN}–{DESC_MAX})')
+
+    # Title не должен СОВПАДАТЬ с H1: title расширяют городом, «купить»,
+    # брендом - полный дубль = недоиспользованный title.
+    if title and h1 and _norm_val(title) == _norm_val(h1):
+        warnings.append('title полностью совпадает с H1 - title обычно '
+                        'расширяют (город, «купить», бренд)')
 
     return {'title': title, 'description': desc, 'h1': h1,
             'title_len': len(title) if title else 0,
@@ -559,14 +570,47 @@ def check_headings_placement(html: str) -> dict:
     return {'issues': issues}
 
 
+_MAX_HIERARCHY_ISSUES = 3    # скачки обычно шаблонные - хватит примеров
+
+
+def check_heading_hierarchy(html: str) -> dict:
+    """Логическая последовательность заголовков h1→h2→h3→… по смысловым
+    блокам: уровень не должен ПРЫГАТЬ вниз через ступень (после h1 сразу
+    h3 - значит h2-структуры нет). Служебные зоны (<header>/<footer>/
+    <nav>/<aside>) вырезаются - их заголовки ловит проверка «текстовости».
+    Возвращает {'issues': [...]} в формате листа «Заголовки и мета»."""
+    h = _clean_struct(html or '')
+    for tag, _label in _PLACEMENT_ZONES:
+        h = re.sub(rf'<{tag}\b[^>]*>.*?</{tag}>', ' ', h, flags=re.I | re.S)
+    issues: list[dict] = []
+    prev = None
+    for m in re.finditer(r'<h([1-6])\b[^>]*>(.*?)</h\1\s*>', h, re.I | re.S):
+        level = int(m.group(1))
+        txt = _txt(m.group(2))
+        if prev is not None and level > prev + 1:
+            issues.append({
+                'тип': 'иерархия',
+                'найдено': f'h{prev}→h{level}',
+                'пояснение': f'скачок уровня заголовков: после h{prev} сразу '
+                             f'h{level} («{_short(txt, 40)}») - пропущен '
+                             f'h{prev + 1}, иерархия смысловых блоков ломается',
+            })
+            if len(issues) >= _MAX_HIERARCHY_ISSUES:
+                break
+        prev = level
+    return {'issues': issues}
+
+
 def check_tags(html: str, url: str = '', type_code: str = '') -> dict:
     """Объединённая проверка тегов для пункта 1.8: единственность
-    title/description/H1 + дубли H2 (п.1.3.1) и «текстовость» заголовков
-    (п.1.3.2). Один dict для CheckResult.meta_unique."""
+    title/description/H1 + дубли H2 (п.1.3.1), «текстовость» заголовков
+    (п.1.3.2) и логическая иерархия h1→h2→h3. Один dict для
+    CheckResult.meta_unique."""
     out = check_meta_uniqueness(html, url, type_code)
     try:
         out['issues'] = list(out.get('issues') or []) + \
-            (check_headings_placement(html).get('issues') or [])
+            (check_headings_placement(html).get('issues') or []) + \
+            (check_heading_hierarchy(html).get('issues') or [])
     except Exception:
         pass
     return out
