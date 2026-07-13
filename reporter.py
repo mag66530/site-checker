@@ -2914,8 +2914,10 @@ def _build_meta_sheet(wb, results, meta_summary):
                             C.err if url_dups else C.ok)
         row += 1
         if not url_dups:
-            _meta_ok_line(ws, row, '✅ Все варианты адресов (http, слэш, www, '
-                                   'index.php) корректно редиректят.')
+            _meta_ok_line(ws, row, '✅ Все варианты адресов (HTTP→HTTPS, '
+                                   'слэш на конце, www/без www, index.php/'
+                                   'index.html/home.php) отдают постоянный '
+                                   '301-редирект на канонический вид.')
             row += 1
         else:
             _url_dup_table(url_dups, C.err)

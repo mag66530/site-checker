@@ -242,9 +242,12 @@ def _url_variants(url: str) -> list:
         variants.append(('без слэша', f'{sp.scheme}://{host}{path.rstrip("/")}'))
     elif not path.endswith('/') and path != '':
         variants.append(('со слэшем', f'{sp.scheme}://{host}{path}/'))
-    # 3. www. - только для корневого домена (www.spb.… обычно без DNS)
+    # 3. www./без-www - в обе стороны, в зависимости от главного зеркала.
+    #    Только для корневого домена (www.spb.… обычно без DNS).
     if not host.startswith('www.') and host.count('.') == 1:
         variants.append(('www', f'{sp.scheme}://www.{host}{path}'))
+    elif host.startswith('www.') and host.count('.') == 2:
+        variants.append(('без www', f'{sp.scheme}://{host[4:]}{path}'))
     # 4. index.php и т.п. - дубли главной (Bitrix часто отдаёт 200)
     if path == '/':
         for idx in ('index.php', 'index.html', 'index.htm', 'home.php'):
