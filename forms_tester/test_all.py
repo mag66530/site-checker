@@ -776,6 +776,245 @@ def стиль_формы(scope) -> dict:
                        f"{слепок}. {кноп_txt}")}
 
 
+# JS: очистить ВСЕ поля (сохранив значения в window.__valSaved) и спросить браузер
+# о нативной валидации - БЕЗ отправки (checkValidity не шлёт). Также считаем
+# «похожие на обязательные» поля: native required / класс-маркер / core-поле
+# (имя/телефон/почта) - чтобы покрыть формы с кастомной JS-валидацией без атрибута.
+_JS_VAL_NATIVE = r"""
+f => {
+  const form = f.tagName==='FORM' ? f : (f.querySelector('form') || f);
+  const skip = ['hidden','submit','button','reset','image'];
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const ctrls = [...form.querySelectorAll('input,textarea,select')]
+    .filter(e => !skip.includes((e.type||'').toLowerCase()));
+  const looksReq = e => {
+    if (e.required || e.getAttribute('aria-required')==='true') return true;
+    const cls = (e.className||'') + ' ' + (e.parentElement ? e.parentElement.className : '');
+    if (/require|mandat|обязат/i.test(cls)) return true;
+    const nm = ((e.name||'') + ' ' + (e.placeholder||'') + ' '
+                + (e.getAttribute('autocomplete')||'')).toLowerCase();
+    if (/phone|tel|тел|mail|почт|name|имя|fio|фио/.test(nm)) return true;
+    return false;
+  };
+  const fillable = ctrls.filter(e => {
+    const t=(e.type||'text').toLowerCase();
+    return vis(e) && (e.tagName==='TEXTAREA' || e.tagName==='SELECT'
+      || ['text','tel','email','search','url','number','password',''].includes(t)); });
+  const reqLike = ctrls.filter(looksReq);
+  window.__valSaved = ctrls.map(e => ({v: e.value, c: e.checked}));
+  ctrls.forEach(e => { const t=(e.type||'').toLowerCase();
+    if (t==='checkbox'||t==='radio') e.checked=false; else e.value=''; });
+  let formValid = true, msgs = [];
+  try { formValid = form.checkValidity(); } catch(_){}
+  for (const e of ctrls) { try {
+    if (!e.checkValidity() && e.validationMessage) msgs.push(e.validationMessage);
+  } catch(_){} }
+  return {fillable: fillable.length, reqLike: reqLike.length, formValid,
+          msgs: [...new Set(msgs)].slice(0,3)};
+}
+"""
+
+# JS: вернуть поля к сохранённым значениям (после пробы).
+_JS_VAL_RESTORE = r"""
+f => {
+  const form = f.tagName==='FORM' ? f : (f.querySelector('form') || f);
+  const skip = ['hidden','submit','button','reset','image'];
+  const ctrls = [...form.querySelectorAll('input,textarea,select')]
+    .filter(e => !skip.includes((e.type||'').toLowerCase()));
+  const s = window.__valSaved || [];
+  ctrls.forEach((e,i) => { if (s[i]) { const t=(e.type||'').toLowerCase();
+    if (t==='checkbox'||t==='radio') e.checked=s[i].c; else e.value=s[i].v; } });
+  return true;
+}
+"""
+
+# JS: перехватчик submit с preventDefault - ловим ФАКТ попытки отправки и ОТМЕНЯЕМ её.
+_JS_VAL_ARM = r"""
+f => {
+  const g = f.tagName==='FORM' ? f : f.querySelector('form');
+  if (!g) return 'noform';
+  window.__valSub = false;
+  window.__valH = function(e){ window.__valSub=true; e.preventDefault(); e.stopPropagation(); };
+  g.addEventListener('submit', window.__valH, true);
+  return 'ok';
+}
+"""
+
+_JS_VAL_DISARM = r"""
+f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');
+  if (g && window.__valH) g.removeEventListener('submit', window.__valH, true); return true; }
+"""
+
+# JS: ищем ВИДИМУЮ ошибку валидации в форме - сообщение (текст+цвет) или подсветку поля.
+_JS_VAL_SCAN = r"""
+f => {
+  const root = f.tagName==='FORM' ? f : (f.querySelector('form') || f);
+  const vis = el => { const r=el.getBoundingClientRect(); const s=getComputedStyle(el);
+    return r.width>0 && r.height>0 && s.visibility!=='hidden'
+        && s.display!=='none' && s.opacity!=='0'; };
+  const red = c => { const m=(c||'').match(/[\d.]+/g); if(!m) return false;
+    const r=+m[0],g=+m[1],b=+m[2]; return r>=120 && r-g>=40 && r-b>=40; };
+  const sels = "[class*=error i],[class*=invalid i],[aria-invalid=true],.errortext,"
+    + ".form-error,.field-error,.help-block,.invalid-feedback,[role=alert]";
+  for (const el of root.querySelectorAll(sels)) {
+    if (!vis(el)) continue; const t=(el.innerText||'').trim();
+    if (!t || t.length>160) continue;
+    const c=getComputedStyle(el).color;
+    return {found:true, text:t.slice(0,120), color:c, red:red(c), kind:'msg'};
+  }
+  for (const e of root.querySelectorAll('input,textarea,select')) {
+    if (!vis(e)) continue; let inv=false;
+    try { inv = e.matches(':invalid') || e.getAttribute('aria-invalid')==='true'; } catch(_){}
+    if (inv) { const bc=getComputedStyle(e).borderTopColor;
+      return {found:true, text:'(поле подсвечено)', color:bc, red:red(bc), kind:'field'}; }
+  }
+  return {found:false};
+}
+"""
+
+
+def проверка_отображения_ошибок(scope, page, sub, is_order) -> dict:
+    """Пункт «Ошибки валидации отображаются корректно (цвета, текст ошибок)».
+
+    Проверяет НЕ наличие правил валидации (это делает 2.14), а ПОКАЗ ошибки
+    пользователю: при пустом/невалидном вводе появляется ли видимое сообщение,
+    красное ли оно, есть ли внятный текст.
+
+    Безопасность - заявка НЕ уходит ни в каком случае:
+      • нативную валидацию ловим `checkValidity()` без отправки;
+      • кастомную (JS Bitrix) - контролируемым пустым сабмитом под ДВОЙНОЙ
+        защитой: перехватчик submit с preventDefault + abort POST-запроса.
+    Поля восстанавливаем из window.__valSaved в конце.
+
+    → {состояние: 'есть'|'нет'|'без реакции'|'не найдено'|'проверить вручную', детали}."""
+    def _restore():
+        try:
+            scope.evaluate(_JS_VAL_RESTORE)
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        r = scope.evaluate(_JS_VAL_NATIVE)
+    except Exception:  # noqa: BLE001
+        return {"состояние": "не найдено", "детали": "валидацию формы прочитать не удалось"}
+    if not isinstance(r, dict):
+        _restore()
+        return {"состояние": "не найдено", "детали": "форму прочитать не удалось"}
+
+    # Нет заполняемых полей - показ ошибок проверять нечего.
+    if not r.get("fillable"):
+        _restore()
+        return {"состояние": "не найдено",
+                "детали": "заполняемых полей нет - показ ошибок проверять нечего"}
+
+    # Нативная валидация ловит пустые поля → браузер сам покажет ошибку (гарантированно).
+    if r.get("formValid") is False:
+        _restore()
+        msgs = r.get("msgs") or []
+        текст = ("; ".join(msgs))[:150] if msgs else "браузерная проверка активна"
+        return {"состояние": "есть",
+                "детали": f"нативная валидация - браузер покажет ошибку ({текст})"}
+
+    # Нативной валидации нет и «обязательных» полей не видно (нет имя/тел/почта,
+    # нет маркеров) - пустая отправка легальна, проверять нечего.
+    if not r.get("reqLike"):
+        _restore()
+        return {"состояние": "не найдено",
+                "детали": "нативной валидации нет, обязательных полей не видно - проверять нечего"}
+
+    # Есть похожие на обязательные поля, но нативной валидации нет → форма
+    # полагается на кастомный JS. На форме заказа авто-пробу не делаем
+    # (перестраховка на чекауте) - помечаем ручной проверкой.
+    if is_order:
+        _restore()
+        return {"состояние": "проверить вручную",
+                "детали": ("нет нативной валидации, форма заказа - авто-проба пропущена; "
+                           "проверьте показ ошибки вручную")}
+
+    # Кастомный проход: пустой сабмит под двойной защитой (preventDefault + abort POST).
+    posted = {"n": 0}
+    armed = listener = False
+    err = {"found": False}
+    attempted = False
+
+    def _val_route(route):
+        try:
+            req = route.request
+            if (req.method or "").upper() == "POST" and not _ds_это_трекер(req.url):
+                posted["n"] += 1
+                route.abort("failed")
+            else:
+                route.continue_()
+        except Exception:  # noqa: BLE001
+            try:
+                route.continue_()
+            except Exception:  # noqa: BLE001
+                pass
+
+    try:
+        try:
+            listener = (scope.evaluate(_JS_VAL_ARM) == "ok")
+        except Exception:  # noqa: BLE001
+            listener = False
+        page.route("**/*", _val_route)
+        armed = True
+        try:
+            sub.click(timeout=5000)
+        except Exception:  # noqa: BLE001
+            try:
+                sub.click(timeout=5000, force=True)
+            except Exception:  # noqa: BLE001
+                pass
+        page.wait_for_timeout(1300)
+        attempted = bool(posted["n"])
+        try:
+            attempted = attempted or bool(page.evaluate("() => !!window.__valSub"))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            err = scope.evaluate(_JS_VAL_SCAN) or {"found": False}
+        except Exception:  # noqa: BLE001
+            err = {"found": False}
+    finally:
+        if armed:
+            try:
+                page.unroute("**/*", _val_route)
+            except Exception:  # noqa: BLE001
+                try:
+                    page.unroute("**/*")
+                except Exception:  # noqa: BLE001
+                    pass
+        if listener:
+            try:
+                scope.evaluate(_JS_VAL_DISARM)
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            sub.evaluate("b => { try { b.disabled=false; b.removeAttribute('disabled'); } catch(_){} }")
+        except Exception:  # noqa: BLE001
+            pass
+        _restore()
+        page.wait_for_timeout(200)
+
+    # Если форма ПОПЫТАЛАСЬ отправить пустые данные - клиентской валидации нет
+    # (реальная валидация блокирует ДО отправки). Любая «ошибка» тут - это уже
+    # реакция на наш перехват, а не валидация. Заявка перехвачена, не ушла.
+    if attempted:
+        return {"состояние": "нет",
+                "детали": ("пустая форма попыталась отправиться без клиентской валидации - "
+                           "ошибок не показано (заявка перехвачена, не ушла)")}
+    if err.get("found"):
+        цвет = _rgb_в_hex(err.get("color") or "")
+        крас = "красная" if err.get("red") else "НЕ красная - проверить цвет"
+        поле = " (подсветка поля)" if err.get("kind") == "field" else ""
+        txt = (err.get("text") or "").strip()
+        return {"состояние": "есть",
+                "детали": f"показана ошибка{поле}: «{txt}», цвет {цвет} - {крас}"}
+    return {"состояние": "без реакции",
+            "детали": ("на пустую отправку форма не показала ошибку и не отправилась - "
+                       "проверьте, видима ли реакция валидации")}
+
+
 def проверка_списков(scope) -> dict:
     """Пункт «Выпадающие списки открываются и корректно отображают варианты».
     Читает ВИДИМЫЕ <select> формы, значение НЕ меняет (иначе на форме заказа
@@ -2334,6 +2573,10 @@ LOG_HEADERS = [
     "Обработка ошибок",
     "Автозаполнение полей",
     "Подсказки полей",
+    # Пункт «Ошибки валидации отображаются корректно (цвета, текст ошибок)»:
+    # показывает ли форма видимую ошибку при пустом/невалидном вводе.
+    # «есть / нет / без реакции / не найдено / проверить вручную».
+    "Ошибки валидации",
     "Комментарий",
 ]
 
@@ -2351,6 +2594,7 @@ LOG_KEYS_ORDER = [
     "обработка_ошибок",
     "автозаполнение",
     "подсказки",
+    "ошибки_валидации",
     "комментарий",
 ]
 
@@ -3892,6 +4136,28 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _btn_css or "button[type='submit'], input[type='submit'], button.btn"
             ).first
             sub.scroll_into_view_if_needed()
+
+            # ── Ошибки валидации отображаются корректно (показ/цвет/текст) ──
+            # Нативную валидацию ловим checkValidity() без отправки; кастомную -
+            # контролируемым ПУСТЫМ сабмитом под двойной защитой (preventDefault +
+            # abort POST), заявка НЕ уходит. Поля восстанавливаются до штатной
+            # отправки ниже. Делаем ДО «Обработки ошибок», пока форма не тронута.
+            try:
+                _vd = проверка_отображения_ошибок(form, page, sub, _is_order)
+                записать_в_excel({
+                    "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                    "тип_селектора": "поля", "ид": название,
+                    "название": f"Ошибки валидации (показ/цвет/текст): {название}",
+                    "имя": имя_теста,
+                    "статус": ("Проверить" if _vd["состояние"]
+                               in ("нет", "без реакции", "проверить вручную") else "OK"),
+                    "ошибки_валидации": _vd["состояние"],
+                    "комментарий_готовый": _vd["детали"],
+                    "код": "validation_display",
+                })
+                print(f"   🚨 Ошибки валидации «{название}»: {_vd['состояние']} — {_vd['детали']}")
+            except Exception as _evd:  # noqa: BLE001
+                print(f"   ⚠️ Проверка показа ошибок валидации не удалась: {_evd}")
 
             # ── Обработка ошибок отправки (пункт чек-листа) ──
             # Нарочно роняем ПЕРВЫЙ запрос отправки (route.abort) и смотрим реакцию
