@@ -2323,6 +2323,7 @@ LOG_HEADERS = [
     "Выпадающие списки", "Чекбоксы/радио", "Двойная отправка",
     "Блокировка при отправке",
     "Кнопка активна после заполнения",
+    "Навигация с клавиатуры", "Hover/Focus состояния",
     "Enter отправляет", "Поля очищены",
     # Пункт «Форма стилизована по макету»: консистентность полей + факт
     # стилизации (не браузерный дефолт). «Консистентно / Разнобой / Дефолт».
@@ -2345,7 +2346,9 @@ LOG_KEYS_ORDER = [
     "название", "где", "имя", "телефон", "почта", "почта_получателя",
     "статус", "уведомление", "типы_файлов", "выпадающие_списки",
     "чекбоксы_радио", "двойная_отправка", "блокировка_отправки",
-    "кнопка_после_заполнения", "enter_отправляет",
+    "кнопка_после_заполнения",
+    "tab_навигация", "hover_focus",
+    "enter_отправляет",
     "поля_очищены",
     "стилизация",
     "согласие_чекбоксы", "согласие_предустановка", "согласие_ссылка",
@@ -3948,6 +3951,154 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     })
                     print(f"   🔘 Кнопка активна после заполнения «{название}»: "
                           f"{_req_btn_verdict}" + (f" — {_req_btn_ком}" if _req_btn_ком else ""))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # ── Навигация с клавиатуры: Tab/Shift+Tab (пункт чек-листа) ──
+            # Форма уже заполнена, кнопка найдена - ничего не отправляем, только
+            # двигаем фокус. Сравниваем «кого реально посетил Tab» с «кто вообще
+            # есть в форме» (видимые input/textarea/select/button/[tabindex]).
+            _tab_verdict, _tab_ком = None, ""
+            _sig_js = ("() => { const e=document.activeElement;"
+                       " return e ? (e.tagName+'|'+(e.name||'')+'|'+(e.id||'')+'|'+(e.type||'')) : ''; }")
+            try:
+                _form_focusables = form.evaluate(
+                    "f => [...f.querySelectorAll("
+                    "'input,textarea,select,button,[tabindex]')]"
+                    ".filter(e => { const t=(e.type||'').toLowerCase();"
+                    " if (t==='hidden' || e.disabled || e.tabIndex===-1) return false;"
+                    " const r=e.getBoundingClientRect(); return r.width>0 && r.height>0; })"
+                    ".map(e => (e.tagName+'|'+(e.name||'')+'|'+(e.id||'')+'|'+(e.type||'')))")
+            except Exception:  # noqa: BLE001
+                _form_focusables = []
+            if len(_form_focusables) >= 2:
+                try:
+                    form.locator(
+                        "input,textarea,select,button,[tabindex]"
+                    ).first.evaluate("e => e.focus()")
+                    _visited, _prev, _stuck = [], None, False
+                    for _ in range(min(len(_form_focusables) + 2, 25)):
+                        _cur = page.evaluate(_sig_js)
+                        _visited.append(_cur)
+                        if _cur == _prev:
+                            _stuck = True
+                            break
+                        _prev = _cur
+                        page.keyboard.press("Tab")
+                        page.wait_for_timeout(30)
+                    _missing = [s for s in _form_focusables if s not in _visited]
+                    _shift_stuck, _sprev = False, None
+                    for _ in range(min(len(_form_focusables), 5)):
+                        page.keyboard.press("Shift+Tab")
+                        page.wait_for_timeout(30)
+                        _scur = page.evaluate(_sig_js)
+                        if _scur == _sprev:
+                            _shift_stuck = True
+                            break
+                        _sprev = _scur
+                    if _stuck:
+                        _tab_verdict = "фокус зависает"
+                        _tab_ком = "Tab перестаёт двигать фокус, не дойдя до конца формы."
+                    elif _missing:
+                        _tab_verdict = "не все элементы достижимы"
+                        _tab_ком = (f"Tab не посещает {len(_missing)} из "
+                                    f"{len(_form_focusables)} элементов формы.")
+                    elif _shift_stuck:
+                        _tab_verdict = "фокус зависает"
+                        _tab_ком = "Shift+Tab перестаёт двигать фокус назад."
+                    else:
+                        _tab_verdict = "корректно"
+                except Exception:  # noqa: BLE001
+                    _tab_verdict = None
+            if _tab_verdict:
+                try:
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "поля", "ид": название,
+                        "название": f"Навигация с клавиатуры (Tab): {название}",
+                        "имя": имя_теста,
+                        "статус": "OK" if _tab_verdict == "корректно" else "Проверить",
+                        "tab_навигация": _tab_verdict,
+                        "комментарий_готовый": _tab_ком or None,
+                        "код": "tab_navigation",
+                    })
+                    print(f"   ⌨️ Навигация Tab «{название}»: {_tab_verdict}"
+                          + (f" — {_tab_ком}" if _tab_ком else ""))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # ── Hover/Focus состояния интерактивных элементов (пункт чек-листа) ──
+            # На кнопке отправки и первом текстовом поле сравниваем computed style
+            # в покое vs при фокусе vs при наведении - если ничего не меняется,
+            # состояние визуально никак не выражено (для фокуса это ещё и вопрос
+            # доступности - без видимого фокуса Tab-навигация бесполезна глазами).
+            def _стиль_снимок(loc):
+                try:
+                    return loc.evaluate(
+                        "e => { const s=getComputedStyle(e);"
+                        " return [s.outlineStyle,s.outlineWidth,s.borderColor,"
+                        " s.borderStyle,s.boxShadow,s.backgroundColor,s.color].join('|'); }")
+                except Exception:  # noqa: BLE001
+                    return None
+
+            _hf_targets = [("кнопка", sub)]
+            try:
+                _first_field = form.locator(
+                    "input:not([type='checkbox']):not([type='radio'])"
+                    ":not([type='hidden']):not([type='file']):not([type='submit'])"
+                    ":not([type='button']) >> visible=true"
+                ).first
+                if _first_field.count():
+                    _hf_targets.insert(0, ("поле", _first_field))
+            except Exception:  # noqa: BLE001
+                pass
+
+            _no_focus, _no_hover = [], []
+            for _label, _loc in _hf_targets:
+                try:
+                    _база = _стиль_снимок(_loc)
+                    if _база is None:
+                        continue
+                    _loc.evaluate("e => e.focus()")
+                    _фокус = _стиль_снимок(_loc)
+                    _loc.evaluate("e => e.blur()")
+                    if _фокус is not None and _фокус == _база:
+                        _no_focus.append(_label)
+                    _loc.hover(timeout=2000)
+                    _ховер = _стиль_снимок(_loc)
+                    page.mouse.move(0, 0)
+                    if _ховер is not None and _ховер == _база:
+                        _no_hover.append(_label)
+                except Exception:  # noqa: BLE001
+                    continue
+
+            _hf_verdict, _hf_ком = None, ""
+            if _hf_targets:
+                if _no_focus and _no_hover:
+                    _hf_verdict = "нет ни фокуса, ни hover"
+                    _hf_ком = f"Нет видимого изменения ни при фокусе, ни при наведении: {', '.join(_no_focus)}."
+                elif _no_focus:
+                    _hf_verdict = "нет focus"
+                    _hf_ком = f"Нет заметного изменения стиля при фокусе: {', '.join(_no_focus)}."
+                elif _no_hover:
+                    _hf_verdict = "нет hover"
+                    _hf_ком = f"Нет заметного изменения стиля при наведении: {', '.join(_no_hover)}."
+                else:
+                    _hf_verdict = "есть"
+            if _hf_verdict:
+                try:
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "поля", "ид": название,
+                        "название": f"Hover/Focus состояния: {название}",
+                        "имя": имя_теста,
+                        "статус": "OK" if _hf_verdict == "есть" else "Проверить",
+                        "hover_focus": _hf_verdict,
+                        "комментарий_готовый": _hf_ком or None,
+                        "код": "hover_focus_states",
+                    })
+                    print(f"   🖱️ Hover/Focus «{название}»: {_hf_verdict}"
+                          + (f" — {_hf_ком}" if _hf_ком else ""))
                 except Exception:  # noqa: BLE001
                     pass
 
