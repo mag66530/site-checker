@@ -2273,12 +2273,13 @@ def _build_security_sheet(wb, results):
     ws.merge_cells('B3:E3')
     c = ws['B3']
     c.value = ('HTTP-заголовки безопасности ответа сервера. Нет HSTS, '
-               'X-Content-Type-Options: nosniff или защиты от кликджекинга '
-               '(X-Frame-Options / CSP frame-ancestors) - предупреждение. '
+               'Content-Security-Policy, X-Content-Type-Options: nosniff или '
+               'защиты от кликджекинга (X-Frame-Options / CSP '
+               'frame-ancestors) - предупреждение. '
                'Битое значение (HSTS max-age=0, устаревший ALLOW-FROM, '
-               'X-Content-Type-Options не nosniff, конфликт дублей) - баг: '
-               'заголовок есть, но работает во вред или впустую. Отсутствие '
-               'CSP не считаем ошибкой - для сайта-визитки это норма. '
+               'X-Content-Type-Options не nosniff, конфликт дублей, CSP с '
+               'unsafe-inline+unsafe-eval) - баг/предупреждение: заголовок '
+               'есть, но работает во вред или впустую. '
                'Полную оценку даёт securityheaders.com.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')

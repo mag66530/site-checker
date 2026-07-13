@@ -1168,10 +1168,10 @@ if pid:
             st.checkbox('1.13  Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
                         key='c30_check_security',
                         help='Доп. чек-лист: HTTP-заголовки безопасности ответа. '
-                             'Мягко - нет HSTS / X-Content-Type-Options / защиты '
-                             'от кликджекинга = предупреждение; битое значение '
-                             '(HSTS max-age=0, ALLOW-FROM, не-nosniff, конфликт '
-                             'дублей) = баг. CSP отсутствие не ругаем.')
+                             'Мягко - нет HSTS / CSP / X-Content-Type-Options / '
+                             'защиты от кликджекинга = предупреждение; битое '
+                             'значение (HSTS max-age=0, ALLOW-FROM, не-nosniff, '
+                             'конфликт дублей) = баг.')
             st.checkbox('1.15  Изображения (alt, webp/avif, вес)',
                         key='c30_check_images',
                         help='Alt у всех <img> (пустой alt="" ок; баг - полное '
