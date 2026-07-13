@@ -2615,6 +2615,94 @@ def _build_w3c_sheet(wb, w3c_check):
         row += 1
 
 
+# ── Лист «Страница 404» (п.1.18) ────────────────────────────────────
+
+
+def _build_404_sheet(wb, p404_check):
+    """Лист проверки 404-страницы: код ответа, дизайн, title/description,
+    ссылки на разделы и форма. Добавляется, только если проверка выполнялась."""
+    if not p404_check:
+        return
+    hosts = p404_check.get('hosts') or []
+    has_bugs = any(h.get('issues') for h in hosts)
+    has_warns = any(h.get('warnings') for h in hosts)
+
+    ws = wb.create_sheet('Страница 404')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = (C.err if has_bugs
+                                    else C.warn if has_warns else C.ok)
+
+    for col, w in (('A', 3), ('B', 24), ('C', 60), ('D', 60), ('E', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:D2')
+    c = ws['B2']
+    c.value = 'Страница 404 (п.1.18)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:D3')
+    c = ws['B3']
+    c.value = ('Запрашиваем заведомо несуществующий адрес и проверяем: '
+               '(1) код ответа ровно 404 (200 = soft-404 шаблон, баг; '
+               'редирект = предупреждение); (2) дизайн совпадает с главной - '
+               'косвенно, по общим CSS-файлам и шапке/подвалу шаблона '
+               '(пиксельное сравнение без браузера невозможно); '
+               '(3) уникальный <title> (не как у главной) и meta description; '
+               '(4) есть ссылки на основные разделы и форма заявки/телефон. '
+               'Шаблон 404 сквозной - проверяются главный домен и один '
+               'поддомен.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+    if not p404_check.get('available') or not hosts:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2)
+        c.value = 'Проверка не выполнялась.'
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True)
+        return
+
+    for h in hosts:
+        # Заголовок хоста
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2)
+        _st = h.get('status')
+        c.value = (f'{h.get("city", "")} — {h.get("host", "")}   '
+                   f'(проба: HTTP {_st if _st is not None else "—"})')
+        c.font = _font(size=11, bold=True)
+        c.fill = _fill(C.surface)
+        c.alignment = _align(indent=1)
+        c.border = _border()
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+        def _line(text, color):
+            nonlocal row
+            ws.merge_cells(start_row=row, start_column=2,
+                           end_row=row, end_column=4)
+            c = ws.cell(row=row, column=2)
+            c.value = text
+            c.font = _font(size=10, color=color)
+            c.alignment = _align(indent=2, wrap=True)
+            ws.row_dimensions[row].height = 18
+            row += 1
+
+        if h.get('error'):
+            _line('⚠ ' + h['error'], C.text_muted)
+        elif not h.get('issues') and not h.get('warnings'):
+            _line('✅ Код 404, дизайн шаблона, свой заголовок, ссылки на '
+                  'разделы и форма - всё на месте.', C.ok)
+        else:
+            for t in h.get('issues') or []:
+                _line('❌ ' + t, C.err)
+            for t in h.get('warnings') or []:
+                _line('⚠ ' + t, C.warn)
+        row += 1
+
+
 # ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
 
 
@@ -3545,6 +3633,7 @@ def build_report(
     filters_test: dict = None,     # итоги фильтр-теста - секция на листе «Вёрстка»
     console_check: dict = None,    # ошибки JS в консоли (п.1.14) - лист «Ошибки JavaScript»
     w3c_check: dict = None,        # валидация W3C + скорость (п.1.16) - лист «Валидация и скорость»
+    p404_check: dict = None,       # страница 404 (п.1.18) - лист «Страница 404»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -3808,6 +3897,7 @@ def build_report(
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Ошибки JavaScript', 'если есть лист - страницы, где в консоли браузера есть ошибки JS (п.1.14).'),
         ('Валидация и скорость', 'если есть лист - валидность HTML/CSS (W3C) и время загрузки ресурсов по выборке (п.1.16).'),
+        ('Страница 404', 'если есть лист - несуществующий адрес отдаёт 404, дизайн/тексты/навигация 404-страницы (п.1.18).'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
@@ -3856,6 +3946,9 @@ def build_report(
 
     # ─── Лист валидации W3C + скорости (п.1.16) - если выполнялась ──────
     _build_w3c_sheet(wb, w3c_check)
+
+    # ─── Лист «Страница 404» (п.1.18) - если проверка выполнялась ──────
+    _build_404_sheet(wb, p404_check)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

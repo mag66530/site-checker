@@ -712,6 +712,28 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Валидация W3C: {_e}')
 
+        # ── Страница 404 (п.1.18) - главный домен + один поддомен ──
+        # Шаблон 404 сквозной: все города гонять незачем, 2 хоста хватает.
+        _p404_check = None
+        if params.get('check_404'):
+            _mains = [(r.city, r.url) for r in results
+                      if r.is_ok and r.type_code == 'main']
+            _pick = _mains[:1] + ([_mains[-1]] if len(_mains) > 1 else [])
+            if _pick:
+                try:
+                    from page404_checker import check_404_pages
+                    log(f'Страница 404: проверяем {len(_pick)} хост(а)…')
+                    _p404_check = asyncio.run(check_404_pages(
+                        _pick, proxy_url=proxy_url))
+                    _n_bad = sum(1 for h in _p404_check.get('hosts', [])
+                                 if h.get('issues'))
+                    _n_warn = sum(1 for h in _p404_check.get('hosts', [])
+                                  if h.get('warnings'))
+                    log(f'Страница 404: ошибок {_n_bad}, '
+                        f'с предупреждениями {_n_warn}')
+                except Exception as _e:
+                    log(f'⚠ Страница 404: {_e}')
+
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых
         # галочках: выключил сбор - листов «Уведомления» / «404 из Метрики» /
@@ -747,7 +769,7 @@ def run_check(pid, params, creds, log, progress):
             service_issues=_service_issues, autoclick=_autoclick,
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,
-            w3c_check=_w3c_check)
+            w3c_check=_w3c_check, p404_check=_p404_check)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
