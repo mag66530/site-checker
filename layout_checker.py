@@ -22,6 +22,9 @@ layout_checker.py - вёрстка и адаптивность (пункт 1.11 
   • Favicon - установлен (<link rel="…icon…"> или дефолтный /favicon.ico)
     и реально грузится; прозвон делает http_checker с главной поддомена
     (favicon сквозной). 404/410 = баг.
+  • Единый протокол (https) - на https-странице нет ресурсов по http
+    (mixed content: браузер блокирует такие картинки/стили/скрипты - баг)
+    и нет внутренних <a>-ссылок по http (лишний редирект - предупреждение).
 
 CSS не качаем повторно: http_checker уже тянет стили страницы для проверки
 видимости цены/кнопок - оттуда же берём статус и признак @media (кэш на батч).
@@ -49,6 +52,19 @@ _RE_INLINE_STYLE = re.compile(
 _RE_COMMENT = re.compile(r'<!--.*?-->', re.S)
 # Инлайн-стилей больше порога - предупреждение (немного инлайна неизбежно).
 _INLINE_STYLE_LIMIT = 15
+
+# Единый протокол: http-РЕСУРСЫ на https-странице (mixed content) и
+# внутренние <a>-ссылки по http. <link> считаем ресурсом только когда он
+# реально грузится браузером (stylesheet/icon/preload) - rel=alternate и
+# т.п. не блокируются.
+_RE_MIXED_RES = re.compile(
+    r'<(?:img|script|source|iframe|video|audio)\b[^>]*?'
+    r'(?:src|href)\s*=\s*["\'](http://[^"\']+)["\']', re.I)
+_RE_LINK_TAG = re.compile(r'<link\b[^>]*>', re.I)
+_RE_LINK_LOAD = re.compile(r'rel\s*=\s*["\'][^"\']*(?:stylesheet|icon|preload)',
+                           re.I)
+_RE_HTTP_HREF = re.compile(r'href\s*=\s*["\'](http://[^"\']+)["\']', re.I)
+_RE_A_HTTP = re.compile(r'<a\b[^>]*href\s*=\s*["\'](http://[^"\']+)["\']', re.I)
 
 
 def _norm_host(h: str) -> str:
@@ -158,6 +174,29 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
             'много инлайн-стилей (атрибут style="…" в HTML) - визуальные '
             'стили лучше вынести в CSS-файлы')
 
+    # 7. Единый протокол: на https-странице нет http-ресурсов (mixed content)
+    # и внутренних <a>-ссылок по http. Тексты без чисел - для группировки.
+    mixed, http_links = [], []
+    if base_url.startswith('https://'):
+        mixed = list(dict.fromkeys(_RE_MIXED_RES.findall(body)))
+        for tag in _RE_LINK_TAG.findall(body):
+            if _RE_LINK_LOAD.search(tag):
+                hm = _RE_HTTP_HREF.search(tag)
+                if hm and hm.group(1) not in mixed:
+                    mixed.append(hm.group(1))
+        for u in _RE_A_HTTP.findall(body):
+            if _norm_host(urlsplit(u).netloc) == own_host:
+                http_links.append(u)
+        http_links = list(dict.fromkeys(http_links))
+        if mixed:
+            issues.append('ресурсы грузятся по http на https-странице '
+                          '(mixed content) - браузер их блокирует, '
+                          'картинки/стили/скрипты ломаются')
+        if http_links:
+            warnings.append('внутренние ссылки со старым протоколом http:// - '
+                            'должны быть https (лишний редирект на каждый '
+                            'переход)')
+
     return {
         'viewport': viewport,
         'css_total': len(css_infos),
@@ -168,6 +207,8 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'semantic': {'present': present, 'missing_core': missing_core,
                      'main_count': main_count},
         'inline_styles': inline_styles,
+        'mixed_content': mixed[:20],
+        'http_links': len(http_links),
         'issues': issues,
         'warnings': warnings,
     }
