@@ -25,6 +25,11 @@ _CSP = 'content-security-policy'
 _XFO = 'x-frame-options'
 _XCTO = 'x-content-type-options'
 _REFERRER = 'referrer-policy'
+_PERMISSIONS = 'permissions-policy'
+
+# HSTS: рекомендуемый минимум max-age - полгода (меньше - браузер быстро
+# «забывает» форсить https, защита от downgrade-атак слабеет).
+_HSTS_MIN_AGE = 15552000          # 180 дней
 
 
 def _dup_conflict(raw: str) -> bool:
@@ -49,12 +54,13 @@ def check_security_headers(headers: Optional[dict], url: str = '') -> Optional[d
     def _get(name):
         return headers.get(name)
 
-    # ── HSTS (только https) ──
+    # ── HSTS (только https): принудительный https + защита от downgrade ──
     hsts = _get(_HSTS)
     if is_https:
         if hsts is None:
             warnings.append('нет заголовка Strict-Transport-Security (HSTS) - '
-                            'браузер не форсит https')
+                            'браузер не форсит https (защита от '
+                            'downgrade/MITM-атак не работает)')
         else:
             present.append('HSTS')
             m = re.search(r'max-age\s*=\s*(\d+)', hsts, re.I)
@@ -63,6 +69,14 @@ def check_security_headers(headers: Optional[dict], url: str = '') -> Optional[d
                               'сам себя')
             elif not m:
                 issues.append('HSTS без директивы max-age - невалидное значение')
+            else:
+                if int(m.group(1)) < _HSTS_MIN_AGE:
+                    warnings.append('HSTS с коротким max-age (меньше 180 дней) '
+                                    '- браузер быстро «забывает» форсить https')
+                if 'includesubdomains' not in hsts.lower().replace(' ', ''):
+                    warnings.append('HSTS без includeSubDomains - городские '
+                                    'поддомены не защищены заголовком '
+                                    'корневого домена')
 
     # ── X-Content-Type-Options ──
     xcto = _get(_XCTO)
@@ -106,13 +120,33 @@ def check_security_headers(headers: Optional[dict], url: str = '') -> Optional[d
         warnings.append('нет заголовка Content-Security-Policy - '
                         'нет политики загрузки скриптов/стилей (защита от XSS)')
 
-    # ── Referrer-Policy - мелочь, только отметка присутствия ──
+    # ── Referrer-Policy / Permissions-Policy - отметка присутствия ──
     if _get(_REFERRER):
         present.append('Referrer-Policy')
+    if _get(_PERMISSIONS):
+        present.append('Permissions-Policy')
 
     return {
         'checked': True,
         'present': present,
+        'grade': _grade(present, is_https, bool(issues)),
         'issues': issues,
         'warnings': warnings,
     }
+
+
+def _grade(present: list, is_https: bool, has_issues: bool) -> str:
+    """Локальная оценка A-F в стиле securityheaders.com: считаем присутствие
+    шести заголовков (HSTS, CSP, X-Frame-Options, X-Content-Type-Options,
+    Referrer-Policy, Permissions-Policy). Битое значение роняет оценку на
+    ступень. Точную оценку даёт сам securityheaders.com (их API - по ключу)."""
+    six = ('HSTS', 'CSP', 'X-Frame-Options', 'X-Content-Type-Options',
+           'Referrer-Policy', 'Permissions-Policy')
+    count = sum(1 for h in six if h in present)
+    total = 6 if is_https else 5              # на http HSTS не бывает
+    scale = 'FFEDCBA'                          # 0..6 заголовков
+    idx = min(count + (6 - total), 6)          # http: 5 из 5 = как 6 из 6
+    g = scale[idx]
+    if has_issues and g != 'F':
+        g = scale[max(scale.index(g) - 1, 0)]  # битое значение - ступень вниз
+    return g

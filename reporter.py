@@ -2288,13 +2288,35 @@ def _build_security_sheet(wb, results):
     row = 5
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
+    # Оценка A-F (в стиле securityheaders.com) - по главным страницам.
+    _grades = []
+    for r in checked:
+        if r.type_code == 'main' and r.security.get('grade'):
+            _grades.append(f'{r.security["grade"]} ({r.city})')
+    _gr_txt = (' · оценка (в стиле securityheaders.com): '
+               + ', '.join(_grades[:4]) if _grades else '')
     c.value = (f'Проверено страниц: {len(checked)} · с багами: {len(bad)} · '
-               f'с предупреждениями: {len(warned)}')
+               f'с предупреждениями: {len(warned)}{_gr_txt}')
     c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
     c.fill = _fill(C.surface)
     c.alignment = _align(wrap=True)
     ws.row_dimensions[row].height = 26
-    row += 2
+    row += 1
+
+    # Ссылка на точную оценку (их API - только по ключу, считаем локально).
+    _main_url = next((r.url for r in checked if r.type_code == 'main'), None)
+    if _main_url:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        _sh = f'https://securityheaders.com/?q={_main_url}&followRedirects=on'
+        c.value = ('Точная оценка: securityheaders.com (клик) - наша считается '
+                   'локально по наличию 6 заголовков.')
+        c.hyperlink = _sh
+        c.font = _font(size=9, color=C.accent, underline='single')
+        c.alignment = _align(wrap=True)
+        ws.row_dimensions[row].height = 16
+        row += 1
+    row += 1
 
     def _sec_found(r):
         present = (getattr(r, 'security', None) or {}).get('present') or []
