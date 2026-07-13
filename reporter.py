@@ -2937,6 +2937,92 @@ def _build_404_sheet(wb, p404_check):
         row += 1
 
 
+# ── Лист «Фильтры ПС» (п.1.19: санкции поисковых систем) ───────────
+
+
+def _build_ps_filters_sheet(wb, ps_filters):
+    """Лист санкций/фильтров поисковых систем: диагностика Яндекс.Вебмастера
+    (санкционные коды) + маркеры ручных мер в почте GSC. Добавляется, только
+    если проверка выполнялась."""
+    if not ps_filters:
+        return
+    sanc = ps_filters.get('yandex') or []
+    gsc_hits = ps_filters.get('gsc_hits') or []
+    has_bugs = bool(sanc or gsc_hits)
+
+    ws = wb.create_sheet('Фильтры ПС')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+
+    for col, w in (('A', 3), ('B', 30), ('C', 60), ('D', 46), ('E', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:D2')
+    c = ws['B2']
+    c.value = 'Фильтры поисковых систем (п.1.19)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:D3')
+    c = ws['B3']
+    c.value = ('Санкции за переоптимизацию/угрозы. Яндекс: санкционные '
+               'сигналы из диагностики Вебмастера (FATAL и коды угроз/'
+               'качества) - надёжный официальный источник, виден только при '
+               'подтверждённых правах. Google: API ручных мер не существует - '
+               'сканируем почтовые уведомления GSC за 90 дней по маркерам '
+               '(«ручные меры», «security issue» и т.п.) и даём ссылку для '
+               'ручной сверки в Search Console.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+
+    def _line(text, color, bold=False, link=None):
+        nonlocal row
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2)
+        c.value = text
+        c.font = _font(size=10, bold=bold, color=color,
+                       underline='single' if link else None)
+        if link:
+            c.hyperlink = link
+        c.alignment = _align(indent=1, wrap=True)
+        ws.row_dimensions[row].height = 18
+        row += 1
+
+    # ── Яндекс ──
+    _line('Яндекс (диагностика Вебмастера)', C.text, bold=True)
+    if not ps_filters.get('wm_collected'):
+        _line('⚠ Сбор диагностики Вебмастера в этом прогоне выключен - '
+              'данные из прошлого кеша либо отсутствуют. Включите галочку '
+              'Вебмастера для свежей проверки.', C.warn)
+    if sanc:
+        for s in sanc:
+            _line(f'❌ {s.get("host", "")}: {s.get("title", s.get("code", ""))} '
+                  f'({s.get("date", "")}) - открыть панель',
+                  C.err, link=s.get('url') or None)
+    else:
+        _line(f'✅ Санкций/угроз в диагностике Вебмастера нет '
+              f'(хостов: {ps_filters.get("wm_hosts", 0)}, '
+              f'проблем всего: {ps_filters.get("wm_issues_total", 0)} - '
+              f'несанкционные см. лист «Ошибки сервисов»).', C.ok)
+    row += 1
+
+    # ── Google ──
+    _line('Google (уведомления GSC + ручная сверка)', C.text, bold=True)
+    if gsc_hits:
+        for h in gsc_hits:
+            _line(f'❌ {h.get("date", "")}: {h.get("subject", "")}', C.err)
+    else:
+        _line(f'✅ В почтовых уведомлениях GSC за 90 дней маркеров ручных '
+              f'мер/безопасности нет (писем просмотрено: '
+              f'{ps_filters.get("gsc_scanned", 0)}).', C.ok)
+    _line('Ручная сверка (1 клик): Search Console → «Меры, принятые '
+          'вручную» и «Проблемы безопасности».', C.accent,
+          link='https://search.google.com/search-console/manual-actions')
+
+
 # ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
 
 
@@ -3942,6 +4028,7 @@ def build_report(
     console_check: dict = None,    # ошибки JS в консоли (п.1.14) - лист «Ошибки JavaScript»
     w3c_check: dict = None,        # валидация W3C + скорость (п.1.16) - лист «Валидация и скорость»
     p404_check: dict = None,       # страница 404 (п.1.18) - лист «Страница 404»
+    ps_filters: dict = None,       # фильтры ПС (п.1.19) - лист «Фильтры ПС»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -4206,6 +4293,7 @@ def build_report(
         ('Ошибки JavaScript', 'если есть лист - страницы, где в консоли браузера есть ошибки JS (п.1.14).'),
         ('Валидация и скорость', 'если есть лист - валидность HTML/CSS (W3C) и время загрузки ресурсов по выборке (п.1.16).'),
         ('Страница 404', 'если есть лист - несуществующий адрес отдаёт 404, дизайн/тексты/навигация 404-страницы (п.1.18).'),
+        ('Фильтры ПС', 'если есть лист - санкции поисковых систем: диагностика Вебмастера + маркеры ручных мер в почте GSC (п.1.19).'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
@@ -4257,6 +4345,9 @@ def build_report(
 
     # ─── Лист «Страница 404» (п.1.18) - если проверка выполнялась ──────
     _build_404_sheet(wb, p404_check)
+
+    # ─── Лист «Фильтры ПС» (п.1.19) - если проверка выполнялась ────────
+    _build_ps_filters_sheet(wb, ps_filters)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

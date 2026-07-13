@@ -659,6 +659,7 @@ def init_session():
         'c30_check_w3c': True,         # п.1.16 - валидация W3C + скорость
         'c30_check_static': True,      # п.1.17 - сжатие/кеш статики
         'c30_check_404': True,         # п.1.18 - страница 404
+        'c30_check_ps_filters': True,  # п.1.19 - фильтры/санкции ПС
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -1073,7 +1074,7 @@ if pid:
                      'c30_check_meta', 'c30_check_region', 'c30_check_cis',
                      'c30_check_layout', 'c30_check_markup', 'c30_check_security',
                      'c30_check_images', 'c30_check_w3c', 'c30_check_static',
-                     'c30_check_404']
+                     'c30_check_404', 'c30_check_ps_filters']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
@@ -1208,6 +1209,15 @@ if pid:
                              'фильтр тоже отдают 404. '
                              'Главный домен + один поддомен (шаблон сквозной). '
                              'Отдельный лист «Страница 404».')
+            st.checkbox('1.19  Фильтры поисковых систем (санкции)',
+                        key='c30_check_ps_filters',
+                        help='Яндекс: санкционные сигналы (угрозы, качество, '
+                             'реклама) из диагностики Вебмастера - надёжный '
+                             'официальный источник. Google: API ручных мер '
+                             'нет - сканируем почтовые уведомления GSC за 90 '
+                             'дней по маркерам («ручные меры», «security '
+                             'issue») + ссылка на ручную сверку в Search '
+                             'Console. Отдельный лист «Фильтры ПС».')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1358,6 +1368,7 @@ if pid:
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
+        bool(st.session_state.get('c30_check_ps_filters', True)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
 
@@ -1415,6 +1426,7 @@ if pid:
                 'check_w3c': st.session_state.get('c30_check_w3c', False),
                 'check_static': st.session_state.get('c30_check_static', False),
                 'check_404': st.session_state.get('c30_check_404', True),
+                'check_ps_filters': st.session_state.get('c30_check_ps_filters', True),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
                 'fetch_metrika_404': st.session_state.get('c30_fetch_metrika_404', True),

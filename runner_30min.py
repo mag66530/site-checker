@@ -755,6 +755,38 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Страница 404: {_e}')
 
+        # ── Фильтры поисковых систем (п.1.19) - санкции/ручные меры ──
+        # Яндекс: санкционные сигналы из диагностики Вебмастера (кеш этого
+        # прогона, если сбор включён). Google: маркеры ручных мер в почтовых
+        # уведомлениях GSC за 90 дней. Текстовый анализ риска НЕ делаем.
+        _ps_filters = None
+        if params.get('check_ps_filters'):
+            try:
+                from webmaster_api import (load_issues as _li,
+                                           filter_sanctions, GSC_SANCTION_RE)
+                _wm_all = _li(pid) or []
+                _sanc = filter_sanctions(_wm_all)
+                from webmaster_notify import load_notifications as _ln90
+                _gsc_mail = _ln90(pid, 'gsc', 90) or []
+                _gsc_hits = [
+                    {'date': n.date, 'subject': n.subject}
+                    for n in _gsc_mail
+                    if GSC_SANCTION_RE.search(
+                        f'{n.subject} {n.body_preview}')]
+                _ps_filters = {
+                    'yandex': _sanc,
+                    'wm_issues_total': len(_wm_all),
+                    'wm_hosts': len({getattr(i, 'host', '') for i in _wm_all}),
+                    'wm_collected': bool(params.get('check_webmaster')),
+                    'gsc_hits': _gsc_hits,
+                    'gsc_scanned': len(_gsc_mail),
+                }
+                log(f'Фильтры ПС: санкций Яндекса {len(_sanc)}, '
+                    f'маркеров в почте GSC {len(_gsc_hits)} '
+                    f'(писем просмотрено {len(_gsc_mail)})')
+            except Exception as _e:
+                log(f'⚠ Фильтры ПС: {_e}')
+
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых
         # галочках: выключил сбор - листов «Уведомления» / «404 из Метрики» /
@@ -790,7 +822,8 @@ def run_check(pid, params, creds, log, progress):
             service_issues=_service_issues, autoclick=_autoclick,
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,
-            w3c_check=_w3c_check, p404_check=_p404_check)
+            w3c_check=_w3c_check, p404_check=_p404_check,
+            ps_filters=_ps_filters)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
