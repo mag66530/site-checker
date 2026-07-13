@@ -2413,10 +2413,12 @@ def _build_images_sheet(wb, results):
                'есть атрибут alt (пустой alt="" ок для декоративных; баг - '
                'полное отсутствие). (2) Современные форматы - используются '
                'webp/avif, а не только jpg/png/gif (устаревшие без webp/avif = '
-               'предупреждение). (3) Оптимизация - свои картинки не тяжелее '
-               f'{_IMG_HEAVY_KB} КБ (тяжелее = вероятно не оптимизированы, '
-               'предупреждение). (4) Lazy loading - у картинок/видео есть '
-               'ленивая загрузка (loading="lazy"/data-src/preload="none"). '
+               'предупреждение). (3) Оптимизация - чек-лист: вес ≤100 КБ; '
+               f'два порога: тяжелее 100 КБ - замечание, тяжелее {_IMG_HEAVY_KB} '
+               'КБ - «тяжёлые» с именами файлов. (4) Lazy loading - у '
+               'картинок/видео есть ленивая загрузка (loading="lazy"/data-src/'
+               'preload="none"). (5) Имена файлов - транслит из alt; хеш-имена '
+               'CMS (/upload/iblock/…) - одно предупреждение на страницу. '
                'Вес берётся по Content-Length.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
@@ -2446,6 +2448,15 @@ def _build_images_sheet(wb, results):
             bits.append('тяжёлые: ' + ', '.join(
                 f'{h["url"].rsplit("/", 1)[-1]} {h["kb"]}КБ'
                 for h in im['heavy'][:3]))
+        if im.get('mid_heavy'):
+            bits.append(f'тяжелее 100КБ: {im["mid_heavy"]}')
+        _nm = im.get('names') or {}
+        if _nm.get('hashed', 0) >= 3 and _nm['hashed'] > _nm.get('readable', 0):
+            bits.append(f'хеш-имена: {_nm["hashed"]}')
+        if _nm.get('mismatch_n'):
+            bits.append('не по alt: ' + ', '.join(_nm.get('mismatch', [])[:2])
+                        + (f' … +{_nm["mismatch_n"] - 2}'
+                           if _nm['mismatch_n'] > 2 else ''))
         if im.get('img_total') and not im.get('lazy_imgs'):
             bits.append(f'без lazy: {im["img_total"]} картинок')
         if im.get('media_total') and not im.get('lazy_media'):
