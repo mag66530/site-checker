@@ -216,6 +216,16 @@ def find_duplicates(results) -> dict:
 
         # Между городами: полное совпадение = город не подставился.
         # Тех. страницы исключаем (политики одинаковы легитимно).
+        # Если шаблон сайта ВООБЩЕ не подставляет город в это поле (H1 у
+        # категорий часто без города: «Тройник ПНД» одинаков во всех
+        # городах by design) - межгородские совпадения легитимны, молчим.
+        # Отсутствие города в title/description и так ловится per-page
+        # проверкой «в title нет города».
+        uses_city = any(
+            city_in_text(r.city, r.meta.get(field) or '') is True
+            for r in ok if r.city and r.meta.get(field))
+        if not uses_city:
+            continue
         by_val: dict = {}
         for r in ok:
             if r.type_code == 'tech':
