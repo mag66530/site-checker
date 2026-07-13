@@ -2539,6 +2539,9 @@ def _build_images_sheet(wb, results):
             bits.append('не по alt: ' + ', '.join(_nm.get('mismatch', [])[:2])
                         + (f' … +{_nm["mismatch_n"] - 2}'
                            if _nm['mismatch_n'] > 2 else ''))
+        if im.get('no_size') and im.get('img_total', 0) >= 4 \
+                and im['no_size'] > im['img_total'] // 2:
+            bits.append(f'без width/height: {im["no_size"]} из {im["img_total"]}')
         if im.get('img_total') and not im.get('lazy_imgs'):
             bits.append(f'без lazy: {im["img_total"]} картинок')
         if im.get('media_total') and not im.get('lazy_media'):

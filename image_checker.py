@@ -143,6 +143,18 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
         warnings.append('современные форматы (webp/avif) не используются - '
                         'картинки в устаревших jpg/png/gif')
 
+    # ── width/height у <img> (предотвращение CLS) ──
+    # Без заданных размеров браузер не резервирует место - при загрузке
+    # картинки макет прыгает. Считаем предупреждением, когда размеров нет
+    # у большинства картинок (одиночные пропуски не шумим).
+    no_size = sum(1 for t in _RE_IMG_TAG.findall(clean)
+                  if not (re.search(r'\bwidth\s*=', t, re.I)
+                          and re.search(r'\bheight\s*=', t, re.I)))
+    img_cnt = len(_RE_IMG_TAG.findall(clean))
+    if img_cnt >= LAZY_MIN_IMGS and no_size > img_cnt // 2:
+        warnings.append('у картинок не заданы width/height - при загрузке '
+                        'макет сдвигается (CLS)')
+
     # ── Lazy loading (изображения и видео) ──
     img_tags = _RE_IMG_TAG.findall(clean)
     lazy_imgs = sum(1 for t in img_tags if _RE_LAZY.search(t))
@@ -219,6 +231,7 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
         'names': {'hashed': hashed, 'readable': readable,
                   'mismatch': mismatch, 'mismatch_n': mismatch_n},
         'img_total': len(img_tags),
+        'no_size': no_size,
         'lazy_imgs': lazy_imgs,
         'media_total': len(media_tags),
         'lazy_media': lazy_media,

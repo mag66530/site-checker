@@ -473,6 +473,29 @@ def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict
                        'пояснение': 'на странице несколько H1: '
                                     + ' | '.join(_short(t, 40) for t in h1s[:MAX_SHOWN])})
 
+    # ── H1: чистота (без вложенных тегов/стилей) и связь с title ──
+    # Чек-лист: «H1 без стилей/тегов внутри, содержит нужные ключевые
+    # слова». Ключи семантикой не проверить - прокси: H1 пересекается с
+    # title хотя бы одним словом (ключи всегда в title).
+    m_h1 = re.search(r'<h1\b[^>]*>(.*?)</h1>', h, re.I | re.S)
+    if m_h1:
+        inner = m_h1.group(1)
+        if re.search(r'<(?!/?br\b)[a-z]', inner, re.I):
+            issues.append({'тип': 'h1', 'найдено': 'теги внутри',
+                           'пояснение': 'внутри H1 вложенные теги/стили - '
+                                        'H1 должен быть чистым текстом: '
+                                        + _short(re.sub(r'\s+', ' ', inner), 60)})
+    if h1s and titles:
+        def _tokens(s):
+            return {t for t in re.split(r'[^а-яёa-z0-9]+', s.lower())
+                    if len(t) >= 4}
+        if _tokens(h1s[0]) and _tokens(titles[0]) \
+                and not (_tokens(h1s[0]) & _tokens(titles[0])):
+            issues.append({'тип': 'h1', 'найдено': 'нет связи с title',
+                           'пояснение': f'H1 «{_short(h1s[0], 40)}» не '
+                                        f'пересекается с title по словам - '
+                                        f'проверить ключевые слова'})
+
     # ── H2 дубли (одинаковый текст) ──
     norm = Counter(re.sub(r'\s+', ' ', t.strip().lower()) for t in h2s)
     dups = [(t, n) for t, n in norm.items() if n >= 2]
