@@ -1163,10 +1163,11 @@ if pid:
                         help='ТЗ 3.5: OpenGraph (og:url/title/description/image/type) '
                              'на основных страницах; Schema.org - данные компании '
                              'везде, крошки BreadcrumbList, листинги, на товаре '
-                             'Product + характеристики + фото + цены. Основной '
-                             'формат microdata: тип только в JSON-LD = '
-                             'предупреждение. Валидность полей - инструментами '
-                             'Яндекса/Google вручную.')
+                             'Product + характеристики + фото + цены. Условно: '
+                             'видео → VideoObject, FAQ-блок → FAQPage, адрес → '
+                             'PostalAddress. Основной формат microdata: тип '
+                             'только в JSON-LD = предупреждение. Валидность '
+                             'полей - инструментами Яндекса/Google вручную.')
             st.checkbox('1.13  Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
                         key='c30_check_security',
                         help='Доп. чек-лист: HTTP-заголовки безопасности ответа. '

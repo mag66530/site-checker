@@ -2317,7 +2317,9 @@ def _build_markup_sheet(wb, results):
                'проверка обязательных полей в объекте: Product без '
                'offers/name/image, Offer без цены/валюты, крошки без '
                'элементов = баг; желательные (логотип, описание) = '
-               'предупреждение.')
+               'предупреждение. Условные типы: видео на странице → '
+               'VideoObject, FAQ-блок → FAQPage, адрес/контакты → '
+               'PostalAddress (нет = предупреждение).')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 68

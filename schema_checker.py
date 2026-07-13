@@ -238,7 +238,22 @@ _FIELD_RULES = {
                       'rec': [('адрес/телефон', ('address', 'telephone'))]},
     'PostalAddress': {'req': [('адрес', ('streetAddress', 'addressLocality'))],
                       'rec': []},
+    'VideoObject': {'req': [('название', ('name',))],
+                    'rec': [('превью', ('thumbnailUrl',)),
+                            ('описание', ('description',))]},
+    'FAQPage': {'req': [('вопросы-ответы', ('mainEntity',))], 'rec': []},
 }
+
+# Видео на странице: свой <video> или встроенный плеер видеохостинга.
+_RE_VIDEO_CONTENT = re.compile(
+    r'<video\b|<iframe\b[^>]*src\s*=\s*["\'][^"\']*'
+    r'(?:youtube\.com|youtu\.be|rutube\.ru|vk\.com/video|vkvideo|vimeo\.com)',
+    re.I)
+# FAQ-блок: типовые классы/заголовки «вопрос-ответ».
+_RE_FAQ_CONTENT = re.compile(
+    r'class\s*=\s*["\'][^"\']*\bfaq\b'
+    r'|часто\s+задаваемые\s+вопросы|вопрос[\s-]*ответ|вопросы\s+и\s+ответы',
+    re.I)
 
 
 def _validate_fields(html: str):
@@ -336,6 +351,22 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
         if 'price' not in props and not (micro | ld) & _PRICE_TYPES:
             warnings.append('цена не размечена (Offer/PriceSpecification) - '
                             'норма для «цены по запросу»')
+
+    # ── Условные типы: требуем разметку, только когда сам контент есть ──
+    # Видео на странице (свой <video> / встроенный плеер) → VideoObject.
+    if _RE_VIDEO_CONTENT.search(html) and not (micro | ld) & {'VideoObject'}:
+        warnings.append('видео на странице не размечено '
+                        '(schema.org/VideoObject)')
+    # FAQ-блок (класс faq / «часто задаваемые вопросы») → FAQPage.
+    if _RE_FAQ_CONTENT.search(html) and not (micro | ld) & {'FAQPage'}:
+        warnings.append('блок вопросов-ответов не размечен '
+                        '(schema.org/FAQPage)')
+    # Контакты/адрес (обычно в футере) → PostalAddress. Предупреждаем,
+    # только если адреса нет ни типом, ни полями (addressLocality и т.п.).
+    if not ((micro | ld) & {'PostalAddress'}
+            or props & {'address', 'addresslocality', 'streetaddress'}):
+        warnings.append('адрес/контакты не размечены '
+                        '(schema.org/PostalAddress)')
 
     # ── Обязательные ПОЛЯ внутри объектов (валидация, а не только наличие
     # типа): Product без offers/name, Offer без price/currency, крошки без
