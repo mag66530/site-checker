@@ -184,6 +184,13 @@ _HREFLANG_RE = re.compile(
 _A_TAG_RE = re.compile(r'<a\b[^>]*>', re.I)
 _REL_RE = re.compile(r'rel\s*=\s*["\']([^"\']*)["\']', re.I)
 _REL_OK_RE = re.compile(r'nofollow|ugc|sponsored', re.I)
+
+# Перелинковка: классификация ЦЕЛИ внутренней ссылки по пути.
+# Тех/инфо-страницы (кандидаты в «паразиты» по весу).
+_RE_TECH_PATH = re.compile(
+    r'contact|about|o-kompanii|dostavk|deliver|oplat|payment|polic|politika|'
+    r'privacy|news|aktsii|action|blog|articl|stati|kak-|uslugi|price|vakansi|'
+    r'otzyv|garanti|rekvizit|sotrudnich|proizvodstv', re.I)
 # Код языка hreflang: ll / ll-CC / ll-Script / x-default (упрощённо по BCP47)
 _HREFLANG_CODE_RE = re.compile(
     r'^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8})?|x-default)$', re.I)
@@ -211,6 +218,45 @@ def _find_canonicals(html: str) -> list:
         if hm and hm.group(1).strip():
             out.append(hm.group(1).strip())
     return out
+
+
+def _internal_link_profile(html: str, url: str) -> tuple:
+    """Классифицировать ВНУТРЕННИЕ ссылки страницы по цели: главная /
+    каталог (категории, фильтры, товары) / тех-инфо / прочее. Уникальные
+    href. Возвращает ({'home','catalog','tech','other'}, {tech_path: n})."""
+    host = (urlsplit(url).netloc or '').lower().removeprefix('www.')
+    root = '.'.join(host.split('.')[-2:])
+    counts = {'home': 0, 'catalog': 0, 'tech': 0, 'other': 0}
+    tech_targets: dict = {}
+    seen = set()
+    for m in _A_TAG_RE.finditer((html or '')[:600_000]):
+        hm = _HREF_RE.search(m.group(0))
+        if not hm:
+            continue
+        href = hm.group(1).strip()
+        if not href or href.startswith(('#', 'javascript:', 'mailto:',
+                                        'tel:', 'data:')):
+            continue
+        sp = urlsplit(href)
+        h = (sp.netloc or '').lower().removeprefix('www.')
+        if h and h != root and not h.endswith('.' + root):
+            continue                             # внешняя
+        path = (sp.path or '/')
+        if path in seen:
+            continue
+        seen.add(path)
+        low = path.lower()
+        if path == '/':
+            counts['home'] += 1
+        elif '/catalog' in low or '/filter/' in low:
+            counts['catalog'] += 1
+        elif _RE_TECH_PATH.search(low):
+            counts['tech'] += 1
+            if len(tech_targets) < 30:
+                tech_targets[path] = tech_targets.get(path, 0) + 1
+        else:
+            counts['other'] += 1
+    return counts, tech_targets
 
 
 def _ext_links_nofollow(html: str, url: str) -> list:
@@ -397,6 +443,14 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         if ext:
             warnings.append('внешние ссылки без rel="nofollow" '
                             '(соцсети/чаты/справочники)')
+
+    # 7. Перелинковка: профиль внутренних ссылок страницы (сводится по
+    # прогону в секцию «Перелинковка» листа «Индексация»). Не находка
+    # per-page - данные для агрегата.
+    if html:
+        _il, _tt = _internal_link_profile(html, url)
+        out['int_links'] = _il
+        out['tech_targets'] = _tt
 
     out['verdict'] = 'closed' if issues else ('warn' if warnings else 'open')
     return out

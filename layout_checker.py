@@ -88,6 +88,20 @@ _RE_PSEUDO_LINK = re.compile(
 _RE_FONTFACE = re.compile(r'@font-face\s*\{[^}]*\}', re.I)
 _RE_FONT_DISPLAY_OK = re.compile(
     r'font-display\s*:\s*(?:swap|optional|fallback)', re.I)
+
+# Скрытый текст (SEO-спам): классические паттерны сокрытия. display:none
+# НЕ считаем - у Bitrix это легитимные попапы/мобильные меню повсюду.
+# Двухшагово: находим элемент со style, отдельно проверяем значение стиля
+# (однопроходный regex съедал закрывающую кавычку атрибута).
+_RE_STYLED_EL = re.compile(
+    r'<(\w+)\b[^>]*style\s*=\s*(["\'])(.*?)\2[^>]*>(.*?)</\1\s*>',
+    re.I | re.S)
+_RE_HIDDEN_VAL = re.compile(
+    r'font-size\s*:\s*(?:0(?:px)?|1px)\s*(?:;|!|$)'
+    r'|text-indent\s*:\s*-\d{4}'
+    r'|opacity\s*:\s*0(?:\.0+)?\s*(?:;|!|$)', re.I)
+_HIDDEN_TEXT_MIN = 100       # значимый объём скрытого текста, символов
+_RE_STRIP_TAGS = re.compile(r'<[^>]+>')
 _RE_LINK_TAG = re.compile(r'<link\b[^>]*>', re.I)
 _RE_LINK_LOAD = re.compile(r'rel\s*=\s*["\'][^"\']*(?:stylesheet|icon|preload)',
                            re.I)
@@ -272,6 +286,22 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         warnings.append('шрифты @font-face без font-display: swap - текст '
                         'скрыт до загрузки шрифта, возможен сдвиг макета')
 
+    # 12. Скрытый текст (SEO-спам): font-size:0/1px, text-indent:-9999,
+    # opacity:0 у элементов со значимым текстом.
+    hidden_text = []
+    for _tag, _q, style_val, inner in _RE_STYLED_EL.findall(body):
+        if not _RE_HIDDEN_VAL.search(style_val):
+            continue
+        txt = re.sub(r'\s+', ' ', _RE_STRIP_TAGS.sub(' ', inner)).strip()
+        if len(txt) >= _HIDDEN_TEXT_MIN:
+            hidden_text.append(txt[:120])
+        if len(hidden_text) >= 5:
+            break
+    if hidden_text:
+        warnings.append('возможен скрытый текст (font-size:0 / text-indent:'
+                        '-9999 / opacity:0 со значимым текстом) - проверить '
+                        'вручную, поисковики наказывают за скрытый текст')
+
     return {
         'viewport': viewport,
         'css_total': len(css_infos),
@@ -289,6 +319,7 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'blocking_scripts': len(blocking),
         'pseudo_links': pseudo_links,
         'fontface_noswap': ff_noswap,
+        'hidden_text': hidden_text,
         'issues': issues,
         'warnings': warnings,
     }

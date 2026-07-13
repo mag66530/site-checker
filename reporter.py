@@ -1777,6 +1777,50 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                           f'отвечает 200, noindex не стоит', C.warn)
             row += 1
 
+        # ── Секция 4.3: перелинковка (внутренний вес) ──
+        # Прокси по выборке прогона (не полный PageRank): классифицируем
+        # внутренние ссылки каждой страницы по цели.
+        _il_pages = [r for r in checked if r.indexing.get('int_links')]
+        if _il_pages:
+            _tot = {'home': 0, 'catalog': 0, 'tech': 0, 'other': 0}
+            _tt_sum: dict = {}
+            for r in _il_pages:
+                for k, v in r.indexing['int_links'].items():
+                    _tot[k] = _tot.get(k, 0) + v
+                for p, n in (r.indexing.get('tech_targets') or {}).items():
+                    _tt_sum[p] = _tt_sum.get(p, 0) + n
+            _all = sum(_tot.values()) or 1
+            _cat_share = _tot['catalog'] * 100 // _all
+            _tech_share = _tot['tech'] * 100 // _all
+            _il_bad = _tot['tech'] >= _tot['catalog']
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = 'Перелинковка (внутренний вес)'
+            c.font = _font(size=13, bold=True, color=C.warn if _il_bad else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            _line(f'Прокси по выборке прогона ({len(_il_pages)} страниц, не '
+                  f'полный расчёт веса): внутренних ссылок {_all}, из них на '
+                  f'каталог/категории {_cat_share}% · на главную '
+                  f'{_tot["home"] * 100 // _all}% · на тех/инфо {_tech_share}% '
+                  f'· прочее {_tot["other"] * 100 // _all}%.', C.text_muted)
+            if _il_bad:
+                _line('⚠ Ссылок на тех/инфо-страницы не меньше, чем на каталог '
+                      '- внутренний вес льётся на страницы-«паразиты» (обычно '
+                      'распухший футер). Каталог и категории должны получать '
+                      'больше всего ссылок.', C.warn)
+            else:
+                _line('✅ Каталог и категории получают больше внутренних '
+                      'ссылок, чем тех/инфо-страницы.', C.ok)
+            if _tt_sum:
+                _top = sorted(_tt_sum.items(), key=lambda kv: -kv[1])[:5]
+                _line('Топ тех/инфо-получателей ссылок: '
+                      + ' · '.join(f'{p} ({n})' for p, n in _top),
+                      C.text_soft)
+            row += 1
+
         # ── Секция 4а: гигиена robots.txt (доп. чек-лист) ──
         # Показываем только если проверка выполнялась (нет error и robots 200)
         if not indexing_summary.get('error'):
