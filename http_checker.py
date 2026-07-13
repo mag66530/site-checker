@@ -715,6 +715,18 @@ async def check_one(
             region = check_region_vars(a['body_text'], task.subdomain, region_ctx)
         except Exception:
             region = None
+        # Технический регион (гео-сигналы) - только с главной поддомена:
+        # meta geo.* и Schema addressLocality сквозные для всего поддомена.
+        if task.type_code == 'main':
+            try:
+                from region_checker import check_geo_region
+                _city = region_ctx.host_city.get(task.subdomain, '') or task.city
+                _geo = check_geo_region(a['body_text'], _city)
+                if region is None:
+                    region = {'город': _city, 'issues': []}
+                region['geo'] = _geo
+            except Exception:
+                pass
     # п.1.6: на СНГ-домене нет РФ / СНГ / чужих стран (сам вернёт None для РФ).
     cis = None
     if check_cis and is_ok and region_ctx is not None and a['body_text']:

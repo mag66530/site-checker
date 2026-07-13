@@ -506,13 +506,23 @@ def run_check(pid, params, creds, log, progress):
         _meta_summary = None
         if _chk_meta:
             try:
-                from meta_checker import find_duplicates, check_url_duplicates
+                from meta_checker import (find_duplicates, check_url_duplicates,
+                                          check_test_domains)
                 _dups = find_duplicates(results)
                 _probe_urls = [r.url for r in results
                                if r.is_ok and r.type_code in ('main', 'catalog')]
                 _url_dups = asyncio.run(check_url_duplicates(
                     _probe_urls, proxy_url=proxy_url))
+                # Тестовые домены (test./dev./stage.…) корневого домена.
+                _tdoms = asyncio.run(check_test_domains(
+                    _main.host, proxy_url=proxy_url)) if _main else []
+                _n_td_open = sum(1 for t in _tdoms
+                                 if t['state'] == 'indexable')
+                if _n_td_open:
+                    log(f'❌ Индексируемых тестовых доменов: {_n_td_open} '
+                        f'({", ".join(t["host"] for t in _tdoms if t["state"] == "indexable")})')
                 _meta_summary = {'duplicates': _dups, 'url_duplicates': _url_dups,
+                                 'test_domains': _tdoms,
                                  'probed_urls': len(_probe_urls)}
                 _m_pages_bad = sum(1 for r in results
                                    if getattr(r, 'has_meta_issues', False)

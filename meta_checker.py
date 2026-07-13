@@ -312,6 +312,68 @@ async def check_url_duplicates(urls: list, *, proxy_url=None,
     return out
 
 
+# ── Тестовые домены: не должны существовать открытыми для индексации ──
+# Чек-лист: «отсутствуют дубли, зеркала и индексируемые тестовые домены».
+# Зеркала (www/http) ловит check_url_duplicates; здесь - типовые тестовые
+# поддомены. Отвечает 200 на СВОЁМ хосте и открыт для роботов = дубль
+# всего сайта в индексе (баг). Закрыт (noindex / Disallow: /) - ок, инфо.
+# Полные копии на ЧУЖИХ доменах снаружи не найти - вне охвата.
+
+_TEST_SUBDOMAINS = ('test', 'dev', 'stage', 'staging', 'beta', 'demo',
+                    'old', 'new')
+_RE_NOINDEX_META = re.compile(
+    r'<meta[^>]+name\s*=\s*["\']robots["\'][^>]*content\s*=\s*["\'][^"\']*'
+    r'noindex', re.I)
+
+
+async def check_test_domains(root_host: str, *, proxy_url=None) -> list:
+    """Прозвонить типовые тестовые поддомены корневого домена.
+
+    Возвращает находки: [{'host', 'code', 'state'}], где state:
+      • 'indexable' - отвечает 200 и ОТКРЫТ для индексации (баг);
+      • 'closed'    - отвечает 200, но закрыт noindex/robots (инфо, ок).
+    Несуществующие (DNS/404) и редиректящие на основной сайт - молчим."""
+    import aiohttp
+    from http_checker import make_browser_headers
+    root = (root_host or '').lower().removeprefix('www.')
+    out = []
+    to = aiohttp.ClientTimeout(total=15)
+    connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=300)
+    async with aiohttp.ClientSession(headers=make_browser_headers(),
+                                     connector=connector) as session:
+        async def probe(sub):
+            host = f'{sub}.{root}'
+            try:
+                async with session.get(f'https://{host}/', timeout=to,
+                                       proxy=proxy_url,
+                                       allow_redirects=True) as r:
+                    final_host = (r.url.host or '').lower().removeprefix('www.')
+                    if final_host != host:
+                        return              # редирект на основной сайт - ок
+                    if r.status != 200:
+                        return
+                    html = await r.text(errors='replace')
+            except Exception:
+                return                      # DNS/сеть - домена нет, ок
+            # Закрыт ли от индексации: meta noindex или Disallow: / в robots.
+            closed = bool(_RE_NOINDEX_META.search(html or ''))
+            if not closed:
+                try:
+                    async with session.get(f'https://{host}/robots.txt',
+                                           timeout=to, proxy=proxy_url) as rr:
+                        if rr.status == 200:
+                            rtxt = await rr.text(errors='replace')
+                            closed = bool(re.search(
+                                r'^\s*disallow\s*:\s*/\s*$', rtxt,
+                                re.I | re.M))
+                except Exception:
+                    pass
+            out.append({'host': host, 'code': 200,
+                        'state': 'closed' if closed else 'indexable'})
+        await asyncio.gather(*[probe(s) for s in _TEST_SUBDOMAINS])
+    return sorted(out, key=lambda x: x['host'])
+
+
 # ═════════════════════════════════════════════════════════════════════
 # П.1.3.1 чек-листа: единственность ключевых SEO-тегов.
 #

@@ -2938,7 +2938,9 @@ def _build_meta_sheet(wb, results, meta_summary):
     url_dups_all = (meta_summary or {}).get('url_duplicates') or []
     url_dups = [d for d in url_dups_all if d.get('problem') != 'not_301']
     url_not301 = [d for d in url_dups_all if d.get('problem') == 'not_301']
-    has_bugs = bool(bad or same_city or cross_city or url_dups)
+    test_domains = (meta_summary or {}).get('test_domains') or []
+    td_open = [t for t in test_domains if t.get('state') == 'indexable']
+    has_bugs = bool(bad or same_city or cross_city or url_dups or td_open)
 
     ws = wb.create_sheet('Метаданные')
     ws.sheet_view.showGridLines = False
@@ -3110,6 +3112,36 @@ def _build_meta_sheet(wb, results, meta_summary):
                 f'Временный редирект вместо 301  ({len(url_not301)})', C.warn)
             row += 1
             _url_dup_table(url_not301, C.warn)
+            row += 1
+
+        # ── Тестовые домены (test./dev./stage.…) ──
+        _meta_section_title(
+            ws, row, f'Тестовые домены  ({len(td_open)})',
+            C.err if td_open else C.ok)
+        row += 1
+        if not test_domains:
+            _meta_ok_line(ws, row, '✅ Типовые тестовые поддомены (test., dev., '
+                                   'stage., beta., demo., old., new.) не '
+                                   'существуют или редиректят на основной сайт.')
+            row += 1
+        else:
+            for t in test_domains:
+                ws.merge_cells(start_row=row, start_column=2,
+                               end_row=row, end_column=5)
+                c = ws.cell(row=row, column=2)
+                if t.get('state') == 'indexable':
+                    c.value = (f'❌ https://{t.get("host", "")}/ отвечает 200 и '
+                               f'ОТКРЫТ для индексации - дубль всего сайта в '
+                               f'индексе; закрыть (noindex / Disallow: /) или '
+                               f'убрать')
+                    c.font = _font(size=10, color=C.err)
+                else:
+                    c.value = (f'✓ https://{t.get("host", "")}/ существует, но '
+                               f'закрыт от индексации (noindex/robots) - ок')
+                    c.font = _font(size=10, color=C.text_muted)
+                c.alignment = _align(indent=2, wrap=True)
+                ws.row_dimensions[row].height = 18
+                row += 1
 
 
 # ── Лист «Контакты по городам» (сверка с КП) ───────────────────────
@@ -3593,6 +3625,48 @@ def _build_region_sheet(wb, results):
                    'проверка выполняется только на доменах не-РФ.')
         c.font = _font(size=10, italic=True, color=C.text_soft)
         c.alignment = _align(indent=1)
+        row += 2
+
+    # ── Технический регион (гео-сигналы в коде) - по главным поддоменов ──
+    _geo_rows = [r for r in results
+                 if r.type_code == 'main'
+                 and (getattr(r, 'region', None) or {}).get('geo')]
+    if _geo_rows:
+        _geo_warn = [r for r in _geo_rows if r.region['geo'].get('warnings')]
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
+        c = ws.cell(row=row, column=2)
+        c.value = (f'Технический регион поддоменов (гео-сигналы в коде)  '
+                   f'({len(_geo_warn)} из {len(_geo_rows)} без сигналов)')
+        c.font = _font(size=13, bold=True,
+                       color=C.warn if _geo_warn else C.ok)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
+        c = ws.cell(row=row, column=2)
+        c.value = ('Снаружи видны только сигналы в коде: meta geo.* и '
+                   'addressLocality из Schema.org. Настройку региона в '
+                   'Яндекс.Вебмастере API не отдаёт - проверяется вручную.')
+        c.font = _font(size=9, italic=True, color=C.text_soft)
+        c.alignment = _align(indent=1, wrap=True)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        for r in _geo_rows:
+            g = r.region['geo']
+            ws.merge_cells(start_row=row, start_column=2,
+                           end_row=row, end_column=7)
+            c = ws.cell(row=row, column=2)
+            if g.get('warnings'):
+                c.value = f'⚠ {r.city} ({r.subdomain}): ' + '; '.join(g['warnings'])
+                c.font = _font(size=10, color=C.warn)
+            else:
+                c.value = (f'✅ {r.city} ({r.subdomain}): '
+                           + '; '.join(g.get('signals') or [])[:160])
+                c.font = _font(size=10, color=C.ok)
+            c.alignment = _align(indent=2, wrap=True)
+            ws.row_dimensions[row].height = 18
+            row += 1
 
 
 # ── Лист «Заголовки и мета» (п.1.3.1: единственные H1/Title/Description) ──

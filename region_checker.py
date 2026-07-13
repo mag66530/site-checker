@@ -273,3 +273,55 @@ def check_cis_mentions(html: str, host: str, ctx: RegionContext) -> dict | None:
             break
 
     return {'страна': страна, 'issues': issues}
+
+
+# ── Технический регион поддомена (гео-сигналы в коде) ────────────────
+# Чек-лист: «в каждом домене/поддомене технически задан свой регион».
+# Снаружи видны только сигналы в коде: meta geo.* (geo.region/geo.placename/
+# geo.position/ICBM) и addressLocality из Schema.org. Настройку региона в
+# Яндекс.Вебмастере API не отдаёт - её проверяют руками.
+
+_RE_META_GEO = re.compile(
+    r'<meta[^>]+name\s*=\s*["\'](geo\.region|geo\.placename|geo\.position|'
+    r'ICBM)["\'][^>]*>', re.I)
+_RE_META_CONTENT = re.compile(r'content\s*=\s*["\']([^"\']*)["\']', re.I)
+# addressLocality: JSON-LD ("addressLocality": "Пенза") и microdata
+# (<span itemprop="addressLocality">Пенза</span>)
+_RE_LOCALITY_JSON = re.compile(r'"addressLocality"\s*:\s*"([^"]+)"')
+_RE_LOCALITY_MICRO = re.compile(
+    r'itemprop\s*=\s*["\']addressLocality["\'][^>]*>([^<]+)<', re.I)
+
+
+def check_geo_region(html: str, city: str) -> dict:
+    """Технические гео-сигналы региона на главной поддомена.
+
+    Возвращает {'signals': [«geo.region=RU-PNZ», …], 'localities': [...],
+    'locality_match': True|False|None, 'warnings': [...]}."""
+    signals, localities = [], []
+    for m in _RE_META_GEO.finditer(html or ''):
+        cm = _RE_META_CONTENT.search(m.group(0))
+        val = (cm.group(1).strip() if cm else '')
+        signals.append(f'{m.group(1)}={val}' if val else m.group(1))
+    for m in _RE_LOCALITY_JSON.finditer(html or ''):
+        localities.append(m.group(1).strip())
+    for m in _RE_LOCALITY_MICRO.finditer(html or ''):
+        localities.append(m.group(1).strip())
+    localities = list(dict.fromkeys(localities))
+    if localities:
+        signals.append('Schema addressLocality=' + ', '.join(localities[:3]))
+
+    warnings = []
+    locality_match = None
+    if localities and city:
+        locality_match = any(city.lower() in l.lower() or l.lower() in city.lower()
+                             for l in localities)
+        if not locality_match:
+            warnings.append(
+                f'в Schema.org указан город «{localities[0]}», а поддомен - '
+                f'«{city}»: технический регион не совпадает')
+    if not signals:
+        warnings.append('технический регион не задан в коде (нет meta geo.* '
+                        'и addressLocality в Schema.org) - регион в '
+                        'Яндекс.Вебмастере проверить вручную')
+    return {'signals': signals, 'localities': localities,
+            'locality_match': locality_match, 'warnings': warnings}
