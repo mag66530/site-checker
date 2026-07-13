@@ -766,6 +766,28 @@ async def check_one(
                             'тех. страницам/каталогу не работают')
             except Exception:
                 pass
+        # Favicon: установлен и реально грузится. Сквозной - проверяем один
+        # раз на поддомен, с его главной. Битым считаем только явный 404/410
+        # (сеть/таймаут - не приговор, как в меню).
+        if layout is not None and task.type_code == 'main':
+            try:
+                from layout_checker import extract_favicon
+                _fav_url, _fav_tag = extract_favicon(
+                    a['body_text'], a['final_url'] or task.url)
+                _fav_status = None
+                if _fav_url:
+                    _fav_status = await _link_status(
+                        session, _fav_url, min(timeout_ms, 20000), proxy_url)
+                layout['favicon'] = {'url': _fav_url, 'tag': _fav_tag,
+                                     'status': _fav_status}
+                if _fav_url and _fav_status in (404, 410):
+                    layout['issues'].append(
+                        'favicon не грузится (битая ссылка в link rel="icon")'
+                        if _fav_tag else
+                        'favicon не установлен (нет <link rel="icon">, '
+                        'и /favicon.ico отдаёт 404)')
+            except Exception:
+                pass
 
     # п.1.12 (ТЗ 3.5): микроразметка Schema.org + OpenGraph. Только основные
     # типы страниц (+ контакты); сам чекер вернёт None для нерелевантных.

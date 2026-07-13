@@ -14,6 +14,8 @@ indexing_checker.py - проверка индексации страниц (пу
         каноникл на категорию бывает намеренным)
   • Кросс-проверка sitemap ↔ robots: URL из sitemap (= «хочу в индекс»),
     но закрыт Disallow → противоречие, баг.
+  • hreflang (если есть мультиязычность): теги валидируются - коды языков,
+    абсолютные URL, self-reference; отсутствие тегов - не ошибка.
 
 Правила разбираются для групп User-agent: * / Yandex / Googlebot по стандарту:
 wildcard «*», якорь «$», выигрывает самое ДЛИННОЕ правило, при равенстве - Allow.
@@ -173,6 +175,11 @@ _META_RE = re.compile(
 _CONTENT_RE = re.compile(r'content\s*=\s*["\']([^"\']*)["\']', re.I)
 _CANONICAL_RE = re.compile(r'<link\b[^>]*rel\s*=\s*["\']canonical["\'][^>]*>', re.I)
 _HREF_RE = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
+_HREFLANG_RE = re.compile(
+    r'<link\b[^>]*hreflang\s*=\s*["\']([^"\']+)["\'][^>]*>', re.I)
+# Код языка hreflang: ll / ll-CC / ll-Script / x-default (упрощённо по BCP47)
+_HREFLANG_CODE_RE = re.compile(
+    r'^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8})?|x-default)$', re.I)
 
 
 def _find_meta_robots(html: str):
@@ -196,6 +203,18 @@ def _find_canonicals(html: str) -> list:
         hm = _HREF_RE.search(m.group(0))
         if hm and hm.group(1).strip():
             out.append(hm.group(1).strip())
+    return out
+
+
+def _find_hreflangs(html: str) -> list:
+    """[(lang, href)] всех <link rel="alternate" hreflang=…> страницы."""
+    out = []
+    for m in _HREFLANG_RE.finditer(html[:200_000]):
+        tag = m.group(0)
+        if 'alternate' not in tag.lower():
+            continue
+        hm = _HREF_RE.search(tag)
+        out.append((m.group(1).strip(), hm.group(1).strip() if hm else ''))
     return out
 
 
@@ -239,6 +258,7 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         'x_robots': None, 'x_robots_noindex': False,
         'canonical': None, 'canonical_count': 0,
         'canonical_self': None, 'canonical_disallowed': False,
+        'hreflang_count': 0,
         'issues': [], 'warnings': [],
     }
     issues, warnings = out['issues'], out['warnings']
@@ -312,6 +332,30 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                                           'ведёт на URL, закрытый в robots')
                     if not out['canonical_disallowed']:
                         warnings.append('canonical ведёт на другой URL')
+
+    # 5. hreflang (если есть мультиязычность). Отсутствие тегов - НЕ ошибка:
+    # одноязычному сайту hreflang не нужен. Если теги есть - валидируем:
+    # корректные коды языков, абсолютные URL, self-reference.
+    if html:
+        hl = _find_hreflangs(html)
+        out['hreflang_count'] = len(hl)
+        if hl:
+            bad_codes = [c for c, _ in hl if not _HREFLANG_CODE_RE.match(c)]
+            rel_urls = [h for _, h in hl
+                        if h and not urlsplit(h).scheme]
+            try:
+                self_ref = any(_norm_url(h) == _norm_url(url)
+                               for _, h in hl if h)
+            except Exception:
+                self_ref = True
+            if bad_codes:
+                warnings.append('hreflang: некорректные коды языков')
+            if rel_urls:
+                warnings.append('hreflang: относительные URL - '
+                                'должны быть абсолютными')
+            if not self_ref:
+                warnings.append('hreflang: нет ссылки на саму страницу '
+                                '(self-reference)')
 
     out['verdict'] = 'closed' if issues else ('warn' if warnings else 'open')
     return out

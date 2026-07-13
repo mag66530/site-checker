@@ -19,6 +19,9 @@ layout_checker.py - вёрстка и адаптивность (пункт 1.11 
   • Инлайн-стили - визуальные стили должны жить в CSS-файлах; много
     атрибутов style="…" в HTML - предупреждение (немного инлайна на живых
     сайтах неизбежно: баннеры с background-image, переключатели видимости).
+  • Favicon - установлен (<link rel="…icon…"> или дефолтный /favicon.ico)
+    и реально грузится; прозвон делает http_checker с главной поддомена
+    (favicon сквозной). 404/410 = баг.
 
 CSS не качаем повторно: http_checker уже тянет стили страницы для проверки
 видимости цены/кнопок - оттуда же берём статус и признак @media (кэш на батч).
@@ -168,6 +171,27 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'issues': issues,
         'warnings': warnings,
     }
+
+
+# ── Favicon: установлен и реально грузится ──────────────────────────
+
+_RE_FAVICON = re.compile(
+    r'<link\b[^>]*rel\s*=\s*["\'][^"\']*icon[^"\']*["\'][^>]*>', re.I)
+_RE_HREF_ATTR = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
+
+
+def extract_favicon(html: str, base_url: str):
+    """(url, from_tag): адрес favicon из <link rel="…icon…"> или дефолтный
+    /favicon.ico, если тега нет (браузеры сами пробуют этот путь)."""
+    for m in _RE_FAVICON.finditer(html or ''):
+        hm = _RE_HREF_ATTR.search(m.group(0))
+        if hm and hm.group(1).strip():
+            href = hm.group(1).strip()
+            if href.startswith('data:'):     # инлайн-иконка - грузится всегда
+                return None, True
+            return urljoin(base_url, href), True
+    sp = urlsplit(base_url)
+    return f'{sp.scheme}://{sp.netloc}/favicon.ico', False
 
 
 # ── Меню шапки (ТЗ 2.2/2.3): переходы по тех. страницам и каталогу ───
