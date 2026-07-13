@@ -881,6 +881,68 @@ def проверка_чекбоксов(scope) -> dict:
     return {"состояние": "корректно", "коммент": ""}
 
 
+def проверка_автозаполнения(scope) -> dict:
+    """Пункт «Поля с автозаполнением работают корректно». Настоящее браузерное
+    автозаполнение (из сохранённого профиля) в headless честно не воспроизвести,
+    поэтому проверяем ОБЪЕКТИВНЫЕ признаки, от которых оно зависит - на личных
+    полях (имя/почта/телефон):
+      • не ОТКЛЮЧЕНО ли автозаполнение (autocomplete=off/false/nope) - тогда
+        браузер не подставит сохранённые данные, пользователь вводит вручную;
+      • ПРИНИМАЕТ ли поле «автозаполненное» значение - ставим значение разом
+        (как автозаполнение, через .value + события input/change) и смотрим, что
+        поле его не очистило. Значение возвращаем как было (отправку не ломаем).
+    → {состояние: 'не найдено'|'корректно'|'отключено'|'искажается', коммент}.
+    Всё в одном evaluate: атомарно, с восстановлением исходных значений."""
+    try:
+        r = scope.evaluate(
+            "f => {"
+            " const vis=e=>{const b=e.getBoundingClientRect();const s=getComputedStyle(e);"
+            "   return b.width>0&&b.height>0&&s.visibility!=='hidden'&&s.display!=='none';};"
+            " const off=new Set(['off','false','nope','none','disabled']);"
+            " const kind=e=>{const t=(e.type||'').toLowerCase();"
+            "   const s=((e.name||'')+' '+(e.getAttribute('autocomplete')||'')+' '"
+            "     +(e.placeholder||'')+' '+(e.id||'')).toLowerCase();"
+            "   if(t==='email'||/mail|почт/.test(s)) return 'email';"
+            "   if(t==='tel'||/phone|tel|телеф/.test(s)) return 'phone';"
+            "   if(/name|имя|фио|\\bfio|фамил/.test(s)) return 'name'; return null;};"
+            " const vals={name:'Иван Петров',email:'test.autofill@example.ru',phone:'+79991234567'};"
+            " const els=[...f.querySelectorAll('input,textarea')].filter(e=>{"
+            "   const t=(e.type||'').toLowerCase();"
+            "   return !['hidden','submit','button','checkbox','radio','file','password'].includes(t)"
+            "     && vis(e) && !e.disabled && !e.readOnly;});"
+            " const отключены=[], искажены=[]; let проверено=0;"
+            " for(const e of els){ const k=kind(e); if(!k) continue; проверено++;"
+            "   const label=(e.name||e.placeholder||e.id||k);"
+            "   const ac=(e.getAttribute('autocomplete')||'').trim().toLowerCase();"
+            "   if(off.has(ac)) отключены.push(label);"
+            "   const orig=e.value;"
+            "   try{ e.focus(); e.value=vals[k];"
+            "     e.dispatchEvent(new Event('input',{bubbles:true}));"
+            "     e.dispatchEvent(new Event('change',{bubbles:true}));"
+            "     if(((e.value||'').trim())==='') искажены.push(label);"
+            "   }catch(_){}"
+            "   finally{ try{ e.value=orig;"
+            "     e.dispatchEvent(new Event('input',{bubbles:true})); }catch(_){} } }"
+            " return {проверено, отключены:[...new Set(отключены)].slice(0,4),"
+            "   искажены:[...new Set(искажены)].slice(0,4)};"
+            "}")
+    except Exception:  # noqa: BLE001
+        return {"состояние": "не найдено", "коммент": ""}
+    if not r or int(r.get("проверено") or 0) == 0:
+        return {"состояние": "не найдено", "коммент": ""}
+    if r.get("отключены"):
+        return {"состояние": "отключено",
+                "коммент": ("Автозаполнение выключено (autocomplete=off) на полях: "
+                            + ", ".join(f"«{x}»" for x in r["отключены"])
+                            + " - браузер не подставит сохранённые имя/почту/телефон, "
+                            "пользователь вводит вручную.")}
+    if r.get("искажены"):
+        return {"состояние": "искажается",
+                "коммент": ("Поле очищает автозаполненное значение (не принимает ввод "
+                            "разом): " + ", ".join(f"«{x}»" for x in r["искажены"]) + ".")}
+    return {"состояние": "корректно", "коммент": ""}
+
+
 # ── Двойная отправка (двойной клик по кнопке) ────────────────────────
 _DS_ТРЕКЕРЫ = ("mc.yandex", "metri", "google-analytics", "googletagmanager",
                "doubleclick", "top-fwz1", "vk.com", "facebook.", "criteo",
@@ -2198,6 +2260,7 @@ LOG_HEADERS = [
     # Защита от XSS (проба под галочкой) - «Защищена / УЯЗВИМА / Проверить».
     "Защита от XSS",
     "Обработка ошибок",
+    "Автозаполнение полей",
     "Комментарий",
 ]
 
@@ -2213,6 +2276,7 @@ LOG_KEYS_ORDER = [
     "согласие_обязательно",
     "защита_от_xss",
     "обработка_ошибок",
+    "автозаполнение",
     "комментарий",
 ]
 
@@ -3557,6 +3621,25 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                       + (f" — {_cb['коммент']}" if _cb["коммент"] else ""))
             except Exception as _ecb:  # noqa: BLE001
                 print(f"   ⚠️ Проверка чекбоксов/радио не удалась: {_ecb}")
+
+            # Автозаполнение личных полей: колонка «корректно/отключено/искажается»,
+            # коммент - только при проблеме. Значения полей возвращаются как были.
+            try:
+                _af = проверка_автозаполнения(form)
+                записать_в_excel({
+                    "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                    "тип_селектора": "поля", "ид": название,
+                    "название": f"Автозаполнение полей: {название}",
+                    "имя": имя_теста,
+                    "статус": "Проверить" if _af["состояние"] in ("отключено", "искажается") else "OK",
+                    "автозаполнение": _af["состояние"],
+                    "комментарий_готовый": _af["коммент"] or None,
+                    "код": "autofill",
+                })
+                print(f"   🅰️ Автозаполнение «{название}»: {_af['состояние']}"
+                      + (f" — {_af['коммент']}" if _af["коммент"] else ""))
+            except Exception as _eaf:  # noqa: BLE001
+                print(f"   ⚠️ Проверка автозаполнения не удалась: {_eaf}")
 
             # Файл-проба (по галочке): грузим безвредный файл с опасным
             # расширением и отправляем - пройдёт ли серверную фильтрацию.
