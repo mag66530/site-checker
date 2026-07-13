@@ -1592,8 +1592,14 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         c.alignment = _align(indent=1)
         ws.row_dimensions[row].height = 24
         row += 1
+        def _idx_extra(r):
+            _ext = (getattr(r, 'indexing', None) or {}).get('ext_nofollow') or []
+            return ('внешние: ' + ', '.join(_ext[:4])
+                    + (f' … +{len(_ext) - 4}' if len(_ext) > 4 else '')
+                    if _ext else '')
         row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'indexing', 'warnings'), C.warn)
+            ws, row, _issue_groups(warned, 'indexing', 'warnings'), C.warn,
+            extra=_idx_extra)
 
     # ── Секция 3: sitemap ↔ robots противоречия ──
     if indexing_summary:
@@ -1698,6 +1704,67 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                       'мусор попадает в обход робота:', C.text_muted)
                 for j in junk:
                     _line(f'{j.get("label", "")}: {j.get("path", "")}', C.err)
+            row += 1
+
+        # ── Секция 4.1: пагинация (canonical для Яндекса, JS для Google) ──
+        _pg = indexing_summary.get('pagination')
+        if _pg:
+            _pg_bad = _pg.get('status') == 200 and _pg.get('canon_ok') is False
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = f'Пагинация  ({_pg.get("base", "")})'
+            c.font = _font(size=13, bold=True, color=C.warn if _pg_bad else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            if _pg.get('status') != 200:
+                _line('✓ Вторая страница пагинации (?PAGEN_1=2) не отдаёт 200 '
+                      '(редирект/404) - дублей пагинации нет.', C.ok)
+            elif _pg.get('canon_ok'):
+                _line(f'✅ Для Яндекса: на странице пагинации rel=canonical '
+                      f'без номера страницы ({_pg.get("canonical", "")}).', C.ok)
+            elif _pg.get('canonical'):
+                _line(f'⚠ canonical пагинации содержит номер страницы '
+                      f'({_pg.get("canonical", "")}) - для Яндекса нужен '
+                      f'canonical на категорию без номера.', C.warn)
+            else:
+                _line('⚠ На странице пагинации (?PAGEN_1=2) нет rel=canonical '
+                      '- для Яндекса нужен canonical на категорию.', C.warn)
+            if _pg.get('loadmore') is True:
+                _line('✅ Для Google: на категории найдена JS-подгрузка '
+                      '(«показать ещё») - контент дозагружается на одной '
+                      'странице.', C.ok)
+            elif _pg.get('loadmore') is False:
+                _line('⚠ Маркеры JS-подгрузки («показать ещё»/load-more) на '
+                      'категории не найдены - проверить вручную, как Google '
+                      'видит остальные товары.', C.warn)
+            row += 1
+
+        # ── Секция 4.2: спорные для индекса страницы (noindex-кандидаты) ──
+        _adv = indexing_summary.get('advisory_open')
+        if _adv is not None and not indexing_summary.get('error'):
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = f'Спорные для индекса страницы  ({len(_adv)})'
+            c.font = _font(size=13, bold=True,
+                           color=C.warn if _adv else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            if not _adv:
+                _line('✅ Типовые разделы (новости, акции, блог, политика '
+                      'конфиденциальности) не существуют либо уже закрыты '
+                      'noindex/robots.', C.ok)
+            else:
+                _line('Чек-лист советует noindex для старых акций/новостей/'
+                      'политик. Эти разделы открыты - решить, нужны ли они '
+                      'в индексе (полезный раздел можно оставить):',
+                      C.text_muted)
+                for a in _adv:
+                    _line(f'⚠ {a.get("label", "")}: {a.get("path", "")} - '
+                          f'отвечает 200, noindex не стоит', C.warn)
             row += 1
 
         # ── Секция 4а: гигиена robots.txt (доп. чек-лист) ──

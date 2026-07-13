@@ -181,6 +181,9 @@ _CANONICAL_RE = re.compile(r'<link\b[^>]*rel\s*=\s*["\']canonical["\'][^>]*>', r
 _HREF_RE = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
 _HREFLANG_RE = re.compile(
     r'<link\b[^>]*hreflang\s*=\s*["\']([^"\']+)["\'][^>]*>', re.I)
+_A_TAG_RE = re.compile(r'<a\b[^>]*>', re.I)
+_REL_RE = re.compile(r'rel\s*=\s*["\']([^"\']*)["\']', re.I)
+_REL_OK_RE = re.compile(r'nofollow|ugc|sponsored', re.I)
 # Код языка hreflang: ll / ll-CC / ll-Script / x-default (упрощённо по BCP47)
 _HREFLANG_CODE_RE = re.compile(
     r'^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8})?|x-default)$', re.I)
@@ -208,6 +211,31 @@ def _find_canonicals(html: str) -> list:
         if hm and hm.group(1).strip():
             out.append(hm.group(1).strip())
     return out
+
+
+def _ext_links_nofollow(html: str, url: str) -> list:
+    """Домены ВНЕШНИХ <a>-ссылок без rel="nofollow" (ugc/sponsored тоже
+    считаем закрытыми). Свой хост и поддомены своего корневого домена -
+    внутренние, не считаем."""
+    host = (urlsplit(url).netloc or '').lower().removeprefix('www.')
+    root = '.'.join(host.split('.')[-2:])
+    domains = set()
+    for m in _A_TAG_RE.finditer((html or '')[:600_000]):
+        tag = m.group(0)
+        hm = _HREF_RE.search(tag)
+        if not hm:
+            continue
+        href = hm.group(1).strip()
+        if not href.startswith(('http://', 'https://')):
+            continue
+        h = (urlsplit(href).netloc or '').lower().removeprefix('www.')
+        if not h or h == root or h.endswith('.' + root):
+            continue
+        rm = _REL_RE.search(tag)
+        if rm and _REL_OK_RE.search(rm.group(1)):
+            continue
+        domains.add(h)
+    return sorted(domains)
 
 
 def _find_hreflangs(html: str) -> list:
@@ -262,7 +290,7 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         'x_robots': None, 'x_robots_noindex': False,
         'canonical': None, 'canonical_count': 0,
         'canonical_self': None, 'canonical_disallowed': False,
-        'hreflang_count': 0,
+        'hreflang_count': 0, 'ext_nofollow': [],
         'issues': [], 'warnings': [],
     }
     issues, warnings = out['issues'], out['warnings']
@@ -361,6 +389,15 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                 warnings.append('hreflang: нет ссылки на саму страницу '
                                 '(self-reference)')
 
+    # 6. Внешние ссылки (соцсети/чаты/справочники/госты) должны быть в
+    # rel="nofollow" - иначе страница отдаёт ссылочный вес наружу.
+    if html:
+        ext = _ext_links_nofollow(html, url)
+        out['ext_nofollow'] = ext
+        if ext:
+            warnings.append('внешние ссылки без rel="nofollow" '
+                            '(соцсети/чаты/справочники)')
+
     out['verdict'] = 'closed' if issues else ('warn' if warnings else 'open')
     return out
 
@@ -390,6 +427,28 @@ _JUNK_FIXED = [
     ('служебный каталог /local/', '/local/'),
     ('служебный каталог /cgi-bin/', '/cgi-bin/'),
 ]
+
+# Спорные для индекса разделы (чек-лист: «noindex для старых акций/новостей/
+# политики»). Открытые = МЯГКОЕ предупреждение, не баг: решает человек.
+_ADVISORY_PATHS = [
+    ('новости', '/news/'),
+    ('новости', '/company/news/'),
+    ('акции', '/aktsii/'),
+    ('акции', '/actions/'),
+    ('акции', '/sale/'),
+    ('блог/статьи', '/blog/'),
+    ('блог/статьи', '/articles/'),
+    ('политика конфиденциальности', '/politika-konfidentsialnosti/'),
+    ('политика конфиденциальности', '/privacy-policy/'),
+    ('политика конфиденциальности', '/policy/'),
+    ('политика конфиденциальности', '/privacy/'),
+]
+
+# Маркеры JS-подгрузки товаров («показать ещё») - эвристика для пункта
+# «для Google весь контент на одной странице».
+_RE_LOADMORE = re.compile(
+    r'show-?more|load-?more|loadmore|btn-more|js-more|показать\s+ещё|'
+    r'показать\s+еще', re.I)
 
 
 async def _status_direct(session, url, proxy_url, *, timeout_ms=15000,
@@ -447,6 +506,7 @@ async def check_paths_against_robots(host: str, paths: list, *,
            'checked': 0, 'disallowed': [], 'junk_open': [],
            'sitemap_checks': None, 'blanket_disallow': [],
            'ua_groups': None, 'assets_checked': 0, 'assets_closed': [],
+           'advisory_open': [], 'pagination': None,
            'error': None}
     try:
         async with aiohttp.ClientSession(
@@ -537,6 +597,52 @@ async def check_paths_against_robots(host: str, paths: list, *,
                 if status == 200:                # существует И открыт = находка
                     out['junk_open'].append(
                         {'label': label, 'path': path})
+
+            # ── 2а. Спорные для индекса страницы (noindex-кандидаты) ──
+            # Чек-лист: старые акции/новости/политики лучше закрывать
+            # noindex'ом. Открытая = МЯГКОЕ предупреждение «решить, нужна ли
+            # в индексе» - полезность таких разделов субъективна.
+            async def _page_html(u):
+                try:
+                    to = aiohttp.ClientTimeout(total=15)
+                    async with session.get(u, timeout=to, proxy=proxy_url,
+                                           allow_redirects=True) as r:
+                        if r.status != 200:
+                            return None
+                        return await r.text(errors='replace')
+                except Exception:
+                    return None
+
+            for label, path in _ADVISORY_PATHS:
+                if any(a['label'] == label for a in out['advisory_open']):
+                    continue
+                dis, _r, _a = robots_verdict(info, f'https://{host}{path}')
+                if dis:
+                    continue                    # закрыта в robots - ок
+                html_a = await _page_html(f'https://{host}{path}')
+                if html_a is None:
+                    continue                    # нет страницы - нечего решать
+                _mv, _noidx = _find_meta_robots(html_a)
+                if _noidx:
+                    continue                    # noindex стоит - ок
+                out['advisory_open'].append({'label': label, 'path': path})
+
+            # ── 2б. Пагинация: canonical для Яндекса + JS-подгрузка для
+            # Google (эвристика по маркерам «показать ещё» в HTML) ──
+            if sample_category:
+                _base = '/' + sample_category.strip('/') + '/'
+                pg = {'base': _base, 'status': None, 'canonical': None,
+                      'canon_ok': None, 'loadmore': None}
+                html_p2 = await _page_html(f'https://{host}{_base}?PAGEN_1=2')
+                if html_p2 is not None:
+                    pg['status'] = 200
+                    canons = _find_canonicals(html_p2)
+                    pg['canonical'] = canons[0] if canons else None
+                    pg['canon_ok'] = bool(canons) and 'pagen' not in canons[0].lower()
+                html_p1 = await _page_html(f'https://{host}{_base}')
+                if html_p1 is not None:
+                    pg['loadmore'] = bool(_RE_LOADMORE.search(html_p1))
+                out['pagination'] = pg
 
             # ── 3. Sitemap-директивы (ТЗ 3.3.6) ──
             sm = {'has_directive': bool(info.sitemaps),
