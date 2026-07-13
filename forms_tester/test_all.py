@@ -793,6 +793,31 @@ def _ds_похоже_на_заказ(url: str, action: str) -> bool:
                                 "korzin"))
 
 
+def _видна_ошибка_отправки(page) -> bool:
+    """Видит ли пользователь СООБЩЕНИЕ ОБ ОШИБКЕ на странице (после упавшей
+    отправки): видимый элемент с error-классом / role=alert или короткий видимый
+    текст с маркером ошибки. Чистая проверка DOM (ничего не меняет)."""
+    try:
+        return bool(page.evaluate(
+            "() => {"
+            " const vis = el => { const r=el.getBoundingClientRect();"
+            "   const s=getComputedStyle(el);"
+            "   return r.width>0 && r.height>0 && s.visibility!=='hidden'"
+            "   && s.display!=='none' && s.opacity!=='0'; };"
+            " for (const el of document.querySelectorAll("
+            "   '[class*=error i],[class*=fail i],[role=alert],.alert-danger,"
+            "    .text-danger,.form-error,.has-error,.invalid-feedback')) {"
+            "   if (vis(el) && (el.innerText||'').trim()) return true; }"
+            " const words=['ошибк','не удалось','не отправ','попробуйте','повторите',"
+            "   'проверьте','что-то пошло','failed','error'];"
+            " for (const el of document.querySelectorAll('div,span,p,li,label,strong,small,b')) {"
+            "   if (!vis(el)) continue; const t=(el.innerText||'').trim().toLowerCase();"
+            "   if (t && t.length<140 && words.some(w=>t.includes(w))) return true; }"
+            " return false; }"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # Типы для пробы серверной фильтрации загрузки: (расширение, опасное?).
 # Контент БЕЗВРЕДНЫЙ (не эксплойт) - меняем только расширение. «Опасные» -
 # исполняемые/скриптовые/веб (могут стать вектором атаки): их приём сервером
@@ -2057,6 +2082,7 @@ LOG_HEADERS = [
     "Без согласия не отправить",
     # Защита от XSS (проба под галочкой) - «Защищена / УЯЗВИМА / Проверить».
     "Защита от XSS",
+    "Обработка ошибок",
     "Комментарий",
 ]
 
@@ -2070,6 +2096,7 @@ LOG_KEYS_ORDER = [
     "согласие_чекбоксы", "согласие_предустановка", "согласие_ссылка",
     "согласие_обязательно",
     "защита_от_xss",
+    "обработка_ошибок",
     "комментарий",
 ]
 
@@ -2476,7 +2503,11 @@ def _playwright_proxy_from_env():
 
 
 def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
-             город="", почта_получателя="", проба_файлов=False, xss_проба=False):
+             город="", почта_получателя="", проба_файлов=False, xss_проба=False,
+             проверять_цели=False):
+    # проверять_цели: проверка форм САМА цели Метрики НЕ проверяет (это делает
+    # «Проверка целей»). Флаг включается только когда движок форм зовёт «Проверка
+    # целей» (forms_run --check-goals) - тогда ловим цели заказа для её отчёта.
     # headless=True - браузер работает скрыто (окно не показывается); False - видимый.
     # город / почта_получателя - для прогона по поддоменам (городам): метка города
     # и почта, на которую должна прийти заявка (пишутся в одноимённые колонки лога).
@@ -2489,6 +2520,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     _run_t0 = _time.time()
     importlib.reload(config)
     from config import ТЕЛЕФОН, ПОЧТА, ИМЯ, КОММЕНТАРИЙ, СТРАНИЦЫ, СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ
+
+    # XSS-проба: подменяем САМО значение имени на payload-маркер. Форма заполняет
+    # поле имени токеном ИМЯ (карта «поля») → значение берётся ОТСЮДА; раньше payload
+    # клался только в имя_теста и в форму не попадал (тест был вхолостую). Почта и
+    # телефон остаются реальными - по ним админка опознаёт нашу заявку.
+    if xss_проба:
+        ИМЯ = _XSS_PAYLOAD
 
     # Пункт 2.9: почту покупателя можно переопределить из интерфейса (окружение
     # ORDER_BUYER_EMAIL) - чтобы заказ (и заявки) уходили на РЕАЛЬНУЮ почту, куда
@@ -3544,6 +3582,99 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _btn_css or "button[type='submit'], input[type='submit'], button.btn"
             ).first
             sub.scroll_into_view_if_needed()
+
+            # ── Обработка ошибок отправки (пункт чек-листа) ──
+            # Нарочно роняем ПЕРВЫЙ запрос отправки (route.abort) и смотрим реакцию
+            # формы: показала ошибку / молчит / соврала «успех». Реальная заявка НЕ
+            # уходит (запрос отменён). Только AJAX-формы (у навигационных ошибку
+            # рисует сервер) и не заказ. Штатную отправку защищаем: в finally снимаем
+            # перехват и возвращаем кнопку в рабочее состояние - настоящая отправка
+            # ниже уходит как обычно.
+            _err_verdict, _err_ком = None, ""
+            if not _is_order:
+                _err_info = {"n": 0, "ajax": False}
+                _err_armed = False
+                try:
+                    _e_btn_до = (sub.inner_text(timeout=800) or "").strip()
+                except Exception:  # noqa: BLE001
+                    _e_btn_до = ""
+                try:
+                    def _err_handler(route):
+                        try:
+                            req = route.request
+                            if ((req.method or "").upper() == "POST"
+                                    and not _ds_это_трекер(req.url)
+                                    and _err_info["n"] == 0):
+                                _err_info["n"] += 1
+                                _err_info["ajax"] = (req.resource_type in ("fetch", "xhr"))
+                                route.abort("failed")
+                            else:
+                                route.continue_()
+                        except Exception:  # noqa: BLE001
+                            try:
+                                route.continue_()
+                            except Exception:  # noqa: BLE001
+                                pass
+                    page.route("**/*", _err_handler)
+                    _err_armed = True
+                    try:
+                        sub.click(timeout=5000)
+                    except Exception:  # noqa: BLE001
+                        try:
+                            sub.click(timeout=5000, force=True)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    page.wait_for_timeout(1600)
+                    if _err_info["n"] == 0 or not _err_info["ajax"]:
+                        _err_verdict = None       # запрос не пойман / навигационная форма
+                    else:
+                        _euved = детект_уведомления_пользователю(
+                            page, _e_btn_до, "", кнопка=sub, таймаут_мс=2500)
+                        if str(_euved).startswith("Да"):
+                            _err_verdict = "ложный успех"
+                            _err_ком = ("При УПАВШЕМ запросе форма показала «успешно» - "
+                                        "пользователь думает, что заявка ушла, а её нет.")
+                        elif _видна_ошибка_отправки(page):
+                            _err_verdict = "корректно"
+                        else:
+                            _err_verdict = "молчит"
+                            _err_ком = ("При ошибке отправки форма никак не реагирует - "
+                                        "нет ни сообщения об ошибке, ни подтверждения.")
+                except Exception:  # noqa: BLE001
+                    _err_verdict = None
+                finally:
+                    if _err_armed:
+                        try:
+                            page.unroute("**/*", _err_handler)
+                        except Exception:  # noqa: BLE001
+                            try:
+                                page.unroute("**/*")
+                            except Exception:  # noqa: BLE001
+                                pass
+                    # вернуть кнопку в рабочее состояние для НАСТОЯЩЕЙ отправки ниже
+                    try:
+                        sub.evaluate("b => { try { b.disabled = false;"
+                                     " b.removeAttribute('disabled'); } catch(_){} }")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    page.wait_for_timeout(300)
+                if _err_verdict:
+                    try:
+                        записать_в_excel({
+                            "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                            "тип_селектора": "поля", "ид": название,
+                            "название": f"Обработка ошибок отправки: {название}",
+                            "имя": имя_теста,
+                            "статус": "Проверить" if _err_verdict in ("молчит", "ложный успех") else "OK",
+                            "обработка_ошибок": _err_verdict,
+                            "комментарий_готовый": _err_ком or None,
+                            "код": "error_handling",
+                        })
+                        print(f"   🚑 Обработка ошибок «{название}»: {_err_verdict}"
+                              + (f" — {_err_ком}" if _err_ком else ""))
+                    except Exception:  # noqa: BLE001
+                        pass
+
             # Пункт 2.7: запомним текст кнопки ДО отправки - чтобы поймать её смену
             # на подтверждение («Отправить» → «Заявка отправлена»).
             try:
@@ -3755,7 +3886,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # и пишем в отчёт «сработала / НЕ сработала». Причину показываем,
             # только если задана в конфиге («цель_причина»).
             _цель_имя = str(форма_config.get("цель") or "").strip()
-            if _цель_имя:
+            if _цель_имя and проверять_цели:
                 _t0g = _time.time()
                 _найдена = False
                 while True:
@@ -3944,6 +4075,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         сработавшей с момента ts (кроме уже записанных - через seen). Так видно,
         какая цель реально фиксируется на форме/кнопке, даже если в конфиге цель
         не задана. Не нужно знать имена целей заранее - прогон их показывает."""
+        if not проверять_цели:
+            return False          # цели - в «Проверке целей», не в формах
         _есть = False
         for g in _цели_с(ts):
             gнэйм = g["цель"]
@@ -4005,10 +4138,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 )
             except Exception:
                 pass
-            try:
-                h["context"].on("request", _поймать_цель)
-            except Exception:
-                pass
+            # Цели Метрики ловим ТОЛЬКО когда движок форм вызван «Проверкой целей»
+            # (проверять_цели=True). В обычной «Проверке форм» слушатель не вешаем -
+            # формы проверяем без целей.
+            if проверять_цели:
+                try:
+                    h["context"].on("request", _поймать_цель)
+                except Exception:
+                    pass
         return h["context"]
 
     def _drop_browser():
@@ -4388,6 +4525,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             print(f"   🧾 Заказ зафиксирован для проверки письма покупателю "
                                   f"({ПОЧТА}).")
 
+                    elif act in ("проверить_цель", "check_goal") and not проверять_цели:
+                        # Цели проверяет «Проверка целей», а не «Проверка форм» -
+                        # шаг пропускаем (формы всё равно кликаются/отправляются).
+                        pass
                     elif act in ("проверить_цель", "check_goal"):
                         # Проверка цели Яндекс.Метрики: ждём, пока перехватчик
                         # поймает reachGoal с нужным именем (цели уходят ajax-ом,
