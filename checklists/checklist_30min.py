@@ -656,8 +656,8 @@ def init_session():
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
-        'c30_check_w3c': False,        # п.1.16 - валидация W3C + скорость - по запросу
-        'c30_check_static': False,     # п.1.17 - сжатие/кеш статики - по запросу
+        'c30_check_w3c': True,         # п.1.16 - валидация W3C + скорость
+        'c30_check_static': True,      # п.1.17 - сжатие/кеш статики
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -1070,7 +1070,8 @@ if pid:
         _CHK_KEYS = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                      'c30_check_products', 'c30_check_text', 'c30_check_indexing',
                      'c30_check_meta', 'c30_check_region', 'c30_check_cis',
-                     'c30_check_layout', 'c30_check_markup']
+                     'c30_check_layout', 'c30_check_markup', 'c30_check_security',
+                     'c30_check_images', 'c30_check_w3c', 'c30_check_static']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
