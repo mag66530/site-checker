@@ -16,6 +16,10 @@ indexing_checker.py - проверка индексации страниц (пу
     но закрыт Disallow → противоречие, баг.
   • hreflang (если есть мультиязычность): теги валидируются - коды языков,
     абсолютные URL, self-reference; отсутствие тегов - не ошибка.
+  • ЧПУ и формат адресов (по ВСЕМ путям каталога): адрес не технический
+    (?ID=…, index.php), в сегментах пути только латиница/цифры/дефис в
+    нижнем регистре (кириллица/заглавные/подчёркивания/спецсимволы -
+    находки).
 
 Правила разбираются для групп User-agent: * / Yandex / Googlebot по стандарту:
 wildcard «*», якорь «$», выигрывает самое ДЛИННОЕ правило, при равенстве - Allow.
@@ -599,3 +603,65 @@ async def _collect_assets(session, page_url: str, proxy_url,
         if len(urls) >= limit:
             break
     return urls
+
+
+# ── ЧПУ и формат адресов (по всем путям каталога, без запросов) ──────
+
+
+_RE_CYR = re.compile(r'[а-яё]', re.I)
+_RE_UPPER = re.compile(r'[A-Z]')
+_RE_SLUG_JUNK = re.compile(r'[^a-z0-9\-_./]')
+
+_EXAMPLES = 10        # сколько примеров каждого типа показывать в отчёте
+
+
+def check_url_format(paths: list) -> dict:
+    """ЧПУ и формат адресов. paths - пути каталога и тех. страниц
+    ('/catalog/truba/…'). Запросов не делает - чистая валидация строк.
+
+    Находки:
+      • non_sef  - технический адрес (query ?ID=…, index.php и т.п.) - не ЧПУ;
+      • cyrillic - кириллица в пути (включая %-энкод и punycode xn--);
+      • uppercase - ЗАГЛАВНЫЕ буквы (риск дублей /Catalog/ vs /catalog/);
+      • underscore - подчёркивания (чек-лист требует дефисы);
+      • junk_chars - прочие символы (пробелы и спецсимволы)."""
+    out = {'checked': 0, 'non_sef': [], 'cyrillic': [], 'uppercase': [],
+           'underscore': [], 'junk_chars': []}
+
+    def _add(kind, p):
+        if len(out[kind]) < _EXAMPLES:
+            out[kind].append(p)
+        out[kind + '_n'] += 1
+
+    for kind in ('non_sef', 'cyrillic', 'uppercase', 'underscore',
+                 'junk_chars'):
+        out[kind + '_n'] = 0
+    for p in paths or []:
+        if not p or p == '/':
+            continue
+        out['checked'] += 1
+        low = p.lower()
+        # Не-ЧПУ: значимая часть адреса в query или скриптовое расширение.
+        if ('?' in p or '.php' in low.split('?')[0]
+                or '.asp' in low.split('?')[0]):
+            _add('non_sef', p)
+            continue
+        path = unquote(p)                       # %D0%BF… → кириллица
+        if _RE_CYR.search(path) or 'xn--' in low:
+            _add('cyrillic', p)
+            continue
+        if _RE_UPPER.search(path):
+            _add('uppercase', p)
+            continue
+        # Подчёркивания: только ВНЕ /filter/-части. Слаги свойств умного
+        # фильтра Bitrix (gost_tu-is-…) содержат «_» штатно - не шумим,
+        # а вот категории/товары с «_» - находка.
+        if '_' in path.split('/filter/')[0]:
+            _add('underscore', p)
+            continue
+        if _RE_SLUG_JUNK.search(path):
+            _add('junk_chars', p)
+    out['total_bad'] = sum(out[k + '_n'] for k in
+                           ('non_sef', 'cyrillic', 'uppercase', 'underscore',
+                            'junk_chars'))
+    return out

@@ -1752,6 +1752,39 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                       f'для роботов.', C.ok)
             row += 1
 
+        # ── Секция 4б: ЧПУ и формат адресов (по всем путям каталога) ──
+        _uf = indexing_summary.get('url_format')
+        if _uf:
+            _uf_bad = bool(_uf.get('total_bad'))
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = (f'ЧПУ и формат адресов  '
+                       f'(проверено {_uf.get("checked", 0)} путей)')
+            c.font = _font(size=13, bold=True, color=C.warn if _uf_bad else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            if not _uf_bad:
+                _line('✅ Все адреса каталога - ЧПУ: латиница/цифры/дефис в '
+                      'нижнем регистре, без технических параметров.', C.ok)
+            else:
+                for kind, label in (
+                        ('non_sef', 'технические адреса (не ЧПУ: ?ID=, .php)'),
+                        ('cyrillic', 'кириллица в адресе'),
+                        ('uppercase', 'ЗАГЛАВНЫЕ буквы в адресе'),
+                        ('underscore', 'подчёркивания вместо дефисов'),
+                        ('junk_chars', 'пробелы/спецсимволы в адресе')):
+                    _n = _uf.get(kind + '_n', 0)
+                    if not _n:
+                        continue
+                    _line(f'⚠ {label}: {_n} шт.', C.warn, bold=True)
+                    for _p in (_uf.get(kind) or [])[:5]:
+                        _line(_p, C.text_muted)
+                    if _n > 5:
+                        _line(f'… и ещё {_n - 5}', C.text_muted)
+            row += 1
+
         # ── Секция 5: sitemap-директивы в robots (ТЗ 3.3.6) ──
         smc = indexing_summary.get('sitemap_checks')
         if smc is not None:

@@ -431,6 +431,13 @@ def run_check(pid, params, creds, log, progress):
                 if _n_ac:
                     log(f'❌ robots.txt: закрыто .css/.js файлов {_n_ac} '
                         f'из {_idx_summary.get("assets_checked", 0)}')
+                # ЧПУ и формат адресов - по тем же путям, без запросов.
+                from indexing_checker import check_url_format
+                _uf = check_url_format(_all_paths)
+                _idx_summary['url_format'] = _uf
+                if _uf.get('total_bad'):
+                    log(f'⚠ Формат адресов: плохих URL {_uf["total_bad"]} '
+                        f'из {_uf["checked"]}')
             except Exception as _e:
                 log(f'⚠ Индексация (sitemap↔robots): {_e}')
 
