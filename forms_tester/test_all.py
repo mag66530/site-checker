@@ -2322,6 +2322,7 @@ LOG_HEADERS = [
     "Статус", "Уведомление пользователю", "Типы файлов формы",
     "Выпадающие списки", "Чекбоксы/радио", "Двойная отправка",
     "Блокировка при отправке",
+    "Кнопка активна после заполнения",
     "Enter отправляет", "Поля очищены",
     # Пункт «Форма стилизована по макету»: консистентность полей + факт
     # стилизации (не браузерный дефолт). «Консистентно / Разнобой / Дефолт».
@@ -2343,7 +2344,8 @@ LOG_KEYS_ORDER = [
     "дата", "время", "город", "страница", "url",
     "название", "где", "имя", "телефон", "почта", "почта_получателя",
     "статус", "уведомление", "типы_файлов", "выпадающие_списки",
-    "чекбоксы_радио", "двойная_отправка", "блокировка_отправки", "enter_отправляет",
+    "чекбоксы_радио", "двойная_отправка", "блокировка_отправки",
+    "кнопка_после_заполнения", "enter_отправляет",
     "поля_очищены",
     "стилизация",
     "согласие_чекбоксы", "согласие_предустановка", "согласие_ссылка",
@@ -3410,6 +3412,26 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # Опционально: расширить область до родительского .row или form (см. ключ «расширить_контейнер»)
             form = _apply_container_expand(form, форма_config)
 
+            # Кнопка отправки: селектор считаем ОДИН раз - используется и ниже
+            # (снимок «до заполнения», пункт чек-листа) и при реальной отправке.
+            _btn_css = str(форма_config.get("кнопка_css") or "").strip()
+            _btn_sel = _btn_css or "button[type='submit'], input[type='submit'], button.btn"
+
+            # Пункт чек-листа «Кнопка отправки активна только после заполнения
+            # обязательных полей»: снимаем состояние кнопки ДО того, как форма
+            # тронута. Предикат - только явные признаки disabled (без временных
+            # «отправка идёт»-классов, тем которые ловит «Блокировка при
+            # отправке» - здесь про другой момент времени).
+            _btn_disabled_before = None
+            try:
+                _pre_btn = form.locator(_btn_sel).first
+                if _pre_btn.count() > 0:
+                    _btn_disabled_before = bool(_pre_btn.evaluate(
+                        "b => !!(b.disabled || b.getAttribute('aria-disabled')==='true'"
+                        " || getComputedStyle(b).pointerEvents==='none')"))
+            except Exception:  # noqa: BLE001
+                _btn_disabled_before = None
+
             _ffmap = _form_field_map_from_config(форма_config)
             _ctx_ff = {
                 "имя_теста": имя_теста,
@@ -3886,13 +3908,48 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             except Exception:  # noqa: BLE001
                 _pre_keys = []
 
-            # Кнопка отправки: по умолчанию стандартные submit-кнопки; если у сайта
-            # своя (например button.send у Авиапромсталь) - задаётся ключом «кнопка_css».
-            _btn_css = str(форма_config.get("кнопка_css") or "").strip()
-            sub = form.locator(
-                _btn_css or "button[type='submit'], input[type='submit'], button.btn"
-            ).first
+            # Кнопка отправки (тот же селектор, что и в снимке «до заполнения» выше).
+            sub = form.locator(_btn_sel).first
             sub.scroll_into_view_if_needed()
+
+            # Пункт чек-листа «Кнопка отправки активна только после заполнения
+            # обязательных полей»: снимок «после» - форма уже заполнена (ffmap +
+            # эвристика имя/телефон/почта/комментарий выше), кнопка ещё не тронута
+            # пробой ошибок/кликом. «Проверить» (не жёсткое «ошибка»), если кнопка
+            # так и не разблокировалась - у сайта может быть своё обязательное
+            # поле, которое мы не заполняем (кастомный чекбокс/select).
+            try:
+                _btn_disabled_after = bool(sub.evaluate(
+                    "b => !!(b.disabled || b.getAttribute('aria-disabled')==='true'"
+                    " || getComputedStyle(b).pointerEvents==='none')"))
+            except Exception:  # noqa: BLE001
+                _btn_disabled_after = None
+            _req_btn_verdict, _req_btn_ком = None, ""
+            if _btn_disabled_before is True and _btn_disabled_after is False:
+                _req_btn_verdict = "да"
+            elif _btn_disabled_before is True and _btn_disabled_after is True:
+                _req_btn_verdict = "проверить"
+                _req_btn_ком = ("Кнопка остаётся неактивной даже после заполнения "
+                                "полей - либо баг, либо есть обязательное поле, "
+                                "которое тест не заполняет (проверьте вручную).")
+            elif _btn_disabled_before is False:
+                _req_btn_verdict = "нет"
+            if _req_btn_verdict:
+                try:
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "поля", "ид": название,
+                        "название": f"Кнопка отправки активна после заполнения: {название}",
+                        "имя": имя_теста,
+                        "статус": "Проверить" if _req_btn_verdict == "проверить" else "OK",
+                        "кнопка_после_заполнения": _req_btn_verdict,
+                        "комментарий_готовый": _req_btn_ком or None,
+                        "код": "submit_btn_gated",
+                    })
+                    print(f"   🔘 Кнопка активна после заполнения «{название}»: "
+                          f"{_req_btn_verdict}" + (f" — {_req_btn_ком}" if _req_btn_ком else ""))
+                except Exception:  # noqa: BLE001
+                    pass
 
             # ── Обработка ошибок отправки (пункт чек-листа) ──
             # Нарочно роняем ПЕРВЫЙ запрос отправки (route.abort) и смотрим реакцию
