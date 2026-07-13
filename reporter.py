@@ -2398,6 +2398,8 @@ def _build_w3c_sheet(wb, w3c_check):
     if not w3c_check:
         return
     pages = w3c_check.get('pages') or []
+    show = w3c_check.get('show') or {'valid': True, 'static': True}
+    _sv, _ss = show.get('valid', True), show.get('static', True)
 
     ws = wb.create_sheet('Валидация и скорость')
     ws.sheet_view.showGridLines = False
@@ -2414,31 +2416,44 @@ def _build_w3c_sheet(wb, w3c_check):
         return ((cp.get('checked') and cp.get('ok', 0) < cp['checked'])
                 or (ca.get('checked') and ca.get('ok', 0) < ca['checked']))
 
-    _any_err = any((p.get('html') or {}).get('errors')
-                   or (p.get('css') or {}).get('errors')
-                   or _perf_warn(p) for p in pages)
-    _any_blocked = any(_page_fail(p) for p in pages)
+    _any_err = ((_sv and any((p.get('html') or {}).get('errors')
+                             or (p.get('css') or {}).get('errors')
+                             for p in pages))
+                or (_ss and any(_perf_warn(p) for p in pages)))
+    _any_blocked = _sv and any(_page_fail(p) for p in pages)
     ws.sheet_properties.tabColor = C.warn if (_any_err or _any_blocked) else C.ok
 
     for col, w in (('A', 3), ('B', 50), ('C', 20), ('D', 20), ('E', 46), ('F', 3)):
         ws.column_dimensions[col].width = w
 
+    # Заголовок и вводка зависят от того, какие пункты включены (1.16 / 1.17).
+    if _sv and _ss:
+        _title = 'Валидация W3C, скорость и доставка статики (пп.1.16-1.17)'
+    elif _sv:
+        _title = 'Валидация W3C и скорость ресурсов (п.1.16)'
+    else:
+        _title = 'Сжатие и кеширование статики (п.1.17)'
     ws.merge_cells('B2:E2')
     c = ws['B2']
-    c.value = 'Валидация W3C и скорость ресурсов (п.1.16)'
+    c.value = _title
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
+    _intro = []
+    if _sv:
+        _intro.append('(1.16) HTML валиден - W3C Nu (validator.w3.org); CSS '
+                      'валиден - W3C CSS Validator (jigsaw.w3.org); время '
+                      'загрузки ресурсов - качаем HTML/CSS/JS/шрифты/картинки '
+                      'и суммируем по типам. Ошибки валидатора = предупреждение '
+                      '(у боевых сайтов их часто много).')
+    if _ss:
+        _intro.append('(1.17) сжатие своей статики (Gzip/Brotli, по '
+                      'Content-Encoding) и кеш (Cache-Control/ETag/Expires) - '
+                      'по заголовкам ответа CSS/JS того же домена.')
     ws.merge_cells('B3:E3')
     c = ws['B3']
-    c.value = ('По ВЫБОРКЕ страниц (главная/категория/товар - у W3C лимиты): '
-               '(1) HTML валиден - W3C Nu (validator.w3.org); (2) CSS валиден - '
-               'W3C CSS Validator (jigsaw.w3.org); (3) время загрузки ресурсов - '
-               'скачиваем HTML/CSS/JS/шрифты/картинки и суммируем по типам; '
-               '(4) сжатие статики (Gzip/Brotli) и (5) кеш статики '
-               '(Cache-Control/ETag) - по заголовкам ответа CSS/JS. '
-               'Ошибки валидатора = предупреждение (у боевых сайтов их часто '
-               'много). Полный список ошибок - в самих валидаторах по ссылке.')
+    c.value = ('По ВЫБОРКЕ страниц (главная/категория/товар). '
+               + ' '.join(_intro))
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
@@ -2453,7 +2468,7 @@ def _build_w3c_sheet(wb, w3c_check):
         return
 
     # Баннер: W3C не проверил валидность (403 Cloudflare / 429 лимит / 502 сбой).
-    _fails = [_page_fail(p) for p in pages if _page_fail(p)]
+    _fails = [_page_fail(p) for p in pages if _page_fail(p)] if _sv else []
     _blocked = len(_fails)
     _reason = _fails[0] if _fails else ''
     if _blocked:
@@ -2506,46 +2521,53 @@ def _build_w3c_sheet(wb, w3c_check):
             ws.row_dimensions[row].height = 18
             row += 1
 
-        # HTML
-        _h = p.get('html') or {}
-        if _h.get('error'):
-            _line('HTML (W3C Nu):', f'не проверено — {_h["error"]}', C.text_muted)
-        else:
-            _he = _h.get('errors')
-            _line('HTML (W3C Nu):',
-                  ('✅ валиден (0 ошибок)' if _he == 0
-                   else f'⚠ {_he} ошибок, {_h.get("warnings", 0)} замечаний'),
-                  C.ok if _he == 0 else C.warn)
-            if _he and _h.get('samples'):
-                _line('  примеры:', '; '.join(_h['samples'][:2]), C.text_soft)
-        # CSS
-        _cs = p.get('css') or {}
-        if _cs.get('error'):
-            _line('CSS (W3C):', f'не проверено — {_cs["error"]}', C.text_muted)
-        else:
-            _ce = _cs.get('errors')
-            _line('CSS (W3C):',
-                  ('✅ валиден (0 ошибок)' if _ce == 0
-                   else f'⚠ {_ce} ошибок, {_cs.get("warnings", 0)} замечаний'),
-                  C.ok if _ce == 0 else C.warn)
-        # Скорость
         _t = p.get('timings') or {}
-        if _t:
-            bt = _t.get('by_type', {})
-            _parts = [f'HTML {_t.get("html_ms", 0)}мс']
-            for k, ru in (('css', 'CSS'), ('js', 'JS'), ('font', 'шрифты'),
-                          ('img', 'картинки')):
-                d = bt.get(k) or {}
-                if d.get('count'):
-                    _parts.append(f'{ru} {d["ms"]}мс/{d["count"]}шт/{d["kb"]}КБ')
-            _line('Скорость ресурсов:', ' · '.join(_parts), C.text)
-            _sl = _t.get('slowest') or {}
-            if _sl.get('url'):
-                _line('  самый долгий:',
-                      f'{_sl["ms"]}мс — {_sl["url"].rsplit("/", 1)[-1]} '
-                      f'({_sl.get("kind", "")})', C.text_soft)
-            _line('  итого загрузка:', f'{_t.get("total_ms", 0)} мс',
-                  C.warn if _t.get('total_ms', 0) > 8000 else C.text)
+        # ── п.1.16: валидация HTML/CSS + скорость ──
+        if _sv:
+            # HTML
+            _h = p.get('html') or {}
+            if _h.get('error'):
+                _line('HTML (W3C Nu):', f'не проверено — {_h["error"]}',
+                      C.text_muted)
+            else:
+                _he = _h.get('errors')
+                _line('HTML (W3C Nu):',
+                      ('✅ валиден (0 ошибок)' if _he == 0
+                       else f'⚠ {_he} ошибок, {_h.get("warnings", 0)} замечаний'),
+                      C.ok if _he == 0 else C.warn)
+                if _he and _h.get('samples'):
+                    _line('  примеры:', '; '.join(_h['samples'][:2]), C.text_soft)
+            # CSS
+            _cs = p.get('css') or {}
+            if _cs.get('error'):
+                _line('CSS (W3C):', f'не проверено — {_cs["error"]}', C.text_muted)
+            else:
+                _ce = _cs.get('errors')
+                _line('CSS (W3C):',
+                      ('✅ валиден (0 ошибок)' if _ce == 0
+                       else f'⚠ {_ce} ошибок, {_cs.get("warnings", 0)} замечаний'),
+                      C.ok if _ce == 0 else C.warn)
+            # Скорость
+            if _t:
+                bt = _t.get('by_type', {})
+                _parts = [f'HTML {_t.get("html_ms", 0)}мс']
+                for k, ru in (('css', 'CSS'), ('js', 'JS'), ('font', 'шрифты'),
+                              ('img', 'картинки')):
+                    d = bt.get(k) or {}
+                    if d.get('count'):
+                        _parts.append(
+                            f'{ru} {d["ms"]}мс/{d["count"]}шт/{d["kb"]}КБ')
+                _line('Скорость ресурсов:', ' · '.join(_parts), C.text)
+                _sl = _t.get('slowest') or {}
+                if _sl.get('url'):
+                    _line('  самый долгий:',
+                          f'{_sl["ms"]}мс — {_sl["url"].rsplit("/", 1)[-1]} '
+                          f'({_sl.get("kind", "")})', C.text_soft)
+                _line('  итого загрузка:', f'{_t.get("total_ms", 0)} мс',
+                      C.warn if _t.get('total_ms', 0) > 8000 else C.text)
+
+        # ── п.1.17: сжатие и кеш статики ──
+        if _ss and _t:
             # Сжатие статики (Gzip/Brotli) - по CSS/JS.
             _cp = _t.get('compression') or {}
             if _cp.get('checked'):

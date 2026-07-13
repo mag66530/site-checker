@@ -668,11 +668,14 @@ def run_check(pid, params, creds, log, progress):
             if _console_urls:
                 _console_check = _run_console_check(pid, _console_urls, log)
 
-        # ── Валидация W3C + скорость ресурсов (п.1.16) - выборка страниц ──
-        # Внешние W3C-сервисы + скачивание ресурсов = медленно, поэтому
-        # берём по одной странице каждого типа (главная/категория/товар).
+        # ── Валидация W3C + скорость (1.16) и сжатие/кеш статики (1.17) ──
+        # Обе по выборке страниц (главная/категория/товар); ресурсы качаем
+        # один раз и делим между проверками. Внешние W3C-сервисы медленные,
+        # поэтому 1.16/1.17 - по отдельным галочкам.
         _w3c_check = None
-        if params.get('check_w3c'):
+        _want_valid = bool(params.get('check_w3c'))
+        _want_static = bool(params.get('check_static'))
+        if _want_valid or _want_static:
             def _first(tc):
                 return next((r.url for r in results
                              if r.is_ok and r.type_code == tc), None)
@@ -681,10 +684,15 @@ def run_check(pid, params, creds, log, progress):
             if _w3c_urls:
                 try:
                     from w3c_perf import check_pages as _w3c_pages
-                    log(f'Валидация W3C + скорость: {len(_w3c_urls)} страниц '
-                        f'(внешние сервисы, медленно)…')
+                    _what = ('Валидация W3C + скорость' if _want_valid
+                             and not _want_static else
+                             'Валидация W3C + скорость + сжатие/кеш'
+                             if _want_valid else 'Сжатие + кеш статики')
+                    log(f'{_what}: {len(_w3c_urls)} страниц…')
                     _w3c_check = _w3c_pages(_w3c_urls, proxy_url,
-                                            log=lambda m: log(m))
+                                            log=lambda m: log(m),
+                                            want_valid=_want_valid,
+                                            want_static=_want_static)
                     # Понятный сигнал, если W3C не проверил валидность
                     # (Cloudflare 403 / лимит 429 / сбой сервера 502).
                     _pp = (_w3c_check or {}).get('pages') or []

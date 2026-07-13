@@ -657,6 +657,7 @@ def init_session():
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
         'c30_check_w3c': False,        # п.1.16 - валидация W3C + скорость - по запросу
+        'c30_check_static': False,     # п.1.17 - сжатие/кеш статики - по запросу
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -817,13 +818,15 @@ st.markdown(
     [data-testid="stMetricLabel"] [data-testid="stTooltipIcon"] svg {
         width: 15px !important; height: 15px !important; opacity: .7;
     }
-    /* Пункт 1.16: «?» с предупреждением про лимиты W3C - возвращаем точечно
-       (глобально иконка скрыта в app.py). Ключ чекбокса = c30_check_w3c. */
-    .st-key-c30_check_w3c [data-testid="stTooltipIcon"] {
+    /* Пункты 1.16/1.17: «?»-подсказки - возвращаем точечно
+       (глобально иконка скрыта в app.py). */
+    .st-key-c30_check_w3c [data-testid="stTooltipIcon"],
+    .st-key-c30_check_static [data-testid="stTooltipIcon"] {
         display: inline-flex !important; align-items: center;
         margin-left: 5px; cursor: help;
     }
-    .st-key-c30_check_w3c [data-testid="stTooltipIcon"] svg {
+    .st-key-c30_check_w3c [data-testid="stTooltipIcon"] svg,
+    .st-key-c30_check_static [data-testid="stTooltipIcon"] svg {
         width: 15px !important; height: 15px !important; opacity: .7;
     }
 
@@ -1171,15 +1174,22 @@ if pid:
                         key='c30_check_w3c',
                         help='По выборке страниц (главная/категория/товар): HTML '
                              'через W3C Nu, CSS через W3C CSS Validator, время '
-                             'загрузки ресурсов (HTML/CSS/JS/шрифты/картинки), '
-                             'сжатие статики (Gzip/Brotli) и кеш '
-                             '(Cache-Control/ETag). Отдельный лист «Валидация и '
-                             'скорость».\n\n'
+                             'загрузки ресурсов (HTML/CSS/JS/шрифты/картинки). '
+                             'Отдельный лист «Валидация и скорость».\n\n'
                              '⚠ W3C - бесплатные сервисы с лимитом запросов. При '
                              'частом прогоне возможен временный блок (HTTP 403); '
                              'тогда валидность не проверится (в отчёте «повторить '
                              'позже»), а скорость ресурсов измерится в любом '
                              'случае.')
+            st.checkbox('1.17  Сжатие (Gzip/Brotli) и кеширование статики',
+                        key='c30_check_static',
+                        help='По выборке страниц (главная/категория/товар): для '
+                             'своей статики (CSS/JS того же домена) проверяем '
+                             'Gzip/Brotli-сжатие (заголовок Content-Encoding) и '
+                             'кеш (Cache-Control/ETag/Expires). Чужие CDN и '
+                             'аналитику не судим - их не настраиваем. Результат - '
+                             'на том же листе «Валидация и скорость». Без внешних '
+                             'сервисов, лимитов W3C тут нет.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1328,6 +1338,7 @@ if pid:
         bool(st.session_state.get('c30_check_filter_fn', False)),
         bool(st.session_state.get('c30_check_console', False)),
         bool(st.session_state.get('c30_check_w3c', False)),
+        bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
     )
 
@@ -1383,6 +1394,7 @@ if pid:
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'check_console': st.session_state.get('c30_check_console', False),
                 'check_w3c': st.session_state.get('c30_check_w3c', False),
+                'check_static': st.session_state.get('c30_check_static', False),
                 'fetch_notifications': st.session_state.get('c30_fetch_notifications', True),
                 'notify_days': int(st.session_state.get('c30_notify_days', 7)),
                 'fetch_metrika_404': st.session_state.get('c30_fetch_metrika_404', True),

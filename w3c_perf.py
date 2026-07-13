@@ -251,15 +251,17 @@ def resource_timings(url, html, proxy=None) -> dict:
             'compression': comp, 'caching': cache}
 
 
-def check_page(url, proxy=None) -> dict:
-    """Одна страница: HTML-валидность + CSS-валидность + время ресурсов."""
+def check_page(url, proxy=None, want_valid=True, want_static=True) -> dict:
+    """Одна страница. want_valid - валидация W3C + скорость (п.1.16);
+    want_static - сжатие/кеш статики (п.1.17). Тело+ресурсы качаются один раз
+    и делятся между проверками."""
     out = {'url': url, 'html': None, 'css': None, 'timings': None,
            'error': None}
     ms, _, st, _ = _get(url, proxy)
     if st is None or st >= 400:
         out['error'] = f'страница не открылась (HTTP {st})'
         return out
-    # тело для валидации HTML
+    # тело нужно и для валидации HTML, и для поиска ресурсов (сжатие/кеш).
     import requests
     try:
         proxies = {'http': proxy, 'https': proxy} if proxy else None
@@ -267,29 +269,38 @@ def check_page(url, proxy=None) -> dict:
                             proxies=proxies).text
     except Exception:
         html = ''
-    out['html'] = validate_html(url, proxy)   # Nu сам качает URL (?doc=)
-    time.sleep(2)                    # щадим лимиты W3C между запросами
-    out['css'] = validate_css(url, proxy)
-    out['timings'] = resource_timings(url, html, proxy)
+    if want_valid:
+        out['html'] = validate_html(url, proxy)   # Nu сам качает URL (?doc=)
+        time.sleep(2)                # щадим лимиты W3C между запросами
+        out['css'] = validate_css(url, proxy)
+    # timings нужны, если просят скорость (1.16) ИЛИ сжатие/кеш (1.17) -
+    # они считаются из одного прохода по ресурсам.
+    if want_valid or want_static:
+        out['timings'] = resource_timings(url, html, proxy)
     return out
 
 
-def check_pages(urls, proxy=None, log=None) -> dict:
-    """Выборка страниц. Возвращает {available, pages:[...], note}."""
+def check_pages(urls, proxy=None, log=None, want_valid=True,
+                want_static=True) -> dict:
+    """Выборка страниц. Возвращает {available, pages:[...], note, show}.
+    show - какие блоки показывать в отчёте (валидность+скорость / статика)."""
     def _log(m):
         if log:
             log(m)
     urls = [u for u in dict.fromkeys(urls) if u]
+    show = {'valid': want_valid, 'static': want_static}
     if not urls:
-        return {'available': False, 'pages': [], 'note': 'нет страниц'}
+        return {'available': False, 'pages': [], 'note': 'нет страниц',
+                'show': show}
+    _lbl = 'W3C+скорость' if want_valid else 'сжатие+кеш'
     pages = []
     for i, u in enumerate(urls, 1):
         if i > 1:
             time.sleep(3)            # пауза между страницами - лимиты W3C
-        _log(f'  [{i}/{len(urls)}] W3C+скорость: {u}')
+        _log(f'  [{i}/{len(urls)}] {_lbl}: {u}')
         try:
-            pages.append(check_page(u, proxy))
+            pages.append(check_page(u, proxy, want_valid, want_static))
         except Exception as e:  # noqa: BLE001
             pages.append({'url': u, 'html': None, 'css': None,
                           'timings': None, 'error': str(e)})
-    return {'available': True, 'pages': pages, 'note': None}
+    return {'available': True, 'pages': pages, 'note': None, 'show': show}
