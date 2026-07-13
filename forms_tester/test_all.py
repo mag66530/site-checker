@@ -943,6 +943,78 @@ def проверка_автозаполнения(scope) -> dict:
     return {"состояние": "корректно", "коммент": ""}
 
 
+def проверка_подсказок(scope) -> dict:
+    """Пункт «Подсказки в полях (placeholder, help text) соответствуют назначению».
+    «Хорошо ли сформулировано» - оценивает человек; мы проверяем ОБЪЕКТИВНОЕ:
+    подсказка НЕ ПРОТИВОРЕЧИТ назначению поля (ловим copy-paste: у «Телефона»
+    placeholder про e-mail и т.п.). Назначение поля (P) берём из type/autocomplete/
+    name/label - НЕ из placeholder; на что похожа подсказка (Q) - из placeholder+
+    help-text. Флажим только пары из «списка противоречий» и только при уверенных
+    P и Q. Только чтение DOM (ничего не меняем).
+    → {состояние: 'не найдено'|'корректно'|'несоответствие'|'нет подсказок', коммент}."""
+    try:
+        r = scope.evaluate(
+            "f => {"
+            " const vis=e=>{const b=e.getBoundingClientRect();const s=getComputedStyle(e);"
+            "   return b.width>0&&b.height>0&&s.visibility!=='hidden'&&s.display!=='none';};"
+            " const norm=s=>(s||'').toLowerCase().replace(/ё/g,'е').trim();"
+            " const cat=txt=>{ const s=norm(txt); const raw=(txt||'').trim(); if(!s) return null;"
+            "   if(s.includes('@')||/mail|почт|e-?mail|электрон/.test(s)) return 'EMAIL';"
+            "   if(/телеф|phone|\\bтел\\b|\\bмоб/.test(s)||/^[\\s+\\d()\\-_]{6,}$/.test(raw)) return 'PHONE';"
+            "   if(/фамил|\\bимя\\b|\\bфио\\b|как вас зов|ваше имя|контактн.{0,3}лиц/.test(s)) return 'NAME';"
+            "   if(/сообщ|вопрос|коммент|что вас интерес|message|напишите/.test(s)) return 'COMMENT';"
+            "   if(/адрес|улиц|street/.test(s)) return 'ADDRESS';"
+            "   if(/\\bгород\\b|\\bcity\\b/.test(s)) return 'CITY';"
+            "   if(/дд[.\\/]мм|\\bдата\\b|\\bdate\\b/.test(s)) return 'DATE'; return null; };"
+            " const labelText=e=>{ let t=''; if(e.id){ const l=document.querySelector('label[for=\"'"
+            "   +CSS.escape(e.id)+'\"]'); if(l) t=l.innerText; } if(!t){ const p=e.closest('label'); if(p) t=p.innerText; } return t; };"
+            " const helpText=e=>{ let t=''; const db=e.getAttribute('aria-describedby');"
+            "   if(db){ for(const id of db.split(/\\s+/)){ const h=document.getElementById(id); if(h) t+=' '+h.innerText; } }"
+            "   const c=e.closest('.form-group,.field,.form-field,.input-wrap,.form-row')||e.parentElement;"
+            "   if(c){ const h=c.querySelector('.hint,.help,.help-text,.form-text,.field-desc,.field-hint,small'); if(h&&h!==e) t+=' '+h.innerText; } return t; };"
+            " const field=e=>{ const t=(e.type||'').toLowerCase();"
+            "   if(t==='email') return 'EMAIL'; if(t==='tel') return 'PHONE'; if(t==='date') return 'DATE';"
+            "   const ac=norm(e.getAttribute('autocomplete'));"
+            "   if(/email/.test(ac)) return 'EMAIL'; if(/tel/.test(ac)) return 'PHONE';"
+            "   if(/name|given-name|family-name/.test(ac)) return 'NAME';"
+            "   if(/street-address|address-line/.test(ac)) return 'ADDRESS';"
+            "   const nm=norm((e.name||'')+' '+(e.id||''));"
+            "   if(/mail/.test(nm)) return 'EMAIL'; if(/phone|tel|телеф/.test(nm)) return 'PHONE';"
+            "   if(/comment|сообщ|коммент|message|вопрос/.test(nm)) return 'COMMENT';"
+            "   if(/name|имя|фио|\\bfio|фамил/.test(nm)) return 'NAME';"
+            "   if(/\\bгород|\\bcity/.test(nm)) return 'CITY'; if(/адрес|address/.test(nm)) return 'ADDRESS';"
+            "   if(/компан|company|организ/.test(nm)) return 'COMPANY';"
+            "   return cat(labelText(e)); };"
+            " const bad={PHONE:['EMAIL','NAME'],EMAIL:['PHONE','NAME'],NAME:['EMAIL','PHONE'],"
+            "   COMMENT:['EMAIL','PHONE'],ADDRESS:['EMAIL','PHONE'],CITY:['EMAIL','PHONE']};"
+            " const RUS={EMAIL:'почта',PHONE:'телефон',NAME:'имя',COMMENT:'сообщение',ADDRESS:'адрес',CITY:'город',COMPANY:'компания',DATE:'дата'};"
+            " const els=[...f.querySelectorAll('input,textarea')].filter(e=>{ const t=(e.type||'').toLowerCase();"
+            "   return !['hidden','submit','button','checkbox','radio','file','password','image','reset'].includes(t) && vis(e); });"
+            " const несоотв=[]; let проверено=0, без_n=0; const без=[];"
+            " for(const e of els){ if(проверено>=20) break; проверено++;"
+            "   const P=field(e); const ph=e.placeholder||''; const hint=(ph+' '+helpText(e)).trim();"
+            "   const label=(e.name||e.id||ph||'поле');"
+            "   if(!hint){ без_n++; if(без.length<6) без.push(label); continue; }"
+            "   const Q=cat(hint);"
+            "   if(P&&Q&&P!==Q&&(bad[P]||[]).includes(Q)){"
+            "     несоотв.push(`«${label}» (поле для «${RUS[P]}», а подсказка про «${RUS[Q]}»: ${ph.slice(0,28)})`); } }"
+            " return {проверено, несоотв:[...new Set(несоотв)].slice(0,4), без, без_n}; }")
+    except Exception:  # noqa: BLE001
+        return {"состояние": "не найдено", "коммент": ""}
+    if not r or int(r.get("проверено") or 0) == 0:
+        return {"состояние": "не найдено", "коммент": ""}
+    if r.get("несоотв"):
+        return {"состояние": "несоответствие",
+                "коммент": ("Подсказка не соответствует назначению поля: "
+                            + "; ".join(r["несоотв"]) + ".")}
+    if int(r.get("без_n") or 0) >= int(r.get("проверено") or 0):
+        return {"состояние": "нет подсказок",
+                "коммент": ("Ни у одного поля формы нет placeholder/подсказки"
+                            + (" (" + ", ".join(f"«{x}»" for x in r["без"]) + ")" if r.get("без") else "")
+                            + " - поля опираются только на подписи, если они есть.")}
+    return {"состояние": "корректно", "коммент": ""}
+
+
 # ── Двойная отправка (двойной клик по кнопке) ────────────────────────
 _DS_ТРЕКЕРЫ = ("mc.yandex", "metri", "google-analytics", "googletagmanager",
                "doubleclick", "top-fwz1", "vk.com", "facebook.", "criteo",
@@ -2261,6 +2333,7 @@ LOG_HEADERS = [
     "Защита от XSS",
     "Обработка ошибок",
     "Автозаполнение полей",
+    "Подсказки полей",
     "Комментарий",
 ]
 
@@ -2277,6 +2350,7 @@ LOG_KEYS_ORDER = [
     "защита_от_xss",
     "обработка_ошибок",
     "автозаполнение",
+    "подсказки",
     "комментарий",
 ]
 
@@ -3640,6 +3714,25 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                       + (f" — {_af['коммент']}" if _af["коммент"] else ""))
             except Exception as _eaf:  # noqa: BLE001
                 print(f"   ⚠️ Проверка автозаполнения не удалась: {_eaf}")
+
+            # Подсказки полей (placeholder/help): соответствуют ли назначению.
+            # Флажим только явные противоречия; «нет подсказок» - мягкая заметка.
+            try:
+                _hp = проверка_подсказок(form)
+                записать_в_excel({
+                    "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                    "тип_селектора": "поля", "ид": название,
+                    "название": f"Подсказки полей (placeholder/help): {название}",
+                    "имя": имя_теста,
+                    "статус": "Проверить" if _hp["состояние"] == "несоответствие" else "OK",
+                    "подсказки": _hp["состояние"],
+                    "комментарий_готовый": _hp["коммент"] or None,
+                    "код": "placeholders",
+                })
+                print(f"   💬 Подсказки полей «{название}»: {_hp['состояние']}"
+                      + (f" — {_hp['коммент']}" if _hp["коммент"] else ""))
+            except Exception as _ehp:  # noqa: BLE001
+                print(f"   ⚠️ Проверка подсказок полей не удалась: {_ehp}")
 
             # Файл-проба (по галочке): грузим безвредный файл с опасным
             # расширением и отправляем - пройдёт ли серверную фильтрацию.
