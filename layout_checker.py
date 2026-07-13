@@ -25,6 +25,12 @@ layout_checker.py - вёрстка и адаптивность (пункт 1.11 
   • Единый протокол (https) - на https-странице нет ресурсов по http
     (mixed content: браузер блокирует такие картинки/стили/скрипты - баг)
     и нет внутренних <a>-ссылок по http (лишний редирект - предупреждение).
+  • Стили/скрипты во внешних файлах - большие inline-<style>/<script>
+    блоки (тяжелее порога) надо выносить в файлы: они не кешируются и
+    раздувают каждую страницу (предупреждение). JSON-LD и шаблоны не
+    считаем.
+  • Отложенный рендеринг скриптов - <script src> в <head> без async/defer
+    блокируют отрисовку страницы (предупреждение от 2 штук).
 
 CSS не качаем повторно: http_checker уже тянет стили страницы для проверки
 видимости цены/кнопок - оттуда же берём статус и признак @media (кэш на батч).
@@ -60,6 +66,16 @@ _INLINE_STYLE_LIMIT = 15
 _RE_MIXED_RES = re.compile(
     r'<(?:img|script|source|iframe|video|audio)\b[^>]*?'
     r'(?:src|href)\s*=\s*["\'](http://[^"\']+)["\']', re.I)
+
+# Вынос стилей/скриптов во внешние файлы: большие inline-блоки не
+# кешируются браузером и раздувают каждую страницу.
+_RE_INLINE_SCRIPT = re.compile(
+    r'<script\b([^>]*)>(.*?)</script>', re.I | re.S)
+_INLINE_STYLE_KB = 15        # суммарный inline-<style> больше - предупреждение
+_INLINE_SCRIPT_KB = 30       # суммарный inline-<script> больше - предупреждение
+# Блокирующие скрипты: <script src> в <head> без async/defer.
+_RE_SCRIPT_HEAD = re.compile(r'<script\b[^>]*\bsrc\s*=[^>]*>', re.I)
+_BLOCKING_MIN = 2            # от скольких блокирующих скриптов ругаемся
 _RE_LINK_TAG = re.compile(r'<link\b[^>]*>', re.I)
 _RE_LINK_LOAD = re.compile(r'rel\s*=\s*["\'][^"\']*(?:stylesheet|icon|preload)',
                            re.I)
@@ -197,6 +213,34 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
                             'должны быть https (лишний редирект на каждый '
                             'переход)')
 
+    # 8. Стили/скрипты во внешних файлах: большие inline-блоки.
+    inline_style_kb = sum(len(b) for b in _RE_STYLE_BLOCK.findall(body)) // 1024
+    inline_script_kb = 0
+    for attrs, code in _RE_INLINE_SCRIPT.findall(body):
+        low_attrs = attrs.lower()
+        if 'src=' in low_attrs:
+            continue                             # внешний - не inline
+        if 'ld+json' in low_attrs or 'template' in low_attrs:
+            continue                             # разметка/шаблон - не код
+        inline_script_kb += len(code)
+    inline_script_kb //= 1024
+    if inline_style_kb > _INLINE_STYLE_KB:
+        warnings.append('большие inline-<style> блоки - стили не кешируются, '
+                        'вынести во внешний CSS-файл')
+    if inline_script_kb > _INLINE_SCRIPT_KB:
+        warnings.append('большие inline-<script> блоки - скрипты не '
+                        'кешируются, вынести во внешний JS-файл')
+
+    # 9. Отложенный рендеринг: <script src> в <head> без async/defer
+    # блокируют отрисовку страницы.
+    head_end = body.lower().find('</head>')
+    head = body[:head_end] if head_end > 0 else ''
+    blocking = [t for t in _RE_SCRIPT_HEAD.findall(head)
+                if 'async' not in t.lower() and 'defer' not in t.lower()]
+    if len(blocking) >= _BLOCKING_MIN:
+        warnings.append('скрипты в <head> без async/defer - блокируют '
+                        'отрисовку страницы (отложенный рендеринг не настроен)')
+
     return {
         'viewport': viewport,
         'css_total': len(css_infos),
@@ -209,6 +253,9 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'inline_styles': inline_styles,
         'mixed_content': mixed[:20],
         'http_links': len(http_links),
+        'inline_style_kb': inline_style_kb,
+        'inline_script_kb': inline_script_kb,
+        'blocking_scripts': len(blocking),
         'issues': issues,
         'warnings': warnings,
     }
