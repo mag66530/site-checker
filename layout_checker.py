@@ -91,10 +91,13 @@ _RE_FONT_DISPLAY_OK = re.compile(
 
 # Скрытый текст (SEO-спам): классические паттерны сокрытия. display:none
 # НЕ считаем - у Bitrix это легитимные попапы/мобильные меню повсюду.
-# Двухшагово: находим элемент со style, отдельно проверяем значение стиля
-# (однопроходный regex съедал закрывающую кавычку атрибута).
+# Двухшагово: элемент со style + отдельная проверка значения стиля.
+# ВАЖНО для скорости: только теги с обязательным закрытием - для void-тегов
+# (<img style=…>, <input>) движок сканировал бы весь документ в поисках
+# несуществующего </img> на КАЖДЫЙ такой тег (прогон вставал колом).
 _RE_STYLED_EL = re.compile(
-    r'<(\w+)\b[^>]*style\s*=\s*(["\'])(.*?)\2[^>]*>(.*?)</\1\s*>',
+    r'<(div|span|p|a|li|td|section|article|b|i|u|em|strong|font|h[1-6])'
+    r'\b[^>]*style\s*=\s*(["\'])(.*?)\2[^>]*>(.*?)</\1\s*>',
     re.I | re.S)
 _RE_HIDDEN_VAL = re.compile(
     r'font-size\s*:\s*(?:0(?:px)?|1px)\s*(?:;|!|$)'
@@ -289,14 +292,18 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
     # 12. Скрытый текст (SEO-спам): font-size:0/1px, text-indent:-9999,
     # opacity:0 у элементов со значимым текстом.
     hidden_text = []
-    for _tag, _q, style_val, inner in _RE_STYLED_EL.findall(body):
-        if not _RE_HIDDEN_VAL.search(style_val):
-            continue
-        txt = re.sub(r'\s+', ' ', _RE_STRIP_TAGS.sub(' ', inner)).strip()
-        if len(txt) >= _HIDDEN_TEXT_MIN:
-            hidden_text.append(txt[:120])
-        if len(hidden_text) >= 5:
-            break
+    # Дешёвый гейт: на большинстве страниц спам-паттернов нет вовсе -
+    # детальный проход по элементам не запускаем.
+    if _RE_HIDDEN_VAL.search(body):
+        for m in _RE_STYLED_EL.finditer(body):
+            if not _RE_HIDDEN_VAL.search(m.group(3)):
+                continue
+            txt = re.sub(r'\s+', ' ',
+                         _RE_STRIP_TAGS.sub(' ', m.group(4))).strip()
+            if len(txt) >= _HIDDEN_TEXT_MIN:
+                hidden_text.append(txt[:120])
+            if len(hidden_text) >= 5:
+                break
     if hidden_text:
         warnings.append('возможен скрытый текст (font-size:0 / text-indent:'
                         '-9999 / opacity:0 со значимым текстом) - проверить '
