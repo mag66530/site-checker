@@ -12,6 +12,13 @@ layout_checker.py - вёрстка и адаптивность (пункт 1.11 
   • Адаптивность - в стилях (внешних CSS или inline <style>) есть
     @media-запросы по ширине (max-width/min-width). Нет ни одного -
     предупреждение «адаптивность не обнаружена» (косвенный сигнал).
+  • Семантическая разметка - используются <header>/<footer>/<main>
+    (<article>/<section>/<nav> считаем присутствием, но не требуем - не на
+    всех типах страниц уместны). Всё на <div> или нет ядра - предупреждение;
+    <main> больше одного - предупреждение.
+  • Инлайн-стили - визуальные стили должны жить в CSS-файлах; много
+    атрибутов style="…" в HTML - предупреждение (немного инлайна на живых
+    сайтах неизбежно: баннеры с background-image, переключатели видимости).
 
 CSS не качаем повторно: http_checker уже тянет стили страницы для проверки
 видимости цены/кнопок - оттуда же берём статус и признак @media (кэш на батч).
@@ -30,6 +37,15 @@ _RE_SCRIPT_SRC = re.compile(
 # Пороги «объединения»: больше стольких СВОИХ файлов - вероятно не объединены.
 _CSS_COMBINE_LIMIT = 4
 _JS_COMBINE_LIMIT = 6
+
+# Семантические теги: ядро (требуем) и расширение (считаем, но не требуем).
+_SEMANTIC_CORE = ('header', 'footer', 'main')
+_SEMANTIC_EXTRA = ('nav', 'article', 'section', 'aside')
+_RE_INLINE_STYLE = re.compile(
+    r'<[a-z][a-zA-Z0-9-]*\b[^>]*\bstyle\s*=\s*["\']', re.I)
+_RE_COMMENT = re.compile(r'<!--.*?-->', re.S)
+# Инлайн-стилей больше порога - предупреждение (немного инлайна неизбежно).
+_INLINE_STYLE_LIMIT = 15
 
 
 def _norm_host(h: str) -> str:
@@ -112,6 +128,33 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
                 f'JS-файлы без признака минификации (.min в имени): все '
                 f'{len(js_own)} - проверить, минифицированы ли')
 
+    # 5. Семантическая разметка: <header>/<footer>/<main> (+расширение).
+    # Комментарии вырезаем - выключенная вёрстка не считается.
+    body = _RE_COMMENT.sub(' ', html)
+    present = [t for t in (_SEMANTIC_CORE + _SEMANTIC_EXTRA)
+               if re.search(rf'<{t}[\s>]', body, re.I)]
+    missing_core = [t for t in _SEMANTIC_CORE if t not in present]
+    main_count = len(re.findall(r'<main[\s>]', body, re.I))
+    if html:
+        if not present:
+            warnings.append(
+                'семантические HTML-теги не используются (<header>/<footer>/'
+                '<main>/<article>/<section>) - вся вёрстка на <div>')
+        elif missing_core:
+            warnings.append(
+                'семантическая разметка неполная - нет тегов: '
+                + ', '.join(f'<{t}>' for t in missing_core))
+        if main_count > 1:
+            warnings.append('тег <main> встречается несколько раз - '
+                            'должен быть один на страницу')
+
+    # 6. Инлайн-стили: визуальные стили должны жить в CSS, не в style="…".
+    inline_styles = len(_RE_INLINE_STYLE.findall(body))
+    if inline_styles > _INLINE_STYLE_LIMIT:
+        warnings.append(
+            'много инлайн-стилей (атрибут style="…" в HTML) - визуальные '
+            'стили лучше вынести в CSS-файлы')
+
     return {
         'viewport': viewport,
         'css_total': len(css_infos),
@@ -119,6 +162,9 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
                        for c in broken],
         'has_media': has_media,
         'assets': assets,
+        'semantic': {'present': present, 'missing_core': missing_core,
+                     'main_count': main_count},
+        'inline_styles': inline_styles,
         'issues': issues,
         'warnings': warnings,
     }
