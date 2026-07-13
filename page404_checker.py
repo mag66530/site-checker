@@ -13,10 +13,15 @@ page404_checker.py - страница 404 (пункт 1.18 чек-листа).
     с главной, meta description присутствует;
   • полезность - есть ссылки на основные разделы (внутренние ссылки,
     в т.ч. на каталог) и форма заявки/консультации (<form> либо
-    телефон tel:).
+    телефон tel:);
+  • несуществующие СЛУЖЕБНЫЕ адреса тоже отдают 404: пагинация с гигантским
+    номером (?PAGEN_1=999999 - битриксовый параметр постранички) и
+    несуществующий фильтр (/filter/<мусор>/ под категорией). 200 на такие
+    адреса = плодятся дубли/мусор в индексе; 200 на пагинации прощаем,
+    если стоит canonical без номера страницы.
 
 Шаблон 404 сквозной для всего сайта - проверяем главный домен и один
-поддомен (не все города). 2 хоста × 2 запроса = дёшево, HTTP-only.
+поддомен (не все города). HTTP-only, несколько запросов на хост.
 """
 from __future__ import annotations
 
@@ -40,6 +45,8 @@ _RE_HREF = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
 _RE_A_HREF = re.compile(r'<a\b[^>]*href\s*=\s*["\']([^"\']+)["\']', re.I)
 _RE_FORM = re.compile(r'<form[\s>]', re.I)
 _RE_TEL = re.compile(r'href\s*=\s*["\']tel:', re.I)
+_RE_CANONICAL = re.compile(
+    r'<link\b[^>]*rel\s*=\s*["\']canonical["\'][^>]*>', re.I)
 
 MIN_SECTION_LINKS = 3     # минимум внутренних ссылок, чтобы считать «есть разделы»
 
@@ -93,15 +100,25 @@ async def _fetch(session, url, proxy_url, allow_redirects=True):
         return None, '', False
 
 
-async def _check_host(session, main_url: str, city: str, proxy_url) -> dict:
-    """Проверка 404-страницы одного хоста (главная того же хоста - эталон)."""
+def _canonical_href(html: str) -> str:
+    m = _RE_CANONICAL.search(html or '')
+    if not m:
+        return ''
+    hm = _RE_HREF.search(m.group(0))
+    return hm.group(1).strip() if hm else ''
+
+
+async def _check_host(session, main_url: str, city: str, proxy_url,
+                      category_url: str = None) -> dict:
+    """Проверка 404-страницы одного хоста (главная того же хоста - эталон).
+    category_url - категория того же хоста для проб пагинации/фильтра."""
     sp = urlsplit(main_url)
     host = (sp.netloc or '').lower().removeprefix('www.')
     rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
     probe_url = f'{sp.scheme}://{sp.netloc}/nesushchestvuyushchaya-{rand}/'
 
     out = {'city': city, 'host': sp.netloc, 'probe_url': probe_url,
-           'status': None, 'redirected': False,
+           'status': None, 'redirected': False, 'probes': [],
            'issues': [], 'warnings': [], 'error': None}
     issues, warnings = out['issues'], out['warnings']
 
@@ -166,19 +183,60 @@ async def _check_host(session, main_url: str, city: str, proxy_url) -> dict:
     if not (_RE_FORM.search(html) or _RE_TEL.search(html)):
         warnings.append('на 404-странице нет формы заявки/консультации '
                         'и телефона')
+
+    # 5. Несуществующие СЛУЖЕБНЫЕ адреса (пагинация/фильтры) тоже отдают 404.
+    if category_url:
+        cat = category_url.rstrip('/')
+        # Пагинация: гигантский номер страницы (PAGEN_* - постраничка Bitrix).
+        pag_url = f'{cat}/?PAGEN_1=999999'
+        p_st, p_html, p_red = await _fetch(session, pag_url, proxy_url)
+        p_ok, p_note = True, ''
+        if p_st is not None and 200 <= p_st < 300:
+            if p_red:
+                p_note = 'редирект на категорию'
+            else:
+                canon = _canonical_href(p_html)
+                if canon and 'pagen' not in canon.lower():
+                    p_note = 'canonical без номера страницы'
+                else:
+                    p_ok = False
+                    warnings.append('пагинация с несуществующим номером '
+                                    '(?PAGEN_1=999999) отдаёт 200 без canonical '
+                                    '- дубль категории в индексе; нужен 404, '
+                                    'редирект или canonical на категорию')
+        if p_st is not None:
+            out['probes'].append({'kind': 'пагинация ?PAGEN_1=999999',
+                                  'status': p_st, 'ok': p_ok, 'note': p_note})
+        # Несуществующий фильтр: мусорный путь под категорией.
+        flt_url = f'{cat}/filter/nesushchestvuyushchiy-is-{rand}/'
+        f_st, _f_html, f_red = await _fetch(session, flt_url, proxy_url)
+        f_ok, f_note = True, ''
+        if f_st is not None and 200 <= f_st < 300:
+            if f_red:
+                f_note = 'редирект на категорию'
+            else:
+                f_ok = False
+                warnings.append('несуществующий фильтр (/filter/<мусор>/) '
+                                'отдаёт 200 - мусорные адреса индексируются; '
+                                'нужен 404')
+        if f_st is not None:
+            out['probes'].append({'kind': 'несуществующий фильтр',
+                                  'status': f_st, 'ok': f_ok, 'note': f_note})
     return out
 
 
-async def check_404_pages(main_urls: list, proxy_url=None) -> dict:
-    """Проверить 404-страницы по списку главных страниц (обычно главный
-    домен + один поддомен). main_urls: [(city, url)].
+async def check_404_pages(entries: list, proxy_url=None) -> dict:
+    """Проверить 404-страницы по списку хостов (обычно главный домен + один
+    поддомен). entries: [(city, main_url, category_url|None)] - категория
+    нужна для проб пагинации/фильтра.
     Возвращает {'available', 'hosts': [...]}"""
-    if not main_urls:
+    if not entries:
         return {'available': False, 'hosts': []}
     from http_checker import make_browser_headers
     connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=300)
     async with aiohttp.ClientSession(headers=make_browser_headers(),
                                      connector=connector) as session:
         hosts = await asyncio.gather(
-            *[_check_host(session, u, c, proxy_url) for c, u in main_urls])
+            *[_check_host(session, u, c, proxy_url, category_url=cat)
+              for c, u, cat in entries])
     return {'available': True, 'hosts': list(hosts)}

@@ -1543,6 +1543,15 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         if _rs is not None:
             bits.append(f'robots.txt: HTTP {_rs}'
                         + (f', Sitemap-директив: {len(_sm)}' if _rs == 200 else ''))
+    # hreflang: подтверждение, что проверка была (отсутствие тегов - не ошибка).
+    _hl_pages = sum(1 for r in checked if r.indexing.get('hreflang_count'))
+    _hl_bad = sum(1 for r in checked
+                  if any('hreflang' in w for w in r.indexing.get('warnings') or []))
+    if _hl_pages:
+        bits.append(f'hreflang: на {_hl_pages} страницах'
+                    + (f', с ошибками: {_hl_bad}' if _hl_bad else ', ок'))
+    else:
+        bits.append('hreflang: не используется (одноязычный сайт - ок)')
     c.value = ' · '.join(bits)
     c.font = _font(size=10, bold=True,
                    color=C.err if has_bugs else C.ok)
@@ -2075,12 +2084,21 @@ def _build_layout_sheet(wb, results, filters_test=None):
                         for r in checked)
     _menu_broken = sum(len((r.layout.get('menu') or {}).get('broken') or [])
                        for r in checked)
+    # Favicon: проверяется с главной каждого поддомена; ок = без favicon-бага.
+    _fav_checked = [r for r in checked if r.layout.get('favicon')]
+    _fav_bad = sum(1 for r in _fav_checked
+                   if any('favicon' in t for t in r.layout.get('issues') or []))
+    _fav_txt = ''
+    if _fav_checked:
+        _fav_txt = (f' · favicon: ✅ ок на {len(_fav_checked)} поддоменах'
+                    if not _fav_bad else
+                    f' · favicon: ❌ битый на {_fav_bad} из {len(_fav_checked)}')
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
     c.value = (f'Проверено страниц: {len(checked)} · без viewport: {_no_vp} · '
                f'с битыми CSS: {_css_broken_pages} · '
                f'ссылок меню прозвонено: {_menu_checked}, битых: {_menu_broken} · '
-               f'предупреждений: {len(warned)}')
+               f'предупреждений: {len(warned)}{_fav_txt}')
     c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
     c.fill = _fill(C.surface)
     c.alignment = _align(wrap=True)
@@ -2649,9 +2667,11 @@ def _build_404_sheet(wb, p404_check):
                'косвенно, по общим CSS-файлам и шапке/подвалу шаблона '
                '(пиксельное сравнение без браузера невозможно); '
                '(3) уникальный <title> (не как у главной) и meta description; '
-               '(4) есть ссылки на основные разделы и форма заявки/телефон. '
-               'Шаблон 404 сквозной - проверяются главный домен и один '
-               'поддомен.')
+               '(4) есть ссылки на основные разделы и форма заявки/телефон; '
+               '(5) несуществующие служебные адреса тоже отдают 404: '
+               'пагинация ?PAGEN_1=999999 (200 прощаем при canonical без '
+               'номера) и мусорный фильтр /filter/…/. Шаблон 404 сквозной - '
+               'проверяются главный домен и один поддомен.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
@@ -2700,6 +2720,12 @@ def _build_404_sheet(wb, p404_check):
                 _line('❌ ' + t, C.err)
             for t in h.get('warnings') or []:
                 _line('⚠ ' + t, C.warn)
+        # Подтверждение проб пагинации/фильтра (проблемные уже выше текстом).
+        for p in h.get('probes') or []:
+            if p.get('ok'):
+                _note = f' ({p["note"]})' if p.get('note') else ''
+                _line(f'✓ {p["kind"]}: HTTP {p["status"]}{_note} - корректно',
+                      C.text_muted)
         row += 1
 
 

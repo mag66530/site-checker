@@ -716,7 +716,11 @@ def run_check(pid, params, creds, log, progress):
         # Шаблон 404 сквозной: все города гонять незачем, 2 хоста хватает.
         _p404_check = None
         if params.get('check_404'):
-            _mains = [(r.city, r.url) for r in results
+            def _city_cat(city):
+                return next((r.url for r in results
+                             if r.is_ok and r.type_code == 'category'
+                             and r.city == city), None)
+            _mains = [(r.city, r.url, _city_cat(r.city)) for r in results
                       if r.is_ok and r.type_code == 'main']
             _pick = _mains[:1] + ([_mains[-1]] if len(_mains) > 1 else [])
             if _pick:
