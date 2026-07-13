@@ -2335,6 +2335,12 @@ def _build_markup_sheet(wb, results):
     ws.row_dimensions[row].height = 26
     row += 2
 
+    # Детали полей («Offer/цена: 21 из 60») - в колонке-контексте: тексты
+    # проблем без чисел, иначе группировка дробится на страницы.
+    def _markup_extra(r):
+        d = (getattr(r, 'markup', None) or {}).get('field_details') or []
+        return '; '.join(d[:3]) + (f' … +{len(d) - 3}' if len(d) > 3 else '')
+
     # Что реально нашлось на странице - чтобы было видно: «нет разметки»
     # значит нет НИ ОДНОГО типа из требуемых, а не «часть есть».
     _meta_section_title(ws, row, f'Проблемы разметки  ({len(bad)})',
@@ -2346,13 +2352,15 @@ def _build_markup_sheet(wb, results):
         row += 2
     else:
         row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err)
+            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err,
+            extra=_markup_extra)
 
     if warned:
         _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
         row += 1
         row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn)
+            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn,
+            extra=_markup_extra)
 
 
 # ── Лист «Безопасность» (доп. 1.8: заголовки безопасности HTTP) ────

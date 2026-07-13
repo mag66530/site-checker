@@ -258,8 +258,11 @@ _RE_FAQ_CONTENT = re.compile(
 
 def _validate_fields(html: str):
     """Проверить обязательные/желательные поля у каждого объекта разметки.
-    Возвращает (issues, warnings) - по одной строке на «тип+поле» с числом
-    объектов, где поля нет (агрегируем, чтобы не плодить по карточке)."""
+
+    Возвращает (issues, warnings, details). Тексты issues/warnings - БЕЗ
+    чисел: лист отчёта группирует страницы по точному тексту, число на
+    каждой странице своё - раздробило бы группы. Числа - в details
+    (['Offer/цена: 21 из 60', …]) и показываются в колонке-контексте."""
     objs = list(_walk_objects(_microdata_objects(html))) \
         + list(_walk_objects(_jsonld_objects(html)))
     # счётчики: (тип, метка поля, критично?) → (нет, всего)
@@ -278,14 +281,15 @@ def _validate_fields(html: str):
                     key = (o['type'], label, crit)
                     miss[key] = miss.get(key, 0) + 1
 
-    issues, warnings = [], []
+    issues, warnings, details = [], [], []
     for (typ, label, crit), n in sorted(
             miss.items(), key=lambda kv: (-kv[1], kv[0])):
         tot = total.get(typ, n)
-        frag = (f'в разметке {typ}: нет поля «{label}»'
-                + (f' ({n} из {tot})' if tot > 1 else ''))
+        frag = f'в разметке {typ}: нет поля «{label}»'
         (issues if crit == 'req' else warnings).append(frag)
-    return issues, warnings
+        if tot > 1:
+            details.append(f'{typ}/{label}: {n} из {tot}')
+    return issues, warnings, details
 
 
 def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional[dict]:
@@ -372,7 +376,7 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
     # типа): Product без offers/name, Offer без price/currency, крошки без
     # itemListElement и т.п. Работает по разобранному дереву microdata +
     # JSON-LD - то, что раньше делали только внешние валидаторы. ──
-    f_issues, f_warnings = _validate_fields(html)
+    f_issues, f_warnings, f_details = _validate_fields(html)
     issues.extend(f_issues)
     warnings.extend(f_warnings)
 
@@ -380,6 +384,7 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
         'og_missing': og_missing,
         'micro_types': sorted(micro),
         'ld_types': sorted(ld),
+        'field_details': f_details,
         'issues': issues,
         'warnings': warnings,
     }
