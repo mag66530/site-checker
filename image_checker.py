@@ -101,9 +101,12 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
     for ss in _RE_SRCSET.findall(clean):
         if '.webp' in ss.lower() or '.avif' in ss.lower():
             modern += 1
+    # Тексты предупреждений - БЕЗ чисел: лист отчёта группирует страницы по
+    # точному тексту, число у каждой страницы своё - раздробило бы группы на
+    # «по 1 странице». Числа страницы видны в колонке-контексте листа.
     if legacy and modern == 0:
-        warnings.append(f'современные форматы (webp/avif) не используются - '
-                        f'{len(legacy)} картинок в устаревших jpg/png/gif')
+        warnings.append('современные форматы (webp/avif) не используются - '
+                        'картинки в устаревших jpg/png/gif')
 
     # ── Lazy loading (изображения и видео) ──
     img_tags = _RE_IMG_TAG.findall(clean)
@@ -111,12 +114,12 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
     media_tags = _RE_MEDIA.findall(clean)
     lazy_media = sum(1 for m in media_tags if _RE_LAZY_MEDIA.search(m))
     if len(img_tags) >= LAZY_MIN_IMGS and lazy_imgs == 0:
-        warnings.append(f'ленивая загрузка (lazy loading) не используется - '
-                        f'{len(img_tags)} картинок грузятся сразу '
-                        f'(нет loading="lazy"/data-src)')
+        warnings.append('ленивая загрузка (lazy loading) не используется - '
+                        'картинки грузятся сразу '
+                        '(нет loading="lazy"/data-src)')
     if media_tags and lazy_media == 0:
-        warnings.append(f'видео/iframe ({len(media_tags)}) без ленивой загрузки '
-                        f'(нет loading="lazy"/preload="none")')
+        warnings.append('видео/iframe без ленивой загрузки '
+                        '(нет loading="lazy"/preload="none")')
 
     # ── Оптимизация (вес) ──
     heavy = []
@@ -124,9 +127,8 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
         heavy = [i for i in image_infos
                  if isinstance(i.get('bytes'), int) and i['bytes'] > HEAVY_BYTES]
         if heavy:
-            warnings.append(f'тяжёлые изображения (не оптимизированы): '
-                            f'{len(heavy)} шт. больше '
-                            f'{HEAVY_BYTES // 1024} КБ')
+            warnings.append(f'тяжёлые изображения (не оптимизированы) - '
+                            f'больше {HEAVY_BYTES // 1024} КБ')
 
     return {
         'no_alt': no_alt[:50],

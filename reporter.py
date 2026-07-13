@@ -2330,7 +2330,7 @@ def _build_images_sheet(wb, results):
 
     ws.merge_cells('B3:E3')
     c = ws['B3']
-    c.value = ('Три проверки по картинкам страницы: (1) Alt - у каждого <img> '
+    c.value = ('Проверки по картинкам страницы: (1) Alt - у каждого <img> '
                'есть атрибут alt (пустой alt="" ок для декоративных; баг - '
                'полное отсутствие). (2) Современные форматы - используются '
                'webp/avif, а не только jpg/png/gif (устаревшие без webp/avif = '
@@ -2347,7 +2347,7 @@ def _build_images_sheet(wb, results):
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
     c.value = (f'Проверено страниц: {len(checked)} · без alt: {len(bad)} · '
-               f'с предупреждениями (форматы/вес): {len(warned)}')
+               f'с предупреждениями (форматы/вес/lazy): {len(warned)}')
     c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
     c.fill = _fill(C.surface)
     c.alignment = _align(wrap=True)
@@ -2367,6 +2367,10 @@ def _build_images_sheet(wb, results):
             bits.append('тяжёлые: ' + ', '.join(
                 f'{h["url"].rsplit("/", 1)[-1]} {h["kb"]}КБ'
                 for h in im['heavy'][:3]))
+        if im.get('img_total') and not im.get('lazy_imgs'):
+            bits.append(f'без lazy: {im["img_total"]} картинок')
+        if im.get('media_total') and not im.get('lazy_media'):
+            bits.append(f'видео/iframe: {im["media_total"]}')
         return ' · '.join(bits)
 
     _meta_section_title(ws, row, f'Проблемы (нет alt)  ({len(bad)})',
