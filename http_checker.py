@@ -471,11 +471,19 @@ async def _css_info_for_url(session, url, timeout_ms, proxy_url, cache, locks, g
         if url in cache:
             return cache[url]
         status, text = await _fetch_css_text(session, url, timeout_ms, proxy_url)
+        # @font-face без font-display: swap/optional/fallback - браузер
+        # прячет текст до загрузки шрифта, макет дёргается (CLS, п.1.11).
+        _faces = re.findall(r'@font-face\s*\{[^}]*\}', text or '', re.I)
+        _noswap = sum(1 for f in _faces
+                      if not re.search(r'font-display\s*:\s*'
+                                       r'(?:swap|optional|fallback)', f, re.I))
         info = {
             'url': url,
             'status': status,
             'has_media': bool(text and _RE_CSS_MEDIA_WIDTH.search(text)),
             'minified': _looks_minified(text),
+            'fontface': len(_faces),
+            'fontface_noswap': _noswap,
             'selectors': parse_hidden_selectors(text) if text else (),
         }
         cache[url] = info

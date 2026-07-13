@@ -76,6 +76,18 @@ _INLINE_SCRIPT_KB = 30       # суммарный inline-<script> больше -
 # Блокирующие скрипты: <script src> в <head> без async/defer.
 _RE_SCRIPT_HEAD = re.compile(r'<script\b[^>]*\bsrc\s*=[^>]*>', re.I)
 _BLOCKING_MIN = 2            # от скольких блокирующих скриптов ругаемся
+
+# Псевдоссылки: button/div/span с onclick-переходом вместо <a href> -
+# краулер по ним не пройдёт, средняя кнопка мыши/новая вкладка не работают.
+_RE_PSEUDO_LINK = re.compile(
+    r'<(?:button|div|span)\b[^>]*onclick\s*=\s*["\'][^"\']*'
+    r'(?:location\.href|location\s*=|window\.open|window\.location)', re.I)
+
+# @font-face без font-display: swap в inline-<style> (внешние CSS смотрит
+# http_checker и кладёт флаги в css_infos).
+_RE_FONTFACE = re.compile(r'@font-face\s*\{[^}]*\}', re.I)
+_RE_FONT_DISPLAY_OK = re.compile(
+    r'font-display\s*:\s*(?:swap|optional|fallback)', re.I)
 _RE_LINK_TAG = re.compile(r'<link\b[^>]*>', re.I)
 _RE_LINK_LOAD = re.compile(r'rel\s*=\s*["\'][^"\']*(?:stylesheet|icon|preload)',
                            re.I)
@@ -241,6 +253,25 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         warnings.append('скрипты в <head> без async/defer - блокируют '
                         'отрисовку страницы (отложенный рендеринг не настроен)')
 
+    # 10. Псевдоссылки: переходы через onclick на button/div вместо <a href>.
+    pseudo_links = len(_RE_PSEUDO_LINK.findall(body))
+    if pseudo_links:
+        warnings.append('ссылки оформлены не тегом <a href>, а button/div с '
+                        'onclick-переходом - краулер по ним не пройдёт, '
+                        '«открыть в новой вкладке» не работает')
+
+    # 11. font-display: swap - шрифты без него прячут текст до загрузки,
+    # макет дёргается (CLS). Внешние CSS - флаги из css_infos, плюс
+    # inline-<style>.
+    ff_noswap = sum(c.get('fontface_noswap') or 0 for c in css_infos)
+    for block in _RE_STYLE_BLOCK.findall(body):
+        for face in _RE_FONTFACE.findall(block):
+            if not _RE_FONT_DISPLAY_OK.search(face):
+                ff_noswap += 1
+    if ff_noswap:
+        warnings.append('шрифты @font-face без font-display: swap - текст '
+                        'скрыт до загрузки шрифта, возможен сдвиг макета')
+
     return {
         'viewport': viewport,
         'css_total': len(css_infos),
@@ -256,6 +287,8 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'inline_style_kb': inline_style_kb,
         'inline_script_kb': inline_script_kb,
         'blocking_scripts': len(blocking),
+        'pseudo_links': pseudo_links,
+        'fontface_noswap': ff_noswap,
         'issues': issues,
         'warnings': warnings,
     }

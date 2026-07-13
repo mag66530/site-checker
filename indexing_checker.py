@@ -450,6 +450,12 @@ _RE_LOADMORE = re.compile(
     r'show-?more|load-?more|loadmore|btn-more|js-more|показать\s+ещё|'
     r'показать\s+еще', re.I)
 
+# Ссылки пагинации в HTML (их видит краулер): <a href="?PAGEN_1=2">,
+# rel="next"/"prev" либо /page/2/.
+_RE_PAG_LINKS = re.compile(
+    r'href\s*=\s*["\'][^"\']*(?:PAGEN|[?&]page=|/page/\d)'
+    r'|rel\s*=\s*["\'](?:next|prev)["\']', re.I)
+
 
 async def _status_direct(session, url, proxy_url, *, timeout_ms=15000,
                          follow_redirects=False):
@@ -642,6 +648,10 @@ async def check_paths_against_robots(host: str, paths: list, *,
                 html_p1 = await _page_html(f'https://{host}{_base}')
                 if html_p1 is not None:
                     pg['loadmore'] = bool(_RE_LOADMORE.search(html_p1))
+                    # Бесконечная прокрутка обязана иметь ссылки пагинации
+                    # в HTML - иначе краулер не дойдёт до товаров дальше
+                    # первой страницы (JS-подгрузку роботы не крутят).
+                    pg['pag_links'] = bool(_RE_PAG_LINKS.search(html_p1))
                 out['pagination'] = pg
 
             # ── 3. Sitemap-директивы (ТЗ 3.3.6) ──
