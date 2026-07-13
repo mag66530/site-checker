@@ -764,6 +764,35 @@ def run_check(pid, params, creds, log, progress):
             try:
                 from webmaster_api import (load_issues as _li,
                                            filter_sanctions, GSC_SANCTION_RE)
+                # Пункт самодостаточен: если общий сбор уведомлений выключен,
+                # дособираем источники сами (диагностика Вебмастера по API +
+                # почта GSC за 90 дней). Включён - кеш уже свежий.
+                _wm_fresh = bool(params['fetch_notifications'])
+                if not params['fetch_notifications']:
+                    _wm_token = creds.get('webmaster_oauth')
+                    if _wm_token:
+                        log('Фильтры ПС: тяну диагностику Вебмастера…')
+                        try:
+                            fetch_webmaster_issues(pid, _wm_token, _proxy, _nlog)
+                            _wm_fresh = True
+                        except Exception as _e:
+                            log(f'⚠ Фильтры ПС (Вебмастер-API): {_e}')
+                    _gsc_e, _gsc_p = creds.get('gsc') or (None, None)
+                    if _gsc_e and _gsc_p:
+                        log('Фильтры ПС: собираю почту GSC за 90 дней…')
+                        try:
+                            fetch_gsc_gmail(pid, _gsc_e, _gsc_p, 90, _nlog)
+                        except Exception as _e:
+                            log(f'⚠ Фильтры ПС (почта GSC): {_e}')
+                    _gf_e, _gf_p, _gf_f = (creds.get('google_folder')
+                                           or (None, None, None))
+                    if _gf_e and _gf_p and _gf_f:
+                        try:
+                            fetch_yandex_folder_simple(
+                                pid, _gf_e, _gf_p, _gf_f, 'gsc', 90,
+                                _proxy, _nlog, classify=True)
+                        except Exception as _e:
+                            log(f'⚠ Фильтры ПС (GSC-папка): {_e}')
                 _wm_all = _li(pid) or []
                 _sanc = filter_sanctions(_wm_all)
                 from webmaster_notify import load_notifications as _ln90
@@ -777,7 +806,7 @@ def run_check(pid, params, creds, log, progress):
                     'yandex': _sanc,
                     'wm_issues_total': len(_wm_all),
                     'wm_hosts': len({getattr(i, 'host', '') for i in _wm_all}),
-                    'wm_collected': bool(params.get('check_webmaster')),
+                    'wm_collected': _wm_fresh,
                     'gsc_hits': _gsc_hits,
                     'gsc_scanned': len(_gsc_mail),
                 }
