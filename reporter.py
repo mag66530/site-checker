@@ -2406,8 +2406,17 @@ def _build_w3c_sheet(wb, w3c_check):
         return (str((p.get('html') or {}).get('error') or '')
                 or str((p.get('css') or {}).get('error') or ''))
 
+    def _perf_warn(p):
+        """Проблема со сжатием/кешем статики (для окраски вкладки)."""
+        t = p.get('timings') or {}
+        cp = t.get('compression') or {}
+        ca = t.get('caching') or {}
+        return ((cp.get('checked') and cp.get('ok', 0) < cp['checked'])
+                or (ca.get('checked') and ca.get('ok', 0) < ca['checked']))
+
     _any_err = any((p.get('html') or {}).get('errors')
-                   or (p.get('css') or {}).get('errors') for p in pages)
+                   or (p.get('css') or {}).get('errors')
+                   or _perf_warn(p) for p in pages)
     _any_blocked = any(_page_fail(p) for p in pages)
     ws.sheet_properties.tabColor = C.warn if (_any_err or _any_blocked) else C.ok
 
@@ -2425,7 +2434,9 @@ def _build_w3c_sheet(wb, w3c_check):
     c.value = ('По ВЫБОРКЕ страниц (главная/категория/товар - у W3C лимиты): '
                '(1) HTML валиден - W3C Nu (validator.w3.org); (2) CSS валиден - '
                'W3C CSS Validator (jigsaw.w3.org); (3) время загрузки ресурсов - '
-               'скачиваем HTML/CSS/JS/шрифты/картинки и суммируем по типам. '
+               'скачиваем HTML/CSS/JS/шрифты/картинки и суммируем по типам; '
+               '(4) сжатие статики (Gzip/Brotli) и (5) кеш статики '
+               '(Cache-Control/ETag) - по заголовкам ответа CSS/JS. '
                'Ошибки валидатора = предупреждение (у боевых сайтов их часто '
                'много). Полный список ошибок - в самих валидаторах по ссылке.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
@@ -2535,6 +2546,41 @@ def _build_w3c_sheet(wb, w3c_check):
                       f'({_sl.get("kind", "")})', C.text_soft)
             _line('  итого загрузка:', f'{_t.get("total_ms", 0)} мс',
                   C.warn if _t.get('total_ms', 0) > 8000 else C.text)
+            # Сжатие статики (Gzip/Brotli) - по CSS/JS.
+            _cp = _t.get('compression') or {}
+            if _cp.get('checked'):
+                _ok, _n = _cp.get('ok', 0), _cp['checked']
+                _enc = ', '.join(_cp.get('enc') or []) or '—'
+                if _ok >= _n:
+                    _line('Сжатие CSS/JS:',
+                          f'✅ включено ({_enc}) — {_ok} из {_n}', C.ok)
+                elif _ok:
+                    _line('Сжатие CSS/JS:',
+                          f'⚠ частично ({_enc}): сжато {_ok} из {_n}. Без сжатия: '
+                          + '; '.join(u.rsplit('/', 1)[-1]
+                                      for u in _cp.get('missing', [])[:4]),
+                          C.warn)
+                else:
+                    _line('Сжатие CSS/JS:',
+                          f'⚠ НЕ включено (Gzip/Brotli) — 0 из {_n}. Включите '
+                          'сжатие статики на сервере (ускорит загрузку).', C.warn)
+            # Кеширование статики (Cache-Control/ETag/Expires).
+            _ca = _t.get('caching') or {}
+            if _ca.get('checked'):
+                _ok, _n = _ca.get('ok', 0), _ca['checked']
+                if _ok >= _n:
+                    _line('Кеш статики:',
+                          f'✅ настроен (Cache-Control/ETag) — {_ok} из {_n}', C.ok)
+                elif _ok:
+                    _line('Кеш статики:',
+                          f'⚠ частично: с кешем {_ok} из {_n}. Без кеша: '
+                          + '; '.join(u.rsplit('/', 1)[-1]
+                                      for u in _ca.get('missing', [])[:4]),
+                          C.warn)
+                else:
+                    _line('Кеш статики:',
+                          f'⚠ НЕ настроен (Cache-Control/ETag/Expires) — 0 из '
+                          f'{_n}. Настройте заголовки кеша статики.', C.warn)
         row += 1
 
 

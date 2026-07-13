@@ -1,14 +1,18 @@
 """
 w3c_perf.py - валидация W3C и скорость ресурсов (пункт 1.16).
 
-Три проверки, все по ВЫБОРКЕ страниц (главная + категория + товар) - у W3C
+Проверки все по ВЫБОРКЕ страниц (главная + категория + товар) - у W3C
 жёсткие лимиты, по всем страницам гонять нельзя:
   • HTML валиден - W3C Nu Html Checker (validator.w3.org/nu, GET ?doc=url -
     Nu сам качает страницу; POST крупного тела ловит 502);
   • CSS валиден - W3C CSS Validator (jigsaw.w3.org/css-validator, по URL);
   • время загрузки основных ресурсов - качаем HTML + свои/внешние CSS/JS/
     шрифты/картинки и замеряем время по типам (грубый серверный прокси
-    реального рендера, но показывает тяжёлые ресурсы).
+    реального рендера, но показывает тяжёлые ресурсы);
+  • сжатие статики (Gzip/Brotli) - по Content-Encoding ответов CSS/JS;
+  • кеш статики - по Cache-Control (max-age) / ETag / Expires ответов.
+Сжатие и кеш читаем из тех же запросов, что и время загрузки, - без
+доп. трафика.
 
 Внешние сервисы + скачивание ресурсов = медленно, поэтому за отдельной
 галочкой (по запросу).
@@ -55,17 +59,22 @@ CAP = {'css': 12, 'js': 12, 'font': 8, 'img': 12}
 
 
 def _get(url, proxy=None, timeout=25):
-    """(ms, bytes, status). Скачивает тело - для честного времени передачи."""
+    """(ms, bytes, status, headers). Скачивает тело - для честного времени
+    передачи; headers нужны для проверки сжатия (Content-Encoding) и
+    кеширования (Cache-Control/ETag/Expires). Явно просим gzip/br, чтобы
+    увидеть, отдаёт ли сервер сжатую статику."""
     import requests
     proxies = {'http': proxy, 'https': proxy} if proxy else None
+    hdr = {'User-Agent': _UA, 'Accept-Encoding': 'gzip, deflate, br'}
     t0 = time.monotonic()
     try:
-        r = requests.get(url, headers={'User-Agent': _UA}, timeout=timeout,
+        r = requests.get(url, headers=hdr, timeout=timeout,
                          proxies=proxies, allow_redirects=True)
         data = r.content
-        return int((time.monotonic() - t0) * 1000), len(data), r.status_code
+        return (int((time.monotonic() - t0) * 1000), len(data),
+                r.status_code, dict(r.headers))
     except Exception:
-        return int((time.monotonic() - t0) * 1000), 0, None
+        return int((time.monotonic() - t0) * 1000), 0, None, {}
 
 
 def validate_html(url, proxy=None) -> dict:
@@ -152,12 +161,31 @@ def _kind(url: str) -> str:
     return ''
 
 
+def _enc(headers) -> str:
+    """Content-Encoding в нижнем регистре ('gzip'/'br'/'deflate'/'')."""
+    return (headers or {}).get('Content-Encoding', '').strip().lower()
+
+
+def _has_cache(headers) -> bool:
+    """Есть ли внятная политика кеша: Cache-Control с max-age>0 (не no-store/
+    no-cache), либо ETag, либо Expires."""
+    h = headers or {}
+    cc = h.get('Cache-Control', '').lower()
+    if 'no-store' in cc or 'no-cache' in cc:
+        return False
+    m = re.search(r'max-age\s*=\s*(\d+)', cc)
+    if m and int(m.group(1)) > 0:
+        return True
+    return bool(h.get('ETag') or h.get('Expires'))
+
+
 def resource_timings(url, html, proxy=None) -> dict:
-    """Время загрузки ресурсов страницы по типам. Возвращает
-    {html_ms, by_type:{css/js/font/img:{ms,count,kb}}, slowest, total_ms}."""
+    """Время загрузки ресурсов страницы по типам + сжатие статики и кеш.
+    Возвращает {html_ms, by_type:{css/js/font/img:{ms,count,kb}}, slowest,
+    total_ms, compression:{...}, caching:{...}}."""
     # HTML уже есть - но замерим отдельным запросом для чистого времени.
     html_ms, html_kb = 0, 0
-    m0, b0, _ = _get(url, proxy)
+    m0, b0, _, _ = _get(url, proxy)
     html_ms, html_kb = m0, b0 // 1024
 
     # Собираем ресурсы из HTML.
@@ -178,27 +206,56 @@ def resource_timings(url, html, proxy=None) -> dict:
         if not src.strip().startswith('data:'):
             res['img'].append(urljoin(url, src.strip()))
 
+    # Сжатие/кеш судим ТОЛЬКО по СВОЕЙ статике (тот же хост): сжатие/кеш
+    # чужих CDN и аналитики (mc.yandex.ru и т.п.) мы не контролируем.
+    def _host(u):
+        h = urlsplit(u).netloc.lower()
+        return h[4:] if h.startswith('www.') else h
+    own_host = _host(url)
+    # Сжатие - только текст (css/js): картинки/woff2 уже сжаты, gzip им не нужен.
+    comp = {'checked': 0, 'ok': 0, 'enc': set(), 'missing': []}
+    cache = {'checked': 0, 'ok': 0, 'missing': []}
+
+    def _own(u):
+        return _host(u) == own_host
+
     by_type, slowest = {}, {'url': '', 'ms': 0, 'kind': ''}
     for k, urls in res.items():
         uniq = list(dict.fromkeys(urls))[:CAP[k]]
         tot_ms, tot_kb = 0, 0
         for u in uniq:
-            ms, b, st = _get(u, proxy, timeout=20)
+            ms, b, st, hd = _get(u, proxy, timeout=20)
             tot_ms += ms
             tot_kb += b // 1024
             if ms > slowest['ms']:
                 slowest = {'url': u, 'ms': ms, 'kind': k}
+            if st and st < 400 and _own(u):
+                if k in ('css', 'js'):
+                    comp['checked'] += 1
+                    e = _enc(hd)
+                    if e in ('gzip', 'br', 'deflate'):
+                        comp['ok'] += 1
+                        comp['enc'].add('brotli' if e == 'br' else e)
+                    elif len(comp['missing']) < 8:
+                        comp['missing'].append(u)
+                cache['checked'] += 1
+                if _has_cache(hd):
+                    cache['ok'] += 1
+                elif len(cache['missing']) < 8:
+                    cache['missing'].append(u)
         by_type[k] = {'ms': tot_ms, 'count': len(uniq), 'kb': tot_kb}
     total = html_ms + sum(v['ms'] for v in by_type.values())
+    comp['enc'] = sorted(comp['enc'])
     return {'html_ms': html_ms, 'html_kb': html_kb, 'by_type': by_type,
-            'slowest': slowest, 'total_ms': total}
+            'slowest': slowest, 'total_ms': total,
+            'compression': comp, 'caching': cache}
 
 
 def check_page(url, proxy=None) -> dict:
     """Одна страница: HTML-валидность + CSS-валидность + время ресурсов."""
     out = {'url': url, 'html': None, 'css': None, 'timings': None,
            'error': None}
-    ms, _, st = _get(url, proxy)
+    ms, _, st, _ = _get(url, proxy)
     if st is None or st >= 400:
         out['error'] = f'страница не открылась (HTTP {st})'
         return out
