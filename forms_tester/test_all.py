@@ -1254,6 +1254,89 @@ def проверка_подсказок(scope) -> dict:
     return {"состояние": "корректно", "коммент": ""}
 
 
+# JS: снимок + очистка видимых текстовых полей (реф. и значения - на window).
+_REQ_CLEAR_JS = (
+    "f => { const vis=e=>{const b=e.getBoundingClientRect();const s=getComputedStyle(e);"
+    " return b.width>0&&b.height>0&&s.visibility!=='hidden'&&s.display!=='none';};"
+    " const els=[...f.querySelectorAll('input,textarea')].filter(e=>{const t=(e.type||'').toLowerCase();"
+    " return !['hidden','submit','button','checkbox','radio','file'].includes(t)&&vis(e);});"
+    " window.__reqEls=els; window.__reqSaved=els.map(e=>e.value);"
+    " els.forEach(e=>{ e.value=''; e.dispatchEvent(new Event('input',{bubbles:true}));"
+    "   e.dispatchEvent(new Event('change',{bubbles:true}));"
+    "   e.dispatchEvent(new Event('keyup',{bubbles:true})); }); return els.length; }")
+# JS: восстановить значения из снимка (идемпотентно).
+_REQ_RESTORE_JS = (
+    "f => { const els=window.__reqEls||[]; const s=window.__reqSaved||[];"
+    " els.forEach((e,i)=>{ e.value=s[i]; e.dispatchEvent(new Event('input',{bubbles:true}));"
+    "   e.dispatchEvent(new Event('change',{bubbles:true}));"
+    "   e.dispatchEvent(new Event('keyup',{bubbles:true})); }); }")
+
+
+def проверка_кнопки_обязательные(scope, page, кнопка_css: str = "") -> dict:
+    """Пункт «Кнопка отправки активна только после заполнения обязательных полей».
+    Проверяем ПО СМЫСЛУ: очищаем поля → смотрим кнопку; возвращаем значения →
+    смотрим кнопку. Значения ВОССТАНАВЛИВАЕМ гарантированно (finally), с паузами -
+    чтобы поймать и синхронные, и слегка отложенные валидаторы.
+    → {состояние, коммент}:
+      корректно        - пусто: кнопка заблокирована, заполнено: активна;
+      не блокируется   - кнопка активна и при пустой форме (валидация по клику);
+      не разблокируется- кнопка заблокирована и ПОСЛЕ заполнения (баг - не отправить)."""
+    sel = (кнопка_css or "button[type='submit'], input[type='submit'], button.btn").strip()
+    try:
+        btn = scope.locator(sel).first
+        if btn.count() == 0:
+            return {"состояние": "не найдено", "коммент": ""}
+    except Exception:  # noqa: BLE001
+        return {"состояние": "не найдено", "коммент": ""}
+
+    def _disabled():
+        try:
+            return bool(btn.evaluate(
+                "b => !!(b.disabled || b.getAttribute('aria-disabled')==='true'"
+                " || /disabl|inactive|not-?allowed/i.test(b.className||'')"
+                " || getComputedStyle(b).pointerEvents==='none')"))
+        except Exception:  # noqa: BLE001
+            return False
+
+    empty_dis = filled_dis = None
+    _cleared = False
+    try:
+        n = scope.evaluate(_REQ_CLEAR_JS)
+        if not n:
+            return {"состояние": "не найдено", "коммент": ""}
+        _cleared = True
+        page.wait_for_timeout(450)
+        empty_dis = _disabled()
+        scope.evaluate(_REQ_RESTORE_JS)
+        page.wait_for_timeout(450)
+        filled_dis = _disabled()
+    except Exception:  # noqa: BLE001
+        empty_dis = None
+    finally:
+        if _cleared:
+            try:
+                scope.evaluate(_REQ_RESTORE_JS)     # идемпотентно - точно вернём как было
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                page.evaluate("() => { delete window.__reqEls; delete window.__reqSaved; }")
+            except Exception:  # noqa: BLE001
+                pass
+
+    if empty_dis is None or filled_dis is None:
+        return {"состояние": "не найдено", "коммент": ""}
+    if empty_dis and not filled_dis:
+        return {"состояние": "корректно", "коммент": ""}
+    if empty_dis and filled_dis:
+        return {"состояние": "не разблокируется",
+                "коммент": ("Кнопка отправки заблокирована ДАЖЕ после заполнения "
+                            "обязательных полей - форму нельзя отправить (баг).")}
+    return {"состояние": "не блокируется",
+            "коммент": ("Кнопка активна и при пустой форме (валидация не блокировкой "
+                        "кнопки, а по клику). Не ошибка, если при отправке показываются "
+                        "подсказки о незаполненных полях.")}
+
+
 # ── Двойная отправка (двойной клик по кнопке) ────────────────────────
 _DS_ТРЕКЕРЫ = ("mc.yandex", "metri", "google-analytics", "googletagmanager",
                "doubleclick", "top-fwz1", "vk.com", "facebook.", "criteo",
@@ -2577,6 +2660,7 @@ LOG_HEADERS = [
     # показывает ли форма видимую ошибку при пустом/невалидном вводе.
     # «есть / нет / без реакции / не найдено / проверить вручную».
     "Ошибки валидации",
+    "Кнопка по заполнению",
     "Комментарий",
 ]
 
@@ -2595,6 +2679,7 @@ LOG_KEYS_ORDER = [
     "автозаполнение",
     "подсказки",
     "ошибки_валидации",
+    "кнопка_обязательные",
     "комментарий",
 ]
 
@@ -2761,6 +2846,120 @@ def append_log_row(path: str, row: dict) -> None:
     except Exception:
         pass
     wb.save(path)
+
+
+def консолидировать_форм_строки(path: str) -> None:
+    """Пост-обработка отчёта: сводит все строки ОДНОЙ формы в ОДНУ строку.
+
+    Раньше каждая проверка формы (Состав, Стилизация, Списки, Чекбоксы, Enter,
+    Двойная отправка, Обработка ошибок, Ошибки валидации, Согласие 2.13, Поля
+    2.14, Вёрстка …) писалась отдельной строкой - на форму выходило ~11 строк,
+    отчёт был нечитаем. Здесь группируем строки листа «Логи» по (Город, Страница,
+    имя формы) и склеиваем: каждая колонка-проверка берёт своё значение, «Статус»
+    - от самой отправки формы, «Комментарий» - объединение пояснений.
+
+    Имя формы: у строк-проверок оно идёт после «префикс: » (напр. «Стилизация
+    формы (…): Заказ звонка»), у самой формы - без префикса. Ни одно имя формы
+    двоеточия с пробелом не содержит, поэтому делим по первому «: ».
+
+    Колонко-независимо (читаем реальную шапку) - переживает вставку «Статуса в
+    админке» и любые новые колонки. Идемпотентно. При ошибке файл не трогаем.
+    Лист «Цели» и «Сводка» не затрагиваются."""
+    from openpyxl.styles import Font
+    from collections import OrderedDict
+    try:
+        wb = load_workbook(path)
+    except Exception:  # noqa: BLE001
+        return
+    if "Логи" not in wb.sheetnames:
+        return
+    ws = wb["Логи"]
+    if ws.max_row < 2:
+        return
+    rows = list(ws.iter_rows(values_only=True))
+    hdr = [str(h) if h is not None else "" for h in rows[0]]
+    data = rows[1:]
+    idx = {h: i for i, h in enumerate(hdr)}
+    # Нужны эти колонки; если шапка нестандартная - тихо выходим (не рискуем).
+    for нужн in ("Город", "Страница", "Название", "Статус", "Комментарий"):
+        if нужн not in idx:
+            return
+    GI, PI, NI, SI, CI = (idx["Город"], idx["Страница"], idx["Название"],
+                          idx["Статус"], idx["Комментарий"])
+
+    def _base(n):
+        n = str(n or "")
+        return n.split(": ", 1)[1] if ": " in n else n
+
+    def _empty(v):
+        return v is None or (isinstance(v, str) and v.strip() in ("", "-"))
+
+    groups = OrderedDict()
+    for r in data:
+        key = (r[GI], r[PI], _base(r[NI]))
+        groups.setdefault(key, []).append(r)
+
+    # Уже сведено (нет строк-проверок с «: ») - второй раз не трогаем.
+    if len(groups) == len(data):
+        return
+
+    merged = []
+    for (_g, _p, bn), grp in groups.items():
+        row = [None] * len(hdr)
+        for col in range(len(hdr)):
+            for r in grp:
+                if not _empty(r[col]):
+                    row[col] = r[col]
+                    break
+        row[NI] = bn
+        # «Статус» - от строки самой формы (без префикса); иначе худший из группы.
+        bare = [r for r in grp if ": " not in str(r[NI] or "")]
+        if bare:
+            row[SI] = bare[0][SI]
+        else:
+            статусы = [str(r[SI]) for r in grp if r[SI] not in (None, "")]
+            row[SI] = next((s for s in статусы
+                            if s.lower().startswith(("ошибк", "проверить"))),
+                           статусы[0] if статусы else "")
+        # «Комментарий» - объединяем непустые пояснения проверок (без повторов).
+        коммы = []
+        for r in grp:
+            c = str(r[CI] or "").strip()
+            if c and c not in коммы:
+                коммы.append(c)
+        row[CI] = " | ".join(коммы)
+        merged.append(row)
+
+    # Переписываем данные листа: чистим строки со 2-й, пишем сведённые, красим.
+    if ws.max_row >= 2:
+        ws.delete_rows(2, ws.max_row - 1)
+    for r_i, row in enumerate(merged, start=2):
+        for c_i, val in enumerate(row, start=1):
+            ws.cell(r_i, c_i, val)
+        try:
+            sval = str(row[SI] or "").strip().lower()
+            if sval in ("успешно", "заполнено", "зафиксирована", "сработала"):
+                ws.cell(r_i, SI + 1).font = Font(color="1E8E3E", bold=True)
+            elif sval.startswith("ошибк") or sval.startswith("не сработала"):
+                ws.cell(r_i, SI + 1).font = Font(color="C62828", bold=True)
+        except Exception:  # noqa: BLE001
+            pass
+        # «Уведомление пользователю» - подсветка Да/Нет (как в append_log_row).
+        try:
+            ui = idx.get("Уведомление пользователю")
+            if ui is not None:
+                uval = str(row[ui] or "").strip()
+                if uval.startswith("Да"):
+                    ws.cell(r_i, ui + 1).font = Font(color="1E8E3E", bold=True)
+                elif uval.startswith("Нет"):
+                    ws.cell(r_i, ui + 1).font = Font(color="B26A00", bold=True)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        wb.save(path)
+        print(f"   🧹 Отчёт сведён: {len(data)} строк → {len(merged)} (1 форма = 1 строка)")
+    except Exception as e:  # noqa: BLE001
+        print(f"   ⚠️ Консолидация отчёта не сохранена: {e}")
 
 
 # --- Уровень 1 (админка): запись реально отправленных форм для сверки ---
@@ -3977,6 +4176,26 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                       + (f" — {_hp['коммент']}" if _hp["коммент"] else ""))
             except Exception as _ehp:  # noqa: BLE001
                 print(f"   ⚠️ Проверка подсказок полей не удалась: {_ehp}")
+
+            # Кнопка отправки активна только после заполнения обязательных полей.
+            # Чистит поля и ГАРАНТИРОВАННО возвращает (finally) - отправку не ломает.
+            try:
+                _rb = проверка_кнопки_обязательные(
+                    form, page, str(форма_config.get("кнопка_css") or ""))
+                записать_в_excel({
+                    "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                    "тип_селектора": "поля", "ид": название,
+                    "название": f"Кнопка активна по заполнению обязательных: {название}",
+                    "имя": имя_теста,
+                    "статус": "Проверить" if _rb["состояние"] == "не разблокируется" else "OK",
+                    "кнопка_обязательные": _rb["состояние"],
+                    "комментарий_готовый": _rb["коммент"] or None,
+                    "код": "required_button",
+                })
+                print(f"   🔘 Кнопка по заполнению «{название}»: {_rb['состояние']}"
+                      + (f" — {_rb['коммент']}" if _rb["коммент"] else ""))
+            except Exception as _erb:  # noqa: BLE001
+                print(f"   ⚠️ Проверка кнопки по заполнению не удалась: {_erb}")
 
             # Файл-проба (по галочке): грузим безвредный файл с опасным
             # расширением и отправляем - пройдёт ли серверную фильтрацию.
