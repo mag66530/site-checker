@@ -3125,8 +3125,11 @@ def _build_console_sheet(wb, console_check):
                        f'{m390["small"]} из {m390["total"]} текстовых '
                        f'элементов' + (f' (напр. {_ex})' if _ex else ''))
         if mob.get('menu_close') == 'not_closed':
-            out.append('мобильное меню НЕ закрывается по клику вне области '
-                       '(бургер-проба) - проверить вручную')
+            out.append('меню (мобильное) НЕ закрывается по клику вне области '
+                       '- проверить вручную')
+        if mob.get('menu_close_d') == 'not_closed':
+            out.append('меню/каталог (ПК) НЕ закрывается по клику вне '
+                       'области - проверить вручную')
         a = p.get('a11y') or {}
         if a.get('img_broken'):
             out.append('битые картинки (не загрузились в браузере): '
@@ -3368,25 +3371,32 @@ def _build_console_sheet(wb, console_check):
             _ux_line('· Выпадающих подменю в шапке не распознано - пропуск.',
                      C.text_muted)
         # Модальная форма: закрывается по клику вне (пункт «меню и формы»).
-        # На странице форм несколько - показываем НАЗВАНИЕ формы + URL.
+        # Проверяется на ПК (1440) и на мобильном (390); на странице форм
+        # несколько - показываем НАЗВАНИЕ формы + URL.
         def _fc_norm(v):
             if isinstance(v, dict):
                 return v.get('status'), v.get('name') or 'модальная форма'
             return v, 'модальная форма'
-        _fc = [(p, *_fc_norm((p.get('mobile') or {}).get('form_close')))
-               for p in pages]
-        _fc_fail = [(p, n) for p, s, n in _fc if s == 'not_closed']
-        _fc_ok = [(p, n) for p, s, n in _fc if s == 'ok']
+        _fc = []
+        for p in pages:
+            mob = p.get('mobile') or {}
+            for key, dev in (('form_close', 'ПК'), ('form_close_m', 'моб.')):
+                s, n = _fc_norm(mob.get(key))
+                if s:
+                    _fc.append((p, s, n, dev))
+        _fc_fail = [(p, n, d) for p, s, n, d in _fc if s == 'not_closed']
+        _fc_ok = [(p, n, d) for p, s, n, d in _fc if s == 'ok']
         if _fc_fail:
             _ux_line('⚠ Модальная форма НЕ закрывается по клику вне неё - '
                      'проверить вручную: '
-                     + '; '.join(f'«{n}» ({p["url"]})'
-                                 for p, n in _fc_fail[:3]), C.warn)
-        elif _fc_ok:
+                     + '; '.join(f'«{n}» [{d}] ({p["url"]})'
+                                 for p, n, d in _fc_fail[:3]), C.warn)
+        if _fc_ok:
+            _devs = ', '.join(sorted({d for _, _, d in _fc_ok}))
             _n0 = _fc_ok[0][1]
             _ux_line(f'✅ Модальная форма «{_n0}» закрывается по клику '
-                     f'вне неё.', C.ok)
-        else:
+                     f'вне неё ({_devs}).', C.ok)
+        if not _fc_fail and not _fc_ok:
             _ux_line('· Модальная форма не распознана (кнопка звонка/заявки '
                      'не найдена или окно на весь экран) - пропуск.',
                      C.text_muted)

@@ -54,6 +54,10 @@ MENU_PROBE_PAGES = 3     # бургер-меню сквозное - пробуе
 _BURGER_SEL = ("[class*='burger'], [class*='hamburger'], .menu-toggle, "
                "[class*='menu-btn'], [class*='menu-button'], "
                "[class*='nav-toggle']")
+# Десктоп: кнопка каталога/меню, открывающая панель по клику.
+_DESKTOP_MENU_SEL = (_BURGER_SEL + ", [class*='catalog-btn'], "
+                     "[class*='btn-catalog'], [class*='catalog-button'], "
+                     "button:has-text('Каталог')")
 # Пометить видимые крупные элементы (до открытия меню). Сначала снимаем
 # метки ПРЕДЫДУЩЕЙ пробы: без этого проверка «осталась видимой» после
 # формы смотрела на старую метку меню - вечный ложный not_closed.
@@ -293,17 +297,29 @@ def _close_on_outside(page, trigger, mode):
     блок (меню/модалка) -> клик СТРОГО вне блока -> блок должен скрыться.
     mode: 'menu' | 'form'. Возвращает 'ok' | 'not_closed' | None (не
     нашли/не поняли - молчим)."""
+    def _esc():
+        # Уборка: открытый блок засорял бы СЛЕДУЮЩУЮ пробу (перекрывает
+        # триггеры). Escape закрывает большинство модалок/меню.
+        try:
+            page.keyboard.press('Escape')
+            page.wait_for_timeout(300)
+        except Exception:
+            pass
+
     try:
         page.evaluate(_MARK_JS)
         trigger.click(timeout=3000)
         page.wait_for_timeout(700)
         box = page.evaluate(_FIND_NEW_JS, mode)
         if not box:
+            _esc()
             return None
         vw0 = page.viewport_size['width']
-        if mode == 'menu' and box['w'] > vw0 * 0.7:
-            # Меню шире 70% экрана - «кликнуть вне» физически негде
-            # (свободная полоска - обычно фон того же меню). Молчим.
+        if box['w'] > vw0 * 0.7:
+            # Блок (меню/модалка) шире 70% экрана - «кликнуть вне»
+            # физически негде (на мобильном модалки часто fullscreen,
+            # закрываются крестиком - это не нарушение). Молчим.
+            _esc()
             return None
         # Точка вне блока: справа / слева / снизу, по вертикальному центру.
         # Верх не используем (шапка: клик в лого/бургер исказит результат).
@@ -319,17 +335,26 @@ def _close_on_outside(page, trigger, mode):
         elif box['y'] + box['h'] + 40 < vh:               # снизу свободно
             pt = (vw / 2, box['y'] + box['h'] + 25)
         if pt is None:
+            _esc()
             return None
         page.mouse.click(int(pt[0]), int(pt[1]))
         page.wait_for_timeout(600)
-        return 'ok' if not page.evaluate(_STILL_VISIBLE_JS) else 'not_closed'
+        result = 'ok' if not page.evaluate(_STILL_VISIBLE_JS) else 'not_closed'
+        if result == 'not_closed':
+            _esc()
+        return result
     except Exception:
+        _esc()
         return None
 
 
-def _menu_close_probe(page):
-    """Мобильное меню (бургер) закрывается по клику вне области."""
-    burger = page.query_selector(_BURGER_SEL)
+def _menu_close_probe(page, selector=_BURGER_SEL):
+    """Меню (бургер на мобильном / кнопка каталога на ПК) закрывается по
+    клику вне области."""
+    try:
+        burger = page.query_selector(selector)
+    except Exception:
+        return None
     if burger is None or not burger.is_visible():
         return None
     return _close_on_outside(page, burger, mode='menu')
@@ -571,14 +596,19 @@ def run(pid: str, urls: list, log) -> dict:
                 # Бургер-проба (клик вне закрывает меню) - в самом конце:
                 # клик мимо может увести со страницы, метрики уже сняты.
                 # Меню сквозное - только первые страницы списка.
+                # Пробы «клик вне закрывает» - И на мобильном, И на ПК.
+                # В самом конце: клики могли бы исказить метрики выше.
                 if i <= MENU_PROBE_PAGES:
-                    mobile['menu_close'] = _menu_close_probe(page)
+                    mobile['menu_close'] = _menu_close_probe(page)   # моб.
+                    page.wait_for_timeout(300)
+                    mobile['form_close_m'] = _form_close_probe(page)  # моб.
                 page.set_viewport_size({'width': 1440, 'height': 900})
-                # Модальная форма (звонок/заявка) - на десктопе, тоже в
-                # самом конце: открытая модалка исказила бы метрики.
                 if i <= MENU_PROBE_PAGES:
                     page.wait_for_timeout(400)
-                    mobile['form_close'] = _form_close_probe(page)
+                    mobile['menu_close_d'] = _menu_close_probe(
+                        page, _DESKTOP_MENU_SEL)                     # ПК
+                    page.wait_for_timeout(300)
+                    mobile['form_close'] = _form_close_probe(page)   # ПК
             except Exception:
                 mobile = None
             out['checked'] += 1
