@@ -2180,7 +2180,7 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None):
 # ── Лист «Вёрстка» (п.1.11, ТЗ 2.1/2.1.1: viewport, стили, @media) ──
 
 
-def _build_layout_sheet(wb, results, filters_test=None):
+def _build_layout_sheet(wb, results, filters_test=None, search_check=None):
     """Лист вёрстки и адаптивности: страницы без viewport, битые CSS,
     отсутствие @media. Плюс секция «Фильтрация товаров» (браузерный тест
     фильтра). Добавляется, если выполнялась вёрстка ИЛИ фильтр-тест."""
@@ -2310,7 +2310,37 @@ def _build_layout_sheet(wb, results, filters_test=None):
         row = _render_issue_groups(
             ws, row, _issue_groups(warned, 'layout', 'warnings'), C.warn)
 
-    # Секция 5: фильтрация товаров (браузерный тест) - если запускался
+    # Секция 5: поиск по сайту находит категории (чек-лист)
+    if search_check:
+        row += 1
+        _sc_bad = (search_check.get('available')
+                   and search_check.get('found_category') is False)
+        _meta_section_title(ws, row, 'Поиск по сайту',
+                            C.warn if _sc_bad or not search_check.get(
+                                'available') else C.ok)
+        row += 1
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        if not search_check.get('available'):
+            c.value = ('⚠ Поиск не проверился: '
+                       + (search_check.get('error') or 'неизвестная причина')
+                       + ' - проверить вручную.')
+            c.font = _font(size=10, color=C.warn)
+        elif search_check.get('found_category'):
+            c.value = (f'✅ Поиск находит категории: по запросу '
+                       f'«{search_check.get("query", "")}» в выдаче есть '
+                       f'ссылка на саму категорию ({search_check.get("search_url", "")}).')
+            c.font = _font(size=10, color=C.ok)
+        else:
+            c.value = (f'⚠ По запросу «{search_check.get("query", "")}» в '
+                       f'выдаче НЕТ ссылки на категорию - похоже, поиск ищет '
+                       f'только товары ({search_check.get("search_url", "")}).')
+            c.font = _font(size=10, color=C.warn)
+        c.alignment = _align(indent=1, wrap=True)
+        ws.row_dimensions[row].height = 30
+        row += 1
+
+    # Секция 6: фильтрация товаров (браузерный тест) - если запускался
     if filters_test:
         row += 1
         row = _render_filters_section(ws, row, filters_test)
@@ -3057,6 +3087,9 @@ def _build_console_sheet(wb, console_check):
             out.append(f'мелкий шрифт меньше 14px (мобильный): '
                        f'{m390["small"]} из {m390["total"]} текстовых '
                        f'элементов' + (f' (напр. {_ex})' if _ex else ''))
+        if mob.get('menu_close') == 'not_closed':
+            out.append('мобильное меню НЕ закрывается по клику вне области '
+                       '(бургер-проба) - проверить вручную')
         return out
     mob_bad = [(p, _mob_issues(p)) for p in pages if _mob_issues(p)]
     mob_checked = sum(1 for p in pages if p.get('mobile'))
@@ -4099,6 +4132,7 @@ def build_report(
     w3c_check: dict = None,        # валидация W3C + скорость (п.1.16) - лист «Валидация и скорость»
     p404_check: dict = None,       # страница 404 (п.1.18) - лист «Страница 404»
     ps_filters: dict = None,       # фильтры ПС (п.1.19) - лист «Фильтры ПС»
+    search_check: dict = None,     # поиск находит категории - секция «Вёрстки»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -4396,7 +4430,7 @@ def build_report(
     _build_meta_sheet(wb, results, meta_summary)
 
     # ─── Лист вёрстки (п.1.11) + секция фильтрации (браузер) ────────
-    _build_layout_sheet(wb, results, filters_test)
+    _build_layout_sheet(wb, results, filters_test, search_check)
 
     # ─── Лист разметки (п.1.12) - если проверка выполнялась ─────────
     _build_markup_sheet(wb, results)

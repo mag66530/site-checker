@@ -755,6 +755,26 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Страница 404: {_e}')
 
+        # ── Поиск по сайту находит категории (чек-лист) - 2-3 запроса ──
+        _search_check = None
+        if params.get('check_layout'):
+            _s_cat = next((r.url for r in results
+                           if r.is_ok and r.type_code == 'category'), None)
+            if _s_cat:
+                try:
+                    from search_check import check_search
+                    _search_check = asyncio.run(
+                        check_search(_s_cat, proxy_url=proxy_url))
+                    if _search_check.get('available'):
+                        log('Поиск по сайту: категория в выдаче - '
+                            + ('да' if _search_check.get('found_category')
+                               else 'НЕТ (только товары?)'))
+                    else:
+                        log(f'⚠ Поиск по сайту: '
+                            f'{_search_check.get("error", "не проверился")}')
+                except Exception as _e:
+                    log(f'⚠ Поиск по сайту: {_e}')
+
         # ── Фильтры поисковых систем (п.1.19) - санкции/ручные меры ──
         # Яндекс: санкционные сигналы из диагностики Вебмастера (кеш этого
         # прогона, если сбор включён). Google: маркеры ручных мер в почтовых
@@ -852,7 +872,7 @@ def run_check(pid, params, creds, log, progress):
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,
             w3c_check=_w3c_check, p404_check=_p404_check,
-            ps_filters=_ps_filters)
+            ps_filters=_ps_filters, search_check=_search_check)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

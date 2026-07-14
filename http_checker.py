@@ -484,6 +484,11 @@ async def _css_info_for_url(session, url, timeout_ms, proxy_url, cache, locks, g
             'minified': _looks_minified(text),
             'fontface': len(_faces),
             'fontface_noswap': _noswap,
+            # Состояния интерактивных элементов (п. чек-листа hover/focus/
+            # active) - наличие псевдоклассов в CSS.
+            'has_hover': bool(text and ':hover' in text),
+            'has_focus': bool(text and ':focus' in text),
+            'has_active': bool(text and ':active' in text),
             'selectors': parse_hidden_selectors(text) if text else (),
         }
         cache[url] = info

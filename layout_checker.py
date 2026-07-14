@@ -359,6 +359,24 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
     except Exception:
         pass
 
+    # 13а. Состояния интерактивных элементов: :hover/:focus/:active в CSS
+    # (внешние стили + inline <style>). Нет :hover = мёртвый UI на десктопе,
+    # нет :focus = недоступно с клавиатуры (предупреждения).
+    _all_css_text = ' '.join(_RE_STYLE_BLOCK.findall(body))
+    has_hover = (any(c.get('has_hover') for c in css_infos)
+                 or ':hover' in _all_css_text)
+    has_focus = (any(c.get('has_focus') for c in css_infos)
+                 or ':focus' in _all_css_text)
+    has_active = (any(c.get('has_active') for c in css_infos)
+                  or ':active' in _all_css_text)
+    if css_infos:                    # без стилей судить не о чем
+        if not has_hover:
+            warnings.append('в стилях нет :hover - у интерактивных элементов '
+                            'нет реакции на наведение')
+        if not has_focus:
+            warnings.append('в стилях нет :focus - состояние фокуса не '
+                            'оформлено (недоступно с клавиатуры)')
+
     # 14. Меню прямыми ссылками (не скриптами) + прямая ссылка на каталог.
     menu_dummy, menu_catalog = 0, False
     _menu_html = ' '.join(m.group(0) for m in _RE_MENU_ZONE_ALL.finditer(body))
@@ -414,6 +432,8 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'menu_dummy': menu_dummy,
         'menu_catalog': menu_catalog,
         'crumb_last_link': crumb_last_link,
+        'states': {'hover': has_hover, 'focus': has_focus,
+                   'active': has_active},
         'issues': issues,
         'warnings': warnings,
     }
