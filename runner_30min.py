@@ -760,11 +760,14 @@ def run_check(pid, params, creds, log, progress):
         if params.get('check_layout'):
             _s_cat = next((r.url for r in results
                            if r.is_ok and r.type_code == 'category'), None)
+            _s_flt = next((r.url for r in results
+                           if r.is_ok and r.type_code == 'filter'), None)
             if _s_cat:
                 try:
                     from search_check import check_search
                     _search_check = asyncio.run(
-                        check_search(_s_cat, proxy_url=proxy_url))
+                        check_search(_s_cat, filter_url=_s_flt,
+                                     proxy_url=proxy_url))
                     if _search_check.get('available'):
                         log('Поиск по сайту: категория в выдаче - '
                             + ('да' if _search_check.get('found_category')

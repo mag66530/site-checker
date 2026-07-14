@@ -2339,6 +2339,25 @@ def _build_layout_sheet(wb, results, filters_test=None, search_check=None):
         c.alignment = _align(indent=1, wrap=True)
         ws.row_dimensions[row].height = 30
         row += 1
+        # Тег (страница-фильтр) - вторая проба.
+        if search_check.get('tag_query'):
+            ws.merge_cells(start_row=row, start_column=2, end_row=row,
+                           end_column=5)
+            c = ws.cell(row=row, column=2)
+            if search_check.get('found_tag'):
+                c.value = (f'✅ Теги тоже находятся: по запросу '
+                           f'«{search_check["tag_query"]}» в выдаче есть '
+                           f'ссылка на страницу-фильтр.')
+                c.font = _font(size=10, color=C.ok)
+            else:
+                c.value = (f'⚠ Тег «{search_check["tag_query"]}» в выдаче '
+                           f'не найден (ссылки на страницу-фильтр нет) - '
+                           f'типично для штатного поиска Bitrix, проверить '
+                           f'при желании вручную.')
+                c.font = _font(size=10, color=C.warn)
+            c.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 26
+            row += 1
 
     # Секция 6: фильтрация товаров (браузерный тест) - если запускался
     if filters_test:

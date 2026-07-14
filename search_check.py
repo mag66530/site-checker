@@ -30,47 +30,72 @@ async def _fetch(session, url, proxy_url):
         return None, ''
 
 
-async def check_search(category_url: str, proxy_url=None) -> dict:
-    """Проверить, находит ли поиск сайта категорию по её названию.
+async def _name_from_h1(session, url, proxy_url):
+    """Название страницы из её H1 (хвост «в Городе» срезаем)."""
+    st, html = await _fetch(session, url, proxy_url)
+    if st != 200 or not html:
+        return None
+    m = _RE_H1.search(html)
+    if not m:
+        return None
+    name = re.sub(r'\s+', ' ', _RE_TAG.sub(' ', m.group(1))).strip()
+    name = re.sub(r'\s+в\s+[А-ЯЁ][\w-]+$', '', name).strip()
+    return name if len(name) >= 3 else None
 
-    Возвращает {'available', 'query', 'search_url', 'status',
-                'found_category', 'error'}."""
+
+async def _probe_search(session, netloc_scheme, name, target_path, proxy_url):
+    """Поиск сайта по name: (search_url|None, found: bool|None)."""
+    for tpl in _SEARCH_PATHS:
+        s_url = netloc_scheme + tpl.format(q=quote(name))
+        st, html = await _fetch(session, s_url, proxy_url)
+        if st != 200 or not html:
+            continue
+        found = (f'href="{target_path}' in html
+                 or f"href='{target_path}" in html
+                 or target_path.rstrip('/') + '"' in html)
+        return s_url, found
+    return None, None
+
+
+async def check_search(category_url: str, filter_url: str = None,
+                       proxy_url=None) -> dict:
+    """Находит ли поиск САЙТА (та самая строка поиска: форма шлёт GET
+    /search/?q=…) категорию и тег/фильтр по их названиям.
+
+    Возвращает {'available', 'query', 'search_url', 'found_category',
+                'tag_query', 'found_tag', 'error'}."""
     out = {'available': False, 'query': None, 'search_url': None,
-           'status': None, 'found_category': None, 'error': None}
+           'status': None, 'found_category': None,
+           'tag_query': None, 'found_tag': None, 'error': None}
     sp = urlsplit(category_url)
+    base = f'{sp.scheme}://{sp.netloc}'
     cat_path = (sp.path or '/').rstrip('/') + '/'
     from http_checker import make_browser_headers
     connector = aiohttp.TCPConnector(limit=2, ttl_dns_cache=300)
     async with aiohttp.ClientSession(headers=make_browser_headers(),
                                      connector=connector) as session:
-        st, html = await _fetch(session, category_url, proxy_url)
-        if st != 200 or not html:
-            out['error'] = f'категория не открылась (HTTP {st})'
-            return out
-        m = _RE_H1.search(html)
-        if not m:
+        name = await _name_from_h1(session, category_url, proxy_url)
+        if not name:
             out['error'] = 'у категории нет H1 - нечего искать'
             return out
-        name = re.sub(r'\s+', ' ', _RE_TAG.sub(' ', m.group(1))).strip()
-        # Срезаем хвост «в Городе» из шаблонных H1 - ищем по сути названия.
-        name = re.sub(r'\s+в\s+[А-ЯЁ][\w-]+$', '', name).strip()
-        if len(name) < 3:
-            out['error'] = 'H1 категории слишком короткий'
-            return out
         out['query'] = name
-
-        for tpl in _SEARCH_PATHS:
-            s_url = f'{sp.scheme}://{sp.netloc}' + tpl.format(q=quote(name))
-            st, html = await _fetch(session, s_url, proxy_url)
-            if st != 200 or not html:
-                continue
-            out['available'] = True
-            out['search_url'] = s_url
-            out['status'] = st
-            # Ссылка на саму категорию в выдаче = поиск находит категории.
-            out['found_category'] = (f'href="{cat_path}' in html
-                                     or f"href='{cat_path}" in html
-                                     or cat_path.rstrip('/') + '"' in html)
+        s_url, found = await _probe_search(session, base, name, cat_path,
+                                           proxy_url)
+        if s_url is None:
+            out['error'] = 'страница поиска не найдена (/search/?q= и варианты)'
             return out
-        out['error'] = 'страница поиска не найдена (/search/?q= и варианты)'
+        out['available'] = True
+        out['search_url'] = s_url
+        out['status'] = 200
+        out['found_category'] = found
+
+        # Тег (страница-фильтр): ищем её название - есть ли ссылка на тег.
+        if filter_url:
+            fsp = urlsplit(filter_url)
+            f_path = (fsp.path or '/').rstrip('/') + '/'
+            f_name = await _name_from_h1(session, filter_url, proxy_url)
+            if f_name and f_name.lower() != name.lower():
+                out['tag_query'] = f_name
+                _, out['found_tag'] = await _probe_search(
+                    session, base, f_name, f_path, proxy_url)
         return out
