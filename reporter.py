@@ -2640,6 +2640,10 @@ def _build_images_sheet(wb, results):
             bits.append('без alt: ' + ', '.join(im['no_alt'][:3])
                         + (f' … +{len(im["no_alt"]) - 3}'
                            if len(im['no_alt']) > 3 else ''))
+        if im.get('broken_imgs'):
+            bits.append('битые: ' + ', '.join(
+                b['url'].rsplit('/', 1)[-1]
+                for b in im['broken_imgs'][:3]))
         if im.get('legacy'):
             bits.append(f'устаревших: {len(im["legacy"])}')
         if im.get('heavy'):
@@ -2664,12 +2668,12 @@ def _build_images_sheet(wb, results):
             bits.append(f'видео/iframe: {im["media_total"]}')
         return ' · '.join(bits)
 
-    _meta_section_title(ws, row, f'Проблемы (нет alt)  ({len(bad)})',
+    _meta_section_title(ws, row, f'Проблемы (alt, битые картинки)  ({len(bad)})',
                         C.err if bad else C.ok)
     row += 1
     if not bad:
         _meta_ok_line(ws, row, '✅ У всех картинок на проверенных страницах '
-                               'есть атрибут alt.')
+                               'есть атрибут alt, битых картинок (404) нет.')
         row += 2
     else:
         row = _render_issue_groups(
@@ -3122,6 +3126,13 @@ def _build_console_sheet(wb, console_check):
         if mob.get('menu_close') == 'not_closed':
             out.append('мобильное меню НЕ закрывается по клику вне области '
                        '(бургер-проба) - проверить вручную')
+        a = p.get('a11y') or {}
+        if a.get('img_broken'):
+            out.append('битые картинки (не загрузились в браузере): '
+                       + ', '.join(a['img_broken'][:4]))
+        if a.get('img_distorted'):
+            out.append('картинки с искажёнными пропорциями (сплющены/'
+                       'растянуты вёрсткой): ' + ', '.join(a['img_distorted'][:4]))
         return out
     mob_bad = [(p, _mob_issues(p)) for p in pages if _mob_issues(p)]
     mob_checked = sum(1 for p in pages if p.get('mobile'))
@@ -3275,6 +3286,31 @@ def _build_console_sheet(wb, console_check):
             else:
                 c.value = (f'✅ Тач-таргеты: большинство кнопок/иконок '
                            f'({100 - int(_share * 100)}%) не меньше 44x44px.')
+                c.font = _font(size=10, color=C.ok)
+            c.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 22
+            row += 1
+        # Контрастность (WCAG): метрика шаблонная - одна сводная строка.
+        _ct = [p.get('a11y') or {} for p in pages]
+        _ct = [a for a in _ct if a.get('contrast_total')]
+        if _ct:
+            _low = sum(a['contrast_low'] for a in _ct)
+            _tot = sum(a['contrast_total'] for a in _ct)
+            _cshare = _low / max(_tot, 1)
+            ws.merge_cells(start_row=row, start_column=2, end_row=row,
+                           end_column=3)
+            c = ws.cell(row=row, column=2)
+            if _cshare > 0.15:
+                _ex = '; '.join((_ct[0].get('contrast_ex') or [])[:3])
+                c.value = (f'⚠ Контрастность (WCAG): {int(_cshare * 100)}% '
+                           f'текста ниже нормы (4.5:1, крупный 3:1) - плохо '
+                           f'читается' + (f' (напр. {_ex})' if _ex else '')
+                           + '.')
+                c.font = _font(size=10, color=C.warn)
+            else:
+                c.value = (f'✅ Контрастность (WCAG): '
+                           f'{100 - int(_cshare * 100)}% текста читается '
+                           f'нормально (порог 4.5:1).')
                 c.font = _font(size=10, color=C.ok)
             c.alignment = _align(indent=1, wrap=True)
             ws.row_dimensions[row].height = 22

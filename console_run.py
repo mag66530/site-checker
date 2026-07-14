@@ -135,6 +135,88 @@ _STILL_VISIBLE_JS = """
 """
 
 
+# Доступность + рендер картинок (десктоп 1440, один замер на страницу):
+# контраст текста по WCAG (4.5:1 обычный, 3:1 крупный/жирный), битые
+# картинки (naturalWidth=0) и искажённые пропорции (rendered vs natural
+# расходятся >25% при object-fit: fill - «не соответствует дизайну»).
+_A11Y_JS = """
+() => {
+  const lum = (r, g, b) => {
+    const f = v => { v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const parse = c => { const m = (c || '').match(/\\d+(\\.\\d+)?/g);
+    return m ? m.map(Number) : null; };
+  let total = 0, low = 0; const ex = [];
+  let i = 0;
+  for (const el of document.querySelectorAll(
+      'p, li, a, span, td, h1, h2, h3, button')) {
+    if (++i > 800) break;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') continue;
+    let hasText = false;
+    for (const n of el.childNodes)
+      if (n.nodeType === 3 && n.textContent.trim().length > 3) {
+        hasText = true; break;
+      }
+    if (!hasText) continue;
+    let bg = null, p = el;
+    for (let d = 0; d < 5 && p && p !== document.documentElement;
+         d++, p = p.parentElement) {
+      const a = parse(getComputedStyle(p).backgroundColor);
+      if (a && (a.length < 4 || a[3] > 0.9)) { bg = a; break; }
+    }
+    // Фон не найден (картинка/градиент/глубже 5 уровней) - контраст
+    // посчитать честно нельзя, пропускаем (белый дефолт давал ложняки
+    // «белое на белом» у текста на тёмных фоновых картинках).
+    if (!bg) continue;
+    const fg = parse(st.color);
+    if (!fg) continue;
+    const L1 = lum(fg[0], fg[1], fg[2]), L2 = lum(bg[0], bg[1], bg[2]);
+    const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+    total++;
+    const fs = parseFloat(st.fontSize) || 14;
+    const need = (fs >= 24 || (fs >= 18.66 && parseInt(st.fontWeight) >= 700))
+        ? 3 : 4.5;
+    if (ratio < need) {
+      low++;
+      if (ex.length < 3)
+        ex.push(el.textContent.trim().slice(0, 30)
+                + ' (' + ratio.toFixed(1) + ':1)');
+    }
+  }
+  const imgBroken = [], imgDist = [];
+  let ic = 0;
+  for (const img of document.images) {
+    if (++ic > 400) break;
+    const r = img.getBoundingClientRect();
+    if (r.width < 5 || r.height < 5) continue;
+    if (img.complete && img.naturalWidth === 0) {
+      if (imgBroken.length < 5)
+        imgBroken.push((img.currentSrc || img.src || '')
+                       .split('/').pop().slice(0, 50));
+      continue;
+    }
+    if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+      const fit = getComputedStyle(img).objectFit;
+      if (fit === 'fill' || fit === 'none' || fit === '') {
+        const nr = img.naturalWidth / img.naturalHeight;
+        const rr = r.width / r.height;
+        if (nr / rr > 1.25 || rr / nr > 1.25) {
+          if (imgDist.length < 5)
+            imgDist.push((img.currentSrc || img.src || '')
+                         .split('/').pop().slice(0, 40));
+        }
+      }
+    }
+  }
+  return {contrast_total: total, contrast_low: low, contrast_ex: ex,
+          img_broken: imgBroken, img_distorted: imgDist};
+}
+"""
+
+
 # Смоук слайдера: контейнер + стрелка «вперёд».
 _SLIDER_SEL = ('.swiper, .slick-slider, .owl-carousel, [class*="carousel"], '
                '[class*="slider"]')
@@ -469,6 +551,12 @@ def run(pid: str, urls: list, log) -> dict:
             if i <= MENU_PROBE_PAGES:
                 ux = {'slider': _slider_probe(page),
                       'dropdown': _dropdown_probe(page)}
+            # Доступность (контраст) + рендер картинок - на 1440, до ресайзов.
+            a11y = None
+            try:
+                a11y = page.evaluate(_A11Y_JS)
+            except Exception:
+                a11y = None
             # Адаптивность: страница уже загружена - меняем ширину окна по
             # сетке 1440/768/390 и замеряем на каждой (без повторных визитов).
             mobile = None
@@ -495,7 +583,7 @@ def run(pid: str, urls: list, log) -> dict:
                 mobile = None
             out['checked'] += 1
             out['pages'].append({'url': url, 'errors': uniq[:15],
-                                 'mobile': mobile, 'ux': ux})
+                                 'mobile': mobile, 'ux': ux, 'a11y': a11y})
             _vps = (mobile or {}).get('viewports') or {}
             _mob_bad = any(
                 m.get('overflow', 0) > 8 or m.get('overlaps')

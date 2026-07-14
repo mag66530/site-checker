@@ -168,6 +168,15 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
         warnings.append('видео/iframe без ленивой загрузки '
                         '(нет loading="lazy"/preload="none")')
 
+    # ── Битые картинки (404/410): «изображение не отображается» - баг ──
+    broken_imgs = []
+    if image_infos:
+        broken_imgs = [i for i in image_infos
+                       if i.get('status') in (404, 410)]
+        if broken_imgs:
+            issues.append('битые картинки (404) - изображение не '
+                          'отображается на странице')
+
     # ── Оптимизация (вес): чек-лист требует ≤100 КБ, два порога ──
     heavy, mid = [], []
     if image_infos:
@@ -228,6 +237,7 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
         'heavy': [{'url': i.get('url', ''), 'kb': (i.get('bytes') or 0) // 1024}
                   for i in heavy][:50],
         'mid_heavy': len(mid),
+        'broken_imgs': [{'url': i.get('url', '')} for i in broken_imgs][:20],
         'names': {'hashed': hashed, 'readable': readable,
                   'mismatch': mismatch, 'mismatch_n': mismatch_n},
         'img_total': len(img_tags),

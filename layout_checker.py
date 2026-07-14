@@ -124,6 +124,12 @@ _RE_A_DUMMY = re.compile(
 _RE_A_CATALOG = re.compile(
     r'<a\b[^>]*href\s*=\s*["\'][^"\']*/catalog[/"\']', re.I)
 
+# Доступность: кнопки/ссылки-ИКОНКИ (без текста) должны иметь aria-label/
+# title - иначе скринридер объявит «кнопка» без смысла.
+_RE_ICON_CTRL = re.compile(r'<(a|button)\b([^>]*)>(.*?)</\1\s*>', re.I | re.S)
+_RE_ARIA_OK = re.compile(r'aria-label|aria-labelledby|\btitle\s*=', re.I)
+_ICON_NOARIA_MIN = 3         # с этого числа безымянных иконок - предупреждение
+
 # Хлебные крошки: контейнер по классу/itemtype.
 _RE_BREADCRUMB_BLOCK = re.compile(
     r'<(ol|ul|div|nav)\b[^>]*(?:class\s*=\s*["\'][^"\']*breadcrumb[^"\']*["\']'
@@ -379,6 +385,25 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
             warnings.append('в стилях нет :focus - состояние фокуса не '
                             'оформлено (недоступно с клавиатуры)')
 
+    # 13б. Доступность: иконки-кнопки без aria-label (скринридер объявит
+    # пустую «кнопку»). Полный aria-аудит это не заменяет - только явный
+    # типовой промах. Иконка = <a>/<button> без текста и без img[alt].
+    icon_noaria = 0
+    for m in _RE_ICON_CTRL.finditer(body[:800_000]):
+        attrs, inner = m.group(2), m.group(3)
+        if _RE_ARIA_OK.search(attrs):
+            continue
+        if re.search(r'<img\b[^>]*\balt\s*=\s*["\'][^"\']+', inner, re.I):
+            continue                       # картинка с alt озвучится
+        txt = re.sub(r'\s+', '', _RE_STRIP_TAGS.sub('', inner))
+        if not txt:
+            icon_noaria += 1
+        if icon_noaria > 200:
+            break
+    if icon_noaria >= _ICON_NOARIA_MIN:
+        warnings.append('кнопки/ссылки-иконки без aria-label - недоступны '
+                        'скринридерам (доступность)')
+
     # 14. Меню прямыми ссылками (не скриптами) + прямая ссылка на каталог.
     # Кап 500КБ: шапка всегда в начале документа, а зонный regex с .*? по
     # мегабайтному листингу - лишний CPU.
@@ -440,6 +465,7 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'crumb_last_link': crumb_last_link,
         'states': {'hover': has_hover, 'focus': has_focus,
                    'active': has_active},
+        'icon_noaria': icon_noaria,
         'issues': issues,
         'warnings': warnings,
     }

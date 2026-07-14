@@ -401,15 +401,17 @@ def _extract_img_srcs(html: str, base_url: str, limit: int = 15) -> list[str]:
 
 
 async def _img_size(session, url, timeout_ms, proxy_url, cache):
-    """Размер картинки по Content-Length (HEAD; при 405/нет длины - GET-стрим).
-    {'url','bytes'|None}. Кэш на батч."""
+    """Размер картинки по Content-Length (HEAD; при 405/нет длины - GET-стрим)
+    + HTTP-статус (404/410 = битая картинка, «не отображается»).
+    {'url','bytes'|None,'status'|None}. Кэш на батч."""
     if url in cache:
         return cache[url]
     to = aiohttp.ClientTimeout(total=min(timeout_ms, 15000) / 1000)
-    size = None
+    size, status = None, None
     try:
         async with session.head(url, timeout=to, allow_redirects=True,
                                 proxy=proxy_url) as r:
+            status = r.status
             cl = r.headers.get('Content-Length')
             if cl and cl.isdigit():
                 size = int(cl)
@@ -419,6 +421,7 @@ async def _img_size(session, url, timeout_ms, proxy_url, cache):
         try:
             async with session.get(url, timeout=to, allow_redirects=True,
                                    proxy=proxy_url) as r:
+                status = r.status
                 cl = r.headers.get('Content-Length')
                 if cl and cl.isdigit():
                     size = int(cl)
@@ -426,7 +429,7 @@ async def _img_size(session, url, timeout_ms, proxy_url, cache):
                     size = len(await r.read())
         except Exception:
             size = None
-    info = {'url': url, 'bytes': size}
+    info = {'url': url, 'bytes': size, 'status': status}
     cache[url] = info
     return info
 
