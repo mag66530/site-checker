@@ -1015,6 +1015,347 @@ def проверка_отображения_ошибок(scope, page, sub, is_or
                        "проверьте, видима ли реакция валидации")}
 
 
+# ── Серверная валидация: нельзя отправить неверные данные в обход клиентской
+# проверки (как правка в DevTools) ────────────────────────────────────────
+# В отличие от проверка_отображения_ошибок (там перехватчик + route.abort
+# специально ГАСЯТ запрос, чтобы ничего не ушло) - здесь наоборот: снимаем
+# HTML5-констрейнт и подставляем невалидное значение НАПРЯМУЮ через JS (минуя
+# маску/кастомный JS-валидатор, ровно как правка в DevTools), а запросу
+# ДАЁМ реально уйти - и смотрим, что ответил сервер. Три вида нарушения,
+# каждый - отдельная (по-настоящему невалидная) отправка; пропускаем те,
+# для которых на форме нет подходящего поля.
+_SRVVAL_ВИДЫ = (
+    ("empty", "обязательное поле пусто"),
+    ("bad_email", "некорректный e-mail"),
+    ("too_long", "превышение длины поля"),
+)
+
+# JS: находит подходящее поле под вид нарушения, снимает required/pattern/
+# maxlength, подставляет невалидное значение (с узнаваемым маркером в тексте,
+# где это возможно - если сервер всё же примет, заявку легко узнать в
+# админке) и диспатчит input/change - чтобы сработали и кастомные JS-валидаторы,
+# слушающие события, а не только нативный констрейнт. Метит поле временным
+# data-атрибутом для точного восстановления после пробы.
+_JS_SRVVAL_TAMPER = r"""
+(f, тип) => {
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const fire = e => { e.dispatchEvent(new Event('input', {bubbles:true}));
+                       e.dispatchEvent(new Event('change', {bubbles:true})); };
+  const looksReq = e => {
+    if (e.required || e.getAttribute('aria-required')==='true') return true;
+    const cls = (e.className||'') + ' ' + (e.parentElement ? e.parentElement.className : '');
+    if (/require|mandat|обязат/i.test(cls)) return true;
+    const nm = ((e.name||'') + ' ' + (e.placeholder||'') + ' '
+                + (e.getAttribute('autocomplete')||'')).toLowerCase();
+    if (/phone|tel|тел|mail|почт|name|имя|fio|фио/.test(nm)) return true;
+    return false;
+  };
+  const skip = ['hidden','submit','button','reset','image','checkbox','radio','file'];
+  const ctrls = [...f.querySelectorAll('input,textarea,select')]
+    .filter(e => vis(e) && !skip.includes((e.type||'').toLowerCase()));
+
+  let target = null;
+  if (тип === 'empty') {
+    // Обязательное, но НЕ похожее на «имя» - чтобы маркер в имени клиента,
+    // если сервер всё же примет заявку, остался читаемым в админке.
+    target = ctrls.find(e => looksReq(e) && !/^(name|fio|имя)$/i.test(e.name||''))
+      || ctrls.find(looksReq);
+  } else if (тип === 'bad_email') {
+    target = f.querySelector("input[type='email'], input[name*='mail' i],"
+      + " input[name*='email' i], input[placeholder*='mail' i],"
+      + " input[placeholder*='почт' i], input[autocomplete='email']");
+  } else if (тип === 'too_long') {
+    // Textarea/текстовое поле, НЕ телефон/почта; избегаем «имени», пока есть
+    // другой кандидат - иначе 4000 симв. затрут узнаваемое имя в заявке.
+    const notPhoneMail = e => !/phone|tel|тел|mail|почт/i.test((e.name||'') + (e.placeholder||''));
+    const isText = e => e.tagName === 'TEXTAREA'
+      || ['text','search',''].includes((e.type||'').toLowerCase());
+    target = ctrls.find(e => e.tagName === 'TEXTAREA' && notPhoneMail(e))
+      || ctrls.find(e => isText(e) && notPhoneMail(e) && !/^(name|fio|имя)$/i.test(e.name||''))
+      || ctrls.find(e => isText(e) && notPhoneMail(e));
+  }
+  if (!target) return {done: false};
+
+  target.setAttribute('data-srvval-tmp', '1');
+  const old = target.value;
+  target.removeAttribute('required');
+  target.removeAttribute('pattern');
+  target.removeAttribute('maxlength');
+  if ((target.type || '').toLowerCase() === 'email') target.type = 'text';
+
+  if (тип === 'empty') target.value = '';
+  else if (тип === 'bad_email') target.value = 'test-validation-probe-not-an-email';
+  else if (тип === 'too_long') target.value = 'ТЕСТ-ВАЛИДАЦИЯ ' + 'A'.repeat(4000);
+
+  fire(target);
+  return {done: true, поле: (target.name || target.id || target.placeholder || 'поле'), old: old};
+}
+"""
+
+_JS_SRVVAL_RESTORE = r"""
+(f, old) => {
+  const t = f.querySelector('[data-srvval-tmp="1"]');
+  if (!t) return false;
+  t.value = old || '';
+  t.dispatchEvent(new Event('input', {bubbles:true}));
+  t.dispatchEvent(new Event('change', {bubbles:true}));
+  t.removeAttribute('data-srvval-tmp');
+  return true;
+}
+"""
+
+
+def проба_серверной_валидации(scope, page, sub, is_order: bool) -> dict:
+    """Пункт «нельзя отправить неверные данные через DevTools» (серверная
+    валидация). Вызывается ПОСЛЕ обычной легитимной отправки формы (чтобы не
+    исказить остальные колонки её строки отчёта), только под галочкой.
+
+    Форму заказа (is_order) пропускаем - та же перестраховка на чекауте, что
+    и в проверка_отображения_ошибок (не делаем на нём авто-пробу).
+
+    Возвращает {попытки: {вид: 'принято'|'отклонено'|'неприменимо'|
+    'не удалось определить'}, детали}."""
+    if is_order:
+        return {"попытки": {}, "детали": "форма заказа - проба пропущена (перестраховка на чекауте)"}
+
+    попытки = {}
+    for вид, _описание in _SRVVAL_ВИДЫ:
+        try:
+            info = scope.evaluate(_JS_SRVVAL_TAMPER, вид)
+        except Exception:  # noqa: BLE001
+            info = None
+        if not info or not info.get("done"):
+            попытки[вид] = "неприменимо"
+            continue
+        try:
+            try:
+                _btn_до = (sub.inner_text(timeout=1000) or "").strip()
+            except Exception:  # noqa: BLE001
+                _btn_до = ""
+            try:
+                sub.click(timeout=5000)
+            except Exception:  # noqa: BLE001
+                sub.click(timeout=5000, force=True)
+            page.wait_for_timeout(1500)
+            try:
+                _btn_после = (sub.inner_text(timeout=1000) or "").strip()
+            except Exception:  # noqa: BLE001
+                _btn_после = ""
+            _уведомл = детект_уведомления_пользователю(
+                page, _btn_до, _btn_после, кнопка=sub, таймаут_мс=3000)
+            if _уведомл.startswith("Да"):
+                попытки[вид] = "принято"
+            elif _видна_ошибка_отправки(page):
+                попытки[вид] = "отклонено"
+            else:
+                попытки[вид] = "не удалось определить"
+        except Exception as e:  # noqa: BLE001
+            попытки[вид] = "не удалось определить"
+            print(f"      ⚠️ Проба серверной валидации ({вид}): {e}")
+        finally:
+            try:
+                scope.evaluate(_JS_SRVVAL_RESTORE, info.get("old", ""))
+            except Exception:  # noqa: BLE001
+                pass
+
+    детали = "; ".join(f"{описание}: {попытки[вид]}"
+                       for вид, описание in _SRVVAL_ВИДЫ if вид in попытки)
+    return {"попытки": попытки, "детали": детали}
+
+
+def валидация_сервера_вердикт(попытки: dict) -> tuple:
+    """(статус, деталь) для строки «Серверная валидация». ЧИСТАЯ функция
+    (юнит-тест без браузера). Статус: «Защищена» / «УЯЗВИМА» / «Проверить»."""
+    применимые = {в: р for в, р in (попытки or {}).items() if р != "неприменимо"}
+    принятые = [в for в, р in применимые.items() if р == "принято"]
+    if принятые:
+        return "УЯЗВИМА", f"сервер принял невалидные данные: {', '.join(принятые)}"
+    if применимые and all(р == "отклонено" for р in применимые.values()):
+        return "Защищена", f"сервер отклонил все проверенные варианты ({len(применимые)})"
+    if not применимые:
+        return ("Проверить",
+                "не нашли подходящих полей для пробы (нет обязательных/email/текстовых)")
+    return "Проверить", "часть попыток не удалось однозначно определить"
+
+
+# ── Лимит запросов: защита от спама/ботов ────────────────────────────────
+# Слой A (пассивно, всегда включён, НИ ОДНОГО лишнего запроса): признаки
+# антибот-защиты в уже загруженной странице - капча-виджет по HTML и
+# honeypot-поле по живому DOM. Слой B (активный залп, отдельная галочка,
+# выключена по умолчанию) - ниже.
+_КАПЧА_МАРКЕРЫ = (
+    ("g-recaptcha", "reCAPTCHA"), ("grecaptcha", "reCAPTCHA"), ("recaptcha", "reCAPTCHA"),
+    ("h-captcha", "hCaptcha"), ("hcaptcha", "hCaptcha"),
+    ("cf-turnstile", "Cloudflare Turnstile"), ("turnstile", "Cloudflare Turnstile"),
+    ("smartcaptcha", "Яндекс SmartCaptcha"), ("smart-captcha", "Яндекс SmartCaptcha"),
+)
+
+
+def защита_от_спама_из_html(html: str) -> dict:
+    """{капча, какая} - есть ли в уже загруженной странице маркер капча-виджета
+    (script/class/iframe узнаваемых сервисов). ЧИСТАЯ функция (юнит-тест без
+    браузера). Не проверяет, что капча реально требуется при отправке - только
+    что она технически присутствует."""
+    low = (html or "").lower()
+    for маркер, имя in _КАПЧА_МАРКЕРЫ:
+        if маркер in low:
+            return {"капча": True, "какая": имя}
+    return {"капча": False, "какая": ""}
+
+
+# JS: honeypot-поле - скрытое (type=hidden) поле с типовым «ловушечным» именем
+# (как hideit у Метпромко, forms_tester/projects/metpromko/config.py). Именно
+# ТИПОВЫЕ имена, не любое hidden - иначе ложно сработает на csrf/hash/sessid.
+_JS_HONEYPOT = r"""
+f => {
+  const known = /^(hideit|honeypot|honey[-_]?pot|trap|bot[-_]?field|homepage)$/i;
+  for (const e of f.querySelectorAll("input[type='hidden']")) {
+    const nm = (e.name || e.id || '').trim();
+    if (nm && known.test(nm)) return {найдено: true, имя: nm};
+  }
+  return {найдено: false, имя: ''};
+}
+"""
+
+
+def лимит_пассивно_вердикт(обнаружено: dict) -> tuple:
+    """(статус, деталь) для колонки «Защита от спама (пассивно)». ЧИСТАЯ
+    функция (юнит-тест без браузера). Статус: «Есть защита» / «Не обнаружено»."""
+    о = обнаружено or {}
+    признаки = []
+    if о.get("капча"):
+        признаки.append(о.get("капча_какая") or "капча")
+    if о.get("honeypot"):
+        признаки.append(f"honeypot-поле «{о.get('honeypot_имя')}»")
+    if признаки:
+        return "Есть защита", "обнаружено: " + ", ".join(признаки)
+    return ("Не обнаружено",
+            "видимых признаков защиты нет (капча/honeypot) - это НЕ доказывает "
+            "отсутствие лимита на сервере, только что снаружи не видно")
+
+
+# Слой B: активный залп - до 3 БЫСТРЫХ повторных отправок ВАЛИДНЫМИ (не
+# невалидными - здесь проверяем throttling, а не валидацию) данными. Число
+# попыток сознательно не настраивается через UI (чтобы не провоцировать
+# «покрутить побольше» - каждая лишняя попытка на боевом сайте лишняя).
+_RATELIMIT_ПОПЫТОК = 3
+_ЛИМИТ_МАРКЕРЫ = (
+    "слишком часто", "слишком много попыток", "много запросов",
+    "попробуйте позже", "повторите попытку позже", "too many requests",
+    "too many attempts", "try again later", "rate limit",
+)
+
+# JS: снимок/восстановление значений полей между попытками - AJAX-форма часто
+# ОЧИЩАЕТ поля после успешной отправки (см. «Поля очищаются» выше), без
+# восстановления 2-я/3-я попытка ушла бы пустой не из-за лимита, а из-за
+# нехватки данных. По образцу window.__valSaved у проверка_отображения_ошибок.
+_JS_RATELIMIT_SNAPSHOT = r"""
+f => {
+  const skip = ['hidden','submit','button','reset','image'];
+  const ctrls = [...f.querySelectorAll('input,textarea,select')]
+    .filter(e => !skip.includes((e.type||'').toLowerCase()));
+  return ctrls.map(e => ({v: e.value, c: e.checked}));
+}
+"""
+_JS_RATELIMIT_RESTORE = r"""
+(f, saved) => {
+  const skip = ['hidden','submit','button','reset','image'];
+  const ctrls = [...f.querySelectorAll('input,textarea,select')]
+    .filter(e => !skip.includes((e.type||'').toLowerCase()));
+  ctrls.forEach((e, i) => { if (saved[i]) { const t = (e.type||'').toLowerCase();
+    if (t==='checkbox'||t==='radio') e.checked = saved[i].c; else e.value = saved[i].v;
+    e.dispatchEvent(new Event('input', {bubbles:true}));
+    e.dispatchEvent(new Event('change', {bubbles:true})); } });
+  return true;
+}
+"""
+
+
+def _текст_похож_на_блок_лимита(text: str) -> bool:
+    """True, если видимый текст страницы похож на капча-блок (переиспользуем
+    response_indicates_captcha_block) или явную фразу про лимит запросов.
+    ЧИСТАЯ функция (юнит-тест без браузера)."""
+    if response_indicates_captcha_block(text or ""):
+        return True
+    t = (text or "").lower()
+    return any(m in t for m in _ЛИМИТ_МАРКЕРЫ)
+
+
+def активная_проба_лимита(scope, page, sub, is_order: bool) -> dict:
+    """До 3 быстрых повторных отправок ВАЛИДНЫМИ данными - проверяем, блокирует
+    ли сайт позднюю попытку (рабочая защита от спама/ботов, а не просто «на
+    вид есть капча»). Форма заказа пропускается - перестраховка на чекауте
+    (та же, что и у server_validation/показа ошибок валидации).
+
+    Возвращает {попытки: [{'n', 'успех', 'блок'}, ...], детали}."""
+    if is_order:
+        return {"попытки": [], "детали": "форма заказа - проба пропущена (перестраховка на чекауте)"}
+
+    try:
+        saved = scope.evaluate(_JS_RATELIMIT_SNAPSHOT)
+    except Exception:  # noqa: BLE001
+        saved = None
+
+    попытки = []
+    for i in range(1, _RATELIMIT_ПОПЫТОК + 1):
+        try:
+            if i > 1 and saved:
+                try:
+                    scope.evaluate(_JS_RATELIMIT_RESTORE, saved)
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                _btn_до = (sub.inner_text(timeout=1000) or "").strip()
+            except Exception:  # noqa: BLE001
+                _btn_до = ""
+            try:
+                sub.click(timeout=5000)
+            except Exception:  # noqa: BLE001
+                sub.click(timeout=5000, force=True)
+            page.wait_for_timeout(400)
+            try:
+                _btn_после = (sub.inner_text(timeout=1000) or "").strip()
+            except Exception:  # noqa: BLE001
+                _btn_после = ""
+            _уведомл = детект_уведомления_пользователю(
+                page, _btn_до, _btn_после, кнопка=sub, таймаут_мс=2000)
+            _текст = ""
+            try:
+                _текст = page.locator("body").inner_text(timeout=1500) or ""
+            except Exception:  # noqa: BLE001
+                pass
+            попытки.append({
+                "n": i,
+                "успех": _уведомл.startswith("Да"),
+                "блок": _текст_похож_на_блок_лимита(_текст),
+            })
+        except Exception as e:  # noqa: BLE001
+            попытки.append({"n": i, "успех": False, "блок": False, "ошибка": str(e)})
+
+    детали = "; ".join(
+        f"попытка {p['n']}: " + ("блок" if p.get("блок") else
+                                  ("принято" if p.get("успех") else "неясно"))
+        for p in попытки)
+    return {"попытки": попытки, "детали": детали}
+
+
+def лимит_активно_вердикт(попытки: list) -> tuple:
+    """(статус, деталь) для строки «Защита от спама (активно)». ЧИСТАЯ функция
+    (юнит-тест без браузера). Статус: «Сработала защита» / «Не сработала за N
+    попытки» / «Проверить»."""
+    if not попытки:
+        return "Проверить", "проба не выполнялась (форма заказа или сбой)"
+    заблокированные = [p for p in попытки if p.get("блок")]
+    if заблокированные:
+        n = заблокированные[0]["n"]
+        return "Сработала защита", f"сайт заблокировал попытку №{n} из {len(попытки)}"
+    if all(p.get("успех") for p in попытки):
+        return (f"Не сработала за {len(попытки)} попытки",
+                f"все {len(попытки)} быстрых попытки прошли одинаково успешно - "
+                "лимит не сработал на этом масштабе (не значит, что его нет вообще)")
+    return "Проверить", "результат неоднозначен - проверьте вручную"
+
+
 def проверка_списков(scope) -> dict:
     """Пункт «Выпадающие списки открываются и корректно отображают варианты».
     Читает ВИДИМЫЕ <select> формы, значение НЕ меняет (иначе на форме заказа
@@ -1703,6 +2044,57 @@ def extract_form_security_from_html(html: str) -> dict:
                 out[key] = m.group(1).strip()
                 break
     return out
+
+
+# ── CSRF: наличие токена/поля защиты сессии (если требуется) ────────────
+# Ищем СКРЫТОЕ поле формы с именем, характерным для CSRF/session-токена
+# (не только Bitrix sessid - АПС/ИМП на нём явно не подтверждены, поэтому
+# вокабуляр общий). Читаем ЖИВОЙ DOM формы (form.evaluate), а не статический
+# HTML: на Bitrix-сайтах значение часто проставляется JS уже после загрузки
+# страницы (см. docstring extract_form_security_from_html выше) - к моменту
+# вызова (после заполнения полей, перед кликом submit) оно уже должно стоять.
+_CSRF_ПОЛЕ_JS = r"""
+f => {
+  const re = /csrf|sessid|_token|authenticity_token|requestverificationtoken|xsrf|nonce/i;
+  for (const e of f.querySelectorAll("input[type='hidden']")) {
+    const nm = e.name || e.id || "";
+    if (re.test(nm)) {
+      return {найдено: true, заполнено: !!(e.value && e.value.trim()), имя: nm};
+    }
+  }
+  return {найдено: false, заполнено: false, имя: ""};
+}
+"""
+
+
+def _найти_csrf_поле(form) -> dict:
+    """{найдено, заполнено, имя, ошибка} для скрытого CSRF/sessid-подобного
+    поля формы. ошибка=True - DOM прочитать не удалось (это НЕ значит «токена
+    нет»: для отчёта такой случай уходит в «Проверить», а не в «Нет»)."""
+    try:
+        r = form.evaluate(_CSRF_ПОЛЕ_JS)
+        if isinstance(r, dict):
+            r.setdefault("ошибка", False)
+            return r
+    except Exception:  # noqa: BLE001
+        pass
+    return {"найдено": False, "заполнено": False, "имя": "", "ошибка": True}
+
+
+def csrf_вердикт(найдено: bool, заполнено: bool, ошибка: bool = False) -> tuple:
+    """(статус, деталь) для колонки «CSRF-защита». ЧИСТАЯ функция (юнит-тест
+    без браузера). Статус: «Есть» / «Нет» / «Проверить»."""
+    if ошибка:
+        return "Проверить", "не удалось прочитать форму - CSRF не проверен"
+    if найдено and заполнено:
+        return "Есть", "скрытое поле токена сессии найдено и заполнено"
+    if найдено:
+        return ("Проверить",
+                "поле токена есть, но пустое - возможно, заполняется иначе "
+                "(не hidden-полем) или не успело проставиться JS")
+    return ("Нет",
+            "скрытое поле CSRF/sessid не найдено - если на сайте нет другой "
+            "защиты (например SameSite-cookie), форма может быть уязвима к CSRF")
 
 
 def format_form_selector_type(форма_config: dict | None) -> str:
@@ -2653,6 +3045,15 @@ LOG_HEADERS = [
     "Без согласия не отправить",
     # Защита от XSS (проба под галочкой) - «Защищена / УЯЗВИМА / Проверить».
     "Защита от XSS",
+    # CSRF: наличие токена/поля защиты сессии, если требуется - «Есть /
+    # Нет / Проверить». Проверяется всегда (пассивно, без лишних запросов).
+    "CSRF-защита",
+    # Серверная валидация (проба под галочкой, отдельная строка после обычной
+    # отправки) - «Защищена / УЯЗВИМА / Проверить».
+    "Серверная валидация",
+    # Лимит запросов / защита от спама-ботов: пассивный слой всегда («Есть
+    # защита» / «Не обнаружено»), активный залп - отдельная строка под галочкой.
+    "Защита от спама (пассивно)", "Защита от спама (активно)",
     "Обработка ошибок",
     "Автозаполнение полей",
     "Подсказки полей",
@@ -2675,6 +3076,9 @@ LOG_KEYS_ORDER = [
     "согласие_чекбоксы", "согласие_предустановка", "согласие_ссылка",
     "согласие_обязательно",
     "защита_от_xss",
+    "csrf_защита",
+    "серверная_валидация",
+    "защита_от_спама_пассивно", "защита_от_спама_активно",
     "обработка_ошибок",
     "автозаполнение",
     "подсказки",
@@ -3201,7 +3605,7 @@ def _playwright_proxy_from_env():
 
 def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
              город="", почта_получателя="", проба_файлов=False, xss_проба=False,
-             проверять_цели=False):
+             валидация_проба=False, лимит_проба=False, проверять_цели=False):
     # проверять_цели: проверка форм САМА цели Метрики НЕ проверяет (это делает
     # «Проверка целей»). Флаг включается только когда движок форм зовёт «Проверка
     # целей» (forms_run --check-goals) - тогда ловим цели заказа для её отчёта.
@@ -4478,6 +4882,29 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _btn_текст_до = ""
             _t_отправки = _time.time()   # цели Метрики считаем с момента отправки
 
+            # CSRF: поля уже заполнены, отправка ещё не было - самое время
+            # проверить наличие токена (читаем живой DOM, ничего не отправляем).
+            _csrf_рез = _найти_csrf_поле(form)
+            _csrf_кол, _csrf_дет = csrf_вердикт(
+                bool(_csrf_рез.get("найдено")), bool(_csrf_рез.get("заполнено")),
+                bool(_csrf_рез.get("ошибка")))
+            print(f"   🔑 CSRF-защита «{название}»: {_csrf_кол} - {_csrf_дет}")
+
+            # Защита от спама/ботов - пассивный слой (всегда, без лишних
+            # запросов): капча по уже загруженному HTML + honeypot по живому DOM.
+            try:
+                _honeypot_рез = form.evaluate(_JS_HONEYPOT)
+            except Exception:  # noqa: BLE001
+                _honeypot_рез = {"найдено": False, "имя": ""}
+            _капча_рез = защита_от_спама_из_html(page.content())
+            _спам_обн = {
+                "капча": _капча_рез["капча"], "капча_какая": _капча_рез["какая"],
+                "honeypot": bool(_honeypot_рез.get("найдено")),
+                "honeypot_имя": _honeypot_рез.get("имя", ""),
+            }
+            _спам_кол, _спам_дет = лимит_пассивно_вердикт(_спам_обн)
+            print(f"   🚦 Защита от спама (пассивно) «{название}»: {_спам_кол} - {_спам_дет}")
+
             # ── Двойная отправка (пункт чек-листа): гибрид ──
             # Заказ (безопасная_отправка / URL-признак) - БЕЗОПАСНО: один клик,
             # потом смотрим, заблокировалась ли кнопка (не создаём второй заказ).
@@ -4611,6 +5038,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     "статус": статус,
                     "уведомление": _уведомл_польз,
                     "защита_от_xss": _xss_кол,
+                    "csrf_защита": _csrf_кол,
+                    "защита_от_спама_пассивно": _спам_кол,
                     "код": "browser",
                 }
             )
@@ -4709,6 +5138,57 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     }
                 )
                 print(f"   🎯 Цель «{_цель_имя}» - {_г_статус}")
+
+            # Серверная валидация (пункт «нельзя отправить неверные данные
+            # через DevTools»): только под галочкой, ПОСЛЕ обычной легитимной
+            # отправки выше - отдельная строка отчёта, чтобы не исказить её.
+            if валидация_проба:
+                try:
+                    _srv = проба_серверной_валидации(form, page, sub, _is_order)
+                    _srv_попытки = _srv.get("попытки") or {}
+                    if _srv_попытки:
+                        _srv_ст, _srv_дет = валидация_сервера_вердикт(_srv_попытки)
+                    else:
+                        _srv_ст, _srv_дет = "Проверить", _srv.get("детали") or ""
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "поля", "ид": название,
+                        "название": f"Серверная валидация: {название}",
+                        "имя": имя_теста,
+                        "статус": "Проверить" if _srv_ст == "УЯЗВИМА" else "OK",
+                        "серверная_валидация": _srv_ст,
+                        "комментарий_готовый": _srv_дет or None,
+                        "код": "server_validation",
+                    })
+                    print(f"   🛡️ Серверная валидация «{название}»: {_srv_ст} - {_srv_дет}")
+                except Exception as _esv:  # noqa: BLE001
+                    print(f"   ⚠️ Проба серверной валидации не удалась: {_esv}")
+
+            # Лимит запросов - активный залп (пункт «Ограничено количество
+            # запросов»): только под галочкой, ПОСЛЕ обычной легитимной
+            # отправки выше - отдельная строка отчёта.
+            if лимит_проба:
+                try:
+                    _rl = активная_проба_лимита(form, page, sub, _is_order)
+                    _rl_попытки = _rl.get("попытки") or []
+                    if _rl_попытки:
+                        _rl_ст, _rl_дет = лимит_активно_вердикт(_rl_попытки)
+                    else:
+                        _rl_ст, _rl_дет = "Проверить", _rl.get("детали") or ""
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "поля", "ид": название,
+                        "название": f"Защита от спама (активно): {название}",
+                        "имя": имя_теста,
+                        "статус": "OK" if _rl_ст == "Сработала защита" else "Проверить",
+                        "защита_от_спама_активно": _rl_ст,
+                        "комментарий_готовый": _rl_дет or None,
+                        "код": "rate_limit",
+                    })
+                    print(f"   🚦 Защита от спама (активно) «{название}»: {_rl_ст} - {_rl_дет}")
+                except Exception as _erl:  # noqa: BLE001
+                    print(f"   ⚠️ Активная проба лимита не удалась: {_erl}")
+
             return True
 
         except Exception as e:

@@ -1,0 +1,86 @@
+"""Тест серверной валидации (пункт «нельзя отправить неверные данные через
+DevTools»). Проверяются чистая функция-вердикт и защита от прогона на форме
+заказа - без браузера."""
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "forms_tester"))
+
+# test_all тянет bs4/playwright на уровне модуля - если их нет, тест пропускаем.
+t = pytest.importorskip("test_all")
+
+
+def test_принято_хотя_бы_раз_уязвима():
+    статус, деталь = t.валидация_сервера_вердикт(
+        {"empty": "отклонено", "bad_email": "принято", "too_long": "неприменимо"})
+    assert статус == "УЯЗВИМА"
+    assert "bad_email" in деталь
+
+
+def test_все_применимые_отклонены_защищена():
+    статус, деталь = t.валидация_сервера_вердикт(
+        {"empty": "отклонено", "bad_email": "отклонено", "too_long": "неприменимо"})
+    assert статус == "Защищена"
+    assert деталь
+
+
+def test_ничего_не_применимо_проверить():
+    статус, деталь = t.валидация_сервера_вердикт(
+        {"empty": "неприменимо", "bad_email": "неприменимо", "too_long": "неприменимо"})
+    assert статус == "Проверить"
+
+
+def test_пустой_словарь_проверить():
+    статус, _ = t.валидация_сервера_вердикт({})
+    assert статус == "Проверить"
+
+
+def test_неоднозначный_результат_проверить():
+    статус, _ = t.валидация_сервера_вердикт(
+        {"empty": "не удалось определить", "bad_email": "неприменимо"})
+    assert статус == "Проверить"
+
+
+def test_принято_приоритетнее_отклонено():
+    # Хотя бы одна принятая невалидная отправка - уязвимость, даже если
+    # остальные виды честно отклонены.
+    статус, _ = t.валидация_сервера_вердикт(
+        {"empty": "отклонено", "bad_email": "принято", "too_long": "отклонено"})
+    assert статус == "УЯЗВИМА"
+
+
+def test_форма_заказа_пропускается_без_браузера():
+    # is_order=True - ранний выход ДО обращения к scope/page/sub (безопасно
+    # вызвать с None - перестраховка на чекауте не должна трогать браузер).
+    рез = t.проба_серверной_валидации(None, None, None, is_order=True)
+    assert рез["попытки"] == {}
+    assert "заказ" in рез["детали"]
+
+
+def test_виды_нарушений_покрывают_обязательность_почту_длину():
+    виды = dict(t._SRVVAL_ВИДЫ)
+    assert set(виды) == {"empty", "bad_email", "too_long"}
+
+
+def test_колонка_серверной_валидации_в_шапке_лога():
+    assert "Серверная валидация" in t.LOG_HEADERS
+    assert "серверная_валидация" in t.LOG_KEYS_ORDER
+    assert len(t.LOG_HEADERS) == len(t.LOG_KEYS_ORDER)
+    assert t.LOG_HEADERS.index("Серверная валидация") == \
+        t.LOG_KEYS_ORDER.index("серверная_валидация")
+
+
+if __name__ == "__main__":
+    import traceback
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    ok = 0
+    for fn in fns:
+        try:
+            fn(); print(f"✓ {fn.__name__}"); ok += 1
+        except Exception:
+            print(f"✗ {fn.__name__}"); traceback.print_exc()
+    print(f"\n{ok}/{len(fns)} прошло")
+    sys.exit(0 if ok == len(fns) else 1)
