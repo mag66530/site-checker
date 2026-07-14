@@ -3317,6 +3317,20 @@ def _build_console_sheet(wb, console_check):
         else:
             _ux_line('· Выпадающих подменю в шапке не распознано - пропуск.',
                      C.text_muted)
+        # Модальная форма: закрывается по клику вне (пункт «меню и формы»).
+        _fc = [(p, (p.get('mobile') or {}).get('form_close')) for p in pages]
+        _fc_fail = [p for p, v in _fc if v == 'not_closed']
+        _fc_ok = any(v == 'ok' for _, v in _fc)
+        if _fc_fail:
+            _ux_line('⚠ Модальная форма (звонок/заявка) НЕ закрывается по '
+                     'клику вне неё - проверить вручную: '
+                     + ', '.join(p['url'] for p in _fc_fail[:3]), C.warn)
+        elif _fc_ok:
+            _ux_line('✅ Модальная форма закрывается по клику вне неё.', C.ok)
+        else:
+            _ux_line('· Модальная форма не распознана (кнопка звонка/заявки '
+                     'не найдена или окно на весь экран) - пропуск.',
+                     C.text_muted)
 
 
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────

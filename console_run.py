@@ -67,17 +67,50 @@ _MARK_JS = """
   }
 }
 """
-# Найти НОВЫЙ крупный видимый элемент (появившееся меню/оверлей).
+# Найти НОВЫЙ крупный видимый элемент (появившееся меню/модалка).
+# mode='form': только блок С ФОРМОЙ не на весь экран (бокс модалки).
+# mode='menu': только menu-подобные (nav/menu/drawer/offcanvas в классе или
+# тег NAV) - иначе первым «новым» ловится lazy-карточка контента (ложняк).
 _FIND_NEW_JS = """
-() => {
+(mode) => {
+  const vw = document.documentElement.clientWidth;
+  const mark = el => { el.setAttribute('data-mcp-menu', '1');
+    const r = el.getBoundingClientRect();
+    return {x: r.x, y: r.y, w: r.width, h: r.height}; };
+  let formFallback = null;
   for (const el of document.querySelectorAll('body *')) {
     if (el.hasAttribute('data-mcp-seen')) continue;
     const st = getComputedStyle(el);
     if (st.display === 'none' || st.visibility === 'hidden') continue;
     const r = el.getBoundingClientRect();
-    if (r.width * r.height > 30000 && r.width > 100) {
-      el.setAttribute('data-mcp-menu', '1');
-      return {x: r.x, y: r.y, w: r.width, h: r.height};
+    if (r.width * r.height < 30000 || r.width < 100) continue;
+    if (mode === 'form') {
+      if (el.querySelector('form') && r.width < vw * 0.95) return mark(el);
+      if (!formFallback) formFallback = el;
+    } else if (mode === 'menu') {
+      const isMenu = el.tagName === 'NAV'
+          || /menu|nav|drawer|offcanvas|sidebar/i.test(el.className || '')
+          || el.querySelector(':scope > nav, :scope nav');
+      // Берём САМОГО КРУПНОГО кандидата (внешний контейнер меню):
+      // внутренний nav меньше панели - клик «мимо nav» попадал бы в саму
+      // открытую панель и давал ложный not_closed.
+      if (isMenu && (!formFallback
+          || r.width * r.height >
+             formFallback.getBoundingClientRect().width *
+             formFallback.getBoundingClientRect().height))
+        formFallback = el;
+    } else {
+      return mark(el);
+    }
+  }
+  if (mode === 'menu' && formFallback) return mark(formFallback);
+  if (mode === 'form' && formFallback) {
+    // Полноэкранный новый слой: возьмём вложенный блок с формой поуже.
+    const inner = formFallback.querySelector('form');
+    if (inner) {
+      const box = inner.closest('div') || inner;
+      const r = box.getBoundingClientRect();
+      if (r.width < vw * 0.95) return mark(box);
     }
   }
   return null;
@@ -154,24 +187,38 @@ def _dropdown_probe(page):
         return None
 
 
-def _menu_close_probe(page):
-    """Открыть мобильное меню бургером и кликнуть ВНЕ него: должно закрыться
-    (пункт чек-листа). Возвращает 'ok' | 'not_closed' | None (меню не нашли/
-    не поняли - молчим, реализации у всех разные)."""
+# Кнопки-триггеры модальной формы (обратный звонок/заявка). Текстовые -
+# запасные (Playwright :has-text). Ложняков не даёт: проба засчитывает
+# «модалку» только если появился блок С ФОРМОЙ (кнопка-скролл к инлайн-
+# форме вернёт None - пропуск, не находка).
+_FORM_TRIGGER_SEL = ('[class*="callback"], [data-fancybox], [data-modal], '
+                     '[class*="popup-open"], [class*="open-popup"], '
+                     '[class*="open-form"], [class*="callorder"], '
+                     '[class*="call-order"], [class*="zayavka"], '
+                     'button:has-text("звонок"), a:has-text("звонок"), '
+                     'button:has-text("Заявка"), a:has-text("Заявка")')
+
+
+def _close_on_outside(page, trigger, mode):
+    """Общая проба «клик вне закрывает»: клик по триггеру -> появился
+    блок (меню/модалка) -> клик СТРОГО вне блока -> блок должен скрыться.
+    mode: 'menu' | 'form'. Возвращает 'ok' | 'not_closed' | None (не
+    нашли/не поняли - молчим)."""
     try:
-        burger = page.query_selector(_BURGER_SEL)
-        if burger is None or not burger.is_visible():
-            return None
         page.evaluate(_MARK_JS)
-        burger.click(timeout=3000)
-        page.wait_for_timeout(600)
-        box = page.evaluate(_FIND_NEW_JS)
+        trigger.click(timeout=3000)
+        page.wait_for_timeout(700)
+        box = page.evaluate(_FIND_NEW_JS, mode)
         if not box:
-            return None                       # меню не распознали
-        # Точка СТРОГО вне меню: справа / слева / снизу от панели, по её
-        # вертикальному центру. Верх не используем (там шапка: клик в лого/
-        # бургер даст ложный результат). Меню на весь экран - проверить
-        # честно нельзя, молчим.
+            return None
+        vw0 = page.viewport_size['width']
+        if mode == 'menu' and box['w'] > vw0 * 0.7:
+            # Меню шире 70% экрана - «кликнуть вне» физически негде
+            # (свободная полоска - обычно фон того же меню). Молчим.
+            return None
+        # Точка вне блока: справа / слева / снизу, по вертикальному центру.
+        # Верх не используем (шапка: клик в лого/бургер исказит результат).
+        # Блок на весь экран - честно проверить нельзя, молчим.
         vw = page.viewport_size['width']
         vh = page.viewport_size['height']
         y_mid = min(box['y'] + box['h'] / 2, vh - 15)
@@ -189,6 +236,25 @@ def _menu_close_probe(page):
         return 'ok' if not page.evaluate(_STILL_VISIBLE_JS) else 'not_closed'
     except Exception:
         return None
+
+
+def _menu_close_probe(page):
+    """Мобильное меню (бургер) закрывается по клику вне области."""
+    burger = page.query_selector(_BURGER_SEL)
+    if burger is None or not burger.is_visible():
+        return None
+    return _close_on_outside(page, burger, mode='menu')
+
+
+def _form_close_probe(page):
+    """Модальная форма (звонок/заявка) закрывается по клику вне неё."""
+    try:
+        trig = page.query_selector(_FORM_TRIGGER_SEL)
+        if trig is None or not trig.is_visible():
+            return None
+    except Exception:
+        return None
+    return _close_on_outside(page, trig, mode='form')
 
 # Замер мобильной вёрстки: мелкий шрифт (<14px) у видимых текстовых
 # элементов + горизонтальный overflow (контент шире экрана).
@@ -393,6 +459,11 @@ def run(pid: str, urls: list, log) -> dict:
                 if i <= MENU_PROBE_PAGES:
                     mobile['menu_close'] = _menu_close_probe(page)
                 page.set_viewport_size({'width': 1440, 'height': 900})
+                # Модальная форма (звонок/заявка) - на десктопе, тоже в
+                # самом конце: открытая модалка исказила бы метрики.
+                if i <= MENU_PROBE_PAGES:
+                    page.wait_for_timeout(400)
+                    mobile['form_close'] = _form_close_probe(page)
             except Exception:
                 mobile = None
             out['checked'] += 1
