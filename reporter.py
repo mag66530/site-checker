@@ -3049,6 +3049,9 @@ def _build_console_sheet(wb, console_check):
             out.append(f'мелкий шрифт меньше 14px: {m["small"]} из '
                        f'{m["total"]} текстовых элементов'
                        + (f' (напр. {_ex})' if _ex else ''))
+        if m.get('overlaps'):
+            out.append('блоки накладываются друг на друга: '
+                       + '; '.join(m['overlaps'][:3]))
         return out
     mob_bad = [(p, _mob_issues(p)) for p in pages if _mob_issues(p)]
     mob_checked = sum(1 for p in pages if p.get('mobile'))

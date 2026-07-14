@@ -116,6 +116,19 @@ _RE_STUCK_WORD = re.compile(r'\b[а-яё]{3,}[А-ЯЁ][а-яё]{2,}')
 # из PDF/вёрстки). Легитимное «двух- и трёхкомнатные» исключаем.
 _RE_BAD_HYPHEN = re.compile(r'\b[а-яё]{2,}- (?!и\b|или\b)(?=[а-яё]{2,})')
 _SOFT_HYPHEN_LIMIT = 30      # мягких переносов больше - замечание
+
+# Меню: пункты-«пустышки» (не прямые ссылки) и прямая ссылка на каталог.
+_RE_MENU_ZONE_ALL = re.compile(r'<(header|nav)\b[^>]*>.*?</\1>', re.I | re.S)
+_RE_A_DUMMY = re.compile(
+    r'<a\b[^>]*href\s*=\s*["\'](?:#|javascript:[^"\']*)["\']', re.I)
+_RE_A_CATALOG = re.compile(
+    r'<a\b[^>]*href\s*=\s*["\'][^"\']*/catalog[/"\']', re.I)
+
+# Хлебные крошки: контейнер по классу/itemtype.
+_RE_BREADCRUMB_BLOCK = re.compile(
+    r'<(ol|ul|div|nav)\b[^>]*(?:class\s*=\s*["\'][^"\']*breadcrumb[^"\']*["\']'
+    r'|itemtype\s*=\s*["\'][^"\']*BreadcrumbList[^"\']*["\'])[^>]*>(.*?)</\1>',
+    re.I | re.S)
 _RE_LINK_TAG = re.compile(r'<link\b[^>]*>', re.I)
 _RE_LINK_LOAD = re.compile(r'rel\s*=\s*["\'][^"\']*(?:stylesheet|icon|preload)',
                            re.I)
@@ -346,6 +359,36 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
     except Exception:
         pass
 
+    # 14. Меню прямыми ссылками (не скриптами) + прямая ссылка на каталог.
+    menu_dummy, menu_catalog = 0, False
+    _menu_html = ' '.join(m.group(0) for m in _RE_MENU_ZONE_ALL.finditer(body))
+    if _menu_html:
+        menu_dummy = len(_RE_A_DUMMY.findall(_menu_html))
+        menu_catalog = bool(_RE_A_CATALOG.search(_menu_html))
+        if menu_dummy >= 2:
+            warnings.append('пункты меню не прямыми ссылками (href="#"/'
+                            'javascript:) - краулер по ним не пройдёт')
+        if not menu_catalog:
+            warnings.append('в меню шапки нет прямой ссылки на каталог '
+                            '(/catalog…) - категории недоступны в один клик')
+
+    # 15. Последняя хлебная крошка должна быть БЕЗ ссылки (текущая страница).
+    crumb_last_link = False
+    m_bc = _RE_BREADCRUMB_BLOCK.search(body)
+    if m_bc:
+        inner = m_bc.group(2)
+        last_a_end = inner.rfind('</a>')
+        if last_a_end != -1:
+            # Значимый текст ПОСЛЕ последней ссылки = крошки заканчиваются
+            # текстом (текущая страница без ссылки) - так и должно быть.
+            tail = _RE_STRIP_TAGS.sub(' ', inner[last_a_end + 4:])
+            tail = re.sub(r'[\s>»/·|→-]+', '', tail)
+            if len(tail) < 3:
+                crumb_last_link = True
+                warnings.append('последняя хлебная крошка - ссылка: текущая '
+                                'страница в крошках должна быть текстом '
+                                'без ссылки')
+
     return {
         'viewport': viewport,
         'css_total': len(css_infos),
@@ -366,6 +409,9 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'hidden_text': hidden_text,
         'stuck_words': stuck,
         'bad_hyphens': bad_hyphens,
+        'menu_dummy': menu_dummy,
+        'menu_catalog': menu_catalog,
+        'crumb_last_link': crumb_last_link,
         'issues': issues,
         'warnings': warnings,
     }

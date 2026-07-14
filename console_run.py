@@ -78,8 +78,37 @@ _MOBILE_JS = """
       wide.push(el.tagName.toLowerCase()
                 + (el.className ? '.' + String(el.className).split(' ')[0] : ''));
   }
+  // Наложения блоков: пересечения ПРЯМЫХ соседей в потоке. fixed/absolute/
+  // sticky не считаем (легитимные оверлеи: шапки, попапы, бейджи).
+  const overlaps = [];
+  const name = el => el.tagName.toLowerCase()
+      + (el.className ? '.' + String(el.className).split(' ')[0] : '');
+  const flow = el => {
+    const p = getComputedStyle(el).position;
+    return p !== 'fixed' && p !== 'absolute' && p !== 'sticky';
+  };
+  const roots = document.querySelectorAll(
+      'body, main, section, article, .container, .content');
+  let scanned = 0;
+  for (const root of roots) {
+    if (++scanned > 20) break;
+    const kids = [...root.children].filter(
+        el => flow(el) && el.getBoundingClientRect().height > 20);
+    for (let a = 0; a < kids.length - 1 && overlaps.length < 5; a++) {
+      const r1 = kids[a].getBoundingClientRect();
+      const r2 = kids[a + 1].getBoundingClientRect();
+      const ox = Math.min(r1.right, r2.right) - Math.max(r1.left, r2.left);
+      const oy = Math.min(r1.bottom, r2.bottom) - Math.max(r1.top, r2.top);
+      const n1 = name(kids[a]), n2 = name(kids[a + 1]);
+      // Шапка/подвал поверх соседнего блока - типовой дизайн-приём
+      // (hero-баннер под шапкой), не считаем наложением.
+      if (/header|footer/i.test(n1 + n2)) continue;
+      if (ox > 30 && oy > 20)
+        overlaps.push(n1 + ' x ' + n2 + ' (' + Math.round(oy) + 'px)');
+    }
+  }
   return {overflow: Math.round(overflow), total, small,
-          small_examples: smallEx, wide};
+          small_examples: smallEx, wide, overlaps};
 }
 """
 
@@ -166,6 +195,7 @@ def run(pid: str, urls: list, log) -> dict:
                                  'mobile': mobile})
             _mob_bad = bool(mobile and (
                 mobile.get('overflow', 0) > 8
+                or mobile.get('overlaps')
                 or (mobile.get('small', 0) >= 3
                     and mobile['small'] > mobile.get('total', 1) * 0.2)))
             if uniq or _mob_bad:
