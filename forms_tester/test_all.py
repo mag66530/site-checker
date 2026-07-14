@@ -1039,12 +1039,14 @@ def _ds_похоже_на_заказ(url: str, action: str) -> bool:
                                 "korzin"))
 
 
-def _видна_ошибка_отправки(page) -> bool:
+def _видна_ошибка_отправки(page) -> str:
     """Видит ли пользователь СООБЩЕНИЕ ОБ ОШИБКЕ на странице (после упавшей
     отправки): видимый элемент с error-классом / role=alert или короткий видимый
-    текст с маркером ошибки. Чистая проверка DOM (ничего не меняет)."""
+    текст с маркером ошибки. Чистая проверка DOM (ничего не меняет).
+    Возвращает текст найденного сообщения ('' - не нашли; truthy-проверка
+    на результат работает как раньше, когда функция возвращала bool)."""
     try:
-        return bool(page.evaluate(
+        return str(page.evaluate(
             "() => {"
             " const vis = el => { const r=el.getBoundingClientRect();"
             "   const s=getComputedStyle(el);"
@@ -1053,15 +1055,55 @@ def _видна_ошибка_отправки(page) -> bool:
             " for (const el of document.querySelectorAll("
             "   '[class*=error i],[class*=fail i],[role=alert],.alert-danger,"
             "    .text-danger,.form-error,.has-error,.invalid-feedback')) {"
-            "   if (vis(el) && (el.innerText||'').trim()) return true; }"
+            "   if (vis(el) && (el.innerText||'').trim()) return (el.innerText||'').trim(); }"
             " const words=['ошибк','не удалось','не отправ','попробуйте','повторите',"
             "   'проверьте','что-то пошло','failed','error'];"
             " for (const el of document.querySelectorAll('div,span,p,li,label,strong,small,b')) {"
             "   if (!vis(el)) continue; const t=(el.innerText||'').trim().toLowerCase();"
-            "   if (t && t.length<140 && words.some(w=>t.includes(w))) return true; }"
-            " return false; }"))
+            "   if (t && t.length<140 && words.some(w=>t.includes(w))) return (el.innerText||'').trim(); }"
+            " return ''; }") or "")
     except Exception:  # noqa: BLE001
-        return False
+        return ""
+
+
+# Слова-маркеры «сырой» технической ошибки, которая не должна долетать до
+# пользователя как есть (движок/фреймворк/БД проговорился).
+_ТЕХНИЧЕСКАЯ_УТЕЧКА = (
+    "exception", "stack trace", "traceback", "at line", "sqlstate",
+    "fatal error", "warning:", "notice:", "undefined index", "undefined offset",
+    "null pointer", "nullpointer", "syntax error", "internal server error",
+    "typeerror", "referenceerror", "500 internal", "segmentation fault",
+)
+# Целиком-шаблонные фразы без единой конкретики - «Ошибка» и синонимы без
+# уточнения, ЧТО пошло не так и что делать. Сверяем СО ВСЕЙ строкой (не
+# подстрокой) - если текст не ограничивается этим, значит есть подробности.
+_ОБЩИЕ_ФРАЗЫ_ОШИБКИ = {
+    "ошибка", "error", "не удалось", "произошла ошибка", "ошибка отправки",
+    "что-то пошло не так", "попробуйте позже", "попробуйте ещё раз",
+    "не удалось отправить", "отправка не удалась", "ошибка!", "error!",
+}
+
+
+def _оценка_текста_ошибки(текст: str) -> tuple:
+    """Грубая (не смысловая - для этого нужна LLM) оценка понятности текста
+    ошибки: ловит худшие случаи - пустой/слишком короткий/голый шаблон без
+    конкретики/утёкшую техническую деталь. → (вердикт, деталь-для-коммента)."""
+    t = (текст or "").strip()
+    if not t:
+        return "нет текста", ("Элемент сообщения об ошибке найден, но текста "
+                               "в нём нет.")
+    tl = t.lower()
+    for marker in _ТЕХНИЧЕСКАЯ_УТЕЧКА:
+        if marker in tl:
+            preview = t if len(t) <= 120 else t[:120] + "…"
+            return ("техническая утечка",
+                    f"В сообщении видна техническая деталь (для разработчика, "
+                    f"не для пользователя): «{preview}».")
+    if tl.strip(" !.,:;") in _ОБЩИЕ_ФРАЗЫ_ОШИБКИ or len(t) < 8:
+        return ("слишком общее",
+                f"Сообщение слишком короткое и общее: «{t}» - непонятно, что "
+                f"именно исправить и как.")
+    return "информативно", ""
 
 
 # Типы для пробы серверной фильтрации загрузки: (расширение, опасное?).
@@ -2335,6 +2377,7 @@ LOG_HEADERS = [
     # Защита от XSS (проба под галочкой) - «Защищена / УЯЗВИМА / Проверить».
     "Защита от XSS",
     "Обработка ошибок",
+    "Понятность ошибки",
     "Автозаполнение полей",
     "Подсказки полей",
     "Комментарий",
@@ -2355,6 +2398,7 @@ LOG_KEYS_ORDER = [
     "согласие_обязательно",
     "защита_от_xss",
     "обработка_ошибок",
+    "понятность_ошибки",
     "автозаполнение",
     "подсказки",
     "комментарий",
@@ -4110,6 +4154,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # перехват и возвращаем кнопку в рабочее состояние - настоящая отправка
             # ниже уходит как обычно.
             _err_verdict, _err_ком = None, ""
+            _err_clarity_verdict, _err_clarity_ком = None, ""
             if not _is_order:
                 _err_info = {"n": 0, "ajax": False}
                 _err_armed = False
@@ -4153,12 +4198,19 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             _err_verdict = "ложный успех"
                             _err_ком = ("При УПАВШЕМ запросе форма показала «успешно» - "
                                         "пользователь думает, что заявка ушла, а её нет.")
-                        elif _видна_ошибка_отправки(page):
-                            _err_verdict = "корректно"
                         else:
-                            _err_verdict = "молчит"
-                            _err_ком = ("При ошибке отправки форма никак не реагирует - "
-                                        "нет ни сообщения об ошибке, ни подтверждения.")
+                            _err_текст = _видна_ошибка_отправки(page)
+                            if _err_текст:
+                                _err_verdict = "корректно"
+                                # Пункт чек-листа «Сообщения об ошибках понятны и
+                                # информативны» - тот же самый показанный текст,
+                                # без ещё одной симуляции отказа.
+                                _err_clarity_verdict, _err_clarity_ком = (
+                                    _оценка_текста_ошибки(_err_текст))
+                            else:
+                                _err_verdict = "молчит"
+                                _err_ком = ("При ошибке отправки форма никак не реагирует - "
+                                            "нет ни сообщения об ошибке, ни подтверждения.")
                 except Exception:  # noqa: BLE001
                     _err_verdict = None
                 finally:
@@ -4178,19 +4230,27 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         pass
                     page.wait_for_timeout(300)
                 if _err_verdict:
+                    _err_bad = (_err_verdict in ("молчит", "ложный успех")
+                                or _err_clarity_verdict in ("слишком общее",
+                                                            "техническая утечка",
+                                                            "нет текста"))
                     try:
                         записать_в_excel({
                             "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
                             "тип_селектора": "поля", "ид": название,
                             "название": f"Обработка ошибок отправки: {название}",
                             "имя": имя_теста,
-                            "статус": "Проверить" if _err_verdict in ("молчит", "ложный успех") else "OK",
+                            "статус": "Проверить" if _err_bad else "OK",
                             "обработка_ошибок": _err_verdict,
-                            "комментарий_готовый": _err_ком or None,
+                            "понятность_ошибки": _err_clarity_verdict or "",
+                            "комментарий_готовый": _err_ком or _err_clarity_ком or None,
                             "код": "error_handling",
                         })
                         print(f"   🚑 Обработка ошибок «{название}»: {_err_verdict}"
-                              + (f" — {_err_ком}" if _err_ком else ""))
+                              + (f" — {_err_ком}" if _err_ком else "")
+                              + (f"  ·  📝 Понятность ошибки: {_err_clarity_verdict}"
+                                 if _err_clarity_verdict else "")
+                              + (f" — {_err_clarity_ком}" if _err_clarity_ком else ""))
                     except Exception:  # noqa: BLE001
                         pass
 
