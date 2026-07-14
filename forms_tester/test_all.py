@@ -1254,6 +1254,89 @@ def проверка_подсказок(scope) -> dict:
     return {"состояние": "корректно", "коммент": ""}
 
 
+# JS: снимок + очистка видимых текстовых полей (реф. и значения - на window).
+_REQ_CLEAR_JS = (
+    "f => { const vis=e=>{const b=e.getBoundingClientRect();const s=getComputedStyle(e);"
+    " return b.width>0&&b.height>0&&s.visibility!=='hidden'&&s.display!=='none';};"
+    " const els=[...f.querySelectorAll('input,textarea')].filter(e=>{const t=(e.type||'').toLowerCase();"
+    " return !['hidden','submit','button','checkbox','radio','file'].includes(t)&&vis(e);});"
+    " window.__reqEls=els; window.__reqSaved=els.map(e=>e.value);"
+    " els.forEach(e=>{ e.value=''; e.dispatchEvent(new Event('input',{bubbles:true}));"
+    "   e.dispatchEvent(new Event('change',{bubbles:true}));"
+    "   e.dispatchEvent(new Event('keyup',{bubbles:true})); }); return els.length; }")
+# JS: восстановить значения из снимка (идемпотентно).
+_REQ_RESTORE_JS = (
+    "f => { const els=window.__reqEls||[]; const s=window.__reqSaved||[];"
+    " els.forEach((e,i)=>{ e.value=s[i]; e.dispatchEvent(new Event('input',{bubbles:true}));"
+    "   e.dispatchEvent(new Event('change',{bubbles:true}));"
+    "   e.dispatchEvent(new Event('keyup',{bubbles:true})); }); }")
+
+
+def проверка_кнопки_обязательные(scope, page, кнопка_css: str = "") -> dict:
+    """Пункт «Кнопка отправки активна только после заполнения обязательных полей».
+    Проверяем ПО СМЫСЛУ: очищаем поля → смотрим кнопку; возвращаем значения →
+    смотрим кнопку. Значения ВОССТАНАВЛИВАЕМ гарантированно (finally), с паузами -
+    чтобы поймать и синхронные, и слегка отложенные валидаторы.
+    → {состояние, коммент}:
+      корректно        - пусто: кнопка заблокирована, заполнено: активна;
+      не блокируется   - кнопка активна и при пустой форме (валидация по клику);
+      не разблокируется- кнопка заблокирована и ПОСЛЕ заполнения (баг - не отправить)."""
+    sel = (кнопка_css or "button[type='submit'], input[type='submit'], button.btn").strip()
+    try:
+        btn = scope.locator(sel).first
+        if btn.count() == 0:
+            return {"состояние": "не найдено", "коммент": ""}
+    except Exception:  # noqa: BLE001
+        return {"состояние": "не найдено", "коммент": ""}
+
+    def _disabled():
+        try:
+            return bool(btn.evaluate(
+                "b => !!(b.disabled || b.getAttribute('aria-disabled')==='true'"
+                " || /disabl|inactive|not-?allowed/i.test(b.className||'')"
+                " || getComputedStyle(b).pointerEvents==='none')"))
+        except Exception:  # noqa: BLE001
+            return False
+
+    empty_dis = filled_dis = None
+    _cleared = False
+    try:
+        n = scope.evaluate(_REQ_CLEAR_JS)
+        if not n:
+            return {"состояние": "не найдено", "коммент": ""}
+        _cleared = True
+        page.wait_for_timeout(450)
+        empty_dis = _disabled()
+        scope.evaluate(_REQ_RESTORE_JS)
+        page.wait_for_timeout(450)
+        filled_dis = _disabled()
+    except Exception:  # noqa: BLE001
+        empty_dis = None
+    finally:
+        if _cleared:
+            try:
+                scope.evaluate(_REQ_RESTORE_JS)     # идемпотентно - точно вернём как было
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                page.evaluate("() => { delete window.__reqEls; delete window.__reqSaved; }")
+            except Exception:  # noqa: BLE001
+                pass
+
+    if empty_dis is None or filled_dis is None:
+        return {"состояние": "не найдено", "коммент": ""}
+    if empty_dis and not filled_dis:
+        return {"состояние": "корректно", "коммент": ""}
+    if empty_dis and filled_dis:
+        return {"состояние": "не разблокируется",
+                "коммент": ("Кнопка отправки заблокирована ДАЖЕ после заполнения "
+                            "обязательных полей - форму нельзя отправить (баг).")}
+    return {"состояние": "не блокируется",
+            "коммент": ("Кнопка активна и при пустой форме (валидация не блокировкой "
+                        "кнопки, а по клику). Не ошибка, если при отправке показываются "
+                        "подсказки о незаполненных полях.")}
+
+
 # ── Двойная отправка (двойной клик по кнопке) ────────────────────────
 _DS_ТРЕКЕРЫ = ("mc.yandex", "metri", "google-analytics", "googletagmanager",
                "doubleclick", "top-fwz1", "vk.com", "facebook.", "criteo",
@@ -2577,6 +2660,7 @@ LOG_HEADERS = [
     # показывает ли форма видимую ошибку при пустом/невалидном вводе.
     # «есть / нет / без реакции / не найдено / проверить вручную».
     "Ошибки валидации",
+    "Кнопка по заполнению",
     "Комментарий",
 ]
 
@@ -2595,6 +2679,7 @@ LOG_KEYS_ORDER = [
     "автозаполнение",
     "подсказки",
     "ошибки_валидации",
+    "кнопка_обязательные",
     "комментарий",
 ]
 
@@ -3977,6 +4062,26 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                       + (f" — {_hp['коммент']}" if _hp["коммент"] else ""))
             except Exception as _ehp:  # noqa: BLE001
                 print(f"   ⚠️ Проверка подсказок полей не удалась: {_ehp}")
+
+            # Кнопка отправки активна только после заполнения обязательных полей.
+            # Чистит поля и ГАРАНТИРОВАННО возвращает (finally) - отправку не ломает.
+            try:
+                _rb = проверка_кнопки_обязательные(
+                    form, page, str(форма_config.get("кнопка_css") or ""))
+                записать_в_excel({
+                    "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                    "тип_селектора": "поля", "ид": название,
+                    "название": f"Кнопка активна по заполнению обязательных: {название}",
+                    "имя": имя_теста,
+                    "статус": "Проверить" if _rb["состояние"] == "не разблокируется" else "OK",
+                    "кнопка_обязательные": _rb["состояние"],
+                    "комментарий_готовый": _rb["коммент"] or None,
+                    "код": "required_button",
+                })
+                print(f"   🔘 Кнопка по заполнению «{название}»: {_rb['состояние']}"
+                      + (f" — {_rb['коммент']}" if _rb["коммент"] else ""))
+            except Exception as _erb:  # noqa: BLE001
+                print(f"   ⚠️ Проверка кнопки по заполнению не удалась: {_erb}")
 
             # Файл-проба (по галочке): грузим безвредный файл с опасным
             # расширением и отправляем - пройдёт ли серверную фильтрацию.
