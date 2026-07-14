@@ -102,8 +102,14 @@ def find_chrome():
 
 
 def port_open(port):
+    # ВАЖНО: без прокси. urllib уважает HTTP(S)_PROXY из окружения - если
+    # в консоли остался прокси (например, задавали для git push), проверка
+    # localhost уходила на прокси и всегда «порт закрыт», хотя Chrome
+    # реально поднялся.
     try:
-        urllib.request.urlopen(f'http://127.0.0.1:{port}/json', timeout=1)
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}))
+        opener.open(f'http://127.0.0.1:{port}/json', timeout=1)
         return True
     except Exception:
         return False
