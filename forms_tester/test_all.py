@@ -2380,6 +2380,7 @@ LOG_HEADERS = [
     "Понятность ошибки",
     "Автозаполнение полей",
     "Подсказки полей",
+    "Форма на мобильных",
     "Комментарий",
 ]
 
@@ -2401,6 +2402,7 @@ LOG_KEYS_ORDER = [
     "понятность_ошибки",
     "автозаполнение",
     "подсказки",
+    "мобильная_адаптивность",
     "комментарий",
 ]
 
@@ -4143,6 +4145,78 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     })
                     print(f"   🖱️ Hover/Focus «{название}»: {_hf_verdict}"
                           + (f" — {_hf_ком}" if _hf_ком else ""))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # ── Форма на мобильных устройствах (пункт чек-листа) ──
+            # Полноценная мобильная эмуляция (is_mobile/touch) требует ОТДЕЛЬНОГО
+            # контекста браузера - удвоило бы время прогона. Вместо этого временно
+            # ужимаем viewport ТОЙ ЖЕ открытой страницы: ловит главные CSS-баги
+            # адаптивности (горизонтальная прокрутка, мелкие тач-цели), но НЕ
+            # настоящее touch-поведение. Desktop-размер возвращаем в finally -
+            # весь остальной сценарий (включая реальную отправку ниже) писан в
+            # расчёте на десктоп.
+            _mobile_verdict, _mobile_ком = None, ""
+            _desktop_viewport = page.viewport_size
+            try:
+                page.set_viewport_size({"width": 390, "height": 844})
+                page.wait_for_timeout(250)      # дать вёрстке пересчитаться
+                # scrollWidth элемента ФОРМЫ не годится сигналом: переполняющий
+                # потомок обычно НЕ раздвигает getBoundingClientRect родителя
+                # (это и есть смысл переполнения) - проверено на фикстуре, ложных
+                # срабатываний/пропусков не давал только page-level scrollWidth.
+                _mob = form.evaluate(
+                    "(f) => {"
+                    " const vis = e => { const r=e.getBoundingClientRect();"
+                    "   return r.width>0 && r.height>0; };"
+                    " const overflow = document.documentElement.scrollWidth"
+                    "   > window.innerWidth + 2;"
+                    " const targets = [...f.querySelectorAll("
+                    "   \"input:not([type='checkbox']):not([type='radio'])"
+                    ":not([type='hidden']):not([type='file']),textarea,select,button\""
+                    " )].filter(vis);"
+                    " const small = targets.filter(e => {"
+                    "   const r = e.getBoundingClientRect();"
+                    "   return r.height < 44 || r.width < 44; })"
+                    "   .map(e => e.name || e.id || e.tagName.toLowerCase());"
+                    " return {overflow, small,"
+                    "   smallN: small.length, total: targets.length}; }")
+                if _mob.get("overflow"):
+                    _mobile_verdict = "переполнение по ширине"
+                    _mobile_ком = ("На мобильном экране (390px) страница с формой "
+                                   "прокручивается по горизонтали - что-то в "
+                                   "вёрстке шире экрана (не обязательно сама "
+                                   "форма - могло быть и другим блоком страницы).")
+                elif _mob.get("smallN"):
+                    _mobile_verdict = "мелкие тач-цели"
+                    _preview = ", ".join(str(x) for x in _mob["small"][:5])
+                    _mobile_ком = (f"{_mob['smallN']} из {_mob['total']} полей/кнопок "
+                                   f"формы меньше 44×44px на мобильном экране "
+                                   f"(неудобно попасть пальцем): {_preview}.")
+                else:
+                    _mobile_verdict = "корректно"
+            except Exception:  # noqa: BLE001
+                _mobile_verdict = None
+            finally:
+                try:
+                    page.set_viewport_size(_desktop_viewport or {"width": 1366, "height": 768})
+                    page.wait_for_timeout(200)
+                except Exception:  # noqa: BLE001
+                    pass
+            if _mobile_verdict:
+                try:
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "поля", "ид": название,
+                        "название": f"Форма на мобильных устройствах: {название}",
+                        "имя": имя_теста,
+                        "статус": "OK" if _mobile_verdict == "корректно" else "Проверить",
+                        "мобильная_адаптивность": _mobile_verdict,
+                        "комментарий_готовый": _mobile_ком or None,
+                        "код": "mobile_layout",
+                    })
+                    print(f"   📱 Форма на мобильных «{название}»: {_mobile_verdict}"
+                          + (f" — {_mobile_ком}" if _mobile_ком else ""))
                 except Exception:  # noqa: BLE001
                     pass
 
