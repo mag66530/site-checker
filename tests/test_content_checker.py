@@ -50,6 +50,33 @@ CARD_PRICE_REQUEST = (
 SMU_MARKER = '<a href="https://stalmetural.ru/">stalmetural</a>'
 FORM_NF = '<div>Не нашли что искали?</div>'
 
+# Отзывы Schema.org (Review) - как на реальной странице: itemprop=author/
+# reviewBody, «источник» - либо просто текст (без ссылки на сервис), либо
+# ссылка на настоящий домен сервиса.
+REVIEW_2GIS_NO_LINK = (
+    '<div itemprop="review" itemscope itemtype="https://schema.org/Review">'
+    '<div itemprop="author" itemscope itemtype="https://schema.org/Person">'
+    '<div itemprop="name">Иван Иванов</div></div>'
+    '<div class="review-card-big__company">2ГИС</div>'
+    '<div itemprop="reviewBody">Отличный магазин, всё понравилось</div>'
+    '</div>'
+)
+REVIEW_FLAMP_WITH_LINK = (
+    '<div itemprop="review" itemscope itemtype="https://schema.org/Review">'
+    '<div itemprop="author" itemscope itemtype="https://schema.org/Person">'
+    '<div itemprop="name">Пётр Петров</div></div>'
+    '<a href="https://flamp.ru/firm/12345" class="review-card-big__company">Flamp</a>'
+    '<div itemprop="reviewBody">Хороший магазин, рекомендую</div>'
+    '</div>'
+)
+REVIEW_NO_SOURCE = (
+    '<div itemprop="review" itemscope itemtype="https://schema.org/Review">'
+    '<div itemprop="author" itemscope itemtype="https://schema.org/Person">'
+    '<div itemprop="name">Сидор Сидоров</div></div>'
+    '<div itemprop="reviewBody">Всё понравилось, спасибо</div>'
+    '</div>'
+)
+
 
 def _by_key(result):
     return {b.key: b for b in result.blocks}
@@ -392,6 +419,46 @@ def test_rec_links_нет_нижнего_блока_необязателен():
             + '<button class="add-to-cart-btn">В корзину</button>')
     b = _by_key(check_content(main + '<div>Характеристики</div>', 'product'))
     assert not b['rec_links'].present and not b['rec_links'].required   # → «-», не баг
+
+
+# ── Отзывы: подпись стороннего сервиса без ссылки на него ─────────────
+
+
+def test_review_source_нет_разметки_отзывов_необязателен():
+    html = COMMON + SMU_MARKER + '<div>Характеристики</div>'
+    b = _by_key(check_content(html, 'product'))
+    assert b['review_source_links'].present and not b['review_source_links'].required
+
+
+def test_review_source_подписан_сервисом_со_ссылкой_ок():
+    html = COMMON + SMU_MARKER + REVIEW_FLAMP_WITH_LINK
+    b = _by_key(check_content(html, 'product'))
+    assert b['review_source_links'].present and b['review_source_links'].required
+
+
+def test_review_source_подписан_сервисом_без_ссылки_баг():
+    """Отзыв подписан «2ГИС», но ссылки на 2gis.ru рядом нет - имя сервиса
+    использовано как «печать доверия» без возможности проверить отзыв."""
+    html = COMMON + SMU_MARKER + REVIEW_2GIS_NO_LINK
+    b = _by_key(check_content(html, 'product'))
+    assert not b['review_source_links'].present and b['review_source_links'].required
+    assert b['review_source_links'].count == 1
+
+
+def test_review_source_без_подписи_сервиса_не_баг():
+    """Отзыв без упоминания стороннего сервиса вообще - не за что зацепиться
+    (может быть честный собственный отзыв на сайте), не баг."""
+    html = COMMON + SMU_MARKER + REVIEW_NO_SOURCE
+    b = _by_key(check_content(html, 'product'))
+    assert b['review_source_links'].present
+
+
+def test_review_source_считает_только_подозрительные_из_нескольких():
+    html = (COMMON + SMU_MARKER + REVIEW_2GIS_NO_LINK
+            + REVIEW_FLAMP_WITH_LINK + REVIEW_NO_SOURCE)
+    b = _by_key(check_content(html, 'product'))
+    assert not b['review_source_links'].present
+    assert b['review_source_links'].count == 1
 
 
 def test_cards_stub_photo_is_warning_with_name():
