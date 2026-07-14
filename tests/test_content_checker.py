@@ -350,6 +350,50 @@ def test_bottom_block_one_card_without_price_is_bug():
     assert b2['rec_price'].present
 
 
+def test_rec_links_все_карточки_со_ссылками_ок():
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    good = ('<div class="catalog-product-card-item"><a href="/c/t1/">Товар 1</a>'
+            '<span>99 000 ₽</span></div>')
+    b = _by_key(check_content(main + '<div>Похожие товары</div>' + good + good, 'product'))
+    assert b['rec_links'].present and b['rec_links'].required
+
+
+def test_rec_links_одна_карточка_без_ссылки_баг():
+    """Хотя бы одна настоящая карточка снизу БЕЗ ссылки на товар - баг rec_links,
+    даже если у соседних карточек ссылка есть (декоративная плашка среди рабочих)."""
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    good = ('<div class="catalog-product-card-item"><a href="/c/t1/">Товар 1</a>'
+            '<span>99 000 ₽</span></div>')
+    no_link = '<div class="catalog-product-card-item"><span>Товар 2</span><span>99 000 ₽</span></div>'
+    b = _by_key(check_content(main + '<div>Похожие товары</div>' + good + no_link, 'product'))
+    assert not b['rec_links'].present and b['rec_links'].required
+    assert b['rec_links'].count == 1
+
+
+def test_rec_links_блок_без_единой_ссылки_ловит_то_что_rec_price_пропускает():
+    """Главный сценарий, ради которого пункт добавлен: блок «Похожие товары» БЕЗ
+    единой рабочей ссылки - это не перелинковка, а декор. rec_price такое
+    пропускает (карточки без ссылки не считаются «настоящими» и просто не
+    участвуют в проверке цены) - rec_links обязан поймать эту ситуацию явно."""
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    no_link = ('<div class="catalog-product-card-item"><span>Товар 2</span>'
+               '<span>99 000 ₽</span></div>')
+    b = _by_key(check_content(
+        main + '<div>Похожие товары</div>' + no_link + no_link, 'product'))
+    assert not b['rec_links'].present and b['rec_links'].required   # → БАГ
+    assert b['rec_links'].count == 2
+
+
+def test_rec_links_нет_нижнего_блока_необязателен():
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    b = _by_key(check_content(main + '<div>Характеристики</div>', 'product'))
+    assert not b['rec_links'].present and not b['rec_links'].required   # → «-», не баг
+
+
 def test_cards_stub_photo_is_warning_with_name():
     """Заглушка «нет фото» - жёлтое ПРЕДУПРЕЖДЕНИЕ (warn), не красный баг; в note
     попадает название товара из alt картинки."""
