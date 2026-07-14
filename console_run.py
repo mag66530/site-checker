@@ -54,9 +54,16 @@ MENU_PROBE_PAGES = 3     # бургер-меню сквозное - пробуе
 _BURGER_SEL = ("[class*='burger'], [class*='hamburger'], .menu-toggle, "
                "[class*='menu-btn'], [class*='menu-button'], "
                "[class*='nav-toggle']")
-# Пометить видимые крупные элементы (до открытия меню).
+# Пометить видимые крупные элементы (до открытия меню). Сначала снимаем
+# метки ПРЕДЫДУЩЕЙ пробы: без этого проверка «осталась видимой» после
+# формы смотрела на старую метку меню - вечный ложный not_closed.
 _MARK_JS = """
 () => {
+  for (const el of document.querySelectorAll(
+      '[data-mcp-seen], [data-mcp-menu]')) {
+    el.removeAttribute('data-mcp-seen');
+    el.removeAttribute('data-mcp-menu');
+  }
   let n = 0;
   for (const el of document.querySelectorAll('body *')) {
     const r = el.getBoundingClientRect();
