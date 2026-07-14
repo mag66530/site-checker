@@ -167,6 +167,53 @@ def test_listing_price_request_only():
     assert not b['price_real'].required and not b['price_request'].required
 
 
+# ── Сортировка на листинге: по разметке/URL, не по языку текста ───────
+
+SORT_WIDGET_RU = (
+    '<div class="catalog-sort"><div class="sort-items"><div class="sort-items-block">'
+    '<b>Сортировать:</b><span class="sort-item active">По популярности</span>'
+    '<a href="/catalog/x/?sort=price&order=asc" class="sort-item">По цене</a>'
+    '</div></div></div>'
+)
+SORT_WIDGET_AZ = (
+    '<div class="catalog-sort"><div class="sort-items"><div class="sort-items-block">'
+    '<b>Çeşidləmə:</b><span class="sort-item active">Populyarlığa görə</span>'
+    '<a href="/catalog/x/?sort=price&order=asc" class="sort-item">Qiymətə görə</a>'
+    '</div></div></div>'
+)
+
+
+def test_sort_обнаруживается_по_классу_на_русском():
+    html = COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER + SORT_WIDGET_RU
+    b = _by_key(check_content(html, 'category'))
+    assert b['sort'].present
+
+
+def test_sort_обнаруживается_на_другом_языке_той_же_вёрстки():
+    """Тот же виджет (классы catalog-sort/sort-item, параметр ?sort=), но
+    текст не русский - раньше детектор ловил только «Сортировать»/«По
+    популярности» и пропускал нерусские языковые версии того же сайта
+    (найдено на живой странице: steelgroup.az против stalmetural.ru)."""
+    html = COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER + SORT_WIDGET_AZ
+    b = _by_key(check_content(html, 'category'))
+    assert b['sort'].present
+
+
+def test_sort_обнаруживается_по_url_параметру_без_известных_классов():
+    html = (COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER
+            + '<a href="/catalog/x/?sort=price">по цене</a>')
+    b = _by_key(check_content(html, 'category'))
+    assert b['sort'].present
+
+
+def test_sort_отсутствует_честно():
+    """Ни классов, ни ?sort=, ни текста - сортировки на странице реально нет
+    (найдено на живой странице листинга МПЭ)."""
+    html = COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER
+    b = _by_key(check_content(html, 'category'))
+    assert not b['sort'].present
+
+
 def test_listing_no_order_buttons_is_bug():
     """Нет НИ «В корзину», НИ «Купить в 1 клик» → «Кнопка заказа» - баг."""
     html = (
