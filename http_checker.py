@@ -525,17 +525,26 @@ async def _link_status(session, url, timeout_ms, proxy_url):
 
 
 async def check_content_links(session, html, base_url, *, proxy_url=None,
-                              timeout_ms=20000, limit=25):
-    """Проверить, что ссылки в контенте реально открываются (не 404).
+                              timeout_ms=20000, limit=120,
+                              link_cache: dict = None,
+                              budget: list = None):
+    """Проверить, что ссылки СТРАНИЦЫ реально открываются (не 404).
+    Чек-лист «нет битых ссылок на странице»: ВСЯ страница (текст + блоки +
+    шапка/подвал/листинг), не только контентная зона.
 
     Только ВНУТРЕННИЕ ссылки (тот же сайт): внешние часто блокируют ботов и
     дают ложные «битые». Битой считаем ТОЛЬКО явный 404/410 (страницы нет);
     таймаут/сеть/5xx/403 не считаем (это не «нет страницы» и оно флаки).
+
+    link_cache - общий кеш кодов на весь прогон (шапка/подвал/меню одинаковы
+    на всех страницах - каждую уникальную ссылку звоним ОДИН раз за прогон).
+    budget - [остаток] общий лимит новых прозвонов на прогон.
     Возвращает {'checked', 'broken':[{'url','code'}]} или None (нечего звонить)."""
     from content_checker import extract_content_links
     from urllib.parse import urljoin, urlparse
     if not html:
         return None
+    link_cache = link_cache if link_cache is not None else {}
 
     def _host(h):
         h = (h or '').lower()
@@ -543,7 +552,7 @@ async def check_content_links(session, html, base_url, *, proxy_url=None,
 
     base_host = _host(urlparse(base_url).netloc)
     todo, seen = [], set()
-    for h in extract_content_links(html, limit=limit * 4):
+    for h in extract_content_links(html, limit=limit * 4, include_chrome=True):
         absu = urljoin(base_url, h)
         pu = urlparse(absu)
         if pu.scheme not in ('http', 'https') or _host(pu.netloc) != base_host:
@@ -558,13 +567,21 @@ async def check_content_links(session, html, base_url, *, proxy_url=None,
     if not todo:
         return None
 
-    codes = await asyncio.gather(
-        *[_link_status(session, u, timeout_ms, proxy_url) for u in todo],
-        return_exceptions=True)
-    broken = [{'url': u, 'code': code}
-              for u, code in zip(todo, codes)
-              if not isinstance(code, Exception) and code in (404, 410)]
-    return {'checked': len(todo), 'broken': broken}
+    # Звоним только НОВЫЕ ссылки (нет в кеше прогона), в пределах бюджета.
+    new = [u for u in todo if u not in link_cache]
+    if budget is not None:
+        new = new[:max(budget[0], 0)]
+        budget[0] -= len(new)
+    if new:
+        codes = await asyncio.gather(
+            *[_link_status(session, u, timeout_ms, proxy_url) for u in new],
+            return_exceptions=True)
+        for u, code in zip(new, codes):
+            link_cache[u] = None if isinstance(code, Exception) else code
+    checked = [u for u in todo if u in link_cache]
+    broken = [{'url': u, 'code': link_cache[u]}
+              for u in checked if link_cache[u] in (404, 410)]
+    return {'checked': len(checked), 'broken': broken}
 
 
 # ── Проверка с ретраями ─────────────────────────────────────────────
@@ -596,6 +613,8 @@ async def check_one(
     get_robots: Optional[Callable] = None,
     get_css_infos: Optional[Callable] = None,
     get_image_infos: Optional[Callable] = None,
+    links_cache: Optional[dict] = None,   # общий кеш прозвона ссылок (прогон)
+    links_budget: Optional[list] = None,  # [остаток] лимит новых прозвонов
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
@@ -702,15 +721,16 @@ async def check_one(
         except Exception:
             meta = None
 
-    # «Ссылки реально открываются» (404) - тяжёлая опц. проверка (запрос по
-    # каждой ссылке). Делаем только если включено, страница открылась и это
-    # тех. страница (их немного, они на главном домене - нагрузка ограничена).
+    # «Ссылки реально открываются» (404) - тяжёлая опц. проверка. Чек-лист:
+    # ВСЕ ссылки ВСЕХ страниц (не только тех.) - нагрузку держит общий кеш
+    # прогона (сквозные шапка/подвал/меню звонятся один раз) + бюджет.
     broken_links = None
-    if check_links and is_ok and a['body_text'] and task.type_code == 'tech':
+    if check_links and is_ok and a['body_text']:
         try:
             broken_links = await check_content_links(
                 session, a['body_text'], a['final_url'] or task.url,
-                proxy_url=proxy_url, timeout_ms=timeout_ms)
+                proxy_url=proxy_url, timeout_ms=timeout_ms,
+                link_cache=links_cache, budget=links_budget)
         except Exception:
             broken_links = None
 
@@ -969,6 +989,13 @@ async def run_batch(
     robots_locks: dict = {}
     robots_guard = asyncio.Lock()
 
+    # Кеш прозвона ссылок на весь прогон (проверка «нет битых ссылок»):
+    # сквозные ссылки шапки/подвала/меню одинаковы на всех страницах -
+    # каждую уникальную звоним один раз. Бюджет - общий лимит новых
+    # прозвонов на прогон, чтобы прогон не разползался по времени.
+    links_cache: dict = {}
+    links_budget = [2500]
+
     async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
 
         async def get_css_hidden(html, base_url):
@@ -1046,6 +1073,7 @@ async def run_batch(
                     get_robots=get_robots if check_indexing else None,
                     get_css_infos=get_css_infos if check_layout else None,
                     get_image_infos=get_image_infos if check_images else None,
+                    links_cache=links_cache, links_budget=links_budget,
                 )
                 done_count += 1
                 if on_progress:

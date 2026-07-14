@@ -102,8 +102,10 @@ class _FakeSession:
 
 
 def test_check_content_links_flags_only_internal_404():
+    """Проверяется ВСЯ страница (чек-лист «нет битых ссылок на странице»):
+    шапка/подвал тоже звонятся; внешние и служебные href - нет."""
     html = (
-        '<header><a href="/in-header/">h</a></header>'      # шапка - не звоним
+        '<header><a href="/in-header/">h</a></header>'      # шапка - тоже звоним
         '<main>'
         '<a href="/ok/">ok</a>'
         '<a href="/dead/">dead</a>'
@@ -117,11 +119,29 @@ def test_check_content_links_flags_only_internal_404():
     sess = _FakeSession(head_codes=codes, get_codes=codes)
     res = asyncio.run(check_content_links(sess, html, base))
     assert res is not None
-    assert {b['url'] for b in res['broken']} == {'https://shop.ru/dead/'}
-    assert res['checked'] == 2                              # /ok/ + /dead/
+    assert {b['url'] for b in res['broken']} == {
+        'https://shop.ru/dead/', 'https://shop.ru/in-header/'}
+    assert res['checked'] == 3                    # header + /ok/ + /dead/
     asked = {u for _, u in sess.calls}
     assert 'https://other.com/ext/' not in asked            # внешний не звонили
-    assert 'https://shop.ru/in-header/' not in asked        # из шапки не звонили
+
+
+def test_check_content_links_run_cache_dedup():
+    """Общий кеш прогона: повторная страница с теми же ссылками не звонит
+    их заново, битые берутся из кеша; бюджет тратится только на новые."""
+    html = '<main><a href="/ok/">o</a><a href="/dead/">d</a></main>'
+    codes = {'https://shop.ru/ok/': 200, 'https://shop.ru/dead/': 404}
+    sess = _FakeSession(head_codes=codes, get_codes=codes)
+    cache, budget = {}, [10]
+    r1 = asyncio.run(check_content_links(sess, html, 'https://shop.ru/a/',
+                                         link_cache=cache, budget=budget))
+    calls_after_first = len(sess.calls)
+    r2 = asyncio.run(check_content_links(sess, html, 'https://shop.ru/b/',
+                                         link_cache=cache, budget=budget))
+    assert len(sess.calls) == calls_after_first   # ни одного нового запроса
+    assert budget[0] == 8                         # потрачено только 2
+    assert {b['url'] for b in r2['broken']} == {'https://shop.ru/dead/'}
+    assert r1['checked'] == r2['checked'] == 2
 
 
 def test_check_content_links_head_to_get_fallback():

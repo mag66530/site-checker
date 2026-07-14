@@ -1212,8 +1212,11 @@ def _d_tech_links(c: _Ctx):
 _SKIP_LINK_PREFIXES = ('#', 'javascript:', 'mailto:', 'tel:', 'data:', 'sms:', 'callto:')
 
 
-def extract_content_links(html: str, limit: int = 60) -> list[str]:
-    """Адреса ссылок из контентной области (без сквозных шапки/подвала/меню).
+def extract_content_links(html: str, limit: int = 60,
+                          include_chrome: bool = False) -> list[str]:
+    """Адреса ссылок из контентной области (без сквозных шапки/подвала/меню);
+    include_chrome=True - ВСЯ страница (чек-лист «нет битых ссылок на
+    странице»: весь текст/блоки, включая шапку/подвал/листинг).
 
     Отбрасываем якоря (#…), javascript:, mailto:, tel:, data:. Поддерживаем
     обе кавычки. Дедуп по href (без учёта регистра), порядок сохраняем, режем
@@ -1221,7 +1224,7 @@ def extract_content_links(html: str, limit: int = 60) -> list[str]:
     и фильтрует по домену уже вызывающая сторона (http_checker)."""
     if not html:
         return []
-    body = _CONTENT_CHROME_RE.sub(' ', html)
+    body = html if include_chrome else _CONTENT_CHROME_RE.sub(' ', html)
     out, seen = [], set()
     for m in re.finditer(r'<a\b[^>]*?\shref\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
                          body, re.I | re.S):
