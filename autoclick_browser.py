@@ -96,7 +96,16 @@ async def open_browser(p, log=None):
         _log('Облачный браузер: headless Chromium + сессия из секрета')
         return browser, page
 
-    # Локальный режим: твой залогиненный Chrome (CDP 9222)
+    # Локальный режим: твой залогиненный Chrome (CDP 9222).
+    # ВАЖНО: подключение к 127.0.0.1 не должно ходить через внешний прокси -
+    # если в окружении консоли остался HTTP(S)_PROXY (например, задавали
+    # для git push), CDP-запрос уходил на прокси и падал с 407. Чистим
+    # прокси-переменные процесса: кликер сам в сеть из Python не ходит
+    # (только CDP к локальному Chrome; сам Chrome - со своими настройками).
+    for _v in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy',
+               'ALL_PROXY', 'all_proxy'):
+        os.environ.pop(_v, None)
+    os.environ['NO_PROXY'] = os.environ['no_proxy'] = '127.0.0.1,localhost'
     browser = await p.chromium.connect_over_cdp(CDP_URL)
     ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
