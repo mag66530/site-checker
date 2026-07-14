@@ -742,6 +742,15 @@ def _d_filters(c: _Ctx):
 
 
 def _d_sort(c: _Ctx):
+    # Основной признак - разметка/URL, НЕ текст: тот же виджет («Сортировать:
+    # По популярности» на RU) на азербайджанской версии того же проекта
+    # подписан «Çeşidləmə: Populyarlığa görə» - разный язык, но класс вёрстки
+    # (catalog-sort/sort-item) и параметр ссылки (?sort=...) те же. Текст -
+    # запасной вариант на случай другой вёрстки без этих классов.
+    if 'catalog-sort' in c.html_lower or 'sort-item' in c.html_lower:
+        return True, None
+    if re.search(r'[?&]sort=', c.html_lower):
+        return True, None
     return 'сортировать' in c.text_lower or 'по популярности' in c.text_lower, None
 
 
