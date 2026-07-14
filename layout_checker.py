@@ -335,11 +335,13 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
 
     # 13. Дефекты текста: слипшиеся слова, кривые переносы, море &shy;.
     # По ВИДИМОМУ тексту (скрипты/стили/атрибуты не считаются).
+    # Кап 600КБ: дефекты шаблонные, встречаются в начале; strip_non_visible
+    # на мегабайтных листингах - заметный CPU на каждую страницу.
     stuck, bad_hyphens = [], []
     try:
         from text_checker import strip_non_visible
-        vis = re.sub(r'\s+', ' ', _RE_STRIP_TAGS.sub(' ',
-                                                     strip_non_visible(html)))
+        vis = re.sub(r'\s+', ' ', _RE_STRIP_TAGS.sub(
+            ' ', strip_non_visible(html[:600_000])))
         stuck = list(dict.fromkeys(_RE_STUCK_WORD.findall(vis)))[:10]
         bad_hyphens = list(dict.fromkeys(
             m.group(0) + '…' for m in _RE_BAD_HYPHEN.finditer(vis)))[:10]
@@ -378,8 +380,11 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
                             'оформлено (недоступно с клавиатуры)')
 
     # 14. Меню прямыми ссылками (не скриптами) + прямая ссылка на каталог.
+    # Кап 500КБ: шапка всегда в начале документа, а зонный regex с .*? по
+    # мегабайтному листингу - лишний CPU.
     menu_dummy, menu_catalog = 0, False
-    _menu_html = ' '.join(m.group(0) for m in _RE_MENU_ZONE_ALL.finditer(body))
+    _menu_html = ' '.join(m.group(0)
+                          for m in _RE_MENU_ZONE_ALL.finditer(body[:500_000]))
     if _menu_html:
         menu_dummy = len(_RE_A_DUMMY.findall(_menu_html))
         menu_catalog = bool(_RE_A_CATALOG.search(_menu_html))
@@ -394,7 +399,8 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
     # Только на страницах СО ВЛОЖЕННОСТЬЮ - на главной/корне крошек нет.
     crumb_last_link = False
     _nested = bool((urlsplit(base_url).path or '/').strip('/'))
-    m_bc = _RE_BREADCRUMB_BLOCK.search(body) if _nested else None
+    # Крошки - сразу после шапки: ищем в первых 500КБ.
+    m_bc = _RE_BREADCRUMB_BLOCK.search(body[:500_000]) if _nested else None
     if m_bc:
         inner = m_bc.group(2)
         last_a_end = inner.rfind('</a>')
