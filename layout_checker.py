@@ -105,6 +105,17 @@ _RE_HIDDEN_VAL = re.compile(
     r'|opacity\s*:\s*0(?:\.0+)?\s*(?:;|!|$)', re.I)
 _HIDDEN_TEXT_MIN = 100       # значимый объём скрытого текста, символов
 _RE_STRIP_TAGS = re.compile(r'<[^>]+>')
+
+# Дефекты текста (чек-лист: «нет лишних переносов, слипшихся букв»).
+# Слипшиеся слова: слово начинается со СТРОЧНОЙ и содержит ЗАГЛАВНУЮ в
+# середине («городеМоскве» - пропал пробел при подстановке). Бренды-
+# CamelCase («СтальМет») начинаются с заглавной - не матчатся; единицы
+# («кВт», «мВт») отсечены требованием 3+ строчных до заглавной.
+_RE_STUCK_WORD = re.compile(r'\b[а-яё]{3,}[А-ЯЁ][а-яё]{2,}')
+# Кривой перенос: дефис+пробел ВНУТРИ слова («метал- лопрокат» - копипаста
+# из PDF/вёрстки). Легитимное «двух- и трёхкомнатные» исключаем.
+_RE_BAD_HYPHEN = re.compile(r'\b[а-яё]{2,}- (?!и\b|или\b)(?=[а-яё]{2,})')
+_SOFT_HYPHEN_LIMIT = 30      # мягких переносов больше - замечание
 _RE_LINK_TAG = re.compile(r'<link\b[^>]*>', re.I)
 _RE_LINK_LOAD = re.compile(r'rel\s*=\s*["\'][^"\']*(?:stylesheet|icon|preload)',
                            re.I)
@@ -309,6 +320,32 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
                         '-9999 / opacity:0 со значимым текстом) - проверить '
                         'вручную, поисковики наказывают за скрытый текст')
 
+    # 13. Дефекты текста: слипшиеся слова, кривые переносы, море &shy;.
+    # По ВИДИМОМУ тексту (скрипты/стили/атрибуты не считаются).
+    stuck, bad_hyphens = [], []
+    try:
+        from text_checker import strip_non_visible
+        vis = re.sub(r'\s+', ' ', _RE_STRIP_TAGS.sub(' ',
+                                                     strip_non_visible(html)))
+        stuck = list(dict.fromkeys(_RE_STUCK_WORD.findall(vis)))[:10]
+        bad_hyphens = list(dict.fromkeys(
+            m.group(0) + '…' for m in _RE_BAD_HYPHEN.finditer(vis)))[:10]
+        if len(stuck) >= 2:
+            warnings.append('слипшиеся слова в тексте (пропал пробел на '
+                            'стыке слов/подстановки)')
+        else:
+            stuck = []                  # единичное - вероятно бренд, молчим
+        if len(bad_hyphens) >= 2:
+            warnings.append('кривые переносы в тексте (дефис с пробелом '
+                            'внутри слова - копипаста из PDF/вёрстки)')
+        else:
+            bad_hyphens = []
+        if html.count('­') + html.lower().count('&shy;') > _SOFT_HYPHEN_LIMIT:
+            warnings.append('очень много мягких переносов (&shy;) в тексте - '
+                            'проверить, не расставлены ли они автозаменой')
+    except Exception:
+        pass
+
     return {
         'viewport': viewport,
         'css_total': len(css_infos),
@@ -327,6 +364,8 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'pseudo_links': pseudo_links,
         'fontface_noswap': ff_noswap,
         'hidden_text': hidden_text,
+        'stuck_words': stuck,
+        'bad_hyphens': bad_hyphens,
         'issues': issues,
         'warnings': warnings,
     }

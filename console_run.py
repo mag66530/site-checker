@@ -1,12 +1,21 @@
 """
 console_run.py - проверка «в консоли браузера нет ошибок JavaScript»
-(пункт 1.14). Отдельный процесс с браузером (Playwright): 30-мин прогон
-ходит по HTTP без браузера, а ошибки JS - рантайм, статикой не видны.
+(пункт 1.14) + мобильная вёрстка (той же поездкой браузера).
+
+Отдельный процесс с браузером (Playwright): 30-мин прогон ходит по HTTP
+без браузера, а ошибки JS и рендер - рантайм, статикой не видны.
 
 Открывает КАЖДУЮ переданную страницу (те, что выбрал пользователь: главная,
 каталог, категории, фильтры, товары, тех.страницы) в headless Chromium,
 слушает console.error и необработанные исключения (pageerror), записывает
 их по каждой странице.
+
+Мобильная вёрстка: после снятия консоли viewport сужается до 390px и
+замеряется (страница уже загружена - без повторного визита):
+  • шрифт читабелен - доля видимых текстовых элементов с computed
+    font-size < 14px (чек-лист: минимум 14px на мобильных);
+  • контент не вылазит - горизонтальный overflow документа и элементы
+    (таблицы/картинки/iframe) шире экрана = сдвиг/обрезка контента.
 
 Запуск (URL-ы приходят файлом-списком от runner_30min):
     python console_run.py --project smu --urls-file cache/console_urls_smu.json
@@ -31,6 +40,48 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 MAX_PAGES = 120          # верхняя граница, чтобы прогон не растянулся
 WAIT_MS = 2500           # ждать после загрузки (асинхронные ошибки)
+MOBILE_W = 390           # ширина мобильного viewport для замера вёрстки
+
+# Замер мобильной вёрстки: мелкий шрифт (<14px) у видимых текстовых
+# элементов + горизонтальный overflow (контент шире экрана).
+_MOBILE_JS = """
+() => {
+  const vw = document.documentElement.clientWidth;
+  const overflow = Math.max(
+      0, document.documentElement.scrollWidth - vw);
+  let total = 0, small = 0;
+  const smallEx = [];
+  const els = document.querySelectorAll('p, li, td, th, a, span, button');
+  let i = 0;
+  for (const el of els) {
+    if (++i > 2000) break;
+    let hasText = false;
+    for (const n of el.childNodes)
+      if (n.nodeType === 3 && n.textContent.trim().length > 5) {
+        hasText = true; break;
+      }
+    if (!hasText) continue;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') continue;
+    const fs = parseFloat(st.fontSize) || 0;
+    total++;
+    if (fs && fs < 14) {
+      small++;
+      if (smallEx.length < 3)
+        smallEx.push(el.textContent.trim().slice(0, 40) + ' - ' + fs + 'px');
+    }
+  }
+  const wide = [];
+  for (const el of document.querySelectorAll('table, pre, img, iframe')) {
+    const r = el.getBoundingClientRect();
+    if (r.width > vw + 5 && wide.length < 5)
+      wide.push(el.tagName.toLowerCase()
+                + (el.className ? '.' + String(el.className).split(' ')[0] : ''));
+  }
+  return {overflow: Math.round(overflow), total, small,
+          small_examples: smallEx, wide};
+}
+"""
 
 # Шумные сторонние ошибки, которые НЕ вина сайта (аналитика/виджеты/CORS
 # сторонних доменов) - не считаем ошибкой сайта.
@@ -100,10 +151,27 @@ def run(pid: str, urls: list, log) -> dict:
                 continue
             # уникальные ошибки сайта (шум аналитики/виджетов отсеиваем)
             uniq = list(dict.fromkeys(x for x in errs if x and not _noise(x)))
+            # Мобильная вёрстка: сужаем viewport (страница уже загружена,
+            # без повторного визита), замеряем, возвращаем ширину.
+            mobile = None
+            try:
+                page.set_viewport_size({'width': MOBILE_W, 'height': 844})
+                page.wait_for_timeout(600)          # reflow
+                mobile = page.evaluate(_MOBILE_JS)
+                page.set_viewport_size({'width': 1440, 'height': 900})
+            except Exception:
+                mobile = None
             out['checked'] += 1
-            out['pages'].append({'url': url, 'errors': uniq[:15]})
-            if uniq:
-                log(f'  [{i}/{len(urls)}] ❌ {len(uniq)} ошибок JS: {url}')
+            out['pages'].append({'url': url, 'errors': uniq[:15],
+                                 'mobile': mobile})
+            _mob_bad = bool(mobile and (
+                mobile.get('overflow', 0) > 8
+                or (mobile.get('small', 0) >= 3
+                    and mobile['small'] > mobile.get('total', 1) * 0.2)))
+            if uniq or _mob_bad:
+                log(f'  [{i}/{len(urls)}] ❌ ошибок JS {len(uniq)}'
+                    + (', мобильная вёрстка' if _mob_bad else '')
+                    + f': {url}')
             else:
                 log(f'  [{i}/{len(urls)}] ✅ чисто: {url}')
         try:

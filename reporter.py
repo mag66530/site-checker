@@ -3035,9 +3035,28 @@ def _build_console_sheet(wb, console_check):
     pages = console_check.get('pages') or []
     bad = [p for p in pages if p.get('errors')]
 
+    # Мобильная вёрстка (замер на viewport 390px той же поездкой браузера).
+    def _mob_issues(p):
+        m = p.get('mobile') or {}
+        out = []
+        if m.get('overflow', 0) > 8:
+            _w = ', '.join(m.get('wide') or [])
+            out.append(f'контент шире экрана на {m["overflow"]}px - '
+                       f'горизонтальный скролл/обрезка'
+                       + (f' ({_w})' if _w else ''))
+        if m.get('small', 0) >= 3 and m['small'] > (m.get('total') or 1) * 0.2:
+            _ex = '; '.join(m.get('small_examples') or [])
+            out.append(f'мелкий шрифт меньше 14px: {m["small"]} из '
+                       f'{m["total"]} текстовых элементов'
+                       + (f' (напр. {_ex})' if _ex else ''))
+        return out
+    mob_bad = [(p, _mob_issues(p)) for p in pages if _mob_issues(p)]
+    mob_checked = sum(1 for p in pages if p.get('mobile'))
+
     ws = wb.create_sheet('Ошибки JavaScript')
     ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if bad else C.ok
+    ws.sheet_properties.tabColor = (C.err if bad
+                                    else C.warn if mob_bad else C.ok)
 
     ws.column_dimensions['A'].width = 3
     ws.column_dimensions['B'].width = 66   # URL
@@ -3057,7 +3076,10 @@ def _build_console_sheet(wb, console_check):
                'и слушал консоль: console.error и необработанные исключения '
                'JavaScript. Шум сторонних сервисов (Метрика, виджеты, чаты, '
                'reCAPTCHA, блокировщики) отсеивается - показываем ошибки '
-               'самого сайта. Страница с ошибками = баг.')
+               'самого сайта. Страница с ошибками = баг. Той же поездкой '
+               'замеряется мобильная вёрстка (viewport 390px): шрифт '
+               'читабелен (мин. 14px) и контент не шире экрана '
+               '(таблицы/блоки не вылазят, текст не обрезается).')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 48
@@ -3076,7 +3098,9 @@ def _build_console_sheet(wb, console_check):
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
     c = ws.cell(row=row, column=2)
     c.value = (f'Проверено страниц: {console_check.get("checked", len(pages))} · '
-               f'с ошибками JS: {len(bad)}')
+               f'с ошибками JS: {len(bad)}'
+               + (f' · мобильная вёрстка: проблемы на {len(mob_bad)} из '
+                  f'{mob_checked}' if mob_checked else ''))
     c.font = _font(size=10, bold=True, color=C.err if bad else C.ok)
     c.fill = _fill(C.surface)
     c.alignment = _align(wrap=True)
@@ -3089,36 +3113,71 @@ def _build_console_sheet(wb, console_check):
         c.value = '✅ Ошибок JavaScript в консоли ни на одной странице нет.'
         c.font = _font(size=11, color=C.ok)
         c.alignment = _align(indent=1)
-        return
-
-    # Заголовки
-    for ci, h in enumerate(['Страница', 'Ошибки в консоли'], 2):
-        cell = ws.cell(row=row, column=ci)
-        cell.value = h
-        cell.font = _font(size=9, bold=True, color=C.text_muted)
-        cell.fill = _fill(C.surface)
-        cell.alignment = _align()
-        cell.border = _border()
-    ws.row_dimensions[row].height = 20
-    row += 1
-    for p in bad:
-        errs = p.get('errors') or []
-        ws.row_dimensions[row].height = max(20, 14 * min(len(errs), 6))
-        # URL
-        c = ws.cell(row=row, column=2)
-        c.value = p.get('url', '')
-        c.hyperlink = p.get('url', '')
-        c.font = _font(size=9, color=C.accent, underline='single')
-        c.alignment = _align(wrap=True, vertical='top')
-        c.border = _border(color=C.border_light)
-        # Ошибки
-        c = ws.cell(row=row, column=3)
-        c.value = '\n'.join(f'• {e}' for e in errs[:6]) + (
-            f'\n… и ещё {len(errs) - 6}' if len(errs) > 6 else '')
-        c.font = _font(size=9, color=C.err)
-        c.alignment = _align(wrap=True, vertical='top')
-        c.border = _border(color=C.border_light)
+        row += 2
+    else:
+        # Заголовки
+        for ci, h in enumerate(['Страница', 'Ошибки в консоли'], 2):
+            cell = ws.cell(row=row, column=ci)
+            cell.value = h
+            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.fill = _fill(C.surface)
+            cell.alignment = _align()
+            cell.border = _border()
+        ws.row_dimensions[row].height = 20
         row += 1
+        for p in bad:
+            errs = p.get('errors') or []
+            ws.row_dimensions[row].height = max(20, 14 * min(len(errs), 6))
+            # URL
+            c = ws.cell(row=row, column=2)
+            c.value = p.get('url', '')
+            c.hyperlink = p.get('url', '')
+            c.font = _font(size=9, color=C.accent, underline='single')
+            c.alignment = _align(wrap=True, vertical='top')
+            c.border = _border(color=C.border_light)
+            # Ошибки
+            c = ws.cell(row=row, column=3)
+            c.value = '\n'.join(f'• {e}' for e in errs[:6]) + (
+                f'\n… и ещё {len(errs) - 6}' if len(errs) > 6 else '')
+            c.font = _font(size=9, color=C.err)
+            c.alignment = _align(wrap=True, vertical='top')
+            c.border = _border(color=C.border_light)
+            row += 1
+        row += 1
+
+    # ── Мобильная вёрстка (viewport 390px) ──
+    if mob_checked:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+        c = ws.cell(row=row, column=2)
+        c.value = f'Мобильная вёрстка (390px)  ({len(mob_bad)})'
+        c.font = _font(size=13, bold=True, color=C.warn if mob_bad else C.ok)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        if not mob_bad:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row,
+                           end_column=3)
+            c = ws.cell(row=row, column=2)
+            c.value = ('✅ На мобильном экране шрифт читабелен (≥14px) и '
+                       'контент не шире экрана на всех замеренных страницах.')
+            c.font = _font(size=10, color=C.ok)
+            c.alignment = _align(indent=1)
+        else:
+            for p, probs in mob_bad:
+                ws.row_dimensions[row].height = max(20, 14 * len(probs))
+                c = ws.cell(row=row, column=2)
+                c.value = p.get('url', '')
+                c.hyperlink = p.get('url', '')
+                c.font = _font(size=9, color=C.accent, underline='single')
+                c.alignment = _align(wrap=True, vertical='top')
+                c.border = _border(color=C.border_light)
+                c = ws.cell(row=row, column=3)
+                c.value = '\n'.join(f'⚠ {t}' for t in probs)
+                c.font = _font(size=9, color=C.warn)
+                c.alignment = _align(wrap=True, vertical='top')
+                c.border = _border(color=C.border_light)
+                row += 1
 
 
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
