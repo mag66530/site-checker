@@ -246,15 +246,35 @@ def _menu_close_probe(page):
     return _close_on_outside(page, burger, mode='menu')
 
 
+# Название открытой модалки: заголовок внутри бокса, иначе текст кнопки.
+_MODAL_NAME_JS = """
+() => {
+  const el = document.querySelector('[data-mcp-menu]');
+  if (!el) return '';
+  const h = el.querySelector('h1, h2, h3, h4, legend, [class*="title"]');
+  return h ? h.textContent.trim().slice(0, 60) : '';
+}
+"""
+
+
 def _form_close_probe(page):
-    """Модальная форма (звонок/заявка) закрывается по клику вне неё."""
+    """Модальная форма (звонок/заявка) закрывается по клику вне неё.
+    Возвращает {'status': 'ok'|'not_closed', 'name': str} | None."""
     try:
         trig = page.query_selector(_FORM_TRIGGER_SEL)
         if trig is None or not trig.is_visible():
             return None
+        trig_text = (trig.text_content() or '').strip()[:60]
     except Exception:
         return None
-    return _close_on_outside(page, trig, mode='form')
+    status = _close_on_outside(page, trig, mode='form')
+    if status is None:
+        return None
+    try:
+        name = page.evaluate(_MODAL_NAME_JS) or trig_text or 'модальная форма'
+    except Exception:
+        name = trig_text or 'модальная форма'
+    return {'status': status, 'name': name}
 
 # Замер мобильной вёрстки: мелкий шрифт (<14px) у видимых текстовых
 # элементов + горизонтальный overflow (контент шире экрана).

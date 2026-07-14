@@ -510,8 +510,20 @@ def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict
         def _tokens(s):
             return {t for t in re.split(r'[^а-яёa-z0-9]+', s.lower())
                     if len(t) >= 4}
-        if _tokens(h1s[0]) and _tokens(titles[0]) \
-                and not (_tokens(h1s[0]) & _tokens(titles[0])):
+
+        def _match(t1, t2):
+            # Терпимо к склонениям: «лист»/«листы», «биметаллический»/
+            # «биметаллические» - совпадение по основе (один - префикс
+            # другого) либо по стему (без 2 последних букв у длинных).
+            if t1 == t2 or t1.startswith(t2) or t2.startswith(t1):
+                return True
+            s1 = t1[:-2] if len(t1) > 5 else t1
+            s2 = t2[:-2] if len(t2) > 5 else t2
+            return s1 == s2 or s1.startswith(s2) or s2.startswith(s1)
+
+        _h1_t, _ti_t = _tokens(h1s[0]), _tokens(titles[0])
+        if _h1_t and _ti_t and not any(
+                _match(a, b) for a in _h1_t for b in _ti_t):
             issues.append({'тип': 'h1', 'найдено': 'нет связи с title',
                            'пояснение': f'H1 «{_short(h1s[0], 40)}» не '
                                         f'пересекается с title по словам - '

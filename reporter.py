@@ -2327,19 +2327,32 @@ def _build_layout_sheet(wb, results, filters_test=None, search_check=None):
                        + ' - проверить вручную.')
             c.font = _font(size=10, color=C.warn)
         elif search_check.get('found_category'):
+            from urllib.parse import unquote as _unq
             c.value = (f'✅ Поиск находит категории: по запросу '
                        f'«{search_check.get("query", "")}» в выдаче есть '
-                       f'ссылка на саму категорию ({search_check.get("search_url", "")}).')
+                       f'ссылка на саму категорию '
+                       f'({_unq(search_check.get("search_url", ""))}).')
             c.font = _font(size=10, color=C.ok)
         else:
+            from urllib.parse import unquote as _unq
             c.value = (f'⚠ По запросу «{search_check.get("query", "")}» в '
                        f'выдаче НЕТ ссылки на категорию - похоже, поиск ищет '
-                       f'только товары ({search_check.get("search_url", "")}).')
+                       f'только товары '
+                       f'({_unq(search_check.get("search_url", ""))}).')
             c.font = _font(size=10, color=C.warn)
         c.alignment = _align(indent=1, wrap=True)
         ws.row_dimensions[row].height = 30
         row += 1
         # Тег (страница-фильтр) - вторая проба.
+        if search_check.get('tag_note'):
+            ws.merge_cells(start_row=row, start_column=2, end_row=row,
+                           end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = '· Тег: ' + search_check['tag_note'] + '.'
+            c.font = _font(size=10, color=C.text_muted)
+            c.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 18
+            row += 1
         if search_check.get('tag_query'):
             ws.merge_cells(start_row=row, start_column=2, end_row=row,
                            end_column=5)
@@ -3318,15 +3331,24 @@ def _build_console_sheet(wb, console_check):
             _ux_line('· Выпадающих подменю в шапке не распознано - пропуск.',
                      C.text_muted)
         # Модальная форма: закрывается по клику вне (пункт «меню и формы»).
-        _fc = [(p, (p.get('mobile') or {}).get('form_close')) for p in pages]
-        _fc_fail = [p for p, v in _fc if v == 'not_closed']
-        _fc_ok = any(v == 'ok' for _, v in _fc)
+        # На странице форм несколько - показываем НАЗВАНИЕ формы + URL.
+        def _fc_norm(v):
+            if isinstance(v, dict):
+                return v.get('status'), v.get('name') or 'модальная форма'
+            return v, 'модальная форма'
+        _fc = [(p, *_fc_norm((p.get('mobile') or {}).get('form_close')))
+               for p in pages]
+        _fc_fail = [(p, n) for p, s, n in _fc if s == 'not_closed']
+        _fc_ok = [(p, n) for p, s, n in _fc if s == 'ok']
         if _fc_fail:
-            _ux_line('⚠ Модальная форма (звонок/заявка) НЕ закрывается по '
-                     'клику вне неё - проверить вручную: '
-                     + ', '.join(p['url'] for p in _fc_fail[:3]), C.warn)
+            _ux_line('⚠ Модальная форма НЕ закрывается по клику вне неё - '
+                     'проверить вручную: '
+                     + '; '.join(f'«{n}» ({p["url"]})'
+                                 for p, n in _fc_fail[:3]), C.warn)
         elif _fc_ok:
-            _ux_line('✅ Модальная форма закрывается по клику вне неё.', C.ok)
+            _n0 = _fc_ok[0][1]
+            _ux_line(f'✅ Модальная форма «{_n0}» закрывается по клику '
+                     f'вне неё.', C.ok)
         else:
             _ux_line('· Модальная форма не распознана (кнопка звонка/заявки '
                      'не найдена или окно на весь экран) - пропуск.',

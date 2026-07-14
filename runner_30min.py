@@ -755,19 +755,34 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Страница 404: {_e}')
 
-        # ── Поиск по сайту находит категории (чек-лист) - 2-3 запроса ──
+        # ── Поиск по сайту находит категории и теги (чек-лист) ──
+        # Категория - случайная из прогона; тег (страница-фильтр) - случайный
+        # из прогона, а если фильтров в выборке нет - из базы каталога.
         _search_check = None
         if params.get('check_layout'):
-            _s_cat = next((r.url for r in results
-                           if r.is_ok and r.type_code == 'category'), None)
-            _s_flt = next((r.url for r in results
-                           if r.is_ok and r.type_code == 'filter'), None)
+            import random as _rnd
+            _s_cats = [r.url for r in results
+                       if r.is_ok and r.type_code == 'category']
+            _s_cat = _rnd.choice(_s_cats) if _s_cats else None
+            _s_flts = [r.url for r in results
+                       if r.is_ok and r.type_code == 'filter']
+            _s_flt = _rnd.choice(_s_flts) if _s_flts else None
+            _tag_note = None
+            if _s_flt is None and _main is not None:
+                _base_flts = list(src.filters or [])
+                if _base_flts:
+                    _s_flt = f'https://{_main.host}' + _rnd.choice(_base_flts)
+                else:
+                    _tag_note = ('страниц-фильтров (тегов) у проекта нет - '
+                                 'проверка тега не применима')
             if _s_cat:
                 try:
                     from search_check import check_search
                     _search_check = asyncio.run(
                         check_search(_s_cat, filter_url=_s_flt,
                                      proxy_url=proxy_url))
+                    if _tag_note:
+                        _search_check['tag_note'] = _tag_note
                     if _search_check.get('available'):
                         log('Поиск по сайту: категория в выдаче - '
                             + ('да' if _search_check.get('found_category')
