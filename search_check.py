@@ -17,6 +17,24 @@ import aiohttp
 _RE_H1 = re.compile(r'<h1\b[^>]*>(.*?)</h1>', re.I | re.S)
 _RE_TAG = re.compile(r'<[^>]+>')
 
+# Шаблонный H1 страницы-фильтра включает ИМЕНА свойств («Заглушка
+# полиэтиленовая Вид электросварная и Материал ПНД») - человек в поиск
+# вбивает без них («заглушка полиэтиленовая электросварная ПНД»).
+# Типовые имена свойств металлопроката/Bitrix-фильтров + связки.
+_PROP_WORDS = {
+    'вид', 'тип', 'материал', 'марка', 'гост', 'ту', 'класс', 'сорт',
+    'диаметр', 'толщина', 'ширина', 'длина', 'высота', 'размер', 'сечение',
+    'производство', 'покрытие', 'форма', 'поверхность', 'назначение',
+    'стандарт', 'исполнение', 'профиль', 'и',
+}
+
+
+def _clean_tag_query(name: str) -> str:
+    """Убрать из H1 фильтра имена свойств и связки - как ищет человек."""
+    words = [w for w in name.split()
+             if w.lower().strip(',') not in _PROP_WORDS]
+    return re.sub(r'\s+', ' ', ' '.join(words)).strip()
+
 # Типовые пути поиска (Bitrix и общие).
 _SEARCH_PATHS = ('/search/?q={q}', '/?q={q}', '/search/?query={q}')
 
@@ -94,6 +112,8 @@ async def check_search(category_url: str, filter_url: str = None,
             fsp = urlsplit(filter_url)
             f_path = (fsp.path or '/').rstrip('/') + '/'
             f_name = await _name_from_h1(session, filter_url, proxy_url)
+            if f_name:
+                f_name = _clean_tag_query(f_name)
             if f_name and f_name.lower() != name.lower():
                 out['tag_query'] = f_name
                 _, out['found_tag'] = await _probe_search(

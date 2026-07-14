@@ -2336,9 +2336,10 @@ def _build_layout_sheet(wb, results, filters_test=None, search_check=None):
         else:
             from urllib.parse import unquote as _unq
             c.value = (f'⚠ По запросу «{search_check.get("query", "")}» в '
-                       f'выдаче НЕТ ссылки на категорию - похоже, поиск ищет '
-                       f'только товары '
-                       f'({_unq(search_check.get("search_url", ""))}).')
+                       f'СТАТИКЕ выдачи нет ссылки на категорию. Либо поиск '
+                       f'ищет только товары, либо блок категорий дорисовывает '
+                       f'JS (как на СМУ) - открыть выдачу и проверить кликом: '
+                       f'{_unq(search_check.get("search_url", ""))}')
             c.font = _font(size=10, color=C.warn)
         c.alignment = _align(indent=1, wrap=True)
         ws.row_dimensions[row].height = 30
