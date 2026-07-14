@@ -1105,6 +1105,140 @@ _JS_SRVVAL_RESTORE = r"""
 """
 
 
+# ── Общий детектор «эта КОНКРЕТНАЯ попытка отправки успешна» ─────────────
+# Используется и в проба_серверной_валидации, и в активная_проба_лимита - обе
+# кликают ПОСЛЕ того, как форма уже была легитимно отправлена (и ещё раз -
+# тестом двойной отправки) выше по потоку. К этому моменту страница часто уже
+# показывает «Спасибо!» от ТОЙ, первой отправки - обычный детект_уведомления_
+# пользователю() смотрит «видно ли подтверждение СЕЙЧАС» без сравнения с
+# состоянием ДО и на таких сайтах засчитывает успех на КАЖДОЙ попытке подряд,
+# даже если сервер её на самом деле отверг (ложный «УЯЗВИМА»/«не сработала»).
+#
+# Поэтому здесь два независимых сигнала:
+#   1) Реальный HTTP-ответ формы (page.expect_response) - самый надёжный,
+#      не зависит от того, что уже нарисовано на странице от прошлых попыток.
+#   2) Если ответ поймать не удалось (переход страницы / не-AJAX форма) -
+#      визуальный фолбэк, но ТОЛЬКО по переходу «подтверждения не было видно
+#      ДО этого клика → появилось ПОСЛЕ» (не «видно ли оно сейчас»).
+def _подтверждение_видно(page) -> bool:
+    """Снимок «видно ли ПРЯМО СЕЙЧАС подтверждение отправки» - попап ИЛИ текст
+    на странице (тот же вокабуляр, что и в детект_уведомления_пользователю,
+    но без опроса во времени - чистый снимок для сравнения «было/стало»)."""
+    for sel in ("[class*='popup']", "[class*='modal']", "[role='dialog']",
+                "[class*='thank']", "[class*='success']", "[class*='spasibo']",
+                "[class*='thanks']"):
+        try:
+            loc = page.locator(sel)
+            for i in range(min(loc.count(), 6)):
+                el = loc.nth(i)
+                if el.is_visible() and _текст_подтверждает_отправку(el.inner_text(timeout=500)):
+                    return True
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        if _текст_подтверждает_отправку(page.locator("body").inner_text(timeout=1500)):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def _ответ_формы_вердикт(текст: str, статус) -> str:
+    """«успешно»/«ошибка»/«неизвестно» по перехваченному HTTP-ответу формы.
+    ЧИСТАЯ функция (юнит-тест без браузера). Тот же вокабуляр, что и
+    _interpret_response_status, адаптирован под (текст, статус) вместо
+    requests.Response - переиспользует response_indicates_captcha_block."""
+    if статус is None:
+        return "неизвестно"
+    t = (текст or "").lower()
+    try:
+        j = json.loads(текст) if текст else None
+    except (ValueError, TypeError):
+        j = None
+    if isinstance(j, dict):
+        if j.get("success") is True or j.get("ok") is True:
+            return "успешно"
+        if j.get("success") is False or j.get("ok") is False or j.get("error") or j.get("errors"):
+            return "ошибка"
+    if "csrf" in t and "invalid" in t:
+        return "ошибка"
+    if response_indicates_captcha_block(текст or ""):
+        return "ошибка"
+    if "ошибк" in t and any(x in t for x in ("не удалось", "не отправлен", "отклонен", "invalid", "error")):
+        return "ошибка"
+    if "спасибо" in t or "успешно" in t or "принят" in t:
+        return "успешно"
+    if статус == 200:
+        return "успешно"
+    return "ошибка"
+
+
+def _клик_поймать_ответ(page, sub, timeout_ms: int = 5000):
+    """Кликает по кнопке ОДИН раз, пытаясь поймать HTTP-ответ реальной
+    отправки формы (не трекер аналитики - _ds_это_трекер). Возвращает
+    (текст, статус) пойманного ответа, или (None, None), если поймать не
+    удалось (переход страницы / не-AJAX форма / ответ не успел) - клик при
+    этом уже произошёл, повторно НЕ кликает."""
+    кликнуто = {"done": False}
+
+    def _click():
+        try:
+            sub.click(timeout=5000)
+        except Exception:  # noqa: BLE001
+            sub.click(timeout=5000, force=True)
+        кликнуто["done"] = True
+
+    try:
+        with page.expect_response(
+                lambda r: (r.request.method or "").upper() == "POST"
+                          and not _ds_это_трекер(r.url),
+                timeout=timeout_ms) as _ri:
+            _click()
+        resp = _ri.value
+        try:
+            текст = resp.text()
+        except Exception:  # noqa: BLE001
+            текст = ""
+        return текст, resp.status
+    except Exception:  # noqa: BLE001
+        if not кликнуто["done"]:
+            try:
+                sub.click(timeout=5000)
+            except Exception:  # noqa: BLE001
+                try:
+                    sub.click(timeout=5000, force=True)
+                except Exception:  # noqa: BLE001
+                    pass
+        return None, None
+
+
+def _клик_и_вердикт_отправки(page, sub) -> tuple:
+    """Кликает по кнопке и решает, была ли ИМЕННО ЭТА попытка успешной.
+    Возвращает (успех: bool, источник: 'ответ'|'визуально')."""
+    _подтв_до = _подтверждение_видно(page)
+    try:
+        _btn_до = (sub.inner_text(timeout=1000) or "").strip()
+    except Exception:  # noqa: BLE001
+        _btn_до = ""
+
+    _текст_отв, _статус_отв = _клик_поймать_ответ(page, sub)
+    if _статус_отв is not None:
+        return (_ответ_формы_вердикт(_текст_отв, _статус_отв) == "успешно"), "ответ"
+
+    page.wait_for_timeout(1200)
+    try:
+        _btn_после = (sub.inner_text(timeout=1000) or "").strip()
+    except Exception:  # noqa: BLE001
+        _btn_после = ""
+    _подтв_после = _подтверждение_видно(page)
+    успех = (
+        (_подтв_после and not _подтв_до)
+        or bool(_btn_после and _btn_после != _btn_до
+                and _текст_подтверждает_отправку(_btn_после))
+    )
+    return успех, "визуально"
+
+
 def проба_серверной_валидации(scope, page, sub, is_order: bool) -> dict:
     """Пункт «нельзя отправить неверные данные через DevTools» (серверная
     валидация). Вызывается ПОСЛЕ обычной легитимной отправки формы (чтобы не
@@ -1128,24 +1262,10 @@ def проба_серверной_валидации(scope, page, sub, is_order:
             попытки[вид] = "неприменимо"
             continue
         try:
-            try:
-                _btn_до = (sub.inner_text(timeout=1000) or "").strip()
-            except Exception:  # noqa: BLE001
-                _btn_до = ""
-            try:
-                sub.click(timeout=5000)
-            except Exception:  # noqa: BLE001
-                sub.click(timeout=5000, force=True)
-            page.wait_for_timeout(1500)
-            try:
-                _btn_после = (sub.inner_text(timeout=1000) or "").strip()
-            except Exception:  # noqa: BLE001
-                _btn_после = ""
-            _уведомл = детект_уведомления_пользователю(
-                page, _btn_до, _btn_после, кнопка=sub, таймаут_мс=3000)
-            if _уведомл.startswith("Да"):
+            успех, источник = _клик_и_вердикт_отправки(page, sub)
+            if успех:
                 попытки[вид] = "принято"
-            elif _видна_ошибка_отправки(page):
+            elif источник == "ответ" or _видна_ошибка_отправки(page):
                 попытки[вид] = "отклонено"
             else:
                 попытки[вид] = "не удалось определить"
@@ -1304,21 +1424,7 @@ def активная_проба_лимита(scope, page, sub, is_order: bool) -
                     scope.evaluate(_JS_RATELIMIT_RESTORE, saved)
                 except Exception:  # noqa: BLE001
                     pass
-            try:
-                _btn_до = (sub.inner_text(timeout=1000) or "").strip()
-            except Exception:  # noqa: BLE001
-                _btn_до = ""
-            try:
-                sub.click(timeout=5000)
-            except Exception:  # noqa: BLE001
-                sub.click(timeout=5000, force=True)
-            page.wait_for_timeout(400)
-            try:
-                _btn_после = (sub.inner_text(timeout=1000) or "").strip()
-            except Exception:  # noqa: BLE001
-                _btn_после = ""
-            _уведомл = детект_уведомления_пользователю(
-                page, _btn_до, _btn_после, кнопка=sub, таймаут_мс=2000)
+            успех, _источник = _клик_и_вердикт_отправки(page, sub)
             _текст = ""
             try:
                 _текст = page.locator("body").inner_text(timeout=1500) or ""
@@ -1326,7 +1432,7 @@ def активная_проба_лимита(scope, page, sub, is_order: bool) -
                 pass
             попытки.append({
                 "n": i,
-                "успех": _уведомл.startswith("Да"),
+                "успех": успех,
                 "блок": _текст_похож_на_блок_лимита(_текст),
             })
         except Exception as e:  # noqa: BLE001
