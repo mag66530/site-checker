@@ -3241,6 +3241,82 @@ def _build_console_sheet(wb, console_check):
                 c.alignment = _align(wrap=True, vertical='top')
                 c.border = _border(color=C.border_light)
                 row += 1
+        # Тач-таргеты (44x44): метрика шаблонная (одни и те же кнопки на
+        # всех страницах) - одна СВОДНАЯ строка, не per-page список.
+        _tt = [( (p.get('mobile') or {}).get('viewports', {}).get('390')
+                 or p.get('mobile') or {}) for p in pages]
+        _tt = [m for m in _tt if m.get('touch_total')]
+        if _tt:
+            _share = sum(m['touch_small'] for m in _tt) \
+                / max(sum(m['touch_total'] for m in _tt), 1)
+            ws.merge_cells(start_row=row, start_column=2, end_row=row,
+                           end_column=3)
+            c = ws.cell(row=row, column=2)
+            if _share > 0.5:
+                _ex = '; '.join((_tt[0].get('touch_examples') or [])[:3])
+                c.value = (f'⚠ Тач-таргеты: {int(_share * 100)}% '
+                           f'кнопок/иконок меньше 44x44px на мобильном - '
+                           f'неудобно попадать пальцем'
+                           + (f' (напр. {_ex})' if _ex else '') + '.')
+                c.font = _font(size=10, color=C.warn)
+            else:
+                c.value = (f'✅ Тач-таргеты: большинство кнопок/иконок '
+                           f'({100 - int(_share * 100)}%) не меньше 44x44px.')
+                c.font = _font(size=10, color=C.ok)
+            c.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 22
+            row += 1
+        row += 1
+
+    # ── Интерактив (слайдеры / выпадающие меню, первые страницы) ──
+    _ux_pages = [p for p in pages if p.get('ux')]
+    if _ux_pages:
+        _sl_fail = [p for p in _ux_pages
+                    if (p['ux'] or {}).get('slider') == 'fail']
+        _dd_fail = [p for p in _ux_pages
+                    if (p['ux'] or {}).get('dropdown') == 'fail']
+        _sl_ok = any((p['ux'] or {}).get('slider') == 'ok' for p in _ux_pages)
+        _dd_ok = any((p['ux'] or {}).get('dropdown') == 'ok'
+                     for p in _ux_pages)
+        _ux_bad = bool(_sl_fail or _dd_fail)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
+        c = ws.cell(row=row, column=2)
+        c.value = 'Интерактив (браузер, первые страницы)'
+        c.font = _font(size=13, bold=True, color=C.warn if _ux_bad else C.ok)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+
+        def _ux_line(text, color):
+            nonlocal row
+            ws.merge_cells(start_row=row, start_column=2,
+                           end_row=row, end_column=3)
+            c = ws.cell(row=row, column=2)
+            c.value = text
+            c.font = _font(size=10, color=color)
+            c.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 18
+            row += 1
+
+        if _sl_fail:
+            _ux_line('⚠ Слайдер не отреагировал на стрелку «вперёд» - '
+                     'проверить вручную: '
+                     + ', '.join(p['url'] for p in _sl_fail[:3]), C.warn)
+        elif _sl_ok:
+            _ux_line('✅ Слайдер листается по стрелке.', C.ok)
+        else:
+            _ux_line('· Слайдер на проверенных страницах не распознан - '
+                     'пропуск.', C.text_muted)
+        if _dd_fail:
+            _ux_line('⚠ Выпадающее меню не открылось по наведению - '
+                     'проверить вручную: '
+                     + ', '.join(p['url'] for p in _dd_fail[:3]), C.warn)
+        elif _dd_ok:
+            _ux_line('✅ Выпадающее меню открывается по наведению.', C.ok)
+        else:
+            _ux_line('· Выпадающих подменю в шапке не распознано - пропуск.',
+                     C.text_muted)
 
 
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────

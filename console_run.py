@@ -95,6 +95,65 @@ _STILL_VISIBLE_JS = """
 """
 
 
+# Смоук слайдера: контейнер + стрелка «вперёд».
+_SLIDER_SEL = ('.swiper, .slick-slider, .owl-carousel, [class*="carousel"], '
+               '[class*="slider"]')
+# Только ЯВНЫЕ классы стрелок: generic [class*="next"] ловил сам слайд
+# (swiper-slide-next) - клик по нему ничего не листает, ложный fail.
+_SLIDER_NEXT_SEL = ('.swiper-button-next, .slick-next, .owl-next, '
+                    '[class*="arrow-next"], [class*="btn-next"], '
+                    '[class*="button-next"]')
+# Состояние слайдера: transform трека + активный слайд.
+_SLIDER_STATE_JS = """
+(root) => {
+  const track = root.querySelector(
+      '.swiper-wrapper, .slick-track, .owl-stage') || root;
+  const act = root.querySelector(
+      '[class*="active"]');
+  return (getComputedStyle(track).transform || '') + '|' +
+         (act ? act.className : '');
+}
+"""
+
+
+def _slider_probe(page):
+    """Слайдер листается по стрелке: 'ok' | 'fail' | None (нет слайдера/
+    стрелки - молчим)."""
+    try:
+        root = page.query_selector(_SLIDER_SEL)
+        if root is None or not root.is_visible():
+            return None
+        nxt = root.query_selector(_SLIDER_NEXT_SEL)
+        if nxt is None or not nxt.is_visible():
+            return None
+        before = page.evaluate(_SLIDER_STATE_JS, root)
+        nxt.click(timeout=3000)
+        page.wait_for_timeout(900)              # анимация
+        after = page.evaluate(_SLIDER_STATE_JS, root)
+        return 'ok' if after != before else 'fail'
+    except Exception:
+        return None
+
+
+def _dropdown_probe(page):
+    """Выпадающее меню открывается по hover: 'ok' | 'fail' | None."""
+    try:
+        li = page.query_selector('header nav li:has(ul), nav li:has(ul), '
+                                 'header li:has(ul)')
+        if li is None or not li.is_visible():
+            return None
+        sub = li.query_selector('ul')
+        if sub is None:
+            return None
+        if sub.is_visible():
+            return 'ok'                         # раскрыто всегда - работает
+        li.hover(timeout=3000)
+        page.wait_for_timeout(600)
+        return 'ok' if sub.is_visible() else 'fail'
+    except Exception:
+        return None
+
+
 def _menu_close_probe(page):
     """Открыть мобильное меню бургером и кликнуть ВНЕ него: должно закрыться
     (пункт чек-листа). Возвращает 'ok' | 'not_closed' | None (меню не нашли/
@@ -140,6 +199,38 @@ _MOBILE_JS = """
       0, document.documentElement.scrollWidth - vw);
   let total = 0, small = 0;
   const smallEx = [];
+  // Тач-таргеты (только мобильный замер): кнопки/иконки меньше 44x44.
+  // Инлайн-ссылки в тексте не считаем (WCAG-исключение) - иначе шум.
+  let touchTotal = 0, touchSmall = 0;
+  const touchEx = [];
+  if (checkFont) {
+    for (const el of document.querySelectorAll(
+        'button, input[type=button], input[type=submit], a')) {
+      const st = getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      if (el.tagName === 'A') {
+        // ссылка-«кнопка»/иконка: блочная или без текста; инлайн в тексте
+        // пропускаем.
+        const disp = st.display;
+        const txt = (el.textContent || '').trim();
+        const btnLike = /btn|button|icon/i.test(el.className || '');
+        if (disp === 'inline' && txt.length > 1 && !btnLike) continue;
+      }
+      touchTotal++;
+      if (r.width < 44 || r.height < 44) {
+        touchSmall++;
+        if (touchEx.length < 3) {
+          const t = (el.textContent || el.className || el.tagName)
+              .toString().trim().slice(0, 30);
+          touchEx.push(t + ' (' + Math.round(r.width) + 'x'
+                       + Math.round(r.height) + ')');
+        }
+      }
+      if (touchTotal > 1500) break;
+    }
+  }
   if (checkFont) {
   const els = document.querySelectorAll('p, li, td, th, a, span, button');
   let i = 0;
@@ -205,7 +296,9 @@ _MOBILE_JS = """
     }
   }
   return {overflow: Math.round(overflow), total, small,
-          small_examples: smallEx, wide, overlaps};
+          small_examples: smallEx, wide, overlaps,
+          touch_total: touchTotal, touch_small: touchSmall,
+          touch_examples: touchEx};
 }
 """
 
@@ -277,6 +370,12 @@ def run(pid: str, urls: list, log) -> dict:
                 continue
             # уникальные ошибки сайта (шум аналитики/виджетов отсеиваем)
             uniq = list(dict.fromkeys(x for x in errs if x and not _noise(x)))
+            # Интерактив (десктоп, первые страницы): слайдер листается,
+            # выпадающее меню открывается. До ресайзов - на 1440.
+            ux = None
+            if i <= MENU_PROBE_PAGES:
+                ux = {'slider': _slider_probe(page),
+                      'dropdown': _dropdown_probe(page)}
             # Адаптивность: страница уже загружена - меняем ширину окна по
             # сетке 1440/768/390 и замеряем на каждой (без повторных визитов).
             mobile = None
@@ -298,7 +397,7 @@ def run(pid: str, urls: list, log) -> dict:
                 mobile = None
             out['checked'] += 1
             out['pages'].append({'url': url, 'errors': uniq[:15],
-                                 'mobile': mobile})
+                                 'mobile': mobile, 'ux': ux})
             _vps = (mobile or {}).get('viewports') or {}
             _mob_bad = any(
                 m.get('overflow', 0) > 8 or m.get('overlaps')
