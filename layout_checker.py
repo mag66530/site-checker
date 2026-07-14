@@ -373,8 +373,10 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
                             '(/catalog…) - категории недоступны в один клик')
 
     # 15. Последняя хлебная крошка должна быть БЕЗ ссылки (текущая страница).
+    # Только на страницах СО ВЛОЖЕННОСТЬЮ - на главной/корне крошек нет.
     crumb_last_link = False
-    m_bc = _RE_BREADCRUMB_BLOCK.search(body)
+    _nested = bool((urlsplit(base_url).path or '/').strip('/'))
+    m_bc = _RE_BREADCRUMB_BLOCK.search(body) if _nested else None
     if m_bc:
         inner = m_bc.group(2)
         last_a_end = inner.rfind('</a>')

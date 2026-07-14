@@ -2549,8 +2549,8 @@ def _build_images_sheet(wb, results):
                'есть атрибут alt (пустой alt="" ок для декоративных; баг - '
                'полное отсутствие). (2) Современные форматы - используются '
                'webp/avif, а не только jpg/png/gif (устаревшие без webp/avif = '
-               'предупреждение). (3) Оптимизация - чек-лист: вес ≤100 КБ; '
-               f'два порога: тяжелее 100 КБ - замечание, тяжелее {_IMG_HEAVY_KB} '
+               'предупреждение). (3) Оптимизация - вес ≤150 КБ; '
+               f'два порога: тяжелее 150 КБ - замечание, тяжелее {_IMG_HEAVY_KB} '
                'КБ - «тяжёлые» с именами файлов. (4) Lazy loading - у '
                'картинок/видео есть ленивая загрузка (loading="lazy"/data-src/'
                'preload="none"). (5) Имена файлов - транслит из alt; хеш-имена '
@@ -2585,7 +2585,7 @@ def _build_images_sheet(wb, results):
                 f'{h["url"].rsplit("/", 1)[-1]} {h["kb"]}КБ'
                 for h in im['heavy'][:3]))
         if im.get('mid_heavy'):
-            bits.append(f'тяжелее 100КБ: {im["mid_heavy"]}')
+            bits.append(f'тяжелее 150КБ: {im["mid_heavy"]}')
         _nm = im.get('names') or {}
         if _nm.get('hashed', 0) >= 3 and _nm['hashed'] > _nm.get('readable', 0):
             bits.append(f'хеш-имена: {_nm["hashed"]}')

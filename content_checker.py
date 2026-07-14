@@ -1507,10 +1507,15 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
         except Exception:
             present, count = False, None
         required = blk.required
-        # Каталог-корень - верхний уровень иерархии, хлебных крошек там
-        # может не быть (например, главная каталога ИМП) - это не баг.
-        if type_code == 'catalog' and blk.key == 'breadcrumbs':
-            required = False
+        # Хлебные крошки нужны только на страницах СО ВЛОЖЕННОСТЬЮ.
+        # Каталог-корень и любая страница с путём «/» (у части проектов
+        # каталог живёт прямо на главной) - верх иерархии, крошек там
+        # может не быть - это не баг.
+        if blk.key == 'breadcrumbs':
+            from urllib.parse import urlsplit as _us
+            _root = not (_us(url or '').path or '/').strip('/')
+            if type_code == 'catalog' or _root:
+                required = False
         # «Цены в нижних блоках» обязательны ТОЛЬКО если внизу есть товарные
         # карточки. Нет нижнего блока (как у МПЭ - его там нет по дизайну) -
         # проверять нечего → пункт необязателен, в отчёте «-», а не ✓ и не баг.
