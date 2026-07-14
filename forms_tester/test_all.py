@@ -1015,6 +1015,169 @@ def проверка_отображения_ошибок(scope, page, sub, is_or
                        "проверьте, видима ли реакция валидации")}
 
 
+# ── Серверная валидация: нельзя отправить неверные данные в обход клиентской
+# проверки (как правка в DevTools) ────────────────────────────────────────
+# В отличие от проверка_отображения_ошибок (там перехватчик + route.abort
+# специально ГАСЯТ запрос, чтобы ничего не ушло) - здесь наоборот: снимаем
+# HTML5-констрейнт и подставляем невалидное значение НАПРЯМУЮ через JS (минуя
+# маску/кастомный JS-валидатор, ровно как правка в DevTools), а запросу
+# ДАЁМ реально уйти - и смотрим, что ответил сервер. Три вида нарушения,
+# каждый - отдельная (по-настоящему невалидная) отправка; пропускаем те,
+# для которых на форме нет подходящего поля.
+_SRVVAL_ВИДЫ = (
+    ("empty", "обязательное поле пусто"),
+    ("bad_email", "некорректный e-mail"),
+    ("too_long", "превышение длины поля"),
+)
+
+# JS: находит подходящее поле под вид нарушения, снимает required/pattern/
+# maxlength, подставляет невалидное значение (с узнаваемым маркером в тексте,
+# где это возможно - если сервер всё же примет, заявку легко узнать в
+# админке) и диспатчит input/change - чтобы сработали и кастомные JS-валидаторы,
+# слушающие события, а не только нативный констрейнт. Метит поле временным
+# data-атрибутом для точного восстановления после пробы.
+_JS_SRVVAL_TAMPER = r"""
+(f, тип) => {
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const fire = e => { e.dispatchEvent(new Event('input', {bubbles:true}));
+                       e.dispatchEvent(new Event('change', {bubbles:true})); };
+  const looksReq = e => {
+    if (e.required || e.getAttribute('aria-required')==='true') return true;
+    const cls = (e.className||'') + ' ' + (e.parentElement ? e.parentElement.className : '');
+    if (/require|mandat|обязат/i.test(cls)) return true;
+    const nm = ((e.name||'') + ' ' + (e.placeholder||'') + ' '
+                + (e.getAttribute('autocomplete')||'')).toLowerCase();
+    if (/phone|tel|тел|mail|почт|name|имя|fio|фио/.test(nm)) return true;
+    return false;
+  };
+  const skip = ['hidden','submit','button','reset','image','checkbox','radio','file'];
+  const ctrls = [...f.querySelectorAll('input,textarea,select')]
+    .filter(e => vis(e) && !skip.includes((e.type||'').toLowerCase()));
+
+  let target = null;
+  if (тип === 'empty') {
+    // Обязательное, но НЕ похожее на «имя» - чтобы маркер в имени клиента,
+    // если сервер всё же примет заявку, остался читаемым в админке.
+    target = ctrls.find(e => looksReq(e) && !/^(name|fio|имя)$/i.test(e.name||''))
+      || ctrls.find(looksReq);
+  } else if (тип === 'bad_email') {
+    target = f.querySelector("input[type='email'], input[name*='mail' i],"
+      + " input[name*='email' i], input[placeholder*='mail' i],"
+      + " input[placeholder*='почт' i], input[autocomplete='email']");
+  } else if (тип === 'too_long') {
+    // Textarea/текстовое поле, НЕ телефон/почта; избегаем «имени», пока есть
+    // другой кандидат - иначе 4000 симв. затрут узнаваемое имя в заявке.
+    const notPhoneMail = e => !/phone|tel|тел|mail|почт/i.test((e.name||'') + (e.placeholder||''));
+    const isText = e => e.tagName === 'TEXTAREA'
+      || ['text','search',''].includes((e.type||'').toLowerCase());
+    target = ctrls.find(e => e.tagName === 'TEXTAREA' && notPhoneMail(e))
+      || ctrls.find(e => isText(e) && notPhoneMail(e) && !/^(name|fio|имя)$/i.test(e.name||''))
+      || ctrls.find(e => isText(e) && notPhoneMail(e));
+  }
+  if (!target) return {done: false};
+
+  target.setAttribute('data-srvval-tmp', '1');
+  const old = target.value;
+  target.removeAttribute('required');
+  target.removeAttribute('pattern');
+  target.removeAttribute('maxlength');
+  if ((target.type || '').toLowerCase() === 'email') target.type = 'text';
+
+  if (тип === 'empty') target.value = '';
+  else if (тип === 'bad_email') target.value = 'test-validation-probe-not-an-email';
+  else if (тип === 'too_long') target.value = 'ТЕСТ-ВАЛИДАЦИЯ ' + 'A'.repeat(4000);
+
+  fire(target);
+  return {done: true, поле: (target.name || target.id || target.placeholder || 'поле'), old: old};
+}
+"""
+
+_JS_SRVVAL_RESTORE = r"""
+(f, old) => {
+  const t = f.querySelector('[data-srvval-tmp="1"]');
+  if (!t) return false;
+  t.value = old || '';
+  t.dispatchEvent(new Event('input', {bubbles:true}));
+  t.dispatchEvent(new Event('change', {bubbles:true}));
+  t.removeAttribute('data-srvval-tmp');
+  return true;
+}
+"""
+
+
+def проба_серверной_валидации(scope, page, sub, is_order: bool) -> dict:
+    """Пункт «нельзя отправить неверные данные через DevTools» (серверная
+    валидация). Вызывается ПОСЛЕ обычной легитимной отправки формы (чтобы не
+    исказить остальные колонки её строки отчёта), только под галочкой.
+
+    Форму заказа (is_order) пропускаем - та же перестраховка на чекауте, что
+    и в проверка_отображения_ошибок (не делаем на нём авто-пробу).
+
+    Возвращает {попытки: {вид: 'принято'|'отклонено'|'неприменимо'|
+    'не удалось определить'}, детали}."""
+    if is_order:
+        return {"попытки": {}, "детали": "форма заказа - проба пропущена (перестраховка на чекауте)"}
+
+    попытки = {}
+    for вид, _описание in _SRVVAL_ВИДЫ:
+        try:
+            info = scope.evaluate(_JS_SRVVAL_TAMPER, вид)
+        except Exception:  # noqa: BLE001
+            info = None
+        if not info or not info.get("done"):
+            попытки[вид] = "неприменимо"
+            continue
+        try:
+            try:
+                _btn_до = (sub.inner_text(timeout=1000) or "").strip()
+            except Exception:  # noqa: BLE001
+                _btn_до = ""
+            try:
+                sub.click(timeout=5000)
+            except Exception:  # noqa: BLE001
+                sub.click(timeout=5000, force=True)
+            page.wait_for_timeout(1500)
+            try:
+                _btn_после = (sub.inner_text(timeout=1000) or "").strip()
+            except Exception:  # noqa: BLE001
+                _btn_после = ""
+            _уведомл = детект_уведомления_пользователю(
+                page, _btn_до, _btn_после, кнопка=sub, таймаут_мс=3000)
+            if _уведомл.startswith("Да"):
+                попытки[вид] = "принято"
+            elif _видна_ошибка_отправки(page):
+                попытки[вид] = "отклонено"
+            else:
+                попытки[вид] = "не удалось определить"
+        except Exception as e:  # noqa: BLE001
+            попытки[вид] = "не удалось определить"
+            print(f"      ⚠️ Проба серверной валидации ({вид}): {e}")
+        finally:
+            try:
+                scope.evaluate(_JS_SRVVAL_RESTORE, info.get("old", ""))
+            except Exception:  # noqa: BLE001
+                pass
+
+    детали = "; ".join(f"{описание}: {попытки[вид]}"
+                       for вид, описание in _SRVVAL_ВИДЫ if вид in попытки)
+    return {"попытки": попытки, "детали": детали}
+
+
+def валидация_сервера_вердикт(попытки: dict) -> tuple:
+    """(статус, деталь) для строки «Серверная валидация». ЧИСТАЯ функция
+    (юнит-тест без браузера). Статус: «Защищена» / «УЯЗВИМА» / «Проверить»."""
+    применимые = {в: р for в, р in (попытки or {}).items() if р != "неприменимо"}
+    принятые = [в for в, р in применимые.items() if р == "принято"]
+    if принятые:
+        return "УЯЗВИМА", f"сервер принял невалидные данные: {', '.join(принятые)}"
+    if применимые and all(р == "отклонено" for р in применимые.values()):
+        return "Защищена", f"сервер отклонил все проверенные варианты ({len(применимые)})"
+    if not применимые:
+        return ("Проверить",
+                "не нашли подходящих полей для пробы (нет обязательных/email/текстовых)")
+    return "Проверить", "часть попыток не удалось однозначно определить"
+
+
 def проверка_списков(scope) -> dict:
     """Пункт «Выпадающие списки открываются и корректно отображают варианты».
     Читает ВИДИМЫЕ <select> формы, значение НЕ меняет (иначе на форме заказа
@@ -2707,6 +2870,9 @@ LOG_HEADERS = [
     # CSRF: наличие токена/поля защиты сессии, если требуется - «Есть /
     # Нет / Проверить». Проверяется всегда (пассивно, без лишних запросов).
     "CSRF-защита",
+    # Серверная валидация (проба под галочкой, отдельная строка после обычной
+    # отправки) - «Защищена / УЯЗВИМА / Проверить».
+    "Серверная валидация",
     "Обработка ошибок",
     "Автозаполнение полей",
     "Подсказки полей",
@@ -2730,6 +2896,7 @@ LOG_KEYS_ORDER = [
     "согласие_обязательно",
     "защита_от_xss",
     "csrf_защита",
+    "серверная_валидация",
     "обработка_ошибок",
     "автозаполнение",
     "подсказки",
@@ -3256,7 +3423,7 @@ def _playwright_proxy_from_env():
 
 def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
              город="", почта_получателя="", проба_файлов=False, xss_проба=False,
-             проверять_цели=False):
+             валидация_проба=False, проверять_цели=False):
     # проверять_цели: проверка форм САМА цели Метрики НЕ проверяет (это делает
     # «Проверка целей»). Флаг включается только когда движок форм зовёт «Проверка
     # целей» (forms_run --check-goals) - тогда ловим цели заказа для её отчёта.
@@ -4773,6 +4940,32 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     }
                 )
                 print(f"   🎯 Цель «{_цель_имя}» - {_г_статус}")
+
+            # Серверная валидация (пункт «нельзя отправить неверные данные
+            # через DevTools»): только под галочкой, ПОСЛЕ обычной легитимной
+            # отправки выше - отдельная строка отчёта, чтобы не исказить её.
+            if валидация_проба:
+                try:
+                    _srv = проба_серверной_валидации(form, page, sub, _is_order)
+                    _srv_попытки = _srv.get("попытки") or {}
+                    if _srv_попытки:
+                        _srv_ст, _srv_дет = валидация_сервера_вердикт(_srv_попытки)
+                    else:
+                        _srv_ст, _srv_дет = "Проверить", _srv.get("детали") or ""
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "поля", "ид": название,
+                        "название": f"Серверная валидация: {название}",
+                        "имя": имя_теста,
+                        "статус": "Проверить" if _srv_ст == "УЯЗВИМА" else "OK",
+                        "серверная_валидация": _srv_ст,
+                        "комментарий_готовый": _srv_дет or None,
+                        "код": "server_validation",
+                    })
+                    print(f"   🛡️ Серверная валидация «{название}»: {_srv_ст} - {_srv_дет}")
+                except Exception as _esv:  # noqa: BLE001
+                    print(f"   ⚠️ Проба серверной валидации не удалась: {_esv}")
+
             return True
 
         except Exception as e:
