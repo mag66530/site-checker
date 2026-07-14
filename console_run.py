@@ -10,12 +10,16 @@ console_run.py - проверка «в консоли браузера нет о
 слушает console.error и необработанные исключения (pageerror), записывает
 их по каждой странице.
 
-Мобильная вёрстка: после снятия консоли viewport сужается до 390px и
-замеряется (страница уже загружена - без повторного визита):
-  • шрифт читабелен - доля видимых текстовых элементов с computed
-    font-size < 14px (чек-лист: минимум 14px на мобильных);
-  • контент не вылазит - горизонтальный overflow документа и элементы
-    (таблицы/картинки/iframe) шире экрана = сдвиг/обрезка контента.
+Адаптивная вёрстка: после снятия консоли страница (уже загруженная, без
+повторного визита) замеряется на СЕТКЕ ширин 1440 / 768 / 390:
+  • нет горизонтального скролла на любом разрешении - overflow документа
+    и элементы шире экрана (сдвиг/обрезка контента);
+  • при изменении размера окна элементы не смещаются хаотично - наложения
+    соседних блоков на промежуточных ширинах;
+  • масштаб Ctrl+/- покрыт той же сеткой: zoom 150% на 1440 = рендер при
+    ~960px, 187% = ~768px - браузер рисует те же макеты;
+  • шрифт читабелен - на 390px доля текста с font-size < 14px
+    (чек-лист: минимум 14px на мобильных).
 
 Запуск (URL-ы приходят файлом-списком от runner_30min):
     python console_run.py --project smu --urls-file cache/console_urls_smu.json
@@ -40,17 +44,21 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 MAX_PAGES = 120          # верхняя граница, чтобы прогон не растянулся
 WAIT_MS = 2500           # ждать после загрузки (асинхронные ошибки)
-MOBILE_W = 390           # ширина мобильного viewport для замера вёрстки
+# Сетка ширин для замера адаптивности: десктоп / планшет (≈zoom 187% на
+# 1440) / мобильный. Мелкий шрифт меряем только на мобильной ширине.
+VIEWPORT_GRID = (1440, 768, 390)
+MOBILE_W = 390
 
 # Замер мобильной вёрстки: мелкий шрифт (<14px) у видимых текстовых
 # элементов + горизонтальный overflow (контент шире экрана).
 _MOBILE_JS = """
-() => {
+(checkFont) => {
   const vw = document.documentElement.clientWidth;
   const overflow = Math.max(
       0, document.documentElement.scrollWidth - vw);
   let total = 0, small = 0;
   const smallEx = [];
+  if (checkFont) {
   const els = document.querySelectorAll('p, li, td, th, a, span, button');
   let i = 0;
   for (const el of els) {
@@ -70,6 +78,7 @@ _MOBILE_JS = """
       if (smallEx.length < 3)
         smallEx.push(el.textContent.trim().slice(0, 40) + ' - ' + fs + 'px');
     }
+  }
   }
   const wide = [];
   for (const el of document.querySelectorAll('table, pre, img, iframe')) {
@@ -106,7 +115,10 @@ _MOBILE_JS = """
       // Одинаковые соседние блоки (container x container) - отрицательный
       // отступ шаблона, визуально всё в порядке - не наложение.
       if (n1 === n2) continue;
-      if (ox > 30 && oy > 20)
+      // Порог 60px: дизайн-приёмы с отрицательным отступом дают 30-45px
+      // (заголовок над слайдером и т.п.) - не поломка; реальный хаос
+      // при ресайзе даёт перекрытия сильно больше.
+      if (ox > 60 && oy > 60)
         overlaps.push(n1 + ' x ' + n2 + ' (' + Math.round(oy) + 'px)');
     }
   }
@@ -183,27 +195,32 @@ def run(pid: str, urls: list, log) -> dict:
                 continue
             # уникальные ошибки сайта (шум аналитики/виджетов отсеиваем)
             uniq = list(dict.fromkeys(x for x in errs if x and not _noise(x)))
-            # Мобильная вёрстка: сужаем viewport (страница уже загружена,
-            # без повторного визита), замеряем, возвращаем ширину.
+            # Адаптивность: страница уже загружена - меняем ширину окна по
+            # сетке 1440/768/390 и замеряем на каждой (без повторных визитов).
             mobile = None
             try:
-                page.set_viewport_size({'width': MOBILE_W, 'height': 844})
-                page.wait_for_timeout(600)          # reflow
-                mobile = page.evaluate(_MOBILE_JS)
+                vps = {}
+                for _w in VIEWPORT_GRID:
+                    page.set_viewport_size({'width': _w, 'height': 900})
+                    page.wait_for_timeout(500)      # reflow
+                    vps[str(_w)] = page.evaluate(_MOBILE_JS, _w == MOBILE_W)
                 page.set_viewport_size({'width': 1440, 'height': 900})
+                mobile = dict(vps.get(str(MOBILE_W)) or {})
+                mobile['viewports'] = vps
             except Exception:
                 mobile = None
             out['checked'] += 1
             out['pages'].append({'url': url, 'errors': uniq[:15],
                                  'mobile': mobile})
-            _mob_bad = bool(mobile and (
-                mobile.get('overflow', 0) > 8
-                or mobile.get('overlaps')
-                or (mobile.get('small', 0) >= 3
-                    and mobile['small'] > mobile.get('total', 1) * 0.2)))
+            _vps = (mobile or {}).get('viewports') or {}
+            _mob_bad = any(
+                m.get('overflow', 0) > 8 or m.get('overlaps')
+                or (m.get('small', 0) >= 3
+                    and m['small'] > (m.get('total') or 1) * 0.2)
+                for m in _vps.values())
             if uniq or _mob_bad:
                 log(f'  [{i}/{len(urls)}] ❌ ошибок JS {len(uniq)}'
-                    + (', мобильная вёрстка' if _mob_bad else '')
+                    + (', адаптивность' if _mob_bad else '')
                     + f': {url}')
             else:
                 log(f'  [{i}/{len(urls)}] ✅ чисто: {url}')

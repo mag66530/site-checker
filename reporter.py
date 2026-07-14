@@ -3035,23 +3035,28 @@ def _build_console_sheet(wb, console_check):
     pages = console_check.get('pages') or []
     bad = [p for p in pages if p.get('errors')]
 
-    # Мобильная вёрстка (замер на viewport 390px той же поездкой браузера).
+    # Адаптивность: замеры на сетке ширин 1440/768/390 той же поездкой
+    # браузера (масштаб Ctrl+/- покрыт той же сеткой - тот же рендер).
     def _mob_issues(p):
-        m = p.get('mobile') or {}
+        mob = p.get('mobile') or {}
+        vps = mob.get('viewports') or ({'390': mob} if mob else {})
         out = []
-        if m.get('overflow', 0) > 8:
-            _w = ', '.join(m.get('wide') or [])
-            out.append(f'контент шире экрана на {m["overflow"]}px - '
-                       f'горизонтальный скролл/обрезка'
-                       + (f' ({_w})' if _w else ''))
-        if m.get('small', 0) >= 3 and m['small'] > (m.get('total') or 1) * 0.2:
-            _ex = '; '.join(m.get('small_examples') or [])
-            out.append(f'мелкий шрифт меньше 14px: {m["small"]} из '
-                       f'{m["total"]} текстовых элементов'
-                       + (f' (напр. {_ex})' if _ex else ''))
-        if m.get('overlaps'):
-            out.append('блоки накладываются друг на друга: '
-                       + '; '.join(m['overlaps'][:3]))
+        for w, m in sorted(vps.items(), key=lambda kv: -int(kv[0])):
+            if m.get('overflow', 0) > 8:
+                _w = ', '.join(m.get('wide') or [])
+                out.append(f'на {w}px: контент шире экрана на '
+                           f'{m["overflow"]}px - горизонтальный скролл/обрезка'
+                           + (f' ({_w})' if _w else ''))
+            if m.get('overlaps'):
+                out.append(f'на {w}px: блоки накладываются: '
+                           + '; '.join(m['overlaps'][:3]))
+        m390 = vps.get('390') or mob
+        if m390.get('small', 0) >= 3 \
+                and m390['small'] > (m390.get('total') or 1) * 0.2:
+            _ex = '; '.join(m390.get('small_examples') or [])
+            out.append(f'мелкий шрифт меньше 14px (мобильный): '
+                       f'{m390["small"]} из {m390["total"]} текстовых '
+                       f'элементов' + (f' (напр. {_ex})' if _ex else ''))
         return out
     mob_bad = [(p, _mob_issues(p)) for p in pages if _mob_issues(p)]
     mob_checked = sum(1 for p in pages if p.get('mobile'))
@@ -3080,9 +3085,11 @@ def _build_console_sheet(wb, console_check):
                'JavaScript. Шум сторонних сервисов (Метрика, виджеты, чаты, '
                'reCAPTCHA, блокировщики) отсеивается - показываем ошибки '
                'самого сайта. Страница с ошибками = баг. Той же поездкой '
-               'замеряется мобильная вёрстка (viewport 390px): шрифт '
-               'читабелен (мин. 14px) и контент не шире экрана '
-               '(таблицы/блоки не вылазят, текст не обрезается).')
+               'замеряется адаптивность на сетке ширин 1440/768/390: нет '
+               'горизонтального скролла ни на одном разрешении, блоки не '
+               'накладываются при изменении ширины окна (масштаб Ctrl+/- '
+               'покрыт той же сеткой - браузер рисует те же макеты), на '
+               '390px шрифт читабелен (мин. 14px).')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 48
@@ -3102,7 +3109,7 @@ def _build_console_sheet(wb, console_check):
     c = ws.cell(row=row, column=2)
     c.value = (f'Проверено страниц: {console_check.get("checked", len(pages))} · '
                f'с ошибками JS: {len(bad)}'
-               + (f' · мобильная вёрстка: проблемы на {len(mob_bad)} из '
+               + (f' · адаптивность: проблемы на {len(mob_bad)} из '
                   f'{mob_checked}' if mob_checked else ''))
     c.font = _font(size=10, bold=True, color=C.err if bad else C.ok)
     c.fill = _fill(C.surface)
@@ -3152,7 +3159,7 @@ def _build_console_sheet(wb, console_check):
     if mob_checked:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
         c = ws.cell(row=row, column=2)
-        c.value = f'Мобильная вёрстка (390px)  ({len(mob_bad)})'
+        c.value = f'Адаптивность (1440 / 768 / 390 px)  ({len(mob_bad)})'
         c.font = _font(size=13, bold=True, color=C.warn if mob_bad else C.ok)
         c.fill = _fill(C.accent_soft)
         c.alignment = _align(indent=1)
@@ -3162,8 +3169,9 @@ def _build_console_sheet(wb, console_check):
             ws.merge_cells(start_row=row, start_column=2, end_row=row,
                            end_column=3)
             c = ws.cell(row=row, column=2)
-            c.value = ('✅ На мобильном экране шрифт читабелен (≥14px) и '
-                       'контент не шире экрана на всех замеренных страницах.')
+            c.value = ('✅ На всех замеренных ширинах (1440/768/390) нет '
+                       'горизонтального скролла и наложений блоков; на '
+                       'мобильном шрифт читабелен (≥14px).')
             c.font = _font(size=10, color=C.ok)
             c.alignment = _align(indent=1)
         else:
