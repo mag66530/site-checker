@@ -3822,9 +3822,17 @@ def построить_матрицу_проверок(path: str) -> None:
     BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
     def _коммент(text):
+        # Ширина по самой длинной строке (щедро - не обрезаем), высота - по
+        # реальному числу строк С УЧЁТОМ переноса на этой ширине (не только
+        # по «\n» - длинное предложение само переносится и должно поместиться).
         text = _матрица_тире(text)
-        width = max(220, min(360, 10 * min(40, max(len(s) for s in text.split("\n")))))
-        height = max(60, 16 * (text.count("\n") + 1 + len(text) // 42))
+        lines = text.split("\n")
+        longest = max(len(s) for s in lines)
+        width = max(240, min(440, longest * 7 + 40))
+        chars_per_line = max(20, width // 7)
+        import math
+        wrapped = sum(max(1, math.ceil(len(s) / chars_per_line)) for s in lines)
+        height = max(70, 20 * wrapped + 30)
         return Comment(text, "site-checker", width=width, height=height)
 
     # Названия листов = сами города/домены (без слова «Матрица», без коллизий
@@ -3875,9 +3883,16 @@ def построить_матрицу_проверок(path: str) -> None:
                     cell.comment = _коммент(cm)
         m.freeze_panes = "B2"
         m.column_dimensions["A"].width = 26
+        _COL_W = 22   # шире, чем раньше (17) - меньше переносов в названиях форм
         for j in range(2, len(forms) + 2):
-            m.column_dimensions[get_column_letter(j)].width = 17
-        m.row_dimensions[1].height = 34
+            m.column_dimensions[get_column_letter(j)].width = _COL_W
+        # Высота шапки - под САМОЕ ДЛИННОЕ название формы на этом листе (с
+        # учётом переноса на ширине колонки), чтобы ни у одной формы текст не
+        # обрезался по вертикали.
+        _max_name_len = max((len(_матрица_тире(str(r[NI]))) for r in forms), default=20)
+        _chars_per_line = max(10, _COL_W - 2)
+        _lines_needed = max(1, -(-_max_name_len // _chars_per_line))
+        m.row_dimensions[1].height = max(34, 16 * _lines_needed + 12)
 
     # ── Легенда на «Сводке»: горизонтальная таблица справа от Домен/Город/Почта. ──
     if "Сводка" in wb.sheetnames:
