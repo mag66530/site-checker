@@ -2848,6 +2848,120 @@ def append_log_row(path: str, row: dict) -> None:
     wb.save(path)
 
 
+def консолидировать_форм_строки(path: str) -> None:
+    """Пост-обработка отчёта: сводит все строки ОДНОЙ формы в ОДНУ строку.
+
+    Раньше каждая проверка формы (Состав, Стилизация, Списки, Чекбоксы, Enter,
+    Двойная отправка, Обработка ошибок, Ошибки валидации, Согласие 2.13, Поля
+    2.14, Вёрстка …) писалась отдельной строкой - на форму выходило ~11 строк,
+    отчёт был нечитаем. Здесь группируем строки листа «Логи» по (Город, Страница,
+    имя формы) и склеиваем: каждая колонка-проверка берёт своё значение, «Статус»
+    - от самой отправки формы, «Комментарий» - объединение пояснений.
+
+    Имя формы: у строк-проверок оно идёт после «префикс: » (напр. «Стилизация
+    формы (…): Заказ звонка»), у самой формы - без префикса. Ни одно имя формы
+    двоеточия с пробелом не содержит, поэтому делим по первому «: ».
+
+    Колонко-независимо (читаем реальную шапку) - переживает вставку «Статуса в
+    админке» и любые новые колонки. Идемпотентно. При ошибке файл не трогаем.
+    Лист «Цели» и «Сводка» не затрагиваются."""
+    from openpyxl.styles import Font
+    from collections import OrderedDict
+    try:
+        wb = load_workbook(path)
+    except Exception:  # noqa: BLE001
+        return
+    if "Логи" not in wb.sheetnames:
+        return
+    ws = wb["Логи"]
+    if ws.max_row < 2:
+        return
+    rows = list(ws.iter_rows(values_only=True))
+    hdr = [str(h) if h is not None else "" for h in rows[0]]
+    data = rows[1:]
+    idx = {h: i for i, h in enumerate(hdr)}
+    # Нужны эти колонки; если шапка нестандартная - тихо выходим (не рискуем).
+    for нужн in ("Город", "Страница", "Название", "Статус", "Комментарий"):
+        if нужн not in idx:
+            return
+    GI, PI, NI, SI, CI = (idx["Город"], idx["Страница"], idx["Название"],
+                          idx["Статус"], idx["Комментарий"])
+
+    def _base(n):
+        n = str(n or "")
+        return n.split(": ", 1)[1] if ": " in n else n
+
+    def _empty(v):
+        return v is None or (isinstance(v, str) and v.strip() in ("", "-"))
+
+    groups = OrderedDict()
+    for r in data:
+        key = (r[GI], r[PI], _base(r[NI]))
+        groups.setdefault(key, []).append(r)
+
+    # Уже сведено (нет строк-проверок с «: ») - второй раз не трогаем.
+    if len(groups) == len(data):
+        return
+
+    merged = []
+    for (_g, _p, bn), grp in groups.items():
+        row = [None] * len(hdr)
+        for col in range(len(hdr)):
+            for r in grp:
+                if not _empty(r[col]):
+                    row[col] = r[col]
+                    break
+        row[NI] = bn
+        # «Статус» - от строки самой формы (без префикса); иначе худший из группы.
+        bare = [r for r in grp if ": " not in str(r[NI] or "")]
+        if bare:
+            row[SI] = bare[0][SI]
+        else:
+            статусы = [str(r[SI]) for r in grp if r[SI] not in (None, "")]
+            row[SI] = next((s for s in статусы
+                            if s.lower().startswith(("ошибк", "проверить"))),
+                           статусы[0] if статусы else "")
+        # «Комментарий» - объединяем непустые пояснения проверок (без повторов).
+        коммы = []
+        for r in grp:
+            c = str(r[CI] or "").strip()
+            if c and c not in коммы:
+                коммы.append(c)
+        row[CI] = " | ".join(коммы)
+        merged.append(row)
+
+    # Переписываем данные листа: чистим строки со 2-й, пишем сведённые, красим.
+    if ws.max_row >= 2:
+        ws.delete_rows(2, ws.max_row - 1)
+    for r_i, row in enumerate(merged, start=2):
+        for c_i, val in enumerate(row, start=1):
+            ws.cell(r_i, c_i, val)
+        try:
+            sval = str(row[SI] or "").strip().lower()
+            if sval in ("успешно", "заполнено", "зафиксирована", "сработала"):
+                ws.cell(r_i, SI + 1).font = Font(color="1E8E3E", bold=True)
+            elif sval.startswith("ошибк") or sval.startswith("не сработала"):
+                ws.cell(r_i, SI + 1).font = Font(color="C62828", bold=True)
+        except Exception:  # noqa: BLE001
+            pass
+        # «Уведомление пользователю» - подсветка Да/Нет (как в append_log_row).
+        try:
+            ui = idx.get("Уведомление пользователю")
+            if ui is not None:
+                uval = str(row[ui] or "").strip()
+                if uval.startswith("Да"):
+                    ws.cell(r_i, ui + 1).font = Font(color="1E8E3E", bold=True)
+                elif uval.startswith("Нет"):
+                    ws.cell(r_i, ui + 1).font = Font(color="B26A00", bold=True)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        wb.save(path)
+        print(f"   🧹 Отчёт сведён: {len(data)} строк → {len(merged)} (1 форма = 1 строка)")
+    except Exception as e:  # noqa: BLE001
+        print(f"   ⚠️ Консолидация отчёта не сохранена: {e}")
+
+
 # --- Уровень 1 (админка): запись реально отправленных форм для сверки ---
 # После прогона forms_run сверяет этот список с «Уведомлениями с форм» в админке
 # (admin_check.выполнить_проверку). Пишем только реальные отправки форм - без
