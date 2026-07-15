@@ -6077,27 +6077,42 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         _ds_ком = ("Кнопка не блокируется при отправке - двойное "
                                    "нажатие теоретически возможно, проверьте вручную.")
                 else:
-                    page.wait_for_timeout(140)         # как «нетерпеливый» второй клик
-                    # ВТОРОЙ клик - БЕЗ force. Раньше force=True обходил саму
-                    # защиту: кнопка после отправки блокируется / меняется на
-                    # «Отправлено», реальный юзер второй раз нажать НЕ может, а
-                    # force жал всё равно → ложное «не защищена». Теперь сперва
-                    # смотрим, заблокировалась ли кнопка (как в _ds_safe), и если
-                    # да - второго клика не делаем (защита есть).
-                    _locked2 = False
+                    # Ждём и СМОТРИМ, заблокируется ли кнопка после первой
+                    # отправки. Ключевой момент: многие формы блокируют кнопку
+                    # НЕ мгновенно, а ПОСЛЕ ответа AJAX (кнопка → «Отправлено» /
+                    # disabled через 0.3-1 с). Раньше смотрели один раз на 140 мс -
+                    # кнопка ещё активна → жали второй раз → ложное «не защищена».
+                    # Теперь ПУЛИМ до ~1.6 с: если за это время кнопка
+                    # заблокировалась/сменила текст/исчезла - защита ЕСТЬ, второй
+                    # клик реальный пользователь не сделает. Второй клик (если
+                    # кнопка так и не заблокировалась) - обычный, БЕЗ force.
+                    _btn_до_ds = ""
                     try:
-                        _locked2 = bool(sub.evaluate(
-                            "b => !!(b.disabled || b.getAttribute('aria-disabled')==='true'"
-                            " || /disabl|load|sending|wait|process|sent|отправ|подожд/i.test(b.className||'')"
-                            " || /отправлено|отправляется|подожд|sending|sent|done/i.test((b.innerText||b.value||''))"
-                            " || getComputedStyle(b).pointerEvents==='none'"
-                            " || b.offsetParent===null)"))
+                        _btn_до_ds = (sub.inner_text(timeout=500) or "").strip().lower()
                     except Exception:  # noqa: BLE001
-                        _locked2 = True             # кнопка исчезла = защита есть
+                        _btn_до_ds = ""
+                    _locked2 = False
+                    for _ in range(11):                # ~1650 мс наблюдения
+                        try:
+                            _locked2 = bool(sub.evaluate(
+                                "(b, txtDo) => { const cs = getComputedStyle(b);"
+                                " const t = (b.innerText||b.value||'').trim().toLowerCase();"
+                                " return !!(b.disabled || b.getAttribute('aria-disabled')==='true'"
+                                "   || /disabl|load|sending|wait|process|sent|отправ|подожд/i.test(b.className||'')"
+                                "   || /отправлено|отправляется|подожд|sending|sent|done|спасибо|thank/i.test(t)"
+                                "   || (txtDo && t && t!==txtDo)"   # текст кнопки сменился
+                                "   || cs.pointerEvents==='none' || cs.display==='none'"
+                                "   || cs.visibility==='hidden' || b.offsetParent===null); }",
+                                _btn_до_ds))
+                        except Exception:  # noqa: BLE001
+                            _locked2 = True            # кнопка исчезла = защита есть
+                        if _locked2:
+                            break
+                        page.wait_for_timeout(150)
                     if not _locked2:
-                        # Кнопка всё ещё активна - жмём ОБЫЧНЫМ кликом (не force):
-                        # если сайт защищает (перехватывает/блокирует) - клик
-                        # просто не пройдёт, и второй заявки не будет.
+                        # Кнопка так и НЕ заблокировалась - жмём второй раз
+                        # обычным кликом (не force). Если и теперь не пройдёт -
+                        # значит защита есть; если пройдёт - уйдёт вторая заявка.
                         try:
                             sub.click(timeout=1200)
                         except Exception:  # noqa: BLE001
