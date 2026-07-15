@@ -888,14 +888,38 @@ def run_check(pid, params, creds, log, progress):
         # Ничего на боевом сайте не пингуем - данные из выгрузки Яндекса.
         _index_404 = None
         if params.get('check_index_404'):
-            _index_404 = _run_index404_download(
+            # Источник 1 — Яндекс.Вебмастер: браузер качает выгрузку «Страницы
+            # в поиске» (код ответа уже в ней, боевой сайт не пингуем).
+            _wm_404 = _run_index404_download(
                 pid, params, log, session_b64=creds.get('autoclick_session'))
-            if _index_404.get('error'):
-                log(f'⚠ 404 в индексе: {_index_404["error"]}')
-            else:
-                log(f'404 в индексе: проверено '
+            if _wm_404.get('error'):
+                log(f'⚠ 404 в индексе (Яндекс): {_wm_404["error"]}')
+            # Источник 2 — Sitemap: порция URL с ротацией по дате, прозвон на 404.
+            _sm_404 = None
+            if params.get('index_404_sitemap', True):
+                try:
+                    from index_sitemap_checker import check_sitemap_404
+                    log('404 в индексе: проверяю sitemap (порция с ротацией)…')
+                    _sm_404 = check_sitemap_404(
+                        pid, proxy_url=proxy_url,
+                        max_urls=int(params.get('index_404_sitemap_max', 3000)),
+                        log=_nlog)
+                    if _sm_404.get('error'):
+                        log(f'⚠ 404 в индексе (sitemap): {_sm_404["error"]}')
+                    else:
+                        log(f'404 в индексе (sitemap): проверено '
+                            f'{_sm_404.get("total_checked", 0)}, битых '
+                            f'{_sm_404.get("total_dead", 0)}')
+                except Exception as _e:
+                    log(f'⚠ 404 в индексе (sitemap): {_e}')
+            # Слияние источников в одну таблицу отчёта.
+            from index_export_parser import merge_index_404
+            _index_404 = merge_index_404(_wm_404, _sm_404)
+            if _index_404 and not _index_404.get('error'):
+                log(f'404 в индексе (итог): проверено '
                     f'{_index_404.get("total_checked", 0)}, битых 404/410 '
-                    f'{_index_404.get("total_dead", 0)}')
+                    f'{_index_404.get("total_dead", 0)}, '
+                    f'источники: {", ".join(_index_404.get("sources") or []) or "—"}')
 
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный

@@ -105,7 +105,9 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'check_security': True,  # доп. 1.8 - заголовки безопасности HTTP
         'check_images': True,    # п.1.15 - изображения (alt/webp/вес)
         'check_links': False,   # «ссылки открываются (404)» - тяжёлая, по запросу
-        'check_index_404': True,  # 404 в индексе: браузер качает выгрузку «Страницы в поиске» (нужна сессия autoclick_session)
+        'check_index_404': True,  # 404 в индексе: Яндекс (браузер+сессия) + sitemap
+        'index_404_sitemap': True,        # источник sitemap (порция с ротацией)
+        'index_404_sitemap_max': 3000,    # URL из sitemap за прогон (остальное — в след. дни)
         'check_filter_fn': False,  # фильтр-тест (браузер) - по запросу, не в расписании
         'check_console': False,    # п.1.14 ошибки JS (браузер) - по запросу
         'check_stress': False,     # ошибки сервера (нагрузка на прод) - по запросу, не в расписании
