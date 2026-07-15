@@ -468,44 +468,39 @@ def test_rec_links_нет_нижнего_блока_необязателен():
     assert not b['rec_links'].present and not b['rec_links'].required   # → «-», не баг
 
 
-# ── Отзывы: подпись стороннего сервиса без ссылки на него ─────────────
+# ── Отзывы: проверка ТОЛЬКО на наличие (без разбора источников/ссылок) ─
 
 
-def test_review_source_нет_разметки_отзывов_необязателен():
+def test_reviews_нет_отзывов_необязателен():
+    """Нет ни микроразметки, ни блока отзывов - пункт необязателен, прочерк «-»
+    (не баг): отзывы на карточке не обязаны быть."""
     html = COMMON + SMU_MARKER + '<div>Характеристики</div>'
     b = _by_key(check_content(html, 'product'))
-    assert b['review_source_links'].present and not b['review_source_links'].required
+    assert not b['reviews'].present and not b['reviews'].required
 
 
-def test_review_source_подписан_сервисом_со_ссылкой_ок():
-    html = COMMON + SMU_MARKER + REVIEW_FLAMP_WITH_LINK
+def test_reviews_schema_markup_наличие():
+    """Отзыв с микроразметкой Schema.org Review - наличие есть (✓),
+    независимо от того, есть ли рядом ссылка на сторонний сервис."""
+    for fixture in (REVIEW_NO_SOURCE, REVIEW_2GIS_NO_LINK, REVIEW_FLAMP_WITH_LINK):
+        b = _by_key(check_content(COMMON + SMU_MARKER + fixture, 'product'))
+        assert b['reviews'].present and not b['reviews'].required
+
+
+def test_reviews_заголовок_блока_наличие():
+    """Заголовок блока «Отзывы клиентов» - наличие есть даже без микроразметки."""
+    html = COMMON + SMU_MARKER + '<h2>Отзывы клиентов</h2><div>Отличный магазин</div>'
     b = _by_key(check_content(html, 'product'))
-    assert b['review_source_links'].present and b['review_source_links'].required
+    assert b['reviews'].present
 
 
-def test_review_source_подписан_сервисом_без_ссылки_баг():
-    """Отзыв подписан «2ГИС», но ссылки на 2gis.ru рядом нет - имя сервиса
-    использовано как «печать доверия» без возможности проверить отзыв."""
-    html = COMMON + SMU_MARKER + REVIEW_2GIS_NO_LINK
+def test_reviews_ссылка_в_меню_не_считается_наличием():
+    """Одиночная ссылка «Отзывы» в шапке/меню - это ссылка на раздел, а не
+    блок отзывов на самой странице: наличием не считаем."""
+    html = (COMMON + SMU_MARKER
+            + '<nav><a href="/reviews/">Отзывы</a></nav><div>Характеристики</div>')
     b = _by_key(check_content(html, 'product'))
-    assert not b['review_source_links'].present and b['review_source_links'].required
-    assert b['review_source_links'].count == 1
-
-
-def test_review_source_без_подписи_сервиса_не_баг():
-    """Отзыв без упоминания стороннего сервиса вообще - не за что зацепиться
-    (может быть честный собственный отзыв на сайте), не баг."""
-    html = COMMON + SMU_MARKER + REVIEW_NO_SOURCE
-    b = _by_key(check_content(html, 'product'))
-    assert b['review_source_links'].present
-
-
-def test_review_source_считает_только_подозрительные_из_нескольких():
-    html = (COMMON + SMU_MARKER + REVIEW_2GIS_NO_LINK
-            + REVIEW_FLAMP_WITH_LINK + REVIEW_NO_SOURCE)
-    b = _by_key(check_content(html, 'product'))
-    assert not b['review_source_links'].present
-    assert b['review_source_links'].count == 1
+    assert not b['reviews'].present
 
 
 def test_cards_stub_photo_is_warning_with_name():
