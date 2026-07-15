@@ -3147,52 +3147,72 @@ def _index_404_code(status) -> int:
 
 def _build_index_404_sheet(wb, index_404_check):
     """Лист «404 в индексе» - понятная таблица битых страниц из поиска.
-    Каждая строка: сайт, адрес, что не так (простыми словами), код ответа.
-    Сортируется/фильтруется по сайту и типу проблемы. Добавляется, только
-    если проверка выполнялась."""
+    Каждая строка: сайт, адрес, что не так (простыми словами), код, источник.
+    Источники комбо (Sitemap / Яндекс / Google) сливаются, дубли по URL
+    схлопываются. Сортируется/фильтруется. Добавляется, если проверка была."""
     if not index_404_check:
         return
     hosts = index_404_check.get('hosts') or []
     _MAX_ROWS = 2000                 # предохранитель от гигантского файла
+    _RANK = {'dead': 0, 'server': 1, 'client': 2}
 
-    # Собираем все проблемные строки в единый список (site, url, code, kind).
-    problems = []                    # kind: 'dead' | 'server' | 'client'
+    # Собираем проблемы, схлопывая по URL и объединяя источники.
+    by_url = {}
+
+    def _add(site, r, kind):
+        url = r.get('url', '')
+        if not url:
+            return
+        code = _index_404_code(r.get('status'))
+        src = r.get('source', '')
+        p = by_url.get(url)
+        if p is None:
+            by_url[url] = {'site': site, 'url': url, 'code': code, 'kind': kind,
+                           'sources': ({src} if src else set())}
+        else:
+            if src:
+                p['sources'].add(src)
+            if _RANK.get(kind, 9) < _RANK.get(p['kind'], 9):
+                p.update(site=site, code=code, kind=kind)
+
     for h in hosts:
         site = h.get('host', '')
         for r in h.get('dead') or []:
-            problems.append((site, r.get('url', ''),
-                             _index_404_code(r.get('status')), 'dead'))
+            _add(site, r, 'dead')
         for r in h.get('errors') or []:
             code = _index_404_code(r.get('status'))
-            kind = 'server' if code >= 500 or code == 0 else 'client'
-            problems.append((site, r.get('url', ''), code, kind))
-    n_dead = sum(1 for p in problems if p[3] == 'dead')
+            _add(site, r, 'server' if (code >= 500 or code == 0) else 'client')
+
+    problems = list(by_url.values())
+    n_dead = sum(1 for p in problems if p['kind'] == 'dead')
     n_err = len(problems) - n_dead
-    bad_sites = len({p[0] for p in problems})
+    bad_sites = len({p['site'] for p in problems})
     has_any = bool(problems)
+    src_list = [s for s in (index_404_check.get('sources') or []) if s]
 
     ws = wb.create_sheet('404 в индексе')
     ws.sheet_view.showGridLines = False
     ws.sheet_properties.tabColor = (C.err if n_dead
                                     else C.warn if n_err else C.ok)
-    for col, w in (('A', 2), ('B', 20), ('C', 90), ('D', 22), ('E', 8)):
+    for col, w in (('A', 2), ('B', 18), ('C', 82), ('D', 20), ('E', 7),
+                   ('F', 16)):
         ws.column_dimensions[col].width = w
 
     # Заголовок.
-    ws.merge_cells('B2:E2')
+    ws.merge_cells('B2:F2')
     c = ws['B2']
     c.value = '404 в индексе — страницы в поиске, которые открываются с ошибкой'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
     # Пояснение простыми словами.
-    ws.merge_cells('B3:E3')
+    ws.merge_cells('B3:F3')
     c = ws['B3']
-    c.value = ('Это страницы, которые Яндекс держит в поиске, но при заходе они '
-               'отдают ошибку — человек кликает из поиска и попадает в никуда. '
-               'Такие нужно починить или убрать из поиска. Таблицу ниже можно '
-               'сортировать и фильтровать по сайту и типу проблемы — стрелки в '
-               'шапке столбцов.')
+    c.value = ('Это страницы, которые есть в поиске (Яндекс) или заявлены нами в '
+               'sitemap, но при заходе отдают ошибку — человек кликает из поиска '
+               'и попадает в никуда. Такие нужно починить или убрать из поиска. '
+               'Столбец «Источник» показывает, откуда узнали про страницу. '
+               'Таблицу можно сортировать и фильтровать — стрелки в шапке.')
     c.font = _font(size=10, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 42
@@ -3201,14 +3221,14 @@ def _build_index_404_sheet(wb, index_404_check):
 
     # Проверка не выполнилась / нет данных.
     if index_404_check.get('error') and not hosts:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
         c = ws.cell(row=row, column=2)
         c.value = '⚠ Проверка не выполнилась: ' + str(index_404_check['error'])
         c.font = _font(size=11, color=C.text_soft)
         c.alignment = _align(wrap=True)
         return
     if not index_404_check.get('available') or not hosts:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
         c = ws.cell(row=row, column=2)
         c.value = 'Проверка не выполнялась.'
         c.font = _font(size=11, color=C.text_soft)
@@ -3217,7 +3237,7 @@ def _build_index_404_sheet(wb, index_404_check):
 
     # Крупная сводка.
     total_checked = index_404_check.get('total_checked', 0)
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
     c = ws.cell(row=row, column=2)
     if has_any:
         c.value = (f'Найдено {len(problems)} битых страниц в поиске на {bad_sites} '
@@ -3226,15 +3246,16 @@ def _build_index_404_sheet(wb, index_404_check):
         c.font = _font(size=13, bold=True, color=C.err)
     else:
         c.value = (f'✅ Битых страниц в поиске не найдено. Проверено '
-                   f'{total_checked} страниц на {len(hosts)} сайтах — все '
-                   f'отвечают нормально.')
+                   f'{total_checked} страниц — все отвечают нормально.')
         c.font = _font(size=13, bold=True, color=C.ok)
     ws.row_dimensions[row].height = 24
     row += 1
 
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
     c = ws.cell(row=row, column=2)
-    c.value = f'Всего проверено страниц в поиске: {total_checked} на {len(hosts)} сайтах.'
+    _src_txt = f'   ·   источники: {", ".join(src_list)}' if src_list else ''
+    c.value = (f'Всего проверено страниц: {total_checked} на {len(hosts)} '
+               f'сайтах{_src_txt}.')
     c.font = _font(size=10, color=C.text_muted)
     ws.row_dimensions[row].height = 16
     row += 1
@@ -3243,7 +3264,7 @@ def _build_index_404_sheet(wb, index_404_check):
         return
 
     # Что делать — простыми словами, один раз.
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
     c = ws.cell(row=row, column=2)
     c.value = ('Что делать:  🔴 404 — страницу удалили, а из поиска она ещё не '
                'выпала: поставьте 301-редирект на живой раздел (или верните '
@@ -3256,9 +3277,9 @@ def _build_index_404_sheet(wb, index_404_check):
     row += 1
 
     # Инсайт: почти все битые — страницы фильтров.
-    n_filter = sum(1 for p in problems if '/filter/' in (p[1] or ''))
+    n_filter = sum(1 for p in problems if '/filter/' in (p['url'] or ''))
     if len(problems) >= 10 and n_filter / len(problems) >= 0.6:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
         c = ws.cell(row=row, column=2)
         c.value = (f'⚠ {n_filter} из {len(problems)} битых адресов — это страницы '
                    f'фильтров каталога (…/filter/…). Похоже, фильтры плодят ссылки '
@@ -3273,7 +3294,7 @@ def _build_index_404_sheet(wb, index_404_check):
     # Шапка таблицы.
     hdr = row
     for col, title in (('B', 'Сайт'), ('C', 'Адрес страницы'),
-                       ('D', 'Проблема'), ('E', 'Код')):
+                       ('D', 'Проблема'), ('E', 'Код'), ('F', 'Источник')):
         cell = ws[f'{col}{hdr}']
         cell.value = title
         cell.font = _font(size=10, bold=True, color=C.text)
@@ -3284,45 +3305,47 @@ def _build_index_404_sheet(wb, index_404_check):
     row += 1
 
     # Сначала 404 (важнее), затем ошибки сервера; внутри - по сайту и адресу.
-    order = {'dead': 0, 'server': 1, 'client': 2}
-    problems.sort(key=lambda p: (order.get(p[3], 9), p[0], p[1]))
+    problems.sort(key=lambda p: (_RANK.get(p['kind'], 9), p['site'], p['url']))
     _KIND = {'dead': ('Страница удалена', C.err),
              'server': ('Сервер не ответил', C.warn),
              'client': ('Страница недоступна', C.warn)}
 
-    shown = problems[:_MAX_ROWS]
-    for site, url, code, kind in shown:
-        label, color = _KIND.get(kind, ('Ошибка', C.warn))
+    for p in problems[:_MAX_ROWS]:
+        label, color = _KIND.get(p['kind'], ('Ошибка', C.warn))
         b = ws.cell(row=row, column=2)
-        b.value = site
+        b.value = p['site']
         b.font = _font(size=10)
         b.alignment = _align(indent=1)
         u = ws.cell(row=row, column=3)
-        u.value = url
+        u.value = p['url']
         u.font = _font(size=10, color=C.accent, underline='single')
-        if url:
-            u.hyperlink = url
+        if p['url']:
+            u.hyperlink = p['url']
         u.alignment = _align(indent=1)
-        p = ws.cell(row=row, column=4)
-        p.value = label
-        p.font = _font(size=10, bold=True, color=color)
-        p.alignment = _align(indent=1)
+        pc = ws.cell(row=row, column=4)
+        pc.value = label
+        pc.font = _font(size=10, bold=True, color=color)
+        pc.alignment = _align(indent=1)
         e = ws.cell(row=row, column=5)
-        e.value = code or '—'
+        e.value = p['code'] or '—'
         e.font = _font(size=10, color=color)
         e.alignment = _align(horizontal='center')
-        for cc in (2, 3, 4, 5):
+        s = ws.cell(row=row, column=6)
+        s.value = ', '.join(sorted(p['sources'])) or '—'
+        s.font = _font(size=10, color=C.text_soft)
+        s.alignment = _align(indent=1)
+        for cc in (2, 3, 4, 5, 6):
             ws.cell(row=row, column=cc).border = _border()
         ws.row_dimensions[row].height = 15
         row += 1
 
     last = row - 1
-    ws.auto_filter.ref = f'B{hdr}:E{last}'
+    ws.auto_filter.ref = f'B{hdr}:F{last}'
     ws.freeze_panes = f'B{hdr + 1}'
 
     if len(problems) > _MAX_ROWS:
         row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
         c = ws.cell(row=row, column=2)
         c.value = (f'…показаны первые {_MAX_ROWS} из {len(problems)} — '
                    f'остальные того же типа, чинятся так же.')

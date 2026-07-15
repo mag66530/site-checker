@@ -168,6 +168,7 @@ def analyze_exports(files: list, log=None) -> dict:
                 hb['searchable'] += 1
             entry = {'url': r.get('url', ''),
                      'status': r.get('http'),
+                     'source': 'Яндекс',
                      'reason': f'httpCode {r.get("http")}, статус {r.get("status")}'}
             if v == 'dead':
                 hb['dead'].append(entry)
@@ -189,3 +190,42 @@ def analyze_exports(files: list, log=None) -> dict:
         out['total_checked'] += hb['checked']
         out['total_dead'] += len(hb['dead'])
     return out
+
+
+def merge_index_404(*checks) -> dict:
+    """Слить результаты нескольких источников (Sitemap / Яндекс / GSC) в один
+    index_404_check. Хосты объединяются по имени, списки проблем (dead/soft/
+    errors) конкатенируются - у каждой записи свой 'source', дедуп по URL
+    делает отчёт. Доступно, если доступен хотя бы один источник."""
+    _SRC_LABEL = {'yandex_export': 'Яндекс', 'sitemap': 'Sitemap',
+                  'gsc': 'Google', 'combo': 'комбо'}
+    checks = [c for c in checks if c]
+    if not checks:
+        return None
+    avail = any(c.get('available') for c in checks)
+    errs = [str(c.get('error')) for c in checks if c.get('error')]
+    hosts = {}
+    for c in checks:
+        for h in c.get('hosts') or []:
+            hb = hosts.setdefault(h.get('host', ''), {
+                'host': h.get('host', ''), 'dead': [], 'soft': [], 'errors': [],
+                'in_index_total': 0, 'checked': 0, 'ok': 0, 'redirects': 0})
+            for k in ('dead', 'soft', 'errors'):
+                hb[k].extend(h.get(k) or [])
+            hb['checked'] += h.get('checked', 0) or 0
+            hb['ok'] += h.get('ok', 0) or 0
+            hb['redirects'] += h.get('redirects', 0) or 0
+            hb['in_index_total'] = max(hb['in_index_total'],
+                                       h.get('in_index_total', 0) or 0)
+    host_list = sorted(hosts.values(), key=lambda h: h['host'])
+    return {
+        'available': avail,
+        'source': 'combo',
+        'sources': [_SRC_LABEL.get(c.get('source'), c.get('source', ''))
+                    for c in checks if c.get('available')],
+        'hosts': host_list,
+        'total_checked': sum(h['checked'] for h in host_list),
+        'total_dead': sum(len(h['dead']) for h in host_list),
+        'total_soft': sum(len(h['soft']) for h in host_list),
+        'error': ('; '.join(errs) if (errs and not avail) else None),
+    }
