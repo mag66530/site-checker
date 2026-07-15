@@ -742,6 +742,15 @@ def _d_filters(c: _Ctx):
 
 
 def _d_sort(c: _Ctx):
+    # Основной признак - разметка/URL, НЕ текст: тот же виджет («Сортировать:
+    # По популярности» на RU) на азербайджанской версии того же проекта
+    # подписан «Çeşidləmə: Populyarlığa görə» - разный язык, но класс вёрстки
+    # (catalog-sort/sort-item) и параметр ссылки (?sort=...) те же. Текст -
+    # запасной вариант на случай другой вёрстки без этих классов.
+    if 'catalog-sort' in c.html_lower or 'sort-item' in c.html_lower:
+        return True, None
+    if re.search(r'[?&]sort=', c.html_lower):
+        return True, None
     return 'сортировать' in c.text_lower or 'по популярности' in c.text_lower, None
 
 
@@ -765,6 +774,39 @@ def _d_form_not_found(c: _Ctx):
 
 def _d_reviews(c: _Ctx):
     return 'отзывы клиентов' in c.text_lower, None
+
+
+# Отзывы со Schema.org-разметкой (itemtype=.../Review), подписанные сторонним
+# сервисом (Flamp/2ГИС/Google Карты/Яндекс.Карты/Blizko/Zoon/Отзовик), но БЕЗ
+# настоящей ссылки на профиль в этом сервисе рядом - имя сервиса используется
+# как «печать доверия», подлинность отзыва проверить негде. Вердикт - только
+# факт («подписан X, ссылки на X нет»), не обвинение в подделке - доказать
+# это по разметке нельзя, только явное несоответствие подписи и ссылки.
+_REVIEW_MARK = 'itemtype="https://schema.org/review"'
+_REVIEW_SOURCE_RE = re.compile(
+    r'\b(flamp|2gis|2гис|google\s*карты|google\s*maps|'
+    r'яндекс[.\s]*карты|yandex\s*maps|blizko|zoon|отзовик)\b', re.IGNORECASE)
+_REVIEW_SOURCE_DOMAIN_RE = re.compile(
+    r'flamp\.ru|2gis\.(?:ru|com)|(?:maps\.)?google\.[a-z.]+/maps|goo\.gl/maps|'
+    r'yandex\.[a-z.]+/maps|blizko\.ru|zoon\.ru|otzovik\.com', re.IGNORECASE)
+
+
+def _has_schema_reviews(c: _Ctx) -> bool:
+    """Есть ли на странице хоть один отзыв с разметкой Schema.org Review -
+    если нет, источник отзывов проверять нечего (как _rec_has_cards для
+    rec_price/rec_links)."""
+    return _REVIEW_MARK in c.html_lower
+
+
+def _d_review_source_links(c: _Ctx):
+    if not _has_schema_reviews(c):
+        return True, None
+    chunks = [p[:4000] for p in c.html_lower.split(_REVIEW_MARK)[1:]]
+    suspicious = sum(
+        1 for ch in chunks
+        if _REVIEW_SOURCE_RE.search(ch) and not _REVIEW_SOURCE_DOMAIN_RE.search(ch)
+    )
+    return (suspicious == 0), (suspicious or None)
 
 
 def _d_faq(c: _Ctx):
@@ -856,6 +898,28 @@ def _d_rec_price(c: _Ctx):
             return (broken == 0), None
     has = bool(_PRICE_RE.search(c.rec_text_lower)) or 'по запросу' in c.rec_text_lower
     return has, None
+
+
+def _d_rec_links(c: _Ctx):
+    # Перелинковка «Похожие товары»: у КАЖДОЙ настоящей карточки (есть видимый
+    # текст) в нижнем блоке должна быть ссылка на товар - иначе это не
+    # перелинковка, а декоративные плашки. _is_real_rec_card() для rec_price
+    # тихо ВЫКИДЫВАЕТ карточки без ссылки из подсчёта цен - здесь наоборот,
+    # отсутствие ссылки у настоящей карточки и есть находка (иначе блок вообще
+    # без единой ссылки молча прошёл бы как «Цены в нижних блоках: OK», т.к.
+    # после фильтра просто не осталось бы карточек для проверки).
+    # Нижнего товарного блока нет - проверять нечего (required снимается в
+    # check_content, как у rec_price).
+    if not _rec_has_cards(c):
+        return False, None
+    rec_full = c.rec_html_full or c.rec_html_lower
+    chunks = [ch for ch in _rec_card_chunks(rec_full)
+              if len(html_to_visible_text(ch).strip()) > 3]
+    if chunks:
+        no_link = sum(1 for ch in chunks if not re.search(r'href="/[a-z0-9\-/]', ch))
+        return (no_link == 0), (no_link or None)
+    has_link = bool(re.search(r'href="/[a-z0-9\-/]', rec_full))
+    return has_link, None
 
 
 # «Нет фото»: вместо картинки товара подставлена заглушка. Точные маркеры в src
@@ -1018,6 +1082,8 @@ BLOCK_DESCRIPTIONS = {
     'specs':         'Характеристики товара или артикул.',
     'rec_block':     'Нижние блоки карточки: «С этим товаром покупают», «Похожие», «Вас также может заинтересовать». Справочно - есть/нет.',
     'rec_price':     'У товаров в нижних блоках есть видимая цена (₽ или «по запросу»). Если карточки снизу есть, а цены не видно - баг (пустые цены снизу).',
+    'rec_links':     'Перелинковка: у каждой карточки в нижних блоках («Похожие товары» и т.п.) есть настоящая ссылка на товар, а не декоративная плашка без href.',
+    'review_source_links': 'Если отзыв (Schema.org Review) подписан сторонним сервисом (Flamp/2ГИС/Google Карты/Яндекс.Карты/Blizko…), рядом должна быть настоящая ссылка на профиль в этом сервисе - иначе имя сервиса используется без возможности проверить отзыв.',
     'forms':         'Количество тегов <form> на странице.',
     'search':        'Поиск по сайту: поле type="search" или текст «Найти»/«Поиск».',
 }
@@ -1118,6 +1184,9 @@ _PRODUCT = [
     # что ниже»): сам блок (справочно) + есть ли у его товаров цена.
     _b('rec_block',     'Блок «похожие / с этим покупают»', False, _d_rec_block),
     _b('rec_price',     'Цены в нижних блоках',        True,  _d_rec_price),
+    _b('rec_links',     'Перелинковка «Похожие товары»', True, _d_rec_links),
+    _b('review_source_links', 'Отзывы: ссылка на сторонний сервис', True,
+       _d_review_source_links),
 ]
 
 # КАТАЛОГ-корень - верхний уровень, показывает разделы. Проверяем: блоки каталога
@@ -1519,7 +1588,9 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
         # «Цены в нижних блоках» обязательны ТОЛЬКО если внизу есть товарные
         # карточки. Нет нижнего блока (как у МПЭ - его там нет по дизайну) -
         # проверять нечего → пункт необязателен, в отчёте «-», а не ✓ и не баг.
-        if blk.key == 'rec_price' and not _rec_has_cards(ctx):
+        if blk.key in ('rec_price', 'rec_links') and not _rec_has_cards(ctx):
+            required = False
+        if blk.key == 'review_source_links' and not _has_schema_reviews(ctx):
             required = False
         # «Фото товаров»: заглушка «нет фото» - это ПРЕДУПРЕЖДЕНИЕ (жёлтое), а не
         # красный баг. Визуально картинка есть (стоит заглушка завода no-image),

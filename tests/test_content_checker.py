@@ -50,6 +50,33 @@ CARD_PRICE_REQUEST = (
 SMU_MARKER = '<a href="https://stalmetural.ru/">stalmetural</a>'
 FORM_NF = '<div>Не нашли что искали?</div>'
 
+# Отзывы Schema.org (Review) - как на реальной странице: itemprop=author/
+# reviewBody, «источник» - либо просто текст (без ссылки на сервис), либо
+# ссылка на настоящий домен сервиса.
+REVIEW_2GIS_NO_LINK = (
+    '<div itemprop="review" itemscope itemtype="https://schema.org/Review">'
+    '<div itemprop="author" itemscope itemtype="https://schema.org/Person">'
+    '<div itemprop="name">Иван Иванов</div></div>'
+    '<div class="review-card-big__company">2ГИС</div>'
+    '<div itemprop="reviewBody">Отличный магазин, всё понравилось</div>'
+    '</div>'
+)
+REVIEW_FLAMP_WITH_LINK = (
+    '<div itemprop="review" itemscope itemtype="https://schema.org/Review">'
+    '<div itemprop="author" itemscope itemtype="https://schema.org/Person">'
+    '<div itemprop="name">Пётр Петров</div></div>'
+    '<a href="https://flamp.ru/firm/12345" class="review-card-big__company">Flamp</a>'
+    '<div itemprop="reviewBody">Хороший магазин, рекомендую</div>'
+    '</div>'
+)
+REVIEW_NO_SOURCE = (
+    '<div itemprop="review" itemscope itemtype="https://schema.org/Review">'
+    '<div itemprop="author" itemscope itemtype="https://schema.org/Person">'
+    '<div itemprop="name">Сидор Сидоров</div></div>'
+    '<div itemprop="reviewBody">Всё понравилось, спасибо</div>'
+    '</div>'
+)
+
 
 def _by_key(result):
     return {b.key: b for b in result.blocks}
@@ -138,6 +165,53 @@ def test_listing_price_request_only():
     assert not b['price_real'].present, 'рублёвой цены нет'
     assert b['price_request'].present
     assert not b['price_real'].required and not b['price_request'].required
+
+
+# ── Сортировка на листинге: по разметке/URL, не по языку текста ───────
+
+SORT_WIDGET_RU = (
+    '<div class="catalog-sort"><div class="sort-items"><div class="sort-items-block">'
+    '<b>Сортировать:</b><span class="sort-item active">По популярности</span>'
+    '<a href="/catalog/x/?sort=price&order=asc" class="sort-item">По цене</a>'
+    '</div></div></div>'
+)
+SORT_WIDGET_AZ = (
+    '<div class="catalog-sort"><div class="sort-items"><div class="sort-items-block">'
+    '<b>Çeşidləmə:</b><span class="sort-item active">Populyarlığa görə</span>'
+    '<a href="/catalog/x/?sort=price&order=asc" class="sort-item">Qiymətə görə</a>'
+    '</div></div></div>'
+)
+
+
+def test_sort_обнаруживается_по_классу_на_русском():
+    html = COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER + SORT_WIDGET_RU
+    b = _by_key(check_content(html, 'category'))
+    assert b['sort'].present
+
+
+def test_sort_обнаруживается_на_другом_языке_той_же_вёрстки():
+    """Тот же виджет (классы catalog-sort/sort-item, параметр ?sort=), но
+    текст не русский - раньше детектор ловил только «Сортировать»/«По
+    популярности» и пропускал нерусские языковые версии того же сайта
+    (найдено на живой странице: steelgroup.az против stalmetural.ru)."""
+    html = COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER + SORT_WIDGET_AZ
+    b = _by_key(check_content(html, 'category'))
+    assert b['sort'].present
+
+
+def test_sort_обнаруживается_по_url_параметру_без_известных_классов():
+    html = (COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER
+            + '<a href="/catalog/x/?sort=price">по цене</a>')
+    b = _by_key(check_content(html, 'category'))
+    assert b['sort'].present
+
+
+def test_sort_отсутствует_честно():
+    """Ни классов, ни ?sort=, ни текста - сортировки на странице реально нет
+    (найдено на живой странице листинга МПЭ)."""
+    html = COMMON + CARD_WITH_PRICE + FORM_NF + SMU_MARKER
+    b = _by_key(check_content(html, 'category'))
+    assert not b['sort'].present
 
 
 def test_listing_no_order_buttons_is_bug():
@@ -348,6 +422,90 @@ def test_bottom_block_one_card_without_price_is_bug():
     # все карточки с ценой / «по запросу» → ок
     b2 = _by_key(check_content(main + '<div>Похожие товары</div>' + good + request, 'product'))
     assert b2['rec_price'].present
+
+
+def test_rec_links_все_карточки_со_ссылками_ок():
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    good = ('<div class="catalog-product-card-item"><a href="/c/t1/">Товар 1</a>'
+            '<span>99 000 ₽</span></div>')
+    b = _by_key(check_content(main + '<div>Похожие товары</div>' + good + good, 'product'))
+    assert b['rec_links'].present and b['rec_links'].required
+
+
+def test_rec_links_одна_карточка_без_ссылки_баг():
+    """Хотя бы одна настоящая карточка снизу БЕЗ ссылки на товар - баг rec_links,
+    даже если у соседних карточек ссылка есть (декоративная плашка среди рабочих)."""
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    good = ('<div class="catalog-product-card-item"><a href="/c/t1/">Товар 1</a>'
+            '<span>99 000 ₽</span></div>')
+    no_link = '<div class="catalog-product-card-item"><span>Товар 2</span><span>99 000 ₽</span></div>'
+    b = _by_key(check_content(main + '<div>Похожие товары</div>' + good + no_link, 'product'))
+    assert not b['rec_links'].present and b['rec_links'].required
+    assert b['rec_links'].count == 1
+
+
+def test_rec_links_блок_без_единой_ссылки_ловит_то_что_rec_price_пропускает():
+    """Главный сценарий, ради которого пункт добавлен: блок «Похожие товары» БЕЗ
+    единой рабочей ссылки - это не перелинковка, а декор. rec_price такое
+    пропускает (карточки без ссылки не считаются «настоящими» и просто не
+    участвуют в проверке цены) - rec_links обязан поймать эту ситуацию явно."""
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    no_link = ('<div class="catalog-product-card-item"><span>Товар 2</span>'
+               '<span>99 000 ₽</span></div>')
+    b = _by_key(check_content(
+        main + '<div>Похожие товары</div>' + no_link + no_link, 'product'))
+    assert not b['rec_links'].present and b['rec_links'].required   # → БАГ
+    assert b['rec_links'].count == 2
+
+
+def test_rec_links_нет_нижнего_блока_необязателен():
+    main = (COMMON + SMU_MARKER + '<div class="cost-val">156 000 ₽</div>'
+            + '<button class="add-to-cart-btn">В корзину</button>')
+    b = _by_key(check_content(main + '<div>Характеристики</div>', 'product'))
+    assert not b['rec_links'].present and not b['rec_links'].required   # → «-», не баг
+
+
+# ── Отзывы: подпись стороннего сервиса без ссылки на него ─────────────
+
+
+def test_review_source_нет_разметки_отзывов_необязателен():
+    html = COMMON + SMU_MARKER + '<div>Характеристики</div>'
+    b = _by_key(check_content(html, 'product'))
+    assert b['review_source_links'].present and not b['review_source_links'].required
+
+
+def test_review_source_подписан_сервисом_со_ссылкой_ок():
+    html = COMMON + SMU_MARKER + REVIEW_FLAMP_WITH_LINK
+    b = _by_key(check_content(html, 'product'))
+    assert b['review_source_links'].present and b['review_source_links'].required
+
+
+def test_review_source_подписан_сервисом_без_ссылки_баг():
+    """Отзыв подписан «2ГИС», но ссылки на 2gis.ru рядом нет - имя сервиса
+    использовано как «печать доверия» без возможности проверить отзыв."""
+    html = COMMON + SMU_MARKER + REVIEW_2GIS_NO_LINK
+    b = _by_key(check_content(html, 'product'))
+    assert not b['review_source_links'].present and b['review_source_links'].required
+    assert b['review_source_links'].count == 1
+
+
+def test_review_source_без_подписи_сервиса_не_баг():
+    """Отзыв без упоминания стороннего сервиса вообще - не за что зацепиться
+    (может быть честный собственный отзыв на сайте), не баг."""
+    html = COMMON + SMU_MARKER + REVIEW_NO_SOURCE
+    b = _by_key(check_content(html, 'product'))
+    assert b['review_source_links'].present
+
+
+def test_review_source_считает_только_подозрительные_из_нескольких():
+    html = (COMMON + SMU_MARKER + REVIEW_2GIS_NO_LINK
+            + REVIEW_FLAMP_WITH_LINK + REVIEW_NO_SOURCE)
+    b = _by_key(check_content(html, 'product'))
+    assert not b['review_source_links'].present
+    assert b['review_source_links'].count == 1
 
 
 def test_cards_stub_photo_is_warning_with_name():
