@@ -1812,6 +1812,27 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             else:
                 _line('· Раздел «Отгрузки» не найден - опционален по '
                       'проекту, не находка.', C.text_muted)
+            # Даты публикации/обновления у статей и новостей.
+            _nd = indexing_summary.get('news_dates')
+            if _nd is None:
+                _line('· Новости/статьи: раздел не найден - проверка дат '
+                      'не применима.', C.text_muted)
+            elif not _nd.get('article'):
+                _line(f'· Новости/статьи ({_nd.get("section", "")}): '
+                      f'статью в разделе не распознали - даты проверить '
+                      f'вручную.', C.text_muted)
+            elif _nd.get('published') and _nd.get('modified'):
+                _line(f'✅ Новости/статьи: дата публикации и обновления '
+                      f'размечены (datePublished/dateModified) - '
+                      f'{_nd.get("article", "")}', C.ok)
+            elif _nd.get('published'):
+                _line(f'⚠ Новости/статьи: есть дата публикации, но нет '
+                      f'даты ОБНОВЛЕНИЯ (dateModified) - '
+                      f'{_nd.get("article", "")}', C.warn)
+            else:
+                _line(f'⚠ Новости/статьи: на статье нет даты публикации '
+                      f'(datePublished / <time datetime>) - '
+                      f'{_nd.get("article", "")}', C.warn)
             row += 1
 
         # ── Секция 4.3: перелинковка (внутренний вес) ──

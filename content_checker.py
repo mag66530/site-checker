@@ -1246,11 +1246,20 @@ def check_seo_text(html: str, type_code: str = 'category') -> dict | None:
     h1 = (re.sub(r'\s+', ' ', _RE_ANY_TAG.sub(' ', m_h1.group(1))).strip()
           if m_h1 else '')
 
+    # Хеш ПОЛНОГО нормализованного текста - для сравнения фильтра с
+    # родительской категорией (дубль текста), сравнивает runner. Полный
+    # текст, а не «голова»: первый абзац бывает общим блоком (форма
+    # «оставьте описание товара…») - голова давала бы ложные дубли.
+    import hashlib
+    _norm = re.sub(r'[^а-яёa-z0-9]+', '', text.lower())
+    text_head = hashlib.md5(_norm.encode()).hexdigest() if _norm else ''
+
     warnings = []
     if text_len < _SEO_TEXT_MIN:
         warnings.append('на странице нет SEO-текста (или он совсем короткий) '
                         '- частотной категории нужен текст с главным ключом')
-        return {'text_len': text_len, 'warnings': warnings}
+        return {'text_len': text_len, 'text_head': text_head,
+                'warnings': warnings}
 
     # Главный ключ: слова H1 встречаются в тексте (терпимо к склонениям).
     def _stems(s):
@@ -1285,7 +1294,8 @@ def check_seo_text(html: str, type_code: str = 'category') -> dict | None:
                         'h2/h3, таблиц, нумерованных списков) - сплошное '
                         'полотно хуже цитируется нейроответами')
 
-    return {'text_len': text_len, 'warnings': warnings}
+    return {'text_len': text_len, 'text_head': text_head,
+            'warnings': warnings}
 
 
 def _content_html(c: _Ctx) -> str:

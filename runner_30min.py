@@ -499,6 +499,31 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Sitemap в Вебмастере: {_e}')
 
+        # ── Тексты фильтров не дублируют родительскую категорию (п.1.6) ──
+        # Сравниваем «голову» нормализованного SEO-текста фильтра с текстом
+        # его категории (тот же поддомен): совпала - дубль, тегу нужен свой.
+        if params.get('check_text'):
+            from urllib.parse import urlsplit as _us6
+            _cat_heads = {}
+            for r in results:
+                st6 = getattr(r, 'seo_text', None)
+                if r.type_code == 'category' and st6 and st6.get('text_head'):
+                    _cat_heads[(r.subdomain,
+                                (_us6(r.url).path or '').rstrip('/'))] = \
+                        st6['text_head']
+            for r in results:
+                st6 = getattr(r, 'seo_text', None)
+                if r.type_code != 'filter' or not st6 \
+                        or not st6.get('text_head'):
+                    continue
+                _p6 = (_us6(r.url).path or '')
+                _parent = _p6.split('/filter/')[0].rstrip('/')
+                _ph = _cat_heads.get((r.subdomain, _parent))
+                if _ph and st6['text_head'] == _ph:
+                    st6['warnings'].append(
+                        'текст страницы-фильтра дублирует родительскую '
+                        'категорию - тегу нужен свой текст')
+
         # ── Метаданные и дубли (п.1.8) ──
         # Дубли title/description/H1 - по всем результатам прогона; дубли
         # УРЛОВ - прозвон вариантов (http/слэш/www) главной и каталога

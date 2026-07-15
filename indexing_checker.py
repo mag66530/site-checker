@@ -526,6 +526,15 @@ _REQUIRED_PAGES = [
 ]
 _RE_HREF_ANY = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
 
+# Даты публикации/обновления у статей и новостей (чек-лист): разделы-
+# кандидаты; в найденном берём первую статью и ищем маркеры даты.
+_NEWS_SECTIONS = ('/news/', '/company/news/', '/blog/', '/articles/',
+                  '/stati/', '/aktsii/')
+_RE_DATE_PUBLISHED = re.compile(
+    r'datePublished|itemprop\s*=\s*["\']datePublished|'
+    r'<time\b[^>]*datetime', re.I)
+_RE_DATE_MODIFIED = re.compile(r'dateModified', re.I)
+
 # Раздел «Отгрузки» (опционален по проекту): если есть - в контенте должна
 # быть перелинковка на каталог.
 _OTGRUZKI_PATHS = ('/otgruzki/', '/otgruzka/', '/nashi-otgruzki/',
@@ -601,7 +610,7 @@ async def check_paths_against_robots(host: str, paths: list, *,
            'sitemap_checks': None, 'blanket_disallow': [],
            'ua_groups': None, 'assets_checked': 0, 'assets_closed': [],
            'advisory_open': [], 'pagination': None,
-           'required_pages': [], 'otgruzki': None,
+           'required_pages': [], 'otgruzki': None, 'news_dates': None,
            'error': None}
     try:
         async with aiohttp.ClientSession(
@@ -778,6 +787,32 @@ async def check_paths_against_robots(host: str, paths: list, *,
                         found = fpath
                         break
                 out['required_pages'].append({'label': label, 'found': found})
+
+            # Даты публикации/обновления у статей и новостей.
+            out['news_dates'] = None
+            for sec in _NEWS_SECTIONS:
+                st, fpath, h_sec = await _fetch_final(f'https://{host}{sec}')
+                if st != 200 or not (fpath or '/').strip('/') or not h_sec:
+                    continue
+                # Первая ссылка на статью: глубже раздела.
+                m_art = re.search(
+                    rf'href\s*=\s*["\']((?:https?://[^"\']+)?{re.escape(sec)}'
+                    rf'[^"\'?#]+/?)["\']', h_sec)
+                art_url = None
+                if m_art:
+                    _a = m_art.group(1)
+                    art_url = (_a if _a.startswith('http')
+                               else f'https://{host}{_a}')
+                nd = {'section': sec, 'article': art_url,
+                      'published': None, 'modified': None}
+                if art_url:
+                    st_a, _fp_a, h_art = await _fetch_final(art_url)
+                    if st_a == 200 and h_art:
+                        nd['published'] = bool(
+                            _RE_DATE_PUBLISHED.search(h_art))
+                        nd['modified'] = bool(_RE_DATE_MODIFIED.search(h_art))
+                out['news_dates'] = nd
+                break
 
             otg_found, otg_links = None, 0
             for v in _OTGRUZKI_PATHS:
