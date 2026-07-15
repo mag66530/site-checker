@@ -210,14 +210,29 @@ async def _download_one(page, site_id: str, host: str, scout: bool) -> tuple:
 
 
 def _resolve_sites(account: list, pid: str) -> list:
-    """Из списка сайтов аккаунта оставить только сайты этого проекта.
-    Фильтр по регистрируемому домену (spb.stalmetural.ru → stalmetural.ru).
-    Если фильтр всё выкинул (домены не совпали) - берём аккаунт как есть."""
+    """Из списка сайтов аккаунта оставить сайты этого проекта, ПО ОДНОМУ на
+    домен - корневой хост.
+
+    Город-поддомены (abakan.stalmetural.ru, arhangelsk.stalmetural.ru…) - это
+    отдельные сайты в аккаунте, но по сути региональные КЛОНЫ основного домена
+    (тот же каталог, подставлен город). Их выгрузку отдельно не качаем: берём
+    корень (host == регистрируемый домен). Если у домена корня в аккаунте нет -
+    оставляем что есть, чтобы домен не выпал молча.
+
+    Фильтр по регистрируемому домену проекта (spb.stalmetural.ru →
+    stalmetural.ru) отсекает чужие сайты из общего аккаунта."""
     doms = _project_domains(pid)
-    if not doms:
+    sites = [(sid, h) for sid, h in account if not doms or _registrable(h) in doms]
+    if not sites:
         return account
-    filtered = [(sid, h) for sid, h in account if _registrable(h) in doms]
-    return filtered or account
+    by_dom = {}
+    for sid, h in sites:
+        by_dom.setdefault(_registrable(h), []).append((sid, h))
+    out = []
+    for dom, group in by_dom.items():
+        roots = [(sid, h) for sid, h in group if h == dom]
+        out.extend(roots if roots else group)
+    return out
 
 
 async def _run(pid: str, max_hosts, scout: bool) -> dict:
