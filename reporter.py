@@ -3221,6 +3221,154 @@ def _build_ps_filters_sheet(wb, ps_filters):
           link='https://search.google.com/search-console/manual-actions')
 
 
+# ── Лист «Нагрузка и парсинг» (ошибки сервера: парсинг/нагрузка/дубли) ──
+
+
+def _build_stress_sheet(wb, stress_check):
+    """Лист «Нагрузка и парсинг»: нет ли ошибок сервера (5xx/обрывы) при
+    быстром обходе-парсинге, параллельной нагрузке и кривых дублях URL.
+    Добавляется, только если стресс-пробы выполнялись."""
+    if not stress_check or not stress_check.get('available'):
+        return
+    parsing = stress_check.get('parsing') or {}
+    load = stress_check.get('load') or {}
+    dups = stress_check.get('duplicates') or {}
+
+    parse_5xx = parsing.get('server_errors') or []
+    parse_net = parsing.get('network_errors') or []
+    banned = parsing.get('banned')
+    load_pages = load.get('pages') or []
+    load_5xx = sum(p.get('server_5xx', 0) for p in load_pages)
+    load_net = sum(p.get('network_errors', 0) for p in load_pages)
+    load_degraded = [p for p in load_pages if p.get('degraded')]
+    dup_5xx = dups.get('server_errors') or []
+
+    total_5xx = len(parse_5xx) + load_5xx + len(dup_5xx)
+    has_bugs = bool(total_5xx or parse_net or load_net or banned)
+    has_warn = bool(load_degraded or parsing.get('rate_limited'))
+
+    ws = wb.create_sheet('Нагрузка и парсинг')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = (C.err if has_bugs
+                                    else C.warn if has_warn else C.ok)
+    for col, w in (('A', 3), ('B', 30), ('C', 64), ('D', 44), ('E', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:D2')
+    c = ws['B2']
+    c.value = 'Нагрузка и парсинг (ошибки сервера)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:D3')
+    c = ws['B3']
+    c.value = ('Сервер не должен отдавать ошибки (5xx) при: (1) быстром '
+               'обходе страниц парсингом; (2) высокой параллельной нагрузке; '
+               '(3) кривых дублях адресов категорий/фильтров/товаров '
+               '(сдвоенный сегмент, двойной слэш, глубокая пагинация, '
+               'сдвоенный GET-параметр). Пробы идут в конце прогона; при '
+               'первых же 5xx/обрывах проба останавливается, чтобы не '
+               'добивать сервер. Бан на парсинге - нагрузку и дубли '
+               'пропускаем (их результат стал бы недостоверным).')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 66
+
+    row = 5
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+    c = ws.cell(row=row, column=2)
+    c.value = (f'Ошибок сервера (5xx) всего: {total_5xx}  ·  обрывов связи: '
+               f'{len(parse_net) + load_net}'
+               + ('  ·  БАН на парсинге' if banned else ''))
+    c.font = _font(size=10, bold=True,
+                   color=C.err if has_bugs else C.warn if has_warn else C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[row].height = 24
+    row += 2
+
+    def _line(text, color, bold=False, link=None):
+        nonlocal row
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2)
+        c.value = text
+        c.font = _font(size=10, bold=bold, color=color,
+                       underline='single' if link else None)
+        if link:
+            c.hyperlink = link
+        c.alignment = _align(indent=1, wrap=True)
+        ws.row_dimensions[row].height = 18
+        row += 1
+
+    # ── 1. Парсинг ──
+    _line(f'1. Парсинг - быстрый обход (проверено {parsing.get("checked", 0)} '
+          f'из {parsing.get("total", 0)})', C.text, bold=True)
+    if banned:
+        _line(f'❌ Защита закрыла доступ (код {banned.get("code")}) после '
+              f'{banned.get("after", 0)} успешных страниц - сайт принял бота '
+              f'за парсера: {banned.get("url", "")}', C.err)
+    if parse_5xx:
+        for e in parse_5xx[:20]:
+            _line(f'❌ {e.get("code")} на {e.get("url", "")}', C.err)
+    if parse_net:
+        _line(f'❌ Обрывы связи при обходе: {len(parse_net)} '
+              f'(сервер не отвечал под последовательной нагрузкой)', C.err)
+    if parsing.get('rate_limited'):
+        _line(f'⚠ Rate-limit (429): {parsing["rate_limited"]} - сервер '
+              f'притормаживал частые запросы', C.warn)
+    if not (banned or parse_5xx or parse_net):
+        _line('✅ Быстрый обход парсингом прошёл без ошибок сервера и бана.',
+              C.ok)
+    row += 1
+
+    # ── 2. Высокая нагрузка ──
+    if load.get('skipped') == 'ban':
+        _line('2. Высокая нагрузка - пропущено из-за бана на парсинге.',
+              C.text_muted, bold=True)
+    else:
+        _line(f'2. Высокая нагрузка - параллельный залп '
+              f'({load.get("concurrency", 0)} одновременных × '
+              f'{load.get("waves", 0)} волны)', C.text, bold=True)
+        for p in load_pages:
+            _base = p.get('baseline_ms')
+            _med = p.get('median_ms')
+            _t = (f' · медиана {_med} мс'
+                  + (f' против {_base} мс в прогоне' if _base else '')
+                  ) if _med else ''
+            if p.get('server_5xx') or p.get('network_errors'):
+                _line(f'❌ {p.get("url", "")}: 5xx {p.get("server_5xx", 0)}, '
+                      f'обрывов {p.get("network_errors", 0)} из '
+                      f'{p.get("sent", 0)} запросов'
+                      + ('  (проба остановлена - не добивали сервер)'
+                         if p.get('stopped') else '') + _t, C.err)
+            elif p.get('degraded'):
+                _line(f'⚠ {p.get("url", "")}: под нагрузкой ответ замедлился '
+                      f'более чем в 3 раза{_t}', C.warn)
+            else:
+                _line(f'✅ {p.get("url", "")}: держит нагрузку без 5xx{_t}',
+                      C.ok)
+        if not load_pages:
+            _line('· Репрезентативных страниц для залпа не набралось - '
+                  'пропуск.', C.text_muted)
+    row += 1
+
+    # ── 3. Дубли URL ──
+    if dups.get('skipped') == 'ban':
+        _line('3. Дубли URL - пропущено из-за бана на парсинге.',
+              C.text_muted, bold=True)
+    else:
+        _line(f'3. Дубли категорий/фильтров/товаров - кривые вариации URL '
+              f'(проверено {dups.get("checked", 0)} по '
+              f'{dups.get("samples", 0)} страницам)', C.text, bold=True)
+        if dup_5xx:
+            for e in dup_5xx[:20]:
+                _line(f'❌ {e.get("code")} на «{e.get("kind", "")}»: '
+                      f'{e.get("url", "")}', C.err)
+        else:
+            _line('✅ На кривых дублях адресов сервер отвечает штатно '
+                  '(200/301/404), 5xx нет.', C.ok)
+
+
 # ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
 
 
@@ -4508,6 +4656,7 @@ def build_report(
     p404_check: dict = None,       # страница 404 (п.1.18) - лист «Страница 404»
     ps_filters: dict = None,       # фильтры ПС (п.1.19) - лист «Фильтры ПС»
     search_check: dict = None,     # поиск находит категории - секция «Вёрстки»
+    stress_check: dict = None,     # ошибки сервера: парсинг/нагрузка/дубли - лист «Нагрузка и парсинг»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -4715,6 +4864,20 @@ def build_report(
         summary_text += (f'\nОшибки JavaScript: на {_console_bad} '
                          f'{_plural_pages(_console_bad)} есть ошибки в консоли '
                          f'- см. лист «Ошибки JavaScript».')
+    if stress_check and stress_check.get('available'):
+        _sp = stress_check.get('parsing') or {}
+        _sl = stress_check.get('load') or {}
+        _sd = stress_check.get('duplicates') or {}
+        _s5 = (len(_sp.get('server_errors') or [])
+               + sum(p.get('server_5xx', 0) for p in (_sl.get('pages') or []))
+               + len(_sd.get('server_errors') or []))
+        if _sp.get('banned'):
+            summary_text += ('\nНагрузка и парсинг: сайт закрыл доступ '
+                             '(принял бота за парсера) - см. лист «Нагрузка '
+                             'и парсинг».')
+        elif _s5:
+            summary_text += (f'\nНагрузка и парсинг: ошибок сервера (5xx) '
+                             f'{_s5} - см. лист «Нагрузка и парсинг».')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -4773,6 +4936,7 @@ def build_report(
         ('Валидация и скорость', 'если есть лист - валидность HTML/CSS (W3C) и время загрузки ресурсов по выборке (п.1.16).'),
         ('Страница 404', 'если есть лист - несуществующий адрес отдаёт 404, дизайн/тексты/навигация 404-страницы (п.1.18).'),
         ('Фильтры ПС', 'если есть лист - санкции поисковых систем: диагностика Вебмастера + маркеры ручных мер в почте GSC (п.1.19).'),
+        ('Нагрузка и парсинг', 'если есть лист - нет ли ошибок сервера при быстром обходе (парсинге), параллельной нагрузке и кривых дублях URL категорий/фильтров/товаров.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
@@ -4827,6 +4991,9 @@ def build_report(
 
     # ─── Лист «Фильтры ПС» (п.1.19) - если проверка выполнялась ────────
     _build_ps_filters_sheet(wb, ps_filters)
+
+    # ─── Лист «Нагрузка и парсинг» - если стресс-пробы выполнялись ─────
+    _build_stress_sheet(wb, stress_check)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

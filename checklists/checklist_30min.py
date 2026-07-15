@@ -656,6 +656,7 @@ def init_session():
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
+        'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
         'c30_check_w3c': True,         # п.1.16 - валидация W3C + скорость
         'c30_check_static': True,      # п.1.17 - сжатие/кеш статики
         'c30_check_404': True,         # п.1.18 - страница 404
@@ -1287,6 +1288,28 @@ if pid:
                          'ресайзе (масштаб Ctrl+/- покрыт той же сеткой), на '
                          'мобильном шрифт минимум 14px. Тяжёлый браузерный '
                          'проход - по запросу.')
+        _ck_stress = st.checkbox(
+            'Ошибки сервера: парсинг, нагрузка, дубли URL (по запросу)',
+            key='c30_check_stress',
+            help='В конце прогона гоняет три сетевые пробы на прод: (1) '
+                 'быстрый обход страниц парсингом; (2) параллельный залп '
+                 'по репрезентативным страницам; (3) кривые дубли адресов '
+                 'категорий/фильтров/товаров (сдвоенный сегмент, двойной '
+                 'слэш, глубокая пагинация). Ищем ошибки сервера (5xx), '
+                 'обрывы и деградацию скорости. При первых 5xx/обрывах проба '
+                 'сама останавливается (не добивает сервер); поймали бан на '
+                 'парсинге - нагрузку и дубли пропускаем. Создаёт реальную '
+                 'нагрузку на боевой сайт - по запросу. Результат: лист '
+                 '«Нагрузка и парсинг».')
+        if _ck_stress:
+            st.slider('Параллельных запросов в залпе нагрузки',
+                      min_value=10, max_value=50, value=30, step=5,
+                      key='c30_stress_concurrency',
+                      help='Сколько запросов летят к сайту одновременно в '
+                           'момент пробы нагрузки. 15 - лёгкий безопасный '
+                           'всплеск; 30 (по умолчанию) - заметный, '
+                           'показательный; выше - ближе к тому, что защита '
+                           'примет за атаку (риск бана).')
 
         # ── Автокликер (локальный Chrome или облако с сессией) ──────
         _ck_ac = st.checkbox(
@@ -1372,6 +1395,8 @@ if pid:
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_check_filter_fn', False)),
         bool(st.session_state.get('c30_check_console', False)),
+        bool(st.session_state.get('c30_check_stress', False)),
+        int(st.session_state.get('c30_stress_concurrency', 30)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1430,6 +1455,8 @@ if pid:
                 'check_links': st.session_state.get('c30_check_links', False),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'check_console': st.session_state.get('c30_check_console', False),
+                'check_stress': st.session_state.get('c30_check_stress', False),
+                'stress_concurrency': int(st.session_state.get('c30_stress_concurrency', 30)),
                 'check_w3c': st.session_state.get('c30_check_w3c', False),
                 'check_static': st.session_state.get('c30_check_static', False),
                 'check_404': st.session_state.get('c30_check_404', True),

@@ -922,6 +922,51 @@ def run_check(pid, params, creds, log, progress):
             except Exception as _e:
                 log(f'⚠ Фильтры ПС: {_e}')
 
+        # ── Ошибки сервера: парсинг / нагрузка / дубли URL (по галочке) ──
+        # Тяжёлые сетевые пробы на прод: гоняем В КОНЦЕ, отчёт по страницам
+        # уже собран - падение сервера/бан здесь = находка, не сбой прогона.
+        _stress_check = None
+        if params.get('check_stress'):
+            try:
+                from stress_checker import run_stress_check
+                _ok = [r for r in results if r.is_ok]
+
+                def _first_ok(tc):
+                    return next((r for r in _ok if r.type_code == tc), None)
+                # Парсинг - выборка каталога (категории/фильтры/товары).
+                _parse = [r.url for r in _ok
+                          if r.type_code in ('category', 'filter', 'product')]
+                # Нагрузка - репрезентативные страницы (главная/категория/фильтр).
+                _load_rs = [r for r in (_first_ok('main'), _first_ok('category'),
+                                        _first_ok('filter')) if r]
+                _load_pages = [r.url for r in _load_rs]
+                _baselines = {r.url: r.elapsed_ms for r in _load_rs
+                              if r.elapsed_ms}
+                # Дубли - по одному образцу каждого типа каталога.
+                _dup = [(tc, _first_ok(tc).url)
+                        for tc in ('category', 'filter', 'product')
+                        if _first_ok(tc)]
+                _conc = int(params.get('stress_concurrency', 30))
+                if _parse or _load_pages or _dup:
+                    log('Ошибки сервера (парсинг/нагрузка/дубли): '
+                        f'параллельность {_conc}…')
+                    _stress_check = asyncio.run(run_stress_check(
+                        parse_urls=_parse, load_pages=_load_pages,
+                        dup_samples=_dup, baselines=_baselines,
+                        proxy_url=proxy_url, concurrency=_conc,
+                        log=lambda m: log(m)))
+                    _p = (_stress_check or {}).get('parsing') or {}
+                    _l = (_stress_check or {}).get('load') or {}
+                    _d = (_stress_check or {}).get('duplicates') or {}
+                    _n5 = (len(_p.get('server_errors') or [])
+                           + sum(pg.get('server_5xx', 0)
+                                 for pg in (_l.get('pages') or []))
+                           + len(_d.get('server_errors') or []))
+                    log(f'✓ Ошибки сервера: 5xx-находок {_n5}'
+                        + (', БАН на парсинге' if _p.get('banned') else ''))
+            except Exception as _e:
+                log(f'⚠ Ошибки сервера (стресс-пробы): {_e}')
+
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых
         # галочках: выключил сбор - листов «Уведомления» / «404 из Метрики» /
@@ -959,7 +1004,8 @@ def run_check(pid, params, creds, log, progress):
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,
             w3c_check=_w3c_check, p404_check=_p404_check,
-            ps_filters=_ps_filters, search_check=_search_check)
+            ps_filters=_ps_filters, search_check=_search_check,
+            stress_check=_stress_check)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
