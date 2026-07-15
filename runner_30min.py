@@ -223,6 +223,56 @@ def _run_index404_download(pid, params, log, session_b64=None):
                 'error': f'результат не прочитан: {e}'}
 
 
+def _run_gsc_index404(pid, params, log, session_b64=None):
+    """Авто-экспорт «Не найдено (404)» / «Ошибка сервера (5xx)» из Google
+    Search Console браузером. Та же сессия, что у автокликеров/Яндекса
+    (у Google свои cookies в ней). Возвращает dict в форме «404 в индексе»
+    с source='Google' у записей."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    if not _cdp_alive():
+        if session_b64:
+            try:
+                from autoclick_browser import (
+                    session_file_from_secret, MODE_ENV, SESSION_FILE_ENV)
+                _env[MODE_ENV] = 'cloud'
+                _env[SESSION_FILE_ENV] = session_file_from_secret(session_b64)
+            except Exception as _e:
+                return {'available': False, 'source': 'gsc', 'hosts': [],
+                        'error': f'сессия autoclick_session не читается: {_e}'}
+        else:
+            return {'available': False, 'source': 'gsc', 'hosts': [],
+                    'error': ('нет ни локального Chrome, ни сессии в Secrets '
+                              '(autoclick_session) - GSC пропущен.')}
+    (root / 'cache').mkdir(exist_ok=True)
+    _res_file = root / 'cache' / f'index_gsc_{pid}.json'
+    try:
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    args = [_sys.executable, 'index_gsc_run.py', '--project', pid]
+    log('404 в индексе (GSC): открываю Search Console, качаю 404/5xx…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [404-GSC] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        return {'available': False, 'source': 'gsc', 'hosts': [], 'error': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'source': 'gsc', 'hosts': [],
+                'error': f'результат GSC не прочитан: {e}'}
+
+
 def _run_filters_test(pid, params, log, category_urls=None):
     """Фильтр-тест товаров в браузере (доп. чек-лист). Отдельный процесс
     filters_run.py (Playwright): локальный CDP-Chrome не нужен, каталог
@@ -912,9 +962,20 @@ def run_check(pid, params, creds, log, progress):
                             f'{_sm_404.get("total_dead", 0)}')
                 except Exception as _e:
                     log(f'⚠ 404 в индексе (sitemap): {_e}')
+            # Источник 3 — Google Search Console: браузер экспортирует причины
+            # «Не найдено (404)» и «Ошибка сервера (5xx)». Domain-ресурс покрывает
+            # и поддомены, поэтому ловит 404, которых нет у Яндекса/в sitemap.
+            _gsc_404 = None
+            if params.get('index_404_gsc', True):
+                _gsc_404 = _run_gsc_index404(
+                    pid, params, log, session_b64=creds.get('autoclick_session'))
+                if _gsc_404.get('error'):
+                    log(f'⚠ 404 в индексе (GSC): {_gsc_404["error"]}')
+                else:
+                    log(f'404 в индексе (GSC): битых {_gsc_404.get("total_dead", 0)}')
             # Слияние источников в одну таблицу отчёта.
             from index_export_parser import merge_index_404
-            _index_404 = merge_index_404(_wm_404, _sm_404)
+            _index_404 = merge_index_404(_wm_404, _sm_404, _gsc_404)
             if _index_404 and not _index_404.get('error'):
                 log(f'404 в индексе (итог): проверено '
                     f'{_index_404.get("total_checked", 0)}, битых 404/410 '

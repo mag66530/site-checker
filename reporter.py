@@ -3164,16 +3164,19 @@ def _build_index_404_sheet(wb, index_404_check):
         if not url:
             return
         code = _index_404_code(r.get('status'))
+        # Код для показа: число, если известно; иначе сырой статус (GSC 5xx).
+        code_txt = str(code) if code else (str(r.get('status') or '').strip() or '—')
         src = r.get('source', '')
         p = by_url.get(url)
         if p is None:
-            by_url[url] = {'site': site, 'url': url, 'code': code, 'kind': kind,
+            by_url[url] = {'site': site, 'url': url, 'code': code,
+                           'code_txt': code_txt, 'kind': kind,
                            'sources': ({src} if src else set())}
         else:
             if src:
                 p['sources'].add(src)
             if _RANK.get(kind, 9) < _RANK.get(p['kind'], 9):
-                p.update(site=site, code=code, kind=kind)
+                p.update(site=site, code=code, code_txt=code_txt, kind=kind)
 
     for h in hosts:
         site = h.get('host', '')
@@ -3327,7 +3330,7 @@ def _build_index_404_sheet(wb, index_404_check):
         pc.font = _font(size=10, bold=True, color=color)
         pc.alignment = _align(indent=1)
         e = ws.cell(row=row, column=5)
-        e.value = p['code'] or '—'
+        e.value = p.get('code_txt') or '—'
         e.font = _font(size=10, color=color)
         e.alignment = _align(horizontal='center')
         s = ws.cell(row=row, column=6)

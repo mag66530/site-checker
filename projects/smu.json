@@ -22,5 +22,7 @@
   ],
   "has_filters": true,
   "use_proxy": false,
-  "kp_sheet_url": ""
+  "kp_sheet_url": "",
+  "gsc_resource": "sc-domain:stalmetural.ru",
+  "gsc_account": "2"
 }
