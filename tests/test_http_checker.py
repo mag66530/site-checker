@@ -170,6 +170,39 @@ def test_check_content_links_none_when_no_links():
     assert res is None and sess.calls == []
 
 
+def test_filter_price_var_issues():
+    """#ПЕРЕМЕННАЯ# (мин. цена) - только товарные страницы с товаром;
+    другие паттерны фильтр не трогает."""
+    from http_checker import filter_price_var_issues
+    from text_checker import TextIssue
+    from content_checker import check_content
+
+    price = TextIssue(pattern='#ПЕРЕМЕННАЯ#', match='#MIN_PRICE#',
+                      context='цена от #MIN_PRICE#')
+    city = TextIssue(pattern='{{...}}', match='{{city}}', context='в {{city}}')
+
+    # Карточка товара - оставляем всегда (товар есть по определению).
+    assert filter_price_var_issues([price], 'product', None) == [price]
+    # Главная/тех - переменной цены не место, находка убирается, чужая остаётся.
+    assert filter_price_var_issues([price, city], 'main', None) == [city]
+    assert filter_price_var_issues([price], 'tech', None) == []
+    # Категория без структурной проверки - судим по типу, оставляем.
+    assert filter_price_var_issues([price], 'category', None) == [price]
+    # Категория-листинг с карточками товаров - оставляем.
+    listing = check_content(
+        '<h1>Труба</h1>' + '<div class="catalog-product-card-item">'
+        '<a href="/p/">Труба 10</a> 100 ₽</div>' * 3, 'category')
+    assert filter_price_var_issues([price], 'category', listing) == [price]
+    # Пустая категория (карточек нет) - цене неоткуда взяться, молчим.
+    empty = check_content('<h1>Пустой раздел</h1><p>Товаров нет</p>',
+                          'category')
+    assert filter_price_var_issues([price, city], 'category', empty) == [city]
+    # Без находок цены - вход не меняется.
+    assert filter_price_var_issues([city], 'main', None) == [city]
+    assert filter_price_var_issues([], 'category', None) == []
+    print('✓ фильтр переменной мин. цены: только товарные страницы с товаром')
+
+
 if __name__ == '__main__':
     test_classify_2xx()
     test_classify_3xx()
@@ -178,4 +211,5 @@ if __name__ == '__main__':
     test_classify_errors()
     test_should_retry()
     test_rate_speed()
+    test_filter_price_var_issues()
     print('\n✅ Все тесты http_checker.py прошли')

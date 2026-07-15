@@ -598,6 +598,27 @@ async def check_content_links(session, html, base_url, *, proxy_url=None,
 # ── Проверка с ретраями ─────────────────────────────────────────────
 
 
+def filter_price_var_issues(text_issues, type_code, content):
+    """Находки '#ПЕРЕМЕННАЯ#' (переменная минимальной цены, #MIN_PRICE#
+    и т.п.) оставляем только на товарных страницах, где товар ЕСТЬ:
+    карточка товара - всегда; категория/фильтр - если распознаны карточки
+    товаров (product_cards) либо страница - листинг; прочие типы страниц -
+    убираем. Структурная проверка выключена (content=None) - судим только
+    по типу страницы. Остальные паттерны не трогаем."""
+    if not text_issues or not any(i.pattern == '#ПЕРЕМЕННАЯ#'
+                                  for i in text_issues):
+        return text_issues
+    keep = type_code in ('category', 'filter', 'product')
+    if keep and content is not None and type_code in ('category', 'filter'):
+        pc = next((b for b in getattr(content, 'blocks', None) or []
+                   if getattr(b, 'code', '') == 'product_cards'), None)
+        keep = bool(pc and pc.present) \
+            or getattr(content, 'page_kind', '') == 'listing'
+    if keep:
+        return text_issues
+    return [i for i in text_issues if i.pattern != '#ПЕРЕМЕННАЯ#']
+
+
 async def check_one(
     session: aiohttp.ClientSession,
     task,                       # CheckTask из sources.py
@@ -679,6 +700,12 @@ async def check_one(
                                     css_hidden=css_hidden, url=task.url)
         except Exception:
             content = None
+
+    # Переменная мин. цены (#MIN_PRICE# и т.п.): считается находкой только
+    # на товарных страницах, где товар ЕСТЬ - на пустой категории цене
+    # неоткуда взяться (это контент, не разработка), прочие типы страниц
+    # шаблон цены не используют.
+    text_issues = filter_price_var_issues(text_issues, task.type_code, content)
 
     # Сверка контактов с КП - только на главной поддомена (шапка/подвал -
     # сквозные, контакты привязаны к городу/домену).
