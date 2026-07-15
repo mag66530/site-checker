@@ -101,6 +101,8 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'check_security': True,  # доп. 1.8 - заголовки безопасности HTTP
         'check_images': True,    # п.1.15 - изображения (alt/webp/вес)
         'check_links': False,   # «ссылки открываются (404)» - тяжёлая, по запросу
+        'check_index_404': True,  # 404 среди страниц в индексе (Вебмастер) - регулярный мониторинг
+        'index_404_max_per_host': 200,  # выборка URL из индекса на хост (бюджет ежедневного прогона)
         'check_filter_fn': False,  # фильтр-тест (браузер) - по запросу, не в расписании
         'check_console': False,    # п.1.14 ошибки JS (браузер) - по запросу
         'check_w3c': False,        # п.1.16 валидация W3C + скорость - по запросу, не в расписании

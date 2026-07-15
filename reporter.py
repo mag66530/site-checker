@@ -3135,6 +3135,136 @@ def _build_404_sheet(wb, p404_check):
         row += 1
 
 
+# ── Лист «404 в индексе» (регулярный мониторинг страниц в поиске) ───
+
+
+def _build_index_404_sheet(wb, index_404_check):
+    """Лист 404-мониторинга страниц В ИНДЕКСЕ: берём выборку URL, которые
+    Яндекс держит в поиске (Вебмастер API), и прозваниваем на код ответа.
+    Добавляется, только если проверка выполнялась."""
+    if not index_404_check:
+        return
+    hosts = index_404_check.get('hosts') or []
+    total_dead = index_404_check.get('total_dead', 0)
+    total_soft = index_404_check.get('total_soft', 0)
+    has_bugs = bool(total_dead or total_soft)
+    has_warns = any(h.get('errors') for h in hosts)
+
+    ws = wb.create_sheet('404 в индексе')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = (C.err if has_bugs
+                                    else C.warn if has_warns else C.ok)
+
+    for col, w in (('A', 3), ('B', 30), ('C', 78), ('D', 34), ('E', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:D2')
+    c = ws['B2']
+    c.value = '404 среди страниц в индексе'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:D3')
+    c = ws['B3']
+    c.value = ('Берём выборку URL, которые Яндекс сейчас держит в поиске '
+               '(Вебмастер API, «страницы в поиске»), и прозваниваем каждый '
+               'на код ответа. Страница в индексе, отдающая 404/410 или '
+               'soft-404 (код 200 на заглушке «страница не найдена»), - баг: '
+               'посетитель из выдачи попадает в никуда. У Google списка '
+               'проиндексированных URL через API нет, поэтому источник - '
+               'Яндекс.Вебмастер. Прочие 4xx (403/401) - вероятная блокировка '
+               'бота, вынесены в предупреждения. Проверка рассчитана на '
+               'регулярный запуск (ежедневное расписание).')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 70
+
+    row = 5
+
+    # Ошибка сбора (нет токена / API недоступен) - показываем и выходим.
+    if index_404_check.get('error') and not hosts:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2)
+        c.value = '⚠ Проверка не выполнилась: ' + str(index_404_check['error'])
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True)
+        return
+    if not index_404_check.get('available') or not hosts:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2)
+        c.value = 'Проверка не выполнялась.'
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True)
+        return
+
+    # Итоговая строка-сводка.
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+    c = ws.cell(row=row, column=2)
+    _total_checked = index_404_check.get('total_checked', 0)
+    c.value = (f'Проверено {_total_checked} страниц из индекса   ·   '
+               f'404/410: {total_dead}   ·   soft-404: {total_soft}')
+    c.font = _font(size=12, bold=True,
+                   color=(C.err if has_bugs else C.ok))
+    ws.row_dimensions[row].height = 22
+    row += 2
+
+    def _line(text, color, indent=2, link=None):
+        nonlocal row
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2)
+        c.value = text
+        c.font = _font(size=10, color=color)
+        c.alignment = _align(indent=indent, wrap=True)
+        if link:
+            c.hyperlink = link
+        ws.row_dimensions[row].height = 16
+        row += 1
+
+    _MAX_ERR_LIST = 25   # ошибки/недоступности listing cap на хост
+
+    for h in hosts:
+        # Заголовок хоста + счётчики.
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2)
+        _n_dead, _n_soft = len(h.get('dead') or []), len(h.get('soft') or [])
+        _n_err = len(h.get('errors') or [])
+        c.value = (f'{h.get("host", "")}   —   в индексе ~{h.get("in_index_total", 0)}, '
+                   f'проверено {h.get("checked", 0)}   '
+                   f'(404/410: {_n_dead}, soft: {_n_soft}, ошибок: {_n_err}, '
+                   f'редиректов: {h.get("redirects", 0)})')
+        c.font = _font(size=11, bold=True)
+        c.fill = _fill(C.surface)
+        c.alignment = _align(indent=1)
+        c.border = _border()
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+        if not (h.get('dead') or h.get('soft') or h.get('errors')):
+            if h.get('checked'):
+                _line('✅ Все проверенные страницы из индекса отвечают корректно.',
+                      C.ok)
+            else:
+                _line('⚠ Выборку страниц в поиске получить не удалось '
+                      '(нет данных по хосту).', C.text_muted)
+            row += 1
+            continue
+
+        for r in h.get('dead') or []:
+            _line('❌ 404/410  ' + r.get('url', ''), C.err,
+                  link=r.get('url'))
+        for r in h.get('soft') or []:
+            _line('⚠ soft-404  ' + r.get('url', ''), C.warn,
+                  link=r.get('url'))
+        _errs = h.get('errors') or []
+        for r in _errs[:_MAX_ERR_LIST]:
+            _line(f'· {r.get("reason", "не ответила")}: {r.get("url", "")}',
+                  C.text_muted, link=r.get('url'))
+        if len(_errs) > _MAX_ERR_LIST:
+            _line(f'…ещё {len(_errs) - _MAX_ERR_LIST} страниц с ошибкой ответа '
+                  f'(сервер/таймаут/блок) - см. полный прогон.', C.text_muted)
+        row += 1
+
+
 # ── Лист «Фильтры ПС» (п.1.19: санкции поисковых систем) ───────────
 
 
@@ -4508,6 +4638,7 @@ def build_report(
     p404_check: dict = None,       # страница 404 (п.1.18) - лист «Страница 404»
     ps_filters: dict = None,       # фильтры ПС (п.1.19) - лист «Фильтры ПС»
     search_check: dict = None,     # поиск находит категории - секция «Вёрстки»
+    index_404_check: dict = None,  # 404 среди страниц в индексе - лист «404 в индексе»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -4772,6 +4903,7 @@ def build_report(
         ('Ошибки JavaScript', 'если есть лист - страницы, где в консоли браузера есть ошибки JS (п.1.14).'),
         ('Валидация и скорость', 'если есть лист - валидность HTML/CSS (W3C) и время загрузки ресурсов по выборке (п.1.16).'),
         ('Страница 404', 'если есть лист - несуществующий адрес отдаёт 404, дизайн/тексты/навигация 404-страницы (п.1.18).'),
+        ('404 в индексе', 'если есть лист - страницы, которые Яндекс держит в поиске, но они отдают 404/410/soft-404 (регулярный мониторинг).'),
         ('Фильтры ПС', 'если есть лист - санкции поисковых систем: диагностика Вебмастера + маркеры ручных мер в почте GSC (п.1.19).'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
@@ -4824,6 +4956,9 @@ def build_report(
 
     # ─── Лист «Страница 404» (п.1.18) - если проверка выполнялась ──────
     _build_404_sheet(wb, p404_check)
+
+    # ─── Лист «404 в индексе» - если проверка выполнялась ──────────────
+    _build_index_404_sheet(wb, index_404_check)
 
     # ─── Лист «Фильтры ПС» (п.1.19) - если проверка выполнялась ────────
     _build_ps_filters_sheet(wb, ps_filters)

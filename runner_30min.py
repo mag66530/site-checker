@@ -823,6 +823,34 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Страница 404: {_e}')
 
+        # ── 404 среди страниц В ИНДЕКСЕ (регулярный мониторинг) ──
+        # Берём выборку URL, которые Яндекс держит в поиске (Вебмастер API),
+        # и прозваниваем каждый на 404/410/soft-404. Тот же OAuth-токен, что
+        # и диагностика Вебмастера; на боевой сайт ходим только по этим URL.
+        _index_404 = None
+        if params.get('check_index_404'):
+            _wm_tok = creds.get('webmaster_oauth')
+            if _wm_tok:
+                try:
+                    from index_pages_checker import check_index_404
+                    log('404 в индексе: беру выборку из Вебмастера и прозваниваю…')
+                    _index_404 = check_index_404(
+                        pid, _wm_tok, proxy_url=proxy_url,
+                        max_urls_per_host=int(
+                            params.get('index_404_max_per_host', 300)),
+                        log=_nlog)
+                    if _index_404.get('error'):
+                        log(f'⚠ 404 в индексе: {_index_404["error"]}')
+                    else:
+                        log(f'404 в индексе: проверено '
+                            f'{_index_404.get("total_checked", 0)}, битых 404/410 '
+                            f'{_index_404.get("total_dead", 0)}, soft-404 '
+                            f'{_index_404.get("total_soft", 0)}')
+                except Exception as _e:
+                    log(f'⚠ 404 в индексе: {_e}')
+            else:
+                log(f'⚠ 404 в индексе: токен не задан (yandex_oauth_{pid})')
+
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный
         # из прогона, а если фильтров в выборке нет - из базы каталога.
@@ -959,7 +987,8 @@ def run_check(pid, params, creds, log, progress):
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,
             w3c_check=_w3c_check, p404_check=_p404_check,
-            ps_filters=_ps_filters, search_check=_search_check)
+            ps_filters=_ps_filters, search_check=_search_check,
+            index_404_check=_index_404)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
@@ -1031,7 +1060,9 @@ def run_check(pid, params, creds, log, progress):
                         if getattr(r, 'has_layout_issues', False)),
                     markup_issues_pages=sum(
                         1 for r in results
-                        if getattr(r, 'has_markup_issues', False)))
+                        if getattr(r, 'has_markup_issues', False)),
+                    index_404_dead=((_index_404 or {}).get('total_dead', 0)
+                                    + (_index_404 or {}).get('total_soft', 0)))
                 tg_result = send_run_notification(
                     bot_token=tg_token, recipients=tg_recipients,
                     project_name=cfg['name'], summary_text=summary_text,
