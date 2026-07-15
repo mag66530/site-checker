@@ -4143,10 +4143,21 @@ def _снять_size_with_cells(path: str) -> None:
     except Exception:  # noqa: BLE001
         return
     pat = re.compile(rb"<[A-Za-z0-9_]*:?SizeWithCells\s*/>")
+    # Гарантируем МИНИМАЛЬНЫЙ размер окна заметки прямо в VML - не полагаясь на
+    # то, что openpyxl (в разных версиях по-разному) применил width/height из
+    # Comment(). Маленькое окно = обрезанный текст. Большое оставляем как есть.
+    pat_size = re.compile(rb"width:(\d+)px;height:(\d+)px")
+
+    def _min_size(m):
+        w = max(400, int(m.group(1)))
+        h = max(150, int(m.group(2)))
+        return ("width:%dpx;height:%dpx" % (w, h)).encode()
+
     changed = False
     for n in names:
         if n.lower().endswith(".vml"):
             new = pat.sub(b"", data[n])
+            new = pat_size.sub(_min_size, new)
             if new != data[n]:
                 data[n] = new
                 changed = True
