@@ -1229,9 +1229,17 @@ def check_seo_text(html: str, type_code: str = 'category') -> dict | None:
     if not html:
         return None
     body = _CONTENT_CHROME_RE.sub(' ', html)
-    paras = _RE_P_BLOCK.findall(body)
-    text = ' '.join(re.sub(r'\s+', ' ', _RE_ANY_TAG.sub(' ', p_)).strip()
-                    for p_ in paras)
+    # SEO-текст = СВЯЗНЫЕ абзацы (от 100 симв.). Короткие <p> - обрывки
+    # из карточек товаров/баннеров: они набирали 300+ символов суммарно,
+    # страница считалась «с текстом», и дальше шло ложное «нет ключа» -
+    # хотя реально SEO-текста нет вовсе (только H2 «Манганин купить»).
+    raw_paras, paras = [], []
+    for p_ in _RE_P_BLOCK.findall(body):
+        t = re.sub(r'\s+', ' ', _RE_ANY_TAG.sub(' ', p_)).strip()
+        if len(t) >= 100:
+            raw_paras.append(p_)
+            paras.append(t)
+    text = ' '.join(paras)
     text_len = len(text)
 
     m_h1 = _RE_H1_TEXT.search(html)
@@ -1269,7 +1277,7 @@ def check_seo_text(html: str, type_code: str = 'category') -> dict | None:
 
     # Фото с alt рядом с текстом: SEO-блок обычно в нижней трети контента.
     _tail = body[-max(len(body) // 3, 20_000):]
-    if not _RE_IMG_WITH_ALT.search(' '.join(paras) + _tail):
+    if not _RE_IMG_WITH_ALT.search(' '.join(raw_paras) + _tail):
         warnings.append('в SEO-тексте нет фото с alt')
 
     if not _RE_SEO_STRUCT.search(_tail):
