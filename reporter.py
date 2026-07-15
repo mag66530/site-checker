@@ -3371,6 +3371,102 @@ def _build_stress_sheet(wb, stress_check):
                   '(200/301/404), 5xx нет.', C.ok)
 
 
+# ── Лист «Ссылочный профиль» (lite-проверка беклинков, Вебмастер) ──
+
+
+def _build_link_profile_sheet(wb, link_profile):
+    """Лист «Ссылочный профиль»: объём/доноры/динамика/спам по данным
+    Яндекс.Вебмастера + ссылка на ручную сверку GSC. Добавляется, только
+    если проверка выполнялась."""
+    if not link_profile:
+        return
+    hosts = link_profile.get('hosts') or []
+    has_warn = any(h.get('warnings') for h in hosts)
+
+    ws = wb.create_sheet('Ссылочный профиль')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.warn if has_warn else C.ok
+    for col, w in (('A', 3), ('B', 34), ('C', 62), ('D', 42), ('E', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:D2')
+    c = ws['B2']
+    c.value = 'Ссылочный профиль (lite)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:D3')
+    c = ws['B3']
+    c.value = ('Беклинки по официальным данным Яндекс.Вебмастера (API v4). '
+               'Смотрим: объём (всего внешних ссылок и доноров), динамику '
+               '(резкий обвал = потеря ссылок; резкий всплеск = возможный '
+               'спам/накрутка) и подозрительных доноров (мусорные зоны, '
+               'gambling/adult). Глубокий аудит (Ahrefs/Majestic) - платный, '
+               'здесь его нет. У Google API беклинков нет - в конце ссылка '
+               'на ручную сверку в GSC.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 62
+
+    row = 5
+
+    def _line(text, color, bold=False, link=None, indent=1):
+        nonlocal row
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2)
+        c.value = text
+        c.font = _font(size=10, bold=bold, color=color,
+                       underline='single' if link else None)
+        if link:
+            c.hyperlink = link
+        c.alignment = _align(indent=indent, wrap=True)
+        ws.row_dimensions[row].height = 18
+        row += 1
+
+    if not link_profile.get('available'):
+        _line(f'⚪ {link_profile.get("note", "Проверка не выполнена.")}',
+              C.text_muted)
+        return
+    if not hosts:
+        _line('⚪ Верифицированных в Вебмастере хостов проекта не нашлось - '
+              'привяжите сайт в Вебмастере под тем же аккаунтом.', C.text_muted)
+
+    for h in hosts:
+        _line(h.get('host', ''), C.text, bold=True)
+        _hist = h.get('history') or {}
+        _dyn = ''
+        if _hist.get('points'):
+            _dyn = (f' · динамика: было {_hist.get("first")} → сейчас '
+                    f'{_hist.get("latest")} (пик {_hist.get("peak")})')
+        _line(f'Всего внешних ссылок: {h.get("total", 0)} · доноров в выборке: '
+              f'{h.get("distinct_hosts", 0)} (из {h.get("sample_size", 0)} '
+              f'ссылок){_dyn}', C.text_soft, indent=2)
+        for w in (h.get('warnings') or []):
+            _line(f'⚠ {w}', C.warn, indent=2)
+        if h.get('spam_hosts'):
+            _line('  спам-доноры (примеры): '
+                  + ', '.join(h['spam_hosts'])
+                  + (f' … +{h["spam_count"] - len(h["spam_hosts"])}'
+                     if h.get('spam_count', 0) > len(h['spam_hosts']) else ''),
+                  C.text_muted, indent=2)
+        for inf in (h.get('infos') or []):
+            _line(f'· {inf}', C.text_muted, indent=2)
+        if not (h.get('warnings') or h.get('infos')):
+            _line('✅ Профиль в норме: динамика стабильна, спам-доноров в '
+                  'выборке нет.', C.ok, indent=2)
+        if h.get('panel_url'):
+            _line('Открыть раздел «Ссылки» в Вебмастере', C.accent, indent=2,
+                  link=h['panel_url'])
+        row += 1
+
+    # ── Google - ручная сверка ──
+    _line('Google (беклинков по API нет - ручная сверка)', C.text, bold=True)
+    _line('Search Console → «Ссылки»: внешние ссылки, топ сайтов-доноров, '
+          'анкоры.', C.accent,
+          link=link_profile.get('gsc_links_url')
+          or 'https://search.google.com/search-console/links')
+
+
 # ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
 
 
@@ -4659,6 +4755,7 @@ def build_report(
     ps_filters: dict = None,       # фильтры ПС (п.1.19) - лист «Фильтры ПС»
     search_check: dict = None,     # поиск находит категории - секция «Вёрстки»
     stress_check: dict = None,     # ошибки сервера: парсинг/нагрузка/дубли - лист «Нагрузка и парсинг»
+    link_profile: dict = None,     # lite-профиль ссылок (Вебмастер) - лист «Ссылочный профиль»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -4880,6 +4977,13 @@ def build_report(
         elif _s5:
             summary_text += (f'\nНагрузка и парсинг: ошибок сервера (5xx) '
                              f'{_s5} - см. лист «Нагрузка и парсинг».')
+    if link_profile and link_profile.get('available'):
+        _lp_w = sum(len(h.get('warnings') or [])
+                    for h in (link_profile.get('hosts') or []))
+        if _lp_w:
+            summary_text += (f'\nСсылочный профиль: замечаний {_lp_w} '
+                             f'(обвал/всплеск/спам) - см. лист «Ссылочный '
+                             f'профиль».')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -4939,6 +5043,7 @@ def build_report(
         ('Страница 404', 'если есть лист - несуществующий адрес отдаёт 404, дизайн/тексты/навигация 404-страницы (п.1.18).'),
         ('Фильтры ПС', 'если есть лист - санкции поисковых систем: диагностика Вебмастера + маркеры ручных мер в почте GSC (п.1.19).'),
         ('Нагрузка и парсинг', 'если есть лист - нет ли ошибок сервера при быстром обходе (парсинге), параллельной нагрузке и кривых дублях URL категорий/фильтров/товаров.'),
+        ('Ссылочный профиль', 'если есть лист - lite-проверка беклинков по Яндекс.Вебмастеру: объём, доноры, динамика (обвал/всплеск), спам-доноры.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
@@ -4996,6 +5101,9 @@ def build_report(
 
     # ─── Лист «Нагрузка и парсинг» - если стресс-пробы выполнялись ─────
     _build_stress_sheet(wb, stress_check)
+
+    # ─── Лист «Ссылочный профиль» - если lite-проверка выполнялась ─────
+    _build_link_profile_sheet(wb, link_profile)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

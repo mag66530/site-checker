@@ -922,6 +922,31 @@ def run_check(pid, params, creds, log, progress):
             except Exception as _e:
                 log(f'⚠ Фильтры ПС: {_e}')
 
+        # ── Lite-проверка ссылочного профиля (по галочке) ──
+        # Официальные данные Яндекс.Вебмастера (links/external): объём,
+        # доноры, динамика, спам. Тот же OAuth-токен, что и диагностика.
+        _link_profile = None
+        if params.get('check_link_profile'):
+            _lp_token = creds.get('webmaster_oauth')
+            if _lp_token:
+                try:
+                    from link_profile import fetch_link_profile
+                    log('Ссылочный профиль: тяну данные Вебмастера…')
+                    _link_profile = fetch_link_profile(
+                        pid, _lp_token, _proxy, log=lambda m: log(m))
+                    _lp_hosts = (_link_profile or {}).get('hosts') or []
+                    _lp_warn = sum(len(h.get('warnings') or [])
+                                   for h in _lp_hosts)
+                    log(f'✓ Ссылочный профиль: хостов {len(_lp_hosts)}, '
+                        f'предупреждений {_lp_warn}')
+                except Exception as _e:
+                    log(f'⚠ Ссылочный профиль: {_e}')
+            else:
+                log('⚠ Ссылочный профиль: OAuth-токен Вебмастера не задан '
+                    '(webmaster_oauth) - пропуск.')
+                _link_profile = {'available': False,
+                                 'note': 'OAuth-токен Вебмастера не задан.'}
+
         # ── Ошибки сервера: парсинг / нагрузка / дубли URL (по галочке) ──
         # Тяжёлые сетевые пробы на прод: гоняем В КОНЦЕ, отчёт по страницам
         # уже собран - падение сервера/бан здесь = находка, не сбой прогона.
@@ -1019,7 +1044,7 @@ def run_check(pid, params, creds, log, progress):
             filters_test=_filters_test, console_check=_console_check,
             w3c_check=_w3c_check, p404_check=_p404_check,
             ps_filters=_ps_filters, search_check=_search_check,
-            stress_check=_stress_check)
+            stress_check=_stress_check, link_profile=_link_profile)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

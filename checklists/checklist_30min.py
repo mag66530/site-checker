@@ -657,6 +657,7 @@ def init_session():
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
         'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
+        'c30_check_link_profile': False,  # lite-профиль ссылок (Вебмастер API) - по запросу
         'c30_check_w3c': True,         # п.1.16 - валидация W3C + скорость
         'c30_check_static': True,      # п.1.17 - сжатие/кеш статики
         'c30_check_404': True,         # п.1.18 - страница 404
@@ -1324,6 +1325,17 @@ if pid:
                                'добираются остальные из прогона. Больше '
                                'страниц - шире картина, но выше суммарная '
                                'нагрузка на сайт.')
+        st.checkbox('Lite-проверка ссылочного профиля (Яндекс.Вебмастер)',
+                    key='c30_check_link_profile',
+                    help='Беклинки по официальным данным Яндекс.Вебмастера '
+                         '(тот же OAuth-токен, что и диагностика): объём '
+                         '(всего внешних ссылок и доноров), динамика (резкий '
+                         'обвал = потеря ссылок, всплеск = возможный спам/'
+                         'накрутка) и подозрительные доноры (мусорные зоны, '
+                         'gambling/adult). Глубокий аудит (Ahrefs/Majestic) '
+                         'платный - здесь его нет. Нужен настроенный токен '
+                         'Вебмастера (webmaster_oauth). Результат: лист '
+                         '«Ссылочный профиль».')
 
         # ── Автокликер (локальный Chrome или облако с сессией) ──────
         _ck_ac = st.checkbox(
@@ -1412,6 +1424,7 @@ if pid:
         bool(st.session_state.get('c30_check_stress', False)),
         int(st.session_state.get('c30_stress_concurrency', 30)),
         int(st.session_state.get('c30_stress_load_pages', 3)),
+        bool(st.session_state.get('c30_check_link_profile', False)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1473,6 +1486,7 @@ if pid:
                 'check_stress': st.session_state.get('c30_check_stress', False),
                 'stress_concurrency': int(st.session_state.get('c30_stress_concurrency', 30)),
                 'stress_load_pages': int(st.session_state.get('c30_stress_load_pages', 3)),
+                'check_link_profile': st.session_state.get('c30_check_link_profile', False),
                 'check_w3c': st.session_state.get('c30_check_w3c', False),
                 'check_static': st.session_state.get('c30_check_static', False),
                 'check_404': st.session_state.get('c30_check_404', True),
