@@ -1,0 +1,176 @@
+"""Тесты классификации ячеек матрицы проверок (_матрица_классифицировать) и
+её сборки (построить_матрицу_проверок).
+
+Главное, что фиксируем — исправление бага: у колонок «Модалка открывается/
+закрывается» не было правил, поэтому «Да» (пройденная проверка!) падало в
+дефолт ⚠ «значение не распознано» и выглядело как ручная проверка. Теперь
+«Да» → ✓, «Нет» → ✗, «Проверить» → ⚠.
+
+Реальные дефекты (УЯЗВИМА, «не защищена», CSRF «Нет», «ложный успех») остаются ✗.
+Новых символов в матрице нет — только ✓/✗/⚠/–.
+
+Без браузера — чистая функция и рендер xlsx (openpyxl)."""
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "forms_tester"))
+
+t = pytest.importorskip("test_all")
+
+
+def _sym(col, val):
+    return t._матрица_классифицировать(col, val)[0]
+
+
+# ── Регресс бага: у «Модалки» не было правил → «Да» уходило в дефолт ⚠ ──
+def test_модалка_закрывается_да_галочка_а_не_предупреждение():
+    assert _sym("Модалка закрывается", "Да") == "✓"
+
+
+def test_модалка_открывается_да_галочка():
+    assert _sym("Модалка открывается", "Да") == "✓"
+
+
+def test_модалка_не_закрылась_ошибка():
+    assert _sym("Модалка закрывается", "Нет") == "✗"
+
+
+def test_модалка_проверить_остаётся_ручной():
+    assert _sym("Модалка закрывается", "Проверить") == "⚠"
+
+
+# ── Реальные дефекты не «размываются» в ✓/⚠ ──
+def test_серверная_валидация_уязвима_ошибка():
+    assert _sym("Серверная валидация", "УЯЗВИМА") == "✗"
+
+
+def test_серверная_валидация_защищена_галочка():
+    assert _sym("Серверная валидация", "Защищена") == "✓"
+
+
+def test_двойная_отправка_не_защищена_ошибка():
+    assert _sym("Двойная отправка", "не защищена") == "✗"
+
+
+def test_csrf_нет_ошибка():
+    assert _sym("CSRF-защита", "Нет") == "✗"
+
+
+def test_csrf_есть_галочка():
+    assert _sym("CSRF-защита", "Есть") == "✓"
+
+
+def test_обработка_ошибок_ложный_успех_ошибка():
+    assert _sym("Обработка ошибок", "ложный успех") == "✗"
+
+
+def test_пустое_значение_прочерк():
+    assert _sym("Серверная валидация", "") == "–"
+    assert _sym("Серверная валидация", None) == "–"
+
+
+# ── В матрице нет новых символов (только ✓/✗/⚠/–) ──
+def test_нет_нового_символа_в_правилах():
+    все_символы = set()
+    for правила in t._МАТРИЦА_ПРАВИЛА.values():
+        for _pat, sym, _cm in правила:
+            все_символы.add(sym)
+    assert все_символы <= {"✓", "✗", "⚠", "–"}, f"лишние символы: {все_символы}"
+
+
+# ── Сборка матрицы: «Да» модалки реально становится ✓, дефект остаётся ✗ ──
+def _минимальный_лог(path):
+    from openpyxl import Workbook
+    wb = Workbook()
+    sv = wb.active
+    sv.title = "Сводка"
+    ws = wb.create_sheet("Логи")
+    ws.append(list(t.LOG_HEADERS))
+    row = {h: "" for h in t.LOG_HEADERS}
+    row["Дата"] = "14.07.2026"
+    row["Город"] = "Москва"
+    row["Страница"] = "Товар"
+    row["URL"] = "https://example.ru/tovar/"
+    row["Название"] = "Купить в один клик"
+    row["Где находится"] = "Товар"
+    row["Статус"] = "УСПЕШНО (Playwright - как ручная отправка)"
+    row["Модалка закрывается"] = "Да"
+    row["CSRF-защита"] = "Есть"
+    row["Двойная отправка"] = "не защищена"
+    # Справочные колонки - должны исчезнуть из матрицы (остаться в «Логи»).
+    row["Поля очищены"] = "не очищены"
+    row["Защита от спама (пассивно)"] = "Не обнаружено"
+    ws.append([row[h] for h in t.LOG_HEADERS])
+    wb.save(path)
+
+
+def test_матрица_рендерит_модалку_галочкой(tmp_path):
+    from openpyxl import load_workbook
+    path = tmp_path / "log_forms.xlsx"
+    _минимальный_лог(path)
+    t.построить_матрицу_проверок(str(path))
+
+    wb = load_workbook(path)
+    assert "Москва" in wb.sheetnames
+    ws = wb["Москва"]
+    got = {str(ws.cell(i, 1).value): str(ws.cell(i, 2).value)
+           for i in range(2, ws.max_row + 1)}
+
+    assert got.get("Модалка закрывается") == "✓"   # был баг: ⚠
+    assert got.get("CSRF-защита") == "✓"           # SameSite-защита
+    assert got.get("Двойная отправка") == "✗"       # реальный дефект
+
+    # Справочные колонки убраны из матрицы (шум ⚠ на каждой форме).
+    assert "Поля очищены" not in got
+    assert "Защита от спама (пассивно)" not in got
+
+    # В легенде нет посторонних символов.
+    sv = wb["Сводка"]
+    legend_syms = {str(sv.cell(r, 7).value) for r in range(2, sv.max_row + 1)}
+    legend_syms.discard("None")
+    assert legend_syms <= {"✓", "✗", "⚠", "–"}
+
+
+def test_заметки_не_ужимаются_до_ячейки(tmp_path):
+    # openpyxl пишет <x:SizeWithCells/>, из-за чего Excel обрезает длинный
+    # комментарий до узкой ячейки. Матрица должна убрать этот флаг (оставив
+    # MoveWithCells), иначе комментарии «не влезают».
+    import zipfile
+    from openpyxl import load_workbook
+    path = tmp_path / "log_forms.xlsx"
+    _минимальный_лог(path)
+    t.построить_матрицу_проверок(str(path))
+
+    with zipfile.ZipFile(str(path)) as z:
+        vml = [n for n in z.namelist() if n.lower().endswith(".vml")]
+        assert vml, "в файле нет VML-заметок"
+        swc = sum(z.read(n).count(b"SizeWithCells") for n in vml)
+        mwc = sum(z.read(n).count(b"MoveWithCells") for n in vml)
+    assert swc == 0, "SizeWithCells не убран - Excel будет обрезать комментарии"
+    assert mwc > 0, "MoveWithCells должен остаться"
+    # файл всё ещё открывается и комментарий на месте
+    load_workbook(str(path))
+
+
+if __name__ == "__main__":
+    import traceback
+    import inspect
+    import tempfile
+    fns = [v for k, v in sorted(globals().items())
+           if k.startswith("test_") and callable(v)]
+    ok = 0
+    for fn in fns:
+        try:
+            if "tmp_path" in inspect.signature(fn).parameters:
+                with tempfile.TemporaryDirectory() as d:
+                    fn(Path(d))
+            else:
+                fn()
+            print(f"✓ {fn.__name__}"); ok += 1
+        except Exception:
+            print(f"✗ {fn.__name__}"); traceback.print_exc()
+    print(f"\n{ok}/{len(fns)} прошло")
+    sys.exit(0 if ok == len(fns) else 1)
