@@ -61,6 +61,35 @@ def test_mix_real_and_fake():
     print('✓ Микс: ловит только настоящее, игнорирует URL-кодировку')
 
 
+def test_min_price_variable_in_title():
+    """#MIN_PRICE# (Битрикс-шаблон мета) - незаменённая переменная
+    минимальной цены, должна ловиться и в <title>, и в тексте."""
+    html = (
+        '<html><head><title>Лист горячекатанный купить, цена от '
+        '#MIN_PRICE#. Прокат | Стальметурал</title></head>'
+        '<body><h1>Лист</h1><p>от #MIN_PRICE# за тонну, #ЦЕНА_ОПТ#</p>'
+        '</body></html>'
+    )
+    issues = find_text_issues(html)
+    matches = [i.match for i in issues]
+    assert matches.count('#MIN_PRICE#') == 2, matches
+    assert '#ЦЕНА_ОПТ#' in matches
+    assert all(i.pattern == '#ПЕРЕМЕННАЯ#' for i in issues)
+    print('✓ #MIN_PRICE# ловится в title и тексте')
+
+
+def test_hash_anchors_and_colors_not_caught():
+    """Якоря (#top), хештеги без закрытия, hex-цвета - не переменные."""
+    html = (
+        '<p>Перейти к #top разделу. Цвет #fff и #ff0000. '
+        'Хештег #акция без закрытия. Номер #123# в накладной.</p>'
+    )
+    issues = find_text_issues(html)
+    hash_hits = [i.match for i in issues if i.pattern == '#ПЕРЕМЕННАЯ#']
+    assert hash_hits == [], f'Ложные срабатывания #...#: {hash_hits}'
+    print('✓ Якоря/хештеги/цвета/числа в решётках не ловятся')
+
+
 def test_context_is_readable():
     """Контекст должен быть из видимого текста, не из HTML."""
     html = '<div class="x"><h1>В нашем магазине {{city}} есть все товары</h1></div>'
@@ -102,6 +131,8 @@ if __name__ == '__main__':
     test_real_template_issues()
     test_script_and_style_ignored()
     test_mix_real_and_fake()
+    test_min_price_variable_in_title()
+    test_hash_anchors_and_colors_not_caught()
     test_context_is_readable()
     test_max_findings_per_pattern()
     test_patterns_config()
