@@ -73,6 +73,10 @@ def build_creds(pid: str) -> dict:
         'google': _pair(GOOGLE_ACCOUNTS_CONFIG, pid),
         'webmaster_oauth': (_env(f'yandex_oauth_{pid}') or _env(f'webmaster_oauth_{pid}')
                             or _env('yandex_oauth') or _env('webmaster_oauth')),
+        # Сохранённая сессия Яндекса для headless-браузера (авто-скачивание
+        # выгрузки «Страницы в поиске» → 404 в индексе). Тот же секрет, что у
+        # автокликеров.
+        'autoclick_session': (_env(f'autoclick_session_{pid}') or _env('autoclick_session')),
         'webmaster_keys_hint': [],
         'secret_keys_hint': [],
     }
@@ -101,6 +105,7 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'check_security': True,  # доп. 1.8 - заголовки безопасности HTTP
         'check_images': True,    # п.1.15 - изображения (alt/webp/вес)
         'check_links': False,   # «ссылки открываются (404)» - тяжёлая, по запросу
+        'check_index_404': True,  # 404 в индексе: браузер качает выгрузку «Страницы в поиске» (нужна сессия autoclick_session)
         'check_filter_fn': False,  # фильтр-тест (браузер) - по запросу, не в расписании
         'check_console': False,    # п.1.14 ошибки JS (браузер) - по запросу
         'check_stress': False,     # ошибки сервера (нагрузка на прод) - по запросу, не в расписании
