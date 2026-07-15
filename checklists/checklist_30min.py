@@ -1302,14 +1302,28 @@ if pid:
                  'нагрузку на боевой сайт - по запросу. Результат: лист '
                  '«Нагрузка и парсинг».')
         if _ck_stress:
-            st.slider('Параллельных запросов в залпе нагрузки',
-                      min_value=10, max_value=50, value=30, step=5,
-                      key='c30_stress_concurrency',
-                      help='Сколько запросов летят к сайту одновременно в '
-                           'момент пробы нагрузки. 15 - лёгкий безопасный '
-                           'всплеск; 30 (по умолчанию) - заметный, '
-                           'показательный; выше - ближе к тому, что защита '
-                           'примет за атаку (риск бана).')
+            _sc1, _sc2 = st.columns(2)
+            with _sc1:
+                st.slider('Параллельных запросов в залпе',
+                          min_value=10, max_value=50, value=30, step=5,
+                          key='c30_stress_concurrency',
+                          help='Сколько запросов летят к ОДНОЙ странице '
+                               'одновременно. 15 - лёгкий безопасный всплеск; '
+                               '30 (по умолчанию) - заметный, показательный; '
+                               'выше - ближе к тому, что защита примет за '
+                               'атаку (риск бана). Каждая страница получает '
+                               'этот залп в 2 волны (итого запросов на '
+                               'страницу = число × 2).')
+            with _sc2:
+                st.slider('Сколько страниц под залпом',
+                          min_value=1, max_value=8, value=3, step=1,
+                          key='c30_stress_load_pages',
+                          help='На сколько разных страниц по очереди пойдёт '
+                               'залп нагрузки. Сначала берутся разнотипные '
+                               '(главная/категория/фильтр/товар), потом '
+                               'добираются остальные из прогона. Больше '
+                               'страниц - шире картина, но выше суммарная '
+                               'нагрузка на сайт.')
 
         # ── Автокликер (локальный Chrome или облако с сессией) ──────
         _ck_ac = st.checkbox(
@@ -1397,6 +1411,7 @@ if pid:
         bool(st.session_state.get('c30_check_console', False)),
         bool(st.session_state.get('c30_check_stress', False)),
         int(st.session_state.get('c30_stress_concurrency', 30)),
+        int(st.session_state.get('c30_stress_load_pages', 3)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1457,6 +1472,7 @@ if pid:
                 'check_console': st.session_state.get('c30_check_console', False),
                 'check_stress': st.session_state.get('c30_check_stress', False),
                 'stress_concurrency': int(st.session_state.get('c30_stress_concurrency', 30)),
+                'stress_load_pages': int(st.session_state.get('c30_stress_load_pages', 3)),
                 'check_w3c': st.session_state.get('c30_check_w3c', False),
                 'check_static': st.session_state.get('c30_check_static', False),
                 'check_404': st.session_state.get('c30_check_404', True),

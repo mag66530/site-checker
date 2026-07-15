@@ -936,9 +936,23 @@ def run_check(pid, params, creds, log, progress):
                 # Парсинг - выборка каталога (категории/фильтры/товары).
                 _parse = [r.url for r in _ok
                           if r.type_code in ('category', 'filter', 'product')]
-                # Нагрузка - репрезентативные страницы (главная/категория/фильтр).
-                _load_rs = [r for r in (_first_ok('main'), _first_ok('category'),
-                                        _first_ok('filter')) if r]
+                # Нагрузка - N репрезентативных страниц. Сначала по одной
+                # каждого типа (главная/категория/фильтр/товар - разнообразие),
+                # потом добираем остальными до нужного числа.
+                _n_load = max(1, int(params.get('stress_load_pages', 3)))
+                _load_rs, _seen = [], set()
+                for _tc in ('main', 'category', 'filter', 'product'):
+                    _r = _first_ok(_tc)
+                    if _r and _r.url not in _seen:
+                        _load_rs.append(_r)
+                        _seen.add(_r.url)
+                for _r in _ok:
+                    if len(_load_rs) >= _n_load:
+                        break
+                    if _r.url not in _seen:
+                        _load_rs.append(_r)
+                        _seen.add(_r.url)
+                _load_rs = _load_rs[:_n_load]
                 _load_pages = [r.url for r in _load_rs]
                 _baselines = {r.url: r.elapsed_ms for r in _load_rs
                               if r.elapsed_ms}

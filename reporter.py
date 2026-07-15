@@ -3326,9 +3326,11 @@ def _build_stress_sheet(wb, stress_check):
         _line('2. Высокая нагрузка - пропущено из-за бана на парсинге.',
               C.text_muted, bold=True)
     else:
-        _line(f'2. Высокая нагрузка - параллельный залп '
-              f'({load.get("concurrency", 0)} одновременных × '
-              f'{load.get("waves", 0)} волны)', C.text, bold=True)
+        _line(f'2. Высокая нагрузка - на каждую страницу залп '
+              f'{load.get("concurrency", 0)} одновременных запросов × '
+              f'{load.get("waves", 0)} волны '
+              f'(итого {load.get("concurrency", 0) * load.get("waves", 0)} '
+              f'запросов на страницу)', C.text, bold=True)
         for p in load_pages:
             _base = p.get('baseline_ms')
             _med = p.get('median_ms')
