@@ -501,19 +501,30 @@ _ADVISORY_PATHS = [
 # Обязательные страницы (чек-лист: «созданы страницы Конфиденциальность,
 # Cookies, Доставка, Оплата»). У каждой - типовые варианты адреса; страница
 # есть, если ХОТЯ БЫ ОДИН вариант отвечает 200 (не редиректом на главную).
+# (метка, типовые пути, маркеры в href) - маркеры нужны для умного
+# fallback: если типовые пути не ответили, ищем ссылку на страницу в HTML
+# главной по подстроке в адресе (у проектов свои слаги, например у СМУ
+# cookies = /polzovatelskoe-soglashenie-ob-ispolzovanii-cookie-faylov/).
 _REQUIRED_PAGES = [
     ('Политика конфиденциальности',
      ('/policy/', '/politika-konfidentsialnosti/', '/privacy/',
-      '/privacy-policy/', '/politika/', '/personal-data/')),
+      '/privacy-policy/', '/politika/', '/personal-data/'),
+     ('polit', 'privacy', 'personaln', 'personal-data', 'confiden',
+      'soglashen', 'soglasie')),
     ('Cookies',
-     ('/cookies/', '/cookie-policy/', '/politika-cookies/', '/cookie/')),
+     ('/cookies/', '/cookie-policy/', '/politika-cookies/', '/cookie/',
+      '/polzovatelskoe-soglashenie-ob-ispolzovanii-cookie-faylov/'),
+     ('cookie',)),
     ('Доставка',
      ('/dostavka/', '/delivery/', '/dostavka-i-oplata/',
-      '/payment_delivery/', '/shipping/')),
+      '/payment_delivery/', '/shipping/'),
+     ('dostavk', 'deliver')),
     ('Оплата',
      ('/oplata/', '/payment/', '/dostavka-i-oplata/',
-      '/payment_delivery/', '/kak-sdelat-pokupku/')),
+      '/payment_delivery/', '/kak-sdelat-pokupku/'),
+     ('oplat', 'payment')),
 ]
+_RE_HREF_ANY = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.I)
 
 # Раздел «Отгрузки» (опционален по проекту): если есть - в контенте должна
 # быть перелинковка на каталог.
@@ -735,10 +746,32 @@ async def check_paths_against_robots(host: str, paths: list, *,
                 _ff_cache[u] = res
                 return res
 
+            # HTML главной - для умного fallback (ссылки в футере).
+            _st_home, _p_home, _home_html = await _fetch_final(
+                f'https://{host}/')
+            _home_paths = []
+            if _home_html:
+                for _href in _RE_HREF_ANY.findall(_home_html):
+                    _hp = urlsplit(_href).path or ''
+                    _hh = (urlsplit(_href).netloc or '').lower()
+                    if _hh and _hh.removeprefix('www.') != host:
+                        continue
+                    if _hp and _hp != '/':
+                        _home_paths.append(_hp)
+
             out['required_pages'] = []
-            for label, variants in _REQUIRED_PAGES:
+            for label, variants, markers in _REQUIRED_PAGES:
+                # Умный кандидат: ссылка с главной, чей адрес содержит маркер
+                # (свой слаг проекта) - проверяется ПЕРВОЙ.
+                # Служебные пути (ЛК/логин/корзина) не считаем кандидатами:
+                # маркер 'personaln' не должен цеплять /personal/auth.php.
+                smart = [p_ for p_ in _home_paths
+                         if any(mk in p_.lower() for mk in markers)
+                         and not re.search(
+                             r'auth|login|register|basket|cart|\.php',
+                             p_, re.I)][:2]
                 found = None
-                for v in variants:
+                for v in smart + list(variants):
                     st, fpath, _h = await _fetch_final(f'https://{host}{v}')
                     # Редирект на главную = страницы нет (заглушка-склейка).
                     if st == 200 and (fpath or '/').strip('/'):
