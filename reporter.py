@@ -3480,7 +3480,11 @@ def _build_meta_sheet(wb, results, meta_summary):
     дубли внутри города / между городами + дубли УРЛОВ.
     Добавляется только если проверка метаданных выполнялась."""
     checked = [r for r in results if getattr(r, 'meta', None)]
-    if not checked and not meta_summary:
+    # SEO-тексты категорий (галочка 1.6) живут на этом же листе - лист
+    # нужен и когда метаданные (1.8) выключены, а 1.6 включена.
+    _seo_pages = [r for r in results
+                  if getattr(r, 'seo_text', None) is not None]
+    if not checked and not meta_summary and not _seo_pages:
         return
 
     bad = [r for r in checked if r.meta.get('issues')]
@@ -3495,10 +3499,12 @@ def _build_meta_sheet(wb, results, meta_summary):
     test_domains = (meta_summary or {}).get('test_domains') or []
     td_open = [t for t in test_domains if t.get('state') == 'indexable']
     has_bugs = bool(bad or same_city or cross_city or url_dups or td_open)
+    _seo_warned = any((r.seo_text or {}).get('warnings') for r in _seo_pages)
 
     ws = wb.create_sheet('Метаданные')
     ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+    ws.sheet_properties.tabColor = (C.err if has_bugs
+                                    else C.warn if _seo_warned else C.ok)
 
     ws.column_dimensions['A'].width = 3
     ws.column_dimensions['B'].width = 18   # Город
@@ -3531,51 +3537,56 @@ def _build_meta_sheet(wb, results, meta_summary):
 
     row = 5
 
-    # ── Сводка ──
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = (f'Проверено страниц: {len(checked)} · с проблемами: {len(bad)} · '
-               f'предупреждений: {len(warned)} · дублей в городе: {len(same_city)} · '
-               f'межгородских: {len(cross_city)} · дублей URL: {len(url_dups)} · '
-               f'временных редиректов: {len(url_not301)}')
-    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 30
-    row += 2
-
-    # ── Секция 1: проблемы на страницах (сгруппированы по проблеме) ──
-    _meta_section_title(ws, row, f'Проблемы метаданных на страницах  ({len(bad)})',
-                        C.err if bad else C.ok)
-    row += 1
-    if not bad:
-        _meta_ok_line(ws, row, '✅ У всех проверенных страниц метаданные в порядке.')
+    # Мета-секции - только если метаданные (1.8) реально проверялись:
+    # при включённой одной 1.6 лист живёт ради SEO-текстов, и пустые
+    # «Проверено: 0» не рисуем.
+    if checked or meta_summary:
+        # ── Сводка ──
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = (f'Проверено страниц: {len(checked)} · с проблемами: {len(bad)} · '
+                   f'предупреждений: {len(warned)} · дублей в городе: {len(same_city)} · '
+                   f'межгородских: {len(cross_city)} · дублей URL: {len(url_dups)} · '
+                   f'временных редиректов: {len(url_not301)}')
+        c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
+        c.fill = _fill(C.surface)
+        c.alignment = _align(wrap=True)
+        ws.row_dimensions[row].height = 30
         row += 2
-    else:
-        row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'meta', 'issues'), C.err)
 
-    # ── Секция 2: предупреждения (длины; сгруппированы по замечанию) ──
-    if warned:
-        _meta_section_title(ws, row, f'Предупреждения (длины)  ({len(warned)})', C.warn)
+    if checked:
+        # ── Секция 1: проблемы на страницах (сгруппированы по проблеме) ──
+        _meta_section_title(ws, row, f'Проблемы метаданных на страницах  ({len(bad)})',
+                            C.err if bad else C.ok)
         row += 1
+        if not bad:
+            _meta_ok_line(ws, row, '✅ У всех проверенных страниц метаданные в порядке.')
+            row += 2
+        else:
+            row = _render_issue_groups(
+                ws, row, _issue_groups(bad, 'meta', 'issues'), C.err)
 
-        def _meta_len(r):
-            m = getattr(r, 'meta', None) or {}
-            return (f'title: {m.get("title_len", 0)} симв. · '
-                    f'description: {m.get("desc_len", 0)} симв.')
+        # ── Секция 2: предупреждения (длины; сгруппированы по замечанию) ──
+        if warned:
+            _meta_section_title(ws, row, f'Предупреждения (длины)  ({len(warned)})', C.warn)
+            row += 1
 
-        row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn,
-            extra=_meta_len)
+            def _meta_len(r):
+                m = getattr(r, 'meta', None) or {}
+                return (f'title: {m.get("title_len", 0)} симв. · '
+                        f'description: {m.get("desc_len", 0)} симв.')
 
-    # ── Секции 3-4: дубли метаданных ──
-    for title_text, groups, note in (
+            row = _render_issue_groups(
+                ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn,
+                extra=_meta_len)
+
+    # ── Секции 3-4: дубли метаданных (только если 1.8 выполнялась) ──
+    for title_text, groups, note in ((
         (f'Дубли внутри города  ({len(same_city)})', same_city,
          'Одинаковое значение у разных страниц одного поддомена.'),
         (f'Межгородские дубли (город не подставился)  ({len(cross_city)})', cross_city,
          'Полное совпадение между разными городами - шаблон не подставил город.'),
-    ):
+    ) if meta_summary is not None else ()):
         _meta_section_title(ws, row, title_text, C.err if groups else C.ok)
         row += 1
         if not groups:
