@@ -1683,6 +1683,34 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             ws.row_dimensions[row].height = 20
             row += 1
 
+        # ── Секция 3а: соблюдение директив - заблокированные страницы вживую ──
+        # Disallow сам по себе не мешает URL попасть в индекс без сниппета,
+        # если на него где-то есть ссылка - надёжна защита с доп. noindex.
+        _dc = indexing_summary.get('directive_check')
+        if _dc and not indexing_summary.get('error'):
+            _dc_finds = _dc.get('findings') or []
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = f'Заблокированные страницы: проверено вживую  ({len(_dc_finds)})'
+            c.font = _font(size=13, bold=True,
+                           color=C.warn if _dc_finds else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            if not _dc_finds:
+                _line(f'✅ Заблокированные в robots.txt страницы (проверено вживую '
+                      f'{_dc.get("checked", 0)}) либо недоступны напрямую, либо '
+                      f'дополнительно закрыты noindex.', C.ok)
+            else:
+                _line('Эти страницы реально отвечают 200 и БЕЗ собственного '
+                      'noindex - держатся только на честном слове robots.txt:',
+                      C.text_muted)
+                for _f in _dc_finds:
+                    _line(f'⚠ {_f.get("path", "")}: Disallow: {_f.get("rule", "")} - '
+                          f'отвечает 200, noindex не стоит', C.warn)
+            row += 1
+
         # ── Секция 4: мусор не закрыт в robots (ТЗ 3.3.4.2) ──
         junk = indexing_summary.get('junk_open')
         if junk is not None and not indexing_summary.get('error'):

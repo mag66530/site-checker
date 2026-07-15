@@ -14,6 +14,11 @@ indexing_checker.py - проверка индексации страниц (пу
         каноникл на категорию бывает намеренным)
   • Кросс-проверка sitemap ↔ robots: URL из sitemap (= «хочу в индекс»),
     но закрыт Disallow → противоречие, баг.
+  • Соблюдение директив вживую: для закрытых Disallow страниц - реальный
+    запрос (не только текст правила). Отвечает 200 БЕЗ собственного noindex
+    → информационная находка: блокировка держится только на robots.txt, без
+    подстраховки (внешняя ссылка всё равно может привести URL в индекс без
+    сниппета). Недоступна напрямую или уже защищена noindex → всё в порядке.
   • hreflang (если есть мультиязычность): теги валидируются - коды языков,
     абсолютные URL, self-reference; отсутствие тегов - не ошибка.
   • ЧПУ и формат адресов (по ВСЕМ путям каталога): адрес не технический
@@ -577,6 +582,65 @@ async def _status_direct(session, url, proxy_url, *, timeout_ms=15000,
         return None
 
 
+# ── Соблюдение директив: заблокированные страницы проверены вживую ────
+# robots.txt сам по себе не мешает URL попасть в индекс без сниппета, если на
+# него где-то есть ссылка - настоящая защита от индексации это noindex
+# (meta/X-Robots-Tag), а Disallow без него - блокировка «на честном слове».
+# Один живой запрос на КАЖДОЕ УНИКАЛЬНОЕ правило Disallow (не на каждый путь -
+# под одним правилом страницы ведут себя одинаково, лишняя нагрузка на боевой
+# сайт не даёт новой информации), с жёстким потолком.
+_DIRECTIVE_CHECK_LIMIT = 20
+
+
+def _sample_disallowed_by_rule(disallowed: list, limit: int = _DIRECTIVE_CHECK_LIMIT) -> list:
+    """Один представитель на каждое уникальное правило Disallow из уже
+    найденных sitemap↔robots-противоречий (`out['disallowed']`), не больше
+    `limit` штук. ЧИСТАЯ функция (юнит-тест без сети)."""
+    seen_rules = set()
+    sample = []
+    for item in disallowed or []:
+        rule = item.get('rule')
+        if rule in seen_rules:
+            continue
+        seen_rules.add(rule)
+        sample.append(item)
+        if len(sample) >= limit:
+            break
+    return sample
+
+
+def _directive_compliance_verdict(status: Optional[int], noindex: bool) -> str:
+    """'ok' (страница недоступна напрямую - нечего защищать по факту) /
+    'protected' (200, но есть СВОЙ noindex - двойная защита) / 'robots_only'
+    (200 без noindex - держится только на честном слове robots.txt). ЧИСТАЯ
+    функция (юнит-тест без сети)."""
+    if status != 200:
+        return 'ok'
+    if noindex:
+        return 'protected'
+    return 'robots_only'
+
+
+async def _fetch_for_directive_check(session, url, proxy_url, *, timeout_ms=15000):
+    """(status, headers_lower, html|None) одним GET БЕЗ редиректов - 301 на
+    закрытом пути не считается находкой (робот всё равно не увидит контент
+    под редиректом). При статусе≠200 тело не читаем - незачем. Не переиспользует
+    `_status_direct` (не отдаёт заголовки/тело) и не `_page_html` (следует
+    редиректам - нужным для ДРУГОЙ проверки, не этой)."""
+    import aiohttp
+    to = aiohttp.ClientTimeout(total=timeout_ms / 1000)
+    try:
+        async with session.get(url, timeout=to, proxy=proxy_url,
+                               allow_redirects=False) as r:
+            headers = {k.lower(): v for k, v in r.headers.items()}
+            if r.status != 200:
+                return r.status, headers, None
+            html = await r.text(errors='replace')
+            return r.status, headers, html
+    except Exception:
+        return None, {}, None
+
+
 async def check_paths_against_robots(host: str, paths: list, *,
                                      proxy_url=None, limit: int = 300,
                                      sample_category: str = None,
@@ -586,6 +650,11 @@ async def check_paths_against_robots(host: str, paths: list, *,
     1. Все известные пути каталога (категории/фильтры/товары из sitemap и
        выгрузок) через robots: путь в sitemap = «хочу в индекс», Disallow на
        нём = противоречие (ТЗ 3.3.4.1).
+    1а. Соблюдение директив вживую: по одному реальному пути на каждое
+        уникальное правило Disallow из найденного в п.1 - реальный запрос,
+        находка = страница отвечает 200 БЕЗ собственного noindex (значит
+        блокировка держится только на честном слове robots.txt - если на
+        неё есть внешняя ссылка, поисковик может показать голый URL).
     2. Типовой мусор закрыт (ТЗ 3.3.4.2): пагинация/сортировка реальной
        категории + поиск/корзина/сравнение/ЛК. Открыт в robots И отвечает
        200 = находка.
@@ -599,7 +668,8 @@ async def check_paths_against_robots(host: str, paths: list, *,
          доступ к ресурсам для рендеринга, закрытые = баг.
 
     Возвращает {'host', 'robots_status', 'sitemaps', 'checked',
-                'disallowed': [...], 'junk_open': [...],
+                'disallowed': [...], 'directive_check': {'checked', 'findings'},
+                'junk_open': [...],
                 'sitemap_checks': {...}, 'blanket_disallow': [...],
                 'ua_groups': {...}, 'assets_checked': int,
                 'assets_closed': [...], 'error'}."""
@@ -611,6 +681,7 @@ async def check_paths_against_robots(host: str, paths: list, *,
            'ua_groups': None, 'assets_checked': 0, 'assets_closed': [],
            'advisory_open': [], 'pagination': None,
            'required_pages': [], 'otgruzki': None, 'news_dates': None,
+           'directive_check': {'checked': 0, 'findings': []},
            'error': None}
     try:
         async with aiohttp.ClientSession(
@@ -655,6 +726,27 @@ async def check_paths_against_robots(host: str, paths: list, *,
                 if dis and len(out['disallowed']) < limit:
                     out['disallowed'].append(
                         {'path': p, 'rule': rule, 'agent': agent})
+
+            # ── 1а. Соблюдение директив: заблокированные страницы вживую ──
+            # По одному реальному пути на уникальное правило Disallow из
+            # уже найденных выше (секция 1) - находка = страница реально
+            # отвечает 200 и БЕЗ собственного noindex (держится только на
+            # robots.txt, без подстраховки).
+            for _item in _sample_disallowed_by_rule(out['disallowed']):
+                out['directive_check']['checked'] += 1
+                _status, _hdrs, _html = await _fetch_for_directive_check(
+                    session, f'https://{host}{_item["path"]}', proxy_url)
+                _noidx = False
+                if _html:
+                    _, _noidx = _find_meta_robots(_html)
+                if not _noidx:
+                    _, _x_noidx = _x_robots_noindex(_hdrs)
+                    _noidx = _x_noidx
+                if _directive_compliance_verdict(_status, _noidx) == 'robots_only':
+                    out['directive_check']['findings'].append({
+                        'rule': _item['rule'], 'path': _item['path'],
+                        'status': _status,
+                    })
 
             # ── 2. Мусор закрыт (ТЗ 3.3.4.2 + доп. чек-лист) ──
             # Параметрические URL всегда отвечают 200 (сервер игнорит лишний
