@@ -2676,6 +2676,9 @@ def _build_images_sheet(wb, results):
                'картинок/видео есть ленивая загрузка (loading="lazy"/data-src/'
                'preload="none"). (5) Имена файлов - транслит из alt; хеш-имена '
                'CMS (/upload/iblock/…) - одно предупреждение на страницу. '
+               '(6) Уникальные картинки категорий - «главная» картинка '
+               'категории (og:image / первая после h1) не повторяется на '
+               'других категориях того же поддомена и не заглушка. '
                'Вес берётся по Content-Length.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
@@ -2691,6 +2694,16 @@ def _build_images_sheet(wb, results):
     c.alignment = _align(wrap=True)
     ws.row_dimensions[row].height = 26
     row += 2
+
+    def _cat_extra(r):
+        """Контекст находки по картинке категории: какая картинка."""
+        im = getattr(r, 'images', None) or {}
+        if im.get('cat_dup'):
+            return (f'та же картинка: {im["cat_dup"]["name"]} '
+                    f'(на {im["cat_dup"]["n"]} категориях)')
+        if im.get('cat_img'):
+            return f'заглушка: {im["cat_img"]["name"]}'
+        return ''
 
     def _img_extra(r):
         im = getattr(r, 'images', None) or {}
@@ -2747,6 +2760,38 @@ def _build_images_sheet(wb, results):
         row = _render_issue_groups(
             ws, row, _issue_groups(warned, 'images', 'warnings'), C.warn,
             extra=_img_extra)
+
+    # ── Уникальные картинки категорий/разделов ──
+    # Секция появляется, когда в прогоне были страницы категорий.
+    cats = [r for r in checked if getattr(r, 'type_code', '') == 'category']
+    if cats:
+        cat_bad = [r for r in cats if r.images.get('cat_warnings')]
+        recognized = sum(1 for r in cats if r.images.get('cat_img'))
+        _meta_section_title(
+            ws, row,
+            f'Картинки категорий/разделов - уникальность  ({len(cat_bad)})',
+            C.warn if cat_bad else C.ok)
+        row += 1
+        if cat_bad:
+            row = _render_issue_groups(
+                ws, row, _issue_groups(cat_bad, 'images', 'cat_warnings'),
+                C.warn, extra=_cat_extra)
+        elif recognized:
+            _meta_ok_line(ws, row,
+                          f'✅ У каждой категории своя картинка, дублей и '
+                          f'заглушек нет (категорий: {len(cats)}, картинка '
+                          f'распознана у {recognized}).')
+            row += 2
+        else:
+            ws.merge_cells(start_row=row, start_column=2,
+                           end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = ('· Картинка категории (og:image / первая после h1) '
+                       'не распознана ни на одной категории - пропуск.')
+            c.font = _font(size=10, color=C.text_muted)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 22
+            row += 2
 
 
 # ── Лист «Валидация и скорость» (п.1.16: W3C HTML/CSS + время ресурсов) ─
@@ -4693,7 +4738,7 @@ def build_report(
         ('Заголовки и мета', 'если есть лист - единственность title/description/H1, дубли H2 и заголовки вне текста.'),
         ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media), переходы из меню шапки и работа фильтров товаров (браузерный тест).'),
         ('Разметка', 'если есть лист - OpenGraph-теги и Schema.org (крошки, компания, товар, цены, фото).'),
-        ('Изображения', 'если есть лист - alt у картинок, современные форматы (webp/avif) и вес (п.1.15).'),
+        ('Изображения', 'если есть лист - alt у картинок, современные форматы (webp/avif), вес и уникальность картинок категорий (п.1.15).'),
         ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
         ('Ошибки JavaScript', 'если есть лист - страницы, где в консоли браузера есть ошибки JS (п.1.14).'),
         ('Валидация и скорость', 'если есть лист - валидность HTML/CSS (W3C) и время загрузки ресурсов по выборке (п.1.16).'),

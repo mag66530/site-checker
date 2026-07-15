@@ -94,6 +94,79 @@ def _short(src: str) -> str:
         return src
 
 
+# ── Картинка категории/раздела (уникальность, пункт чек-листа) ─────
+# «Главная» картинка страницы категории: og:image, иначе первая контентная
+# <img> после </h1>. Логотипы/иконки пропускаем (не показатель), заглушки
+# (no-photo и т.п.) возвращаем с пометкой - заглушка вместо своей картинки
+# сама по себе находка. Сравнение между категориями - в runner.
+_RE_META_TAG = re.compile(r'<meta\b[^>]*>', re.I)
+_RE_OG_IMAGE_PROP = re.compile(r'property\s*=\s*["\']og:image["\']', re.I)
+_RE_CONTENT_ATTR = re.compile(r'content\s*=\s*["\']([^"\']+)["\']', re.I)
+_RE_H1_CLOSE = re.compile(r'</h1\s*>', re.I)
+_RE_PLACEHOLDER_NAME = re.compile(
+    r'no-?image|no-?photo|placeholder|zaglushka|default|stub', re.I)
+_RE_LOGO_NAME = re.compile(r'logo|favicon|sprite|icon', re.I)
+# Bitrix resize_cache: /upload/resize_cache/iblock/<хеш>/<размер>/name.jpg -
+# та же картинка, что /upload/iblock/<хеш>/name.jpg: разные размеры одного
+# файла не должны считаться разными картинками.
+_RE_RESIZE_CACHE = re.compile(r'/resize_cache/(iblock/[^/]+)/[^/]+/', re.I)
+
+
+def _img_key(src: str, base_url: str = '') -> str:
+    """Ключ сравнения картинки: путь без query, resize_cache схлопнут."""
+    from urllib.parse import urljoin
+    absu = urljoin(base_url or '', (src or '').strip())
+    path = urlsplit(absu).path or ''
+    return _RE_RESIZE_CACHE.sub(r'/\1/', path).lower()
+
+
+def category_image(html, base_url: str = '') -> dict:
+    """«Главная» картинка страницы категории: og:image, иначе первая
+    контентная <img> после </h1>. None - не распознана."""
+    html = _RE_HTML_COMMENT.sub(' ', html or '')
+    for tag in _RE_META_TAG.findall(html):
+        if not _RE_OG_IMAGE_PROP.search(tag):
+            continue
+        m = _RE_CONTENT_ATTR.search(tag)
+        src = (m.group(1) or '').strip() if m else ''
+        if src and not src.startswith('data:'):
+            key = _img_key(src, base_url)
+            name = key.rsplit('/', 1)[-1]
+            # og:image-логотип - не картинка категории, ищем контентную
+            if name and not _RE_LOGO_NAME.search(name):
+                return {'key': key, 'name': name, 'source': 'og:image',
+                        'placeholder':
+                            bool(_RE_PLACEHOLDER_NAME.search(name))}
+        break
+    m = _RE_H1_CLOSE.search(html)
+    tail = html[m.end():] if m else html
+    for tag in _RE_IMG_TAG.findall(tail):
+        im = _RE_IMG_SRC.search(tag)
+        src = ((im.group(1) or im.group(2) or '').strip() if im else '')
+        if not src or src.startswith('data:'):
+            continue
+        key = _img_key(src, base_url)
+        name = key.rsplit('/', 1)[-1]
+        # svg после h1 - почти всегда иконка/декор, не картинка раздела
+        if not name or name.endswith('.svg') or _RE_LOGO_NAME.search(name):
+            continue
+        return {'key': key, 'name': name, 'source': 'после h1',
+                'placeholder': bool(_RE_PLACEHOLDER_NAME.search(name))}
+    return None
+
+
+def category_image_dups(cats) -> dict:
+    """cats: [(subdomain, url, cat_img|None)] -> {(subdomain, key): [urls]},
+    где одна картинка стоит на >=2 категориях ОДНОГО поддомена (на разных
+    поддоменах-городах каталог зеркальный - это не дубль). Заглушки в дубли
+    не считаем - у них своё предупреждение."""
+    groups = {}
+    for sub, url, ci in cats:
+        if ci and ci.get('key') and not ci.get('placeholder'):
+            groups.setdefault((sub, ci['key']), []).append(url)
+    return {k: v for k, v in groups.items() if len(v) >= 2}
+
+
 def imgs_no_alt(html: str) -> list:
     """src всех <img> БЕЗ атрибута alt (пустой alt="" - ок)."""
     out = []

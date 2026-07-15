@@ -524,6 +524,37 @@ def run_check(pid, params, creds, log, progress):
                         'текст страницы-фильтра дублирует родительскую '
                         'категорию - тегу нужен свой текст')
 
+        # ── Уникальные картинки категорий/разделов (п.1.15) ──
+        # «Главная» картинка категории (og:image / первая после h1) не
+        # должна повторяться на других категориях того же поддомена.
+        # Находки - в cat_warnings (своя секция листа «Изображения»),
+        # не в warnings: чтобы не смешивались с форматами/весом.
+        if params.get('check_images', True):
+            from image_checker import category_image_dups
+            _cats15 = [(r.subdomain, r.url, r.images.get('cat_img'))
+                       for r in results
+                       if r.type_code == 'category'
+                       and getattr(r, 'images', None)]
+            _dup15 = {}
+            for (_sub, _key), _urls in category_image_dups(_cats15).items():
+                for _u in _urls:
+                    _dup15[_u] = {'name': _key.rsplit('/', 1)[-1],
+                                  'n': len(_urls)}
+            for r in results:
+                if r.type_code != 'category' \
+                        or not getattr(r, 'images', None):
+                    continue
+                _ci15 = r.images.get('cat_img')
+                _cw = r.images.setdefault('cat_warnings', [])
+                if r.url in _dup15:
+                    r.images['cat_dup'] = _dup15[r.url]
+                    _cw.append('картинка категории не уникальна - та же '
+                               'картинка на других категориях (каждому '
+                               'разделу нужна своя)')
+                elif _ci15 and _ci15.get('placeholder'):
+                    _cw.append('у категории вместо своей картинки заглушка '
+                               '(no-photo/placeholder)')
+
         # ── Метаданные и дубли (п.1.8) ──
         # Дубли title/description/H1 - по всем результатам прогона; дубли
         # УРЛОВ - прозвон вариантов (http/слэш/www) главной и каталога
