@@ -165,6 +165,64 @@ def _run_autoclicker(pid, params, log, session_b64=None):
     return {'available': True, 'sites': sites}
 
 
+def _run_index404_download(pid, params, log, session_b64=None):
+    """Авто-скачать выгрузку «Страницы в поиске» браузером и разобрать на 404.
+    Локальный залогиненный Chrome (CDP 9222) в приоритете; нет его, но есть
+    сессия (Secrets: autoclick_session) - облачный headless-режим. Логина с
+    нуля нет (у Яндекса капча) - только сохранённая сессия.
+    Возвращает dict в форме листа «404 в индексе»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    if not _cdp_alive():
+        if session_b64:
+            try:
+                from autoclick_browser import (
+                    session_file_from_secret, MODE_ENV, SESSION_FILE_ENV)
+                _env[MODE_ENV] = 'cloud'
+                _env[SESSION_FILE_ENV] = session_file_from_secret(session_b64)
+                log('404 в индексе: локального Chrome нет - облачный режим '
+                    '(headless + сессия из Secrets).')
+            except Exception as _e:
+                return {'available': False, 'source': 'yandex_export', 'hosts': [],
+                        'error': f'сессия autoclick_session не читается: {_e}'}
+        else:
+            return {'available': False, 'source': 'yandex_export', 'hosts': [],
+                    'error': ('нет ни локального Chrome (CDP 9222), ни сессии в '
+                              'Secrets (autoclick_session). Настрой сессию один '
+                              'раз: вкладка «Автокликеры» → «Экспорт сессии для '
+                              'облака».')}
+    (root / 'cache').mkdir(exist_ok=True)
+    _res_file = root / 'cache' / f'index404_{pid}.json'
+    try:
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    args = [_sys.executable, 'index404_run.py', '--project', pid]
+    if params.get('index_404_max_hosts'):
+        args += ['--max-hosts', str(params['index_404_max_hosts'])]
+    log('404 в индексе: запускаю браузер, качаю выгрузки «Страницы в поиске»…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [404-индекс] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        return {'available': False, 'source': 'yandex_export', 'hosts': [],
+                'error': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'source': 'yandex_export', 'hosts': [],
+                'error': f'результат не прочитан: {e}'}
+
+
 def _run_filters_test(pid, params, log, category_urls=None):
     """Фильтр-тест товаров в браузере (доп. чек-лист). Отдельный процесс
     filters_run.py (Playwright): локальный CDP-Chrome не нужен, каталог
@@ -824,32 +882,20 @@ def run_check(pid, params, creds, log, progress):
                     log(f'⚠ Страница 404: {_e}')
 
         # ── 404 среди страниц В ИНДЕКСЕ (регулярный мониторинг) ──
-        # Берём выборку URL, которые Яндекс держит в поиске (Вебмастер API),
-        # и прозваниваем каждый на 404/410/soft-404. Тот же OAuth-токен, что
-        # и диагностика Вебмастера; на боевой сайт ходим только по этим URL.
+        # Браузер (сохранённая сессия) сам заходит на «Страницы в поиске»
+        # каждого хоста в Вебмастере и качает выгрузку - там уже есть код
+        # ответа (httpCode) и статус. Отмечаем строки 404/410/5xx/HTTP_ERROR.
+        # Ничего на боевом сайте не пингуем - данные из выгрузки Яндекса.
         _index_404 = None
         if params.get('check_index_404'):
-            _wm_tok = creds.get('webmaster_oauth')
-            if _wm_tok:
-                try:
-                    from index_pages_checker import check_index_404
-                    log('404 в индексе: беру выборку из Вебмастера и прозваниваю…')
-                    _index_404 = check_index_404(
-                        pid, _wm_tok, proxy_url=proxy_url,
-                        max_urls_per_host=int(
-                            params.get('index_404_max_per_host', 300)),
-                        log=_nlog)
-                    if _index_404.get('error'):
-                        log(f'⚠ 404 в индексе: {_index_404["error"]}')
-                    else:
-                        log(f'404 в индексе: проверено '
-                            f'{_index_404.get("total_checked", 0)}, битых 404/410 '
-                            f'{_index_404.get("total_dead", 0)}, soft-404 '
-                            f'{_index_404.get("total_soft", 0)}')
-                except Exception as _e:
-                    log(f'⚠ 404 в индексе: {_e}')
+            _index_404 = _run_index404_download(
+                pid, params, log, session_b64=creds.get('autoclick_session'))
+            if _index_404.get('error'):
+                log(f'⚠ 404 в индексе: {_index_404["error"]}')
             else:
-                log(f'⚠ 404 в индексе: токен не задан (yandex_oauth_{pid})')
+                log(f'404 в индексе: проверено '
+                    f'{_index_404.get("total_checked", 0)}, битых 404/410 '
+                    f'{_index_404.get("total_dead", 0)}')
 
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный
