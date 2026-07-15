@@ -134,6 +134,27 @@ def test_матрица_рендерит_модалку_галочкой(tmp_pat
     assert legend_syms <= {"✓", "✗", "⚠", "–"}
 
 
+def test_заметки_не_ужимаются_до_ячейки(tmp_path):
+    # openpyxl пишет <x:SizeWithCells/>, из-за чего Excel обрезает длинный
+    # комментарий до узкой ячейки. Матрица должна убрать этот флаг (оставив
+    # MoveWithCells), иначе комментарии «не влезают».
+    import zipfile
+    from openpyxl import load_workbook
+    path = tmp_path / "log_forms.xlsx"
+    _минимальный_лог(path)
+    t.построить_матрицу_проверок(str(path))
+
+    with zipfile.ZipFile(str(path)) as z:
+        vml = [n for n in z.namelist() if n.lower().endswith(".vml")]
+        assert vml, "в файле нет VML-заметок"
+        swc = sum(z.read(n).count(b"SizeWithCells") for n in vml)
+        mwc = sum(z.read(n).count(b"MoveWithCells") for n in vml)
+    assert swc == 0, "SizeWithCells не убран - Excel будет обрезать комментарии"
+    assert mwc > 0, "MoveWithCells должен остаться"
+    # файл всё ещё открывается и комментарий на месте
+    load_workbook(str(path))
+
+
 if __name__ == "__main__":
     import traceback
     import inspect

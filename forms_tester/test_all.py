@@ -3865,6 +3865,51 @@ def _матрица_классифицировать(col: str, val) -> tuple:
     return "⚠", f"Значение «{val}» не распознано – проверьте вручную."
 
 
+def _снять_size_with_cells(path: str) -> None:
+    """openpyxl ЖЁСТКО пишет <x:SizeWithCells/> в каждую заметку (см.
+    openpyxl/comments/shape_writer.py) - из-за этого Excel ужимает окно заметки
+    до размера узкой ячейки матрицы, и длинный комментарий обрезается («не
+    влезает»). Убираем этот флаг в уже сохранённом файле: тогда Excel держит
+    заметку в её СОБСТВЕННОМ размере (width/height из VML) и текст помещается.
+    MoveWithCells оставляем (заметка ездит с ячейкой). Всё в try - на любой
+    ошибке файл остаётся как был (просто без этого улучшения)."""
+    import zipfile
+    import os
+    import shutil
+    import tempfile
+    try:
+        with zipfile.ZipFile(path, "r") as z:
+            names = z.namelist()
+            data = {n: z.read(n) for n in names}
+    except Exception:  # noqa: BLE001
+        return
+    pat = re.compile(rb"<[A-Za-z0-9_]*:?SizeWithCells\s*/>")
+    changed = False
+    for n in names:
+        if n.lower().endswith(".vml"):
+            new = pat.sub(b"", data[n])
+            if new != data[n]:
+                data[n] = new
+                changed = True
+    if not changed:
+        return
+    tmp = None
+    try:
+        fd, tmp = tempfile.mkstemp(suffix=".xlsx",
+                                   dir=os.path.dirname(path) or ".")
+        os.close(fd)
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+            for n in names:
+                z.writestr(n, data[n])
+        shutil.move(tmp, path)
+    except Exception:  # noqa: BLE001
+        try:
+            if tmp and os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def построить_матрицу_проверок(path: str) -> None:
     """Наглядный отчёт поверх консолидированных «Логов»: по листу на домен/город
     («Москва», «Алматы», …, без слова «Матрица» в названии) - проверки строками,
@@ -3944,14 +3989,17 @@ def построить_матрицу_проверок(path: str) -> None:
         # Ширина по самой длинной строке (щедро - не обрезаем), высота - по
         # реальному числу строк С УЧЁТОМ переноса на этой ширине (не только
         # по «\n» - длинное предложение само переносится и должно поместиться).
+        # Кириллица в шрифте заметки шире латиницы, поэтому символов-в-строке
+        # считаем КОНСЕРВАТИВНО (делим ширину на ~8.5, а не на 7) - иначе строк
+        # выходит меньше реального и текст не влезает по высоте.
         text = _матрица_тире(text)
         lines = text.split("\n")
         longest = max(len(s) for s in lines)
-        width = max(240, min(440, longest * 7 + 40))
-        chars_per_line = max(20, width // 7)
+        width = max(260, min(520, int(longest * 8) + 40))
+        chars_per_line = max(16, int((width - 24) / 8.5))
         import math
         wrapped = sum(max(1, math.ceil(len(s) / chars_per_line)) for s in lines)
-        height = max(70, 20 * wrapped + 30)
+        height = max(90, 20 * wrapped + 40)
         return Comment(text, "site-checker", width=width, height=height)
 
     # Названия листов = сами города/домены (без слова «Матрица», без коллизий
@@ -4040,6 +4088,8 @@ def построить_матрицу_проверок(path: str) -> None:
         pass
     try:
         wb.save(path)
+        # Заметки не должны ужиматься до ячейки (иначе текст обрезается).
+        _снять_size_with_cells(path)
         print(f"   🗂️ Матрица проверок построена: {len(matrix_titles)} лист(ов) "
               f"по домену ({', '.join(matrix_titles)})")
     except Exception as e:  # noqa: BLE001
