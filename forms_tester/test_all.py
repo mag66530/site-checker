@@ -5118,6 +5118,38 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             except Exception as e:
                 print(f"      ⚠️ Подготовка ({act}): {e}")
 
+    def _replay_open_step(page, step, base_url):
+        """Тихо проигрывает ОДИН шаг ОТКРЫТИЯ формы при переоткрытии (только
+        пауза/переход/клик/наведение - то, что открывает модалку/попап). Шаги
+        «форма»/«модалка» не трогаем: саму форму мы находим и заполняем отдельно.
+        Всё guarded - на ошибке просто идём дальше."""
+        try:
+            act = _нормализовать_действие_шага(step)
+            if act == "пауза":
+                try:
+                    ms = int(step.get("мс") or step.get("ms") or 500)
+                except (TypeError, ValueError):
+                    ms = 500
+                page.wait_for_timeout(ms)
+            elif act == "перейти":
+                href = step.get("url") or step.get("href")
+                if href:
+                    _goto_with_retry(page, _resolve_scenario_url(page, base_url, href))
+                    page.wait_for_timeout(1200)
+            elif act in ("клик", "наведение"):
+                css = step.get("css") or step.get("selector")
+                if css:
+                    css_norm = _normalize_scenario_click_css_selector(str(css).strip())
+                    loc = page.locator(css_norm).first
+                    if act == "клик":
+                        loc.click(timeout=8000)
+                    else:
+                        loc.scroll_into_view_if_needed()
+                        loc.hover(timeout=8000)
+                    page.wait_for_timeout(400)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _form_fill_submit_on_page(
         page,
         url_for_excel: str,
@@ -5129,6 +5161,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         название_контекста=None,
         цели_seen=None,
         безопасная_отправка=False,
+        переоткрыть_fn=None,
     ):
         """
         Заполнение и отправка формы на уже открытой странице.
@@ -6247,12 +6280,89 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 )
                 print(f"   🎯 Цель «{_цель_имя}» - {_г_статус}")
 
+            # Модальные окна: закрывается (только если форма реально лежала
+            # в модалке/попапе - _модалка_вокруг). Делаем ДО переоткрывающих
+            # проб (серверная валидация/лимит уводят страницу перезагрузкой).
+            if _модалка_вокруг is not None:
+                try:
+                    _закр_ст2, _закр_способ2 = _проба_закрытия_модалки(page, _модалка_вокруг)
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "модалка", "ид": название,
+                        "название": f"Модалка закрывается: {название}",
+                        "имя": имя_теста,
+                        "статус": "OK" if _закр_ст2 == "Да" else "Проверить",
+                        "модалка_закрывается": _закр_ст2,
+                        "комментарий_готовый": f"способ: {_закр_способ2}",
+                        "код": "modal_close",
+                    })
+                    print(f"   🪟 Модалка «{название}» закрывается: "
+                          f"{_закр_ст2} ({_закр_способ2})")
+                except Exception as _emc2:  # noqa: BLE001
+                    print(f"   ⚠️ Проба закрытия модалки не удалась: {_emc2}")
+
+            # ── Переоткрытие формы для повторных проб ──
+            # Серверная валидация и активный лимит бьют по форме ПОВТОРНО, но
+            # большинство форм блокируется после первой отправки (кнопка
+            # «Отправлено»), поэтому на том же заходе проба не проходит и вердикт
+            # выходил «Проверить». Перед каждой такой пробой пытаемся ЗАНОВО
+            # открыть свежую форму: перезагрузка + повтор шагов открытия
+            # (переоткрыть_fn) + повторное заполнение из снимка валидных значений.
+            # Всё под try: если переоткрыть не вышло - проба идёт по СТАРОЙ форме,
+            # ровно как раньше (никакой регрессии, максимум прежнее «Проверить»).
+            def _переоткрыть_и_заполнить():
+                if переоткрыть_fn is None or not _снимок_валидных or _is_order:
+                    return None, None
+                try:
+                    if not переоткрыть_fn():
+                        return None, None
+                    page.wait_for_timeout(600)
+                    if use_text:
+                        _loc = page.locator("form").filter(
+                            has_text=str(форма_config.get("text") or "").strip())
+                    else:
+                        _loc = page.locator(sel)
+                    _f = None
+                    for _k in range(min(_loc.count(), 6)):
+                        try:
+                            if _loc.nth(_k).is_visible():
+                                _f = _loc.nth(_k)
+                                break
+                        except Exception:  # noqa: BLE001
+                            continue
+                    if _f is None:
+                        return None, None
+                    try:
+                        _tag = _f.evaluate("el => el.tagName.toLowerCase()")
+                        if _tag in ("input", "textarea", "select"):
+                            _anc = _f.locator("xpath=ancestor::form[1]")
+                            if _anc.count() > 0:
+                                _f = _anc.first
+                    except Exception:  # noqa: BLE001
+                        pass
+                    _f = _apply_container_expand(_f, форма_config)
+                    _f.evaluate(_JS_RATELIMIT_RESTORE, _снимок_валидных)
+                    _bcss = str(форма_config.get("кнопка_css") or "").strip()
+                    _s = _f.locator(
+                        _bcss or "button[type='submit'], input[type='submit'], button.btn"
+                    ).first
+                    try:
+                        _s.scroll_into_view_if_needed()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    return _f, _s
+                except Exception:  # noqa: BLE001
+                    return None, None
+
             # Серверная валидация (пункт «нельзя отправить неверные данные
-            # через DevTools»): только под галочкой, ПОСЛЕ обычной легитимной
-            # отправки выше - отдельная строка отчёта, чтобы не исказить её.
+            # через DevTools»): под галочкой. Пробуем на СВЕЖЕЙ форме.
             if валидация_проба:
                 try:
-                    _srv = проба_серверной_валидации(form, page, sub, _is_order,
+                    _sv_form, _sv_sub = form, sub
+                    _fresh1 = _переоткрыть_и_заполнить()
+                    if _fresh1[0] is not None:
+                        _sv_form, _sv_sub = _fresh1
+                    _srv = проба_серверной_валидации(_sv_form, page, _sv_sub, _is_order,
                                                      снимок=_снимок_валидных)
                     _srv_попытки = _srv.get("попытки") or {}
                     if _srv_попытки:
@@ -6274,11 +6384,15 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     print(f"   ⚠️ Проба серверной валидации не удалась: {_esv}")
 
             # Лимит запросов - активный залп (пункт «Ограничено количество
-            # запросов»): только под галочкой, ПОСЛЕ обычной легитимной
-            # отправки выше - отдельная строка отчёта.
+            # запросов»): под галочкой. Тоже на СВЕЖЕЙ форме (иначе повтор не
+            # проходит из-за блокировки после первой отправки).
             if лимит_проба:
                 try:
-                    _rl = активная_проба_лимита(form, page, sub, _is_order,
+                    _rl_form, _rl_sub = form, sub
+                    _fresh2 = _переоткрыть_и_заполнить()
+                    if _fresh2[0] is not None:
+                        _rl_form, _rl_sub = _fresh2
+                    _rl = активная_проба_лимита(_rl_form, page, _rl_sub, _is_order,
                                                 снимок=_снимок_валидных)
                     _rl_попытки = _rl.get("попытки") or []
                     if _rl_попытки:
@@ -6298,27 +6412,6 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     print(f"   🚦 Защита от спама (активно) «{название}»: {_rl_ст} - {_rl_дет}")
                 except Exception as _erl:  # noqa: BLE001
                     print(f"   ⚠️ Активная проба лимита не удалась: {_erl}")
-
-            # Модальные окна: закрывается (только если форма реально лежала
-            # в модалке/попапе - _модалка_вокруг, иначе пункт не применим и
-            # колонка остаётся пустой, а не «Проверить»).
-            if _модалка_вокруг is not None:
-                try:
-                    _закр_ст2, _закр_способ2 = _проба_закрытия_модалки(page, _модалка_вокруг)
-                    записать_в_excel({
-                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
-                        "тип_селектора": "модалка", "ид": название,
-                        "название": f"Модалка закрывается: {название}",
-                        "имя": имя_теста,
-                        "статус": "OK" if _закр_ст2 == "Да" else "Проверить",
-                        "модалка_закрывается": _закр_ст2,
-                        "комментарий_готовый": f"способ: {_закр_способ2}",
-                        "код": "modal_close",
-                    })
-                    print(f"   🪟 Модалка «{название}» закрывается: "
-                          f"{_закр_ст2} ({_закр_способ2})")
-                except Exception as _emc2:  # noqa: BLE001
-                    print(f"   ⚠️ Проба закрытия модалки не удалась: {_emc2}")
 
             return True
 
@@ -6652,11 +6745,22 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
         print(f"   🌐 Форма через браузер (Playwright): {format_form_config_for_log(форма_config)}")
 
-        return _with_browser_page(
-            lambda page: _form_fill_submit_on_page(
-                page, url, страница, форма_config, название, initial_url=url
+        def _run_direct(page):
+            def _переоткрыть():
+                # Свежая форма для повторных проб: просто перезагружаем страницу
+                # (прямая форма уже на ней, шагов открытия нет).
+                try:
+                    _goto_with_retry(page, url)
+                    page.wait_for_timeout(1500)
+                    _run_page_prep(page, страница)
+                    return True
+                except Exception:  # noqa: BLE001
+                    return False
+            return _form_fill_submit_on_page(
+                page, url, страница, форма_config, название, initial_url=url,
+                переоткрыть_fn=_переоткрыть,
             )
-        )
+        return _with_browser_page(_run_direct)
 
     def проверить_кнопку_через_playwright(url, значение, название_теста):
         страница = определить_страницу(url)
@@ -6831,6 +6935,32 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             f"   🌐 Шаг {i + 1}: форма «{nm}»"
                             + (f" (переход: {initial})" if initial else "")
                         )
+
+                        # Колбэк «заново открыть эту форму» для повторных проб
+                        # (серверная валидация/лимит). Перезагружаем базу сценария
+                        # и повторяем ШАГИ ОТКРЫТИЯ (клики/паузы) до формы. Слайс
+                        # шагов фиксируем через дефолт-аргумент (i - переменная цикла).
+                        def _переоткрыть_сценарий(_откр=list(шаги[:i]), _init=initial):
+                            try:
+                                _goto_with_retry(page, base_url)
+                                page.wait_for_timeout(800)
+                                _run_page_prep(page, страница)
+                                for _st in _откр:
+                                    _replay_open_step(page, _st, base_url)
+                                if _init:
+                                    _goto_with_retry(page, _init)
+                                    page.wait_for_timeout(1200)
+                                return True
+                            except Exception:  # noqa: BLE001
+                                return False
+
+                        # Переоткрытие уводит страницу перезагрузкой - безопасно
+                        # ТОЛЬКО если «форма» последний шаг сценария (после неё
+                        # других шагов нет). Иначе не передаём колбэк (проба
+                        # пойдёт по старой форме, как раньше).
+                        _reopen_cb = (_переоткрыть_сценарий
+                                      if i == len(шаги) - 1 else None)
+
                         _form_fill_submit_on_page(
                             page,
                             base_url,
@@ -6843,6 +6973,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             ),
                             цели_seen=_scn_цели_seen,
                             безопасная_отправка=str(тип_блока).startswith("Оформление"),
+                            переоткрыть_fn=_reopen_cb,
                         )
 
                     elif act == "модалка":
