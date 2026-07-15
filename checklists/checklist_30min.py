@@ -629,6 +629,12 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 # ── Session state ───────────────────────────────────────────────────
 
 
+# Версия набора дефолтов галочек «Что проверять». Поднимать при добавлении
+# нового пункта или смене дефолта, чтобы автовыбор применился и к уже
+# открытым (сохранённым) сессиям (см. init_session).
+_C30_CHECKS_DEFAULTS_VER = 3
+
+
 def init_session():
     defaults = {
         'c30_project_id': None,
@@ -657,11 +663,11 @@ def init_session():
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
         'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
-        'c30_check_link_profile': False,  # lite-профиль ссылок (Вебмастер API) - по запросу
         'c30_check_w3c': True,         # п.1.16 - валидация W3C + скорость
         'c30_check_static': True,      # п.1.17 - сжатие/кеш статики
         'c30_check_404': True,         # п.1.18 - страница 404
         'c30_check_ps_filters': True,  # п.1.19 - фильтры/санкции ПС
+        'c30_check_link_profile': True,   # п.1.20 - lite-профиль ссылок (Вебмастер API)
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -679,6 +685,16 @@ def init_session():
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+    # Одноразовое обновление дефолтов галочек при выкатке новой версии блока
+    # «Что проверять». Без него в уже открытой (сохранённой) сессии остаются
+    # СТАРЫЕ значения ключей - init выше их не трогает (k уже в session_state),
+    # и новые пункты/включённые по умолчанию проверки выглядят «снятыми».
+    # Бампаем версию - при следующем открытии страницы блок выбран целиком.
+    if st.session_state.get('c30_checks_defaults_ver') != _C30_CHECKS_DEFAULTS_VER:
+        for k, v in defaults.items():
+            if k.startswith('c30_check_'):
+                st.session_state[k] = v
+        st.session_state['c30_checks_defaults_ver'] = _C30_CHECKS_DEFAULTS_VER
 
 
 init_session()
@@ -1076,7 +1092,8 @@ if pid:
                      'c30_check_meta', 'c30_check_region', 'c30_check_cis',
                      'c30_check_layout', 'c30_check_markup', 'c30_check_security',
                      'c30_check_images', 'c30_check_w3c', 'c30_check_static',
-                     'c30_check_404', 'c30_check_ps_filters']
+                     'c30_check_404', 'c30_check_ps_filters',
+                     'c30_check_link_profile']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
@@ -1220,6 +1237,19 @@ if pid:
                              'дней по маркерам («ручные меры», «security '
                              'issue») + ссылка на ручную сверку в Search '
                              'Console. Отдельный лист «Фильтры ПС».')
+            st.checkbox('1.20  Ссылочный профиль (беклинки, lite)',
+                        key='c30_check_link_profile',
+                        help='Беклинки по официальным данным Яндекс.Вебмастера '
+                             '(тот же OAuth-токен, что и диагностика): объём '
+                             '(всего внешних ссылок и доноров), динамика '
+                             '(резкий обвал = потеря ссылок, всплеск = '
+                             'возможный спам/накрутка) и подозрительные доноры '
+                             '(мусорные зоны, gambling/adult). Глубокий аудит '
+                             '(Ahrefs/Majestic) платный - здесь его нет. У '
+                             'Google API беклинков нет - ссылка на ручную '
+                             'сверку в GSC. Нужен настроенный токен Вебмастера '
+                             '(webmaster_oauth). Отдельный лист «Ссылочный '
+                             'профиль».')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1325,17 +1355,6 @@ if pid:
                                'добираются остальные из прогона. Больше '
                                'страниц - шире картина, но выше суммарная '
                                'нагрузка на сайт.')
-        st.checkbox('Lite-проверка ссылочного профиля (Яндекс.Вебмастер)',
-                    key='c30_check_link_profile',
-                    help='Беклинки по официальным данным Яндекс.Вебмастера '
-                         '(тот же OAuth-токен, что и диагностика): объём '
-                         '(всего внешних ссылок и доноров), динамика (резкий '
-                         'обвал = потеря ссылок, всплеск = возможный спам/'
-                         'накрутка) и подозрительные доноры (мусорные зоны, '
-                         'gambling/adult). Глубокий аудит (Ahrefs/Majestic) '
-                         'платный - здесь его нет. Нужен настроенный токен '
-                         'Вебмастера (webmaster_oauth). Результат: лист '
-                         '«Ссылочный профиль».')
 
         # ── Автокликер (локальный Chrome или облако с сессией) ──────
         _ck_ac = st.checkbox(
