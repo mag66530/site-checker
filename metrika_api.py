@@ -343,6 +343,90 @@ def counter_info(token, counter, proxy_url=None):
         print('  (пусто)')
 
 
+# ── Цель на 404 в Метрике (регулярный мониторинг: не сборка почтового отчёта
+# из письма/выгрузки, а прямой запрос к живой конфигурации счётчика при
+# каждом прогоне) ────────────────────────────────────────────────────────
+GOALS_URL_TMPL = 'https://api-metrika.yandex.net/management/v1/counter/{counter}/goals'
+
+
+def counter_goals(cid, token, proxy_url=None) -> Optional[list]:
+    """Список целей счётчика (Management API). None - не удалось узнать
+    (сеть/токен/доступ) - НЕ путать с [] (счётчик реально ответил и целей
+    у него просто нет)."""
+    if requests is None or not token or not cid:
+        return None
+    headers = {'Authorization': f'OAuth {token}'}
+    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    url = GOALS_URL_TMPL.format(counter=cid)
+    try:
+        r = requests.get(url, headers=headers, proxies=proxies, timeout=40)
+    except Exception:
+        return None
+    if r.status_code != 200:
+        return None
+    return (r.json() or {}).get('goals') or []
+
+
+def _goal_looks_like_404(goal: dict) -> bool:
+    """Похожа ли цель на отслеживание 404-ошибок - по названию ИЛИ по любому
+    ТЕКСТОВОМУ значению внутри описания цели (JS-идентификатор события лежит
+    в разных полях в зависимости от типа цели - ищем по всей структуре, а не
+    по одному конкретному ключу, чтобы не зависеть от точной схемы). Поле
+    `id` (и подобные служебные числа) из поиска исключаем нарочно - это
+    большое произвольное число, которое может случайно содержать «404» и
+    дать ложное «цель есть» там, где её на самом деле нет. В реальных
+    счётчиках СМУ/ИМП такая цель уже настроена: название «404», JS-
+    идентификатор «404error» - оба матчатся уже по названию. ЧИСТАЯ функция
+    (юнит-тест без сети)."""
+    if '404' in str(goal.get('name') or ''):
+        return True
+    import json as _json
+    relevant = {k: v for k, v in (goal or {}).items()
+                if k not in ('id', 'counter_id')}
+    try:
+        blob = _json.dumps(relevant, ensure_ascii=False)
+    except Exception:
+        blob = str(relevant)
+    return '404' in blob
+
+
+def has_404_goal(project_id, token, proxy_url=None, counter=None, log=None) -> dict:
+    """Есть ли хотя бы у одного счётчика проекта цель на отслеживание 404 -
+    живым запросом к Метрике (не по ранее выгруженному каталогу целей,
+    который мог устареть). Переиспользует _counters_for - те же счётчики
+    (в т.ч. по странам), что и «404 из Метрики».
+
+    Возвращает {'есть': bool, 'счётчики': {cid: {'есть': bool|None,
+    'название': str|None}}} - «есть»=None у счётчика значит «не удалось
+    узнать» (не то же самое, что «нет цели»)."""
+    def _log(msg):
+        if log:
+            log('info', msg)
+
+    result = {'есть': False, 'счётчики': {}}
+    if requests is None or not token:
+        _log('⚠ Метрика-API (цель 404): токен не задан или requests не установлен')
+        return result
+    counters = _counters_for(project_id, counter, token=token,
+                             proxy_url=proxy_url, log=log)
+    if not counters:
+        _log(f'⚠ Метрика-API (цель 404): нет счётчиков для {project_id}')
+        return result
+    for cid in counters:
+        goals = counter_goals(cid, token, proxy_url)
+        if goals is None:
+            result['счётчики'][cid] = {'есть': None, 'название': None}
+            continue
+        found = next((g for g in goals if _goal_looks_like_404(g)), None)
+        result['счётчики'][cid] = {
+            'есть': bool(found),
+            'название': found.get('name') if found else None,
+        }
+        if found:
+            result['есть'] = True
+    return result
+
+
 def probe_counter(project_id, token, proxy_url=None, counter=None,
                   date='yesterday'):
     """Диагностика доступа: запрос БЕЗ фильтра (любые данные за день).

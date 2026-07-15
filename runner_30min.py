@@ -600,6 +600,7 @@ def run_check(pid, params, creds, log, progress):
         report_filename = make_report_filename(pid, started_ms, REPORTS_DIR)
         report_path = REPORTS_DIR / report_filename
         _today_404 = None   # отчёт 404 из Метрика-API
+        _404_goal = None    # есть ли в Метрике цель на отслеживание 404
         _nlog = lambda lvl, msg: log(msg)
         # Прокси для почты/Метрики/Вебмастера - тот же, что и для страниц: с
         # учётом use_proxy проекта. Иначе при use_proxy=false сбор всё равно лез
@@ -710,6 +711,17 @@ def run_check(pid, params, creds, log, progress):
                     _m404_disp = _metrika_period_display(_d1, _d2)
                 except Exception as _e:
                     log(f'⚠ Метрика-API: {_e}')
+                # Цель на 404 - живым запросом к конфигурации счётчика (не
+                # старый выгруженный каталог, который мог устареть) - та же
+                # галочка, тот же токен/счётчик, лишнего запроса на боевой
+                # сайт не делает (только к API Метрики).
+                try:
+                    from metrika_api import has_404_goal
+                    _404_goal = has_404_goal(
+                        pid, _mt_token, _proxy,
+                        counter=creds.get('metrika_counter'), log=_nlog)
+                except Exception as _e:
+                    log(f'⚠ Метрика-API (цель 404): {_e}')
             else:
                 log(f'⚠ Метрика-API: токен не задан (metrika_oauth_{pid})')
         else:
@@ -942,6 +954,7 @@ def run_check(pid, params, creds, log, progress):
             metrika_reports=_metrika_reports,
             metrika_data_date=(_m404_disp if _today_404
                                else get_latest_available_date(pid)),
+            metrika_404_goal=_404_goal,
             service_issues=_service_issues, autoclick=_autoclick,
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,

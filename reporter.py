@@ -1683,6 +1683,34 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             ws.row_dimensions[row].height = 20
             row += 1
 
+        # ── Секция 3а: соблюдение директив - заблокированные страницы вживую ──
+        # Disallow сам по себе не мешает URL попасть в индекс без сниппета,
+        # если на него где-то есть ссылка - надёжна защита с доп. noindex.
+        _dc = indexing_summary.get('directive_check')
+        if _dc and not indexing_summary.get('error'):
+            _dc_finds = _dc.get('findings') or []
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = f'Заблокированные страницы: проверено вживую  ({len(_dc_finds)})'
+            c.font = _font(size=13, bold=True,
+                           color=C.warn if _dc_finds else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            if not _dc_finds:
+                _line(f'✅ Заблокированные в robots.txt страницы (проверено вживую '
+                      f'{_dc.get("checked", 0)}) либо недоступны напрямую, либо '
+                      f'дополнительно закрыты noindex.', C.ok)
+            else:
+                _line('Эти страницы реально отвечают 200 и БЕЗ собственного '
+                      'noindex - держатся только на честном слове robots.txt:',
+                      C.text_muted)
+                for _f in _dc_finds:
+                    _line(f'⚠ {_f.get("path", "")}: Disallow: {_f.get("rule", "")} - '
+                          f'отвечает 200, noindex не стоит', C.warn)
+            row += 1
+
         # ── Секция 4: мусор не закрыт в robots (ТЗ 3.3.4.2) ──
         junk = indexing_summary.get('junk_open')
         if junk is not None and not indexing_summary.get('error'):
@@ -4468,6 +4496,7 @@ def build_report(
     metrika_reports: list = None,  # список Report404 - добавит лист «404 из Метрики»
     metrika_data_date: str = None, # дата отчёта Метрики (YYYY-MM-DD)
     metrika_is_stale: bool = False,# True если данные не за вчера, а за более ранний день
+    metrika_404_goal: dict = None, # has_404_goal() - строка на листе «404 из Метрики»
     notifications: list = None,    # список WebmasterNotification - добавит лист «Уведомления»
     service_issues: list = None,   # список ServiceIssue - добавит лист «Ошибки сервисов»
     autoclick: dict = None,        # итоги автокликера - добавит лист «Автокликер»
@@ -4997,9 +5026,12 @@ def build_report(
         ws3.auto_filter.ref = f'A{hdr_row}:E{hdr_row}'
 
     # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 4: «404 из Метрики» - если есть данные
+    # ЛИСТ 4: «404 из Метрики» - если есть данные (страницы ИЛИ хотя бы
+    # проверка цели - иначе «404 не найдено, но и цель не проверялась»
+    # молча теряется, когда отчёт Метрики просто пуст за период)
     # ═══════════════════════════════════════════════════════════════
-    if metrika_reports:
+    if metrika_reports or metrika_404_goal is not None:
+        metrika_reports = metrika_reports or []
         # Собираем все страницы из всех стран, считаем сшивку с Site Checker
         # Множество URL'ов которые упали в Site Checker (404 или 5xx)
         sc_failed_urls = set()
@@ -5018,7 +5050,7 @@ def build_report(
         ws4 = wb.create_sheet('404 из Метрики')
         ws4.sheet_view.showGridLines = False
         ws4.sheet_properties.tabColor = C.err if metrika_is_stale else C.accent
-        ws4.freeze_panes = 'A6'  # шапка фиксируется
+        ws4.freeze_panes = 'A7'  # шапка фиксируется
 
         # Колонки и их ширина
         ws4.column_dimensions['A'].width = 14   # Дата отчёта
@@ -5067,9 +5099,36 @@ def build_report(
         # а лишний текст загромождал шапку.
         ws4.row_dimensions[3].height = 8
 
-        # ─── Шапка таблицы на 5-й строке ───────────────────────────
-        # 4-я строка - пустая разделительная
-        hdr_row = 5
+        # ─── Цель на 404 в Метрике (регулярный мониторинг): есть/нет ───
+        # Не влияет на сам сбор этого листа (он и так работает через
+        # просмотры страниц с заголовком «не найдена») - это отдельная,
+        # клиентская настройка: без неё 404 не видно в «Конверсиях»/
+        # уведомлениях самой Метрики, только в этом отчёте.
+        if metrika_404_goal is not None:
+            ws4.merge_cells('A4:H4')
+            c = ws4['A4']
+            if metrika_404_goal.get('есть'):
+                _names = sorted({v['название'] for v in
+                                 metrika_404_goal.get('счётчики', {}).values()
+                                 if v.get('есть') and v.get('название')})
+                c.value = ('✅ Цель на 404 в Метрике: есть'
+                           + (f' («{", ".join(_names)}»)' if _names else ''))
+                c.font = _font(size=10, color=C.ok)
+            else:
+                c.value = ('❌ Цель на 404 в Метрике: не найдена - сбор на этом '
+                           'листе всё равно работает (через просмотры страниц), '
+                           'но в самой Метрике (вкладка «Конверсии», '
+                           'уведомления) 404 без цели не отслеживаются - '
+                           'стоит создать.')
+                c.font = _font(size=10, bold=True, color=C.err)
+            c.alignment = _align(wrap=True, indent=1)
+            ws4.row_dimensions[4].height = 20
+        else:
+            ws4.row_dimensions[4].height = 4
+
+        # ─── Шапка таблицы на 6-й строке ───────────────────────────
+        # 5-я строка - пустая разделительная
+        hdr_row = 6
         ws4.row_dimensions[hdr_row].height = 28
         hdrs = ['Дата', 'Страна', 'Статус', 'URL страницы', 'Просмотры', 'Посетители', 'Реферер', 'Заголовок страницы']
         for col_idx, label in enumerate(hdrs, 1):
@@ -5121,7 +5180,7 @@ def build_report(
         # пользователь сразу понял что происходит.
         rows_with_url = sum(1 for fr in flat_rows if fr['url'])
         if flat_rows and rows_with_url == 0:
-            warn_row = hdr_row - 1  # 4-я строка (там сейчас пусто)
+            warn_row = hdr_row - 1  # 5-я строка (пустая разделительная)
             ws4.merge_cells(f'A{warn_row}:H{warn_row}')
             wc = ws4.cell(row=warn_row, column=1)
             wc.value = (
