@@ -46,7 +46,7 @@ IN_SEARCH_SAMPLES = '/user/{uid}/hosts/{hid}/search-urls/in-search/samples/'
 # ежедневном прогоне, без чрезмерной нагрузки на боевой сайт.
 DEFAULT_MAX_PER_HOST = 300
 _PAGE_LIMIT = 100          # максимум записей на страницу у Вебмастера (1..100)
-_CONCURRENCY = 8           # одновременных прозвонов (вежливо к сайту)
+_CONCURRENCY = 12          # одновременных прозвонов (баланс скорость/вежливость)
 _TIMEOUT_S = 25
 _HEAD_BYTES = 16384        # сколько байт тела читаем ради <title> (soft-404)
 
@@ -205,19 +205,29 @@ async def _check_one(session, url: str, proxy_url, sem) -> dict:
                     'final_url': '', 'verdict': v, 'reason': rz}
 
 
-async def _check_all(pairs: list, proxy_url) -> dict:
-    """pairs: [(host_norm, url)] → {url: результат}. Одна общая сессия."""
+async def _check_all(pairs: list, proxy_url, progress=None) -> dict:
+    """pairs: [(host_norm, url)] → {url: результат}. Одна общая сессия.
+    progress(done, total) - опциональный колбэк по мере готовности (для лога
+    прогресса при долгом прозвоне)."""
     from http_checker import make_browser_headers
     sem = asyncio.Semaphore(_CONCURRENCY)
     connector = aiohttp.TCPConnector(limit=_CONCURRENCY, ttl_dns_cache=300)
     results = {}
+    total = len(pairs)
     async with aiohttp.ClientSession(headers=make_browser_headers(),
                                      connector=connector) as session:
         tasks = [asyncio.create_task(_check_one(session, u, proxy_url, sem))
                  for _, u in pairs]
+        done = 0
         for coro in asyncio.as_completed(tasks):
             r = await coro
             results[r['url']] = r
+            done += 1
+            if progress:
+                try:
+                    progress(done, total)
+                except Exception:
+                    pass
     return results
 
 
