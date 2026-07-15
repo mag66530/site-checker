@@ -3646,6 +3646,37 @@ def _build_meta_sheet(wb, results, meta_summary):
                     cell.hyperlink = val
             row += 1
 
+    # ── Секция: SEO-тексты категорий (нейроответы / AI overviews) ──
+    _st_pages = [r for r in results
+                 if getattr(r, 'seo_text', None) is not None]
+    if _st_pages:
+        _st_warned = [r for r in _st_pages if r.seo_text.get('warnings')]
+        _meta_section_title(
+            ws, row,
+            f'SEO-тексты категорий (нейроответы)  ({len(_st_warned)})',
+            C.warn if _st_warned else C.ok)
+        row += 1
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = ('Формальные признаки текста для нейроответов/AI overviews: '
+                   'текст есть, содержит главный ключ (из H1), фото с alt, '
+                   'таблица с caption+thead, структура (h2/h3, таблицы, '
+                   'нумерованные списки). Смысловую полноту ответа и '
+                   'LSI-слова машина не оценит - это семантическое ядро и '
+                   'ручная вычитка.')
+        c.font = _font(size=9, italic=True, color=C.text_muted)
+        c.alignment = _align(indent=1, wrap=True)
+        ws.row_dimensions[row].height = 30
+        row += 1
+        if not _st_warned:
+            _meta_ok_line(ws, row, '✅ На проверенных категориях SEO-тексты '
+                                   'с ключом, фото, таблицей и структурой.')
+            row += 2
+        else:
+            row = _render_issue_groups(
+                ws, row, _issue_groups(_st_warned, 'seo_text', 'warnings'),
+                C.warn)
+
     if meta_summary is not None:
         _meta_section_title(ws, row, f'Дубли УРЛОВ (нет редиректа)  ({len(url_dups)})',
                             C.err if url_dups else C.ok)

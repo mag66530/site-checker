@@ -171,6 +171,9 @@ class CheckResult:
     text_issues: list[TextIssue] = field(default_factory=list)
     has_text_issues: bool = False
 
+    # SEO-текст категории/фильтра (нейроответы: ключ/фото/таблица/структура)
+    seo_text: Optional[dict] = None
+
     # Структурная проверка контента (блоки страницы)
     content: Optional["ContentResult"] = None
     content_bugs: int = 0
@@ -650,6 +653,16 @@ async def check_one(
         except Exception:
             text_issues = []
 
+    # SEO-текст категории/фильтра (нейроответы: ключ/фото/таблица/структура)
+    seo_text = None
+    if is_ok and check_text and a['body_text'] \
+            and task.type_code in ('category', 'filter'):
+        try:
+            from content_checker import check_seo_text
+            seo_text = check_seo_text(a['body_text'], task.type_code)
+        except Exception:
+            seo_text = None
+
     # Структурная проверка контента - только для OK с body. Подтягиваем CSS,
     # чтобы цена/кнопка, скрытые стилями (display:none), считались невидимыми.
     content = None
@@ -903,6 +916,7 @@ async def check_one(
         error_message=a['error_message'],
         text_issues=text_issues,
         has_text_issues=len(text_issues) > 0,
+        seo_text=seo_text,
         content=content,
         content_bugs=content.bug_count if content else 0,
         has_content_bugs=bool(content and content.has_bugs),

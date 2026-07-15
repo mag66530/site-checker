@@ -1208,6 +1208,78 @@ _CATALOG = [
 _CONTENT_CHROME_RE = re.compile(r'<(header|footer|nav)\b[^>]*>.*?</\1>', re.I | re.S)
 
 
+# ── SEO-текст категории (нейроответы / AI overviews + чек-лист) ──────
+# Формальные признаки: текст есть, содержит главный ключ (H1), фото с alt,
+# таблица с caption+thead, структура (подзаголовки/таблицы/нумерованные
+# списки). Смысловую полноту «ответа на главный вопрос» и LSI-слова машина
+# не оценит - это к семантическому ядру и человеку (написано в вводке).
+
+_SEO_TEXT_MIN = 300           # короче - «текста нет», символов
+_RE_P_BLOCK = re.compile(r'<p\b[^>]*>(.*?)</p>', re.I | re.S)
+_RE_TABLE_BLOCK = re.compile(r'<table\b.*?</table>', re.I | re.S)
+_RE_IMG_WITH_ALT = re.compile(r'<img\b[^>]*\balt\s*=\s*["\'][^"\']+', re.I)
+_RE_SEO_STRUCT = re.compile(r'<h[23]\b|<ol\b|<table\b', re.I)
+_RE_H1_TEXT = re.compile(r'<h1\b[^>]*>(.*?)</h1>', re.I | re.S)
+_RE_ANY_TAG = re.compile(r'<[^>]+>')
+
+
+def check_seo_text(html: str, type_code: str = 'category') -> dict | None:
+    """Проверка SEO-текста категории/фильтра. Возвращает dict с warnings
+    (тексты без чисел - лист группирует страницы по тексту) или None."""
+    if not html:
+        return None
+    body = _CONTENT_CHROME_RE.sub(' ', html)
+    paras = _RE_P_BLOCK.findall(body)
+    text = ' '.join(re.sub(r'\s+', ' ', _RE_ANY_TAG.sub(' ', p_)).strip()
+                    for p_ in paras)
+    text_len = len(text)
+
+    m_h1 = _RE_H1_TEXT.search(html)
+    h1 = (re.sub(r'\s+', ' ', _RE_ANY_TAG.sub(' ', m_h1.group(1))).strip()
+          if m_h1 else '')
+
+    warnings = []
+    if text_len < _SEO_TEXT_MIN:
+        warnings.append('на странице нет SEO-текста (или он совсем короткий) '
+                        '- частотной категории нужен текст с главным ключом')
+        return {'text_len': text_len, 'warnings': warnings}
+
+    # Главный ключ: слова H1 встречаются в тексте (терпимо к склонениям).
+    def _stems(s):
+        return {w[:-2] if len(w) > 5 else w
+                for w in re.split(r'[^а-яёa-z0-9]+', s.lower())
+                if len(w) >= 4}
+    if h1:
+        h1_st, tx_st = _stems(h1), _stems(text)
+        if h1_st and not any(
+                a == b or a.startswith(b) or b.startswith(a)
+                for a in h1_st for b in tx_st):
+            warnings.append('в SEO-тексте нет главного ключа (названия '
+                            'категории из H1)')
+
+    tables = _RE_TABLE_BLOCK.findall(body)
+    table_ok = any('<caption' in t.lower() and '<thead' in t.lower()
+                   for t in tables)
+    if tables and not table_ok:
+        warnings.append('таблица на странице без <caption>/<thead> - '
+                        'чек-лист требует подпись и шапку таблицы')
+    elif not tables:
+        warnings.append('в SEO-тексте нет таблицы (caption+thead) - '
+                        'по чек-листу желательна на частотных категориях')
+
+    # Фото с alt рядом с текстом: SEO-блок обычно в нижней трети контента.
+    _tail = body[-max(len(body) // 3, 20_000):]
+    if not _RE_IMG_WITH_ALT.search(' '.join(paras) + _tail):
+        warnings.append('в SEO-тексте нет фото с alt')
+
+    if not _RE_SEO_STRUCT.search(_tail):
+        warnings.append('SEO-текст не структурирован (нет подзаголовков '
+                        'h2/h3, таблиц, нумерованных списков) - сплошное '
+                        'полотно хуже цитируется нейроответами')
+
+    return {'text_len': text_len, 'warnings': warnings}
+
+
 def _content_html(c: _Ctx) -> str:
     """HTML страницы без сквозных шапки/подвала/меню - «контентная» область.
     Берём полный HTML (не vis): strip_hidden иногда убирает блоки, которые
