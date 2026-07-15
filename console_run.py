@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -257,6 +258,94 @@ def _slider_probe(page):
         page.wait_for_timeout(900)              # анимация
         after = page.evaluate(_SLIDER_STATE_JS, root)
         return 'ok' if after != before else 'fail'
+    except Exception:
+        return None
+
+
+# Cookie-баннер и кнопка согласия. Кнопка - СТРОГО по тексту согласия;
+# ссылки «файлы cookie»/«подробнее»/«политика» - это ссылки на политику,
+# не согласие (клик по ним уводит со страницы и даёт ложный «не запомнил»).
+_COOKIE_BANNER_SEL = ("[class*='cookie'], [id*='cookie'], [class*='gdpr'], "
+                      "[class*='consent']")
+_COOKIE_ACCEPT_TEXTS = ('принять', 'согласен', 'согласна', 'хорошо',
+                        'понятно', 'ок', 'accept', 'разрешить', 'приемлю',
+                        'да, принимаю', 'соглас')
+_RE_COOKIE_DECLINE = re.compile(
+    r'подробн|политик|policy|настро|отклон|подроб|узнать|читать|\bболее\b',
+    re.I)
+COOKIE_MIN_DAYS = 7
+
+
+def _find_cookie_accept(page, banner):
+    """Кнопка согласия ВНУТРИ баннера: <a>/<button> с текстом согласия и
+    без слов «подробнее/политика/настройки». None - не нашли."""
+    try:
+        for el in banner.query_selector_all('a, button, [role=button]'):
+            if not el.is_visible():
+                continue
+            txt = (el.text_content() or '').strip().lower()
+            if not txt or len(txt) > 40:
+                continue
+            if _RE_COOKIE_DECLINE.search(txt):
+                continue
+            if any(t in txt for t in _COOKIE_ACCEPT_TEXTS):
+                return el
+    except Exception:
+        pass
+    return None
+
+
+def _cookie_consent_probe(page, context):
+    """Cookie-popup запоминает выбор минимум неделю (чек-лист).
+    Возвращает {'status': 'ok'|'short'|'not_remembered', 'days': int|None} |
+    None (баннера/кнопки нет - молчим)."""
+    import time as _t
+    try:
+        banner = page.query_selector(_COOKIE_BANNER_SEL)
+        if banner is None or not banner.is_visible():
+            return None
+        btn = _find_cookie_accept(page, banner)
+        if btn is None:
+            return None                        # кнопки согласия нет - молчим
+        before = {c['name'] for c in context.cookies()}
+        btn.click(timeout=3000)
+        page.wait_for_timeout(700)
+        # Новые cookies после согласия - максимальный срок жизни. Аналитику
+        # (Метрика _ym_*, GA _ga*) не считаем: она про трекинг, не про
+        # факт согласия.
+        now = _t.time()
+        best_days = None
+        for c in context.cookies():
+            nm = (c['name'] or '')
+            if c['name'] in before or nm.startswith(('_ym', '_ga', '_gid',
+                                                     '_gcl')):
+                continue
+            exp = c.get('expires')
+            if exp and exp > 0:
+                d = (exp - now) / 86400
+                if best_days is None or d > best_days:
+                    best_days = d
+        # Согласие часто пишут в localStorage (без срока - «навсегда»).
+        try:
+            ls_mark = page.evaluate(
+                "() => Object.keys(localStorage).some(k => "
+                "/cookie|consent|gdpr|soglas/i.test(k))")
+        except Exception:
+            ls_mark = False
+        # Проверка перезагрузкой: баннер не должен вернуться.
+        page.reload(wait_until='domcontentloaded', timeout=40000)
+        page.wait_for_timeout(1200)
+        b2 = page.query_selector(_COOKIE_BANNER_SEL)
+        reappeared = bool(b2 and b2.is_visible())
+        # Запомнил, если: cookie согласия с большим сроком, ИЛИ отметка в
+        # localStorage, ИЛИ баннер просто не вернулся после перезагрузки.
+        if best_days is not None and best_days >= COOKIE_MIN_DAYS:
+            return {'status': 'ok', 'days': int(best_days)}
+        if best_days is not None and best_days < COOKIE_MIN_DAYS:
+            return {'status': 'short', 'days': int(best_days)}
+        if ls_mark or not reappeared:
+            return {'status': 'ok', 'days': None}   # запомнил (срок не виден)
+        return {'status': 'not_remembered', 'days': None}
     except Exception:
         return None
 
@@ -611,6 +700,12 @@ def run(pid: str, urls: list, log) -> dict:
                     mobile['form_close'] = _form_close_probe(page)   # ПК
             except Exception:
                 mobile = None
+            # Cookie-согласие - В САМОМ КОНЦЕ: проба перезагружает страницу.
+            if ux is not None and i <= MENU_PROBE_PAGES:
+                try:
+                    ux['cookie'] = _cookie_consent_probe(page, ctx)
+                except Exception:
+                    ux['cookie'] = None
             out['checked'] += 1
             out['pages'].append({'url': url, 'errors': uniq[:15],
                                  'mobile': mobile, 'ux': ux, 'a11y': a11y})

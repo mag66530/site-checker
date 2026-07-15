@@ -3428,6 +3428,29 @@ def _build_console_sheet(wb, console_check):
         else:
             _ux_line('· Выпадающих подменю в шапке не распознано - пропуск.',
                      C.text_muted)
+        # Cookie-popup запоминает выбор минимум неделю.
+        _ck = [(p, (p.get('ux') or {}).get('cookie')) for p in pages]
+        _ck = [(p, v) for p, v in _ck if v]
+        _ck_bad = [(p, v) for p, v in _ck
+                   if v.get('status') in ('short', 'not_remembered')]
+        _ck_ok = [(p, v) for p, v in _ck if v.get('status') == 'ok']
+        if _ck_bad:
+            p0, v0 = _ck_bad[0]
+            if v0.get('status') == 'short':
+                _ux_line(f'⚠ Cookie-баннер запоминает выбор лишь на '
+                         f'{v0.get("days")} дн. (нужно ≥7) - '
+                         f'{p0["url"]}', C.warn)
+            else:
+                _ux_line(f'⚠ Cookie-баннер НЕ запоминает выбор (появляется '
+                         f'снова после перезагрузки) - {p0["url"]}', C.warn)
+        elif _ck_ok:
+            v0 = _ck_ok[0][1]
+            _d = (f' (срок {v0["days"]} дн.)' if v0.get('days') else '')
+            _ux_line(f'✅ Cookie-баннер запоминает выбор минимум неделю{_d}.',
+                     C.ok)
+        elif not _ck:
+            _ux_line('· Cookie-баннер с кнопкой согласия не распознан - '
+                     'пропуск.', C.text_muted)
         # Модальная форма: закрывается по клику вне (пункт «меню и формы»).
         # Проверяется на ПК (1440) и на мобильном (390); на странице форм
         # несколько - показываем НАЗВАНИЕ формы + URL.
