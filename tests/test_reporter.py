@@ -326,6 +326,76 @@ def test_problem_text_human_phrases():
     print('✓ «Что чинить»: человеческие формулировки')
 
 
+def test_metrika_404_goal_есть():
+    """Цель на 404 найдена - строка появляется на листе «404 из Метрики»,
+    даже если 404-страниц за период не было (сам факт проверки цели не
+    должен теряться, когда сшивка сама по себе пустая)."""
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    results = [make_result(url='https://stalmetural.ru/')]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            metrika_reports=None,
+            metrika_404_goal={'есть': True, 'счётчики':
+                               {'15630172': {'есть': True, 'название': '404'}}},
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert '404 из Метрики' in wb.sheetnames
+        ws = wb['404 из Метрики']
+        text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+        assert 'Цель на 404' in text
+        assert 'есть' in text.lower()
+    print('✓ Лист «404 из Метрики»: строка «цель есть» появляется')
+
+
+def test_metrika_404_goal_не_найдена():
+    selected = [Subdomain(url='https://mepen.ru/', city='Москва', host='mepen.ru')]
+    results = [make_result(url='https://mepen.ru/')]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            metrika_reports=None,
+            metrika_404_goal={'есть': False, 'счётчики':
+                               {'99551890': {'есть': False, 'название': None}}},
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert '404 из Метрики' in wb.sheetnames
+        ws = wb['404 из Метрики']
+        text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+        assert 'не найдена' in text.lower()
+        assert 'стоит создать' in text.lower()
+    print('✓ Лист «404 из Метрики»: строка «цель не найдена» появляется')
+
+
+def test_metrika_404_goal_none_без_данных_лист_не_создаётся():
+    """metrika_404_goal не передан (сбор 404 выключен) и отчётов о 404 тоже
+    нет - лист не появляется (прежнее поведение не сломано)."""
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    results = [make_result(url='https://stalmetural.ru/')]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert '404 из Метрики' not in wb.sheetnames
+    print('✓ Без данных о 404 (ни отчётов, ни цели) лист не создаётся')
+
+
 if __name__ == '__main__':
     test_basic_report_creation()
     test_report_with_text_issues()
@@ -333,4 +403,7 @@ if __name__ == '__main__':
     test_speed_with_comma()
     test_make_report_filename()
     test_custom_run_no_subdomains()
+    test_metrika_404_goal_есть()
+    test_metrika_404_goal_не_найдена()
+    test_metrika_404_goal_none_без_данных_лист_не_создаётся()
     print('\n✅ Все тесты reporter.py прошли')
