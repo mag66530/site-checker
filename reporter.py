@@ -1777,6 +1777,43 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                           f'отвечает 200, noindex не стоит', C.warn)
             row += 1
 
+        # ── Секция 4.2а: обязательные страницы + раздел «Отгрузки» ──
+        _rq = indexing_summary.get('required_pages')
+        if _rq:
+            _rq_missing = [r_ for r_ in _rq if not r_.get('found')]
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = (f'Обязательные страницы  '
+                       f'(не найдено: {len(_rq_missing)})')
+            c.font = _font(size=13, bold=True,
+                           color=C.err if _rq_missing else C.ok)
+            c.fill = _fill(C.accent_soft)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 24
+            row += 1
+            for r_ in _rq:
+                if r_.get('found'):
+                    _line(f'✅ {r_["label"]}: {r_["found"]}', C.ok)
+                else:
+                    _line(f'❌ {r_["label"]}: страница не найдена (проверены '
+                          f'типовые адреса) - создать', C.err)
+            # Раздел «Отгрузки» - опционален; если есть, должна быть
+            # перелинковка на каталог.
+            _otg = indexing_summary.get('otgruzki') or {}
+            if _otg.get('found'):
+                if _otg.get('catalog_links'):
+                    _line(f'✅ Раздел «Отгрузки» ({_otg["found"]}) - с '
+                          f'перелинковкой на каталог '
+                          f'({_otg["catalog_links"]} ссылок).', C.ok)
+                else:
+                    _line(f'⚠ Раздел «Отгрузки» ({_otg["found"]}) есть, но '
+                          f'ссылок на каталог в нём нет - добавить '
+                          f'перелинковку.', C.warn)
+            else:
+                _line('· Раздел «Отгрузки» не найден - опционален по '
+                      'проекту, не находка.', C.text_muted)
+            row += 1
+
         # ── Секция 4.3: перелинковка (внутренний вес) ──
         # Прокси по выборке прогона (не полный PageRank): классифицируем
         # внутренние ссылки каждой страницы по цели.

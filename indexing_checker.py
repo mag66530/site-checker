@@ -498,6 +498,29 @@ _ADVISORY_PATHS = [
     ('политика конфиденциальности', '/privacy/'),
 ]
 
+# Обязательные страницы (чек-лист: «созданы страницы Конфиденциальность,
+# Cookies, Доставка, Оплата»). У каждой - типовые варианты адреса; страница
+# есть, если ХОТЯ БЫ ОДИН вариант отвечает 200 (не редиректом на главную).
+_REQUIRED_PAGES = [
+    ('Политика конфиденциальности',
+     ('/policy/', '/politika-konfidentsialnosti/', '/privacy/',
+      '/privacy-policy/', '/politika/', '/personal-data/')),
+    ('Cookies',
+     ('/cookies/', '/cookie-policy/', '/politika-cookies/', '/cookie/')),
+    ('Доставка',
+     ('/dostavka/', '/delivery/', '/dostavka-i-oplata/',
+      '/payment_delivery/', '/shipping/')),
+    ('Оплата',
+     ('/oplata/', '/payment/', '/dostavka-i-oplata/',
+      '/payment_delivery/', '/kak-sdelat-pokupku/')),
+]
+
+# Раздел «Отгрузки» (опционален по проекту): если есть - в контенте должна
+# быть перелинковка на каталог.
+_OTGRUZKI_PATHS = ('/otgruzki/', '/otgruzka/', '/nashi-otgruzki/',
+                   '/shipments/', '/company/otgruzki/')
+_RE_CATALOG_HREF = re.compile(r'href\s*=\s*["\'][^"\']*/catalog', re.I)
+
 # Маркеры JS-подгрузки товаров («показать ещё») - эвристика для пункта
 # «для Google весь контент на одной странице».
 _RE_LOADMORE = re.compile(
@@ -567,6 +590,7 @@ async def check_paths_against_robots(host: str, paths: list, *,
            'sitemap_checks': None, 'blanket_disallow': [],
            'ua_groups': None, 'assets_checked': 0, 'assets_closed': [],
            'advisory_open': [], 'pagination': None,
+           'required_pages': [], 'otgruzki': None,
            'error': None}
     try:
         async with aiohttp.ClientSession(
@@ -686,6 +710,50 @@ async def check_paths_against_robots(host: str, paths: list, *,
                 if _noidx:
                     continue                    # noindex стоит - ок
                 out['advisory_open'].append({'label': label, 'path': path})
+
+            # ── 2в. Обязательные страницы + раздел «Отгрузки» ──
+            # Кеш по пути: /payment_delivery/ встречается в двух списках
+            # (Доставка и Оплата) - звоним один раз (и быстрее, и без
+            # флаков «вторая проверка того же URL таймаутнула»).
+            _ff_cache: dict = {}
+
+            async def _fetch_final(u):
+                """(status, final_path, html) с редиректами. Кеш + ретрай."""
+                if u in _ff_cache:
+                    return _ff_cache[u]
+                res = (None, None, '')
+                for _try in range(2):
+                    try:
+                        to = aiohttp.ClientTimeout(total=20)
+                        async with session.get(u, timeout=to, proxy=proxy_url,
+                                               allow_redirects=True) as r:
+                            res = (r.status, (r.url.path or '/'),
+                                   await r.text(errors='replace'))
+                            break
+                    except Exception:
+                        continue
+                _ff_cache[u] = res
+                return res
+
+            out['required_pages'] = []
+            for label, variants in _REQUIRED_PAGES:
+                found = None
+                for v in variants:
+                    st, fpath, _h = await _fetch_final(f'https://{host}{v}')
+                    # Редирект на главную = страницы нет (заглушка-склейка).
+                    if st == 200 and (fpath or '/').strip('/'):
+                        found = fpath
+                        break
+                out['required_pages'].append({'label': label, 'found': found})
+
+            otg_found, otg_links = None, 0
+            for v in _OTGRUZKI_PATHS:
+                st, fpath, h_otg = await _fetch_final(f'https://{host}{v}')
+                if st == 200 and (fpath or '/').strip('/'):
+                    otg_found = fpath
+                    otg_links = len(_RE_CATALOG_HREF.findall(h_otg or ''))
+                    break
+            out['otgruzki'] = {'found': otg_found, 'catalog_links': otg_links}
 
             # ── 2б. Пагинация: canonical для Яндекса + JS-подгрузка для
             # Google (эвристика по маркерам «показать ещё» в HTML) ──
