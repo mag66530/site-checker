@@ -938,6 +938,8 @@ def run_check(pid, params, creds, log, progress):
         # Ничего на боевом сайте не пингуем - данные из выгрузки Яндекса.
         _index_404 = None
         if params.get('check_index_404'):
+            import time as _time
+            _t404 = _time.monotonic()
             # Источник 1 — Яндекс.Вебмастер: браузер качает выгрузку «Страницы
             # в поиске» (код ответа уже в ней, боевой сайт не пингуем).
             _wm_404 = _run_index404_download(
@@ -952,7 +954,7 @@ def run_check(pid, params, creds, log, progress):
                     log('404 в индексе: проверяю sitemap (порция с ротацией)…')
                     _sm_404 = check_sitemap_404(
                         pid, proxy_url=proxy_url,
-                        max_urls=int(params.get('index_404_sitemap_max', 3000)),
+                        max_urls=int(params.get('index_404_sitemap_max', 1000)),
                         log=_nlog)
                     if _sm_404.get('error'):
                         log(f'⚠ 404 в индексе (sitemap): {_sm_404["error"]}')
@@ -977,8 +979,8 @@ def run_check(pid, params, creds, log, progress):
             from index_export_parser import merge_index_404
             _index_404 = merge_index_404(_wm_404, _sm_404, _gsc_404)
             if _index_404 and not _index_404.get('error'):
-                log(f'404 в индексе (итог): проверено '
-                    f'{_index_404.get("total_checked", 0)}, битых 404/410 '
+                log(f'404 в индексе (итог за {int(_time.monotonic() - _t404)}с): '
+                    f'проверено {_index_404.get("total_checked", 0)}, битых 404/410 '
                     f'{_index_404.get("total_dead", 0)}, '
                     f'источники: {", ".join(_index_404.get("sources") or []) or "—"}')
 

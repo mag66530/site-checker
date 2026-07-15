@@ -79,6 +79,8 @@ def check_sitemap_404(project_id: str, proxy_url=None,
     if day_ordinal is None:
         day_ordinal = datetime.date.today().toordinal()
 
+    import time
+
     async def _work():
         urls = await collect_all_urls(sitemap_url, proxy_url=proxy_url,
                                       log=(lambda lvl, m: _log(m)) if log else None)
@@ -89,7 +91,16 @@ def check_sitemap_404(project_id: str, proxy_url=None,
         if not window:
             return {}, total, 0
         pairs = [(_host_of(u), u) for u in window]
-        checked = await _check_all(pairs, proxy_url)
+        # Прогресс: прозвон долгий, показываем ход и время, чтобы не выглядело
+        # зависанием.
+        t0 = time.monotonic()
+
+        def _prog(done, tot):
+            if done % 250 == 0 or done == tot:
+                _log(f'Sitemap: прозвон {done}/{tot} '
+                     f'({int(time.monotonic() - t0)}с)')
+        checked = await _check_all(pairs, proxy_url, progress=_prog)
+        _log(f'Sitemap: прозвон завершён за {int(time.monotonic() - t0)}с')
         return checked, total, len(window)
 
     try:
