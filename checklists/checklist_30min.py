@@ -629,6 +629,12 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 # ── Session state ───────────────────────────────────────────────────
 
 
+# Версия набора дефолтов галочек «Что проверять». Поднимать при добавлении
+# нового пункта или смене дефолта, чтобы автовыбор применился и к уже
+# открытым (сохранённым) сессиям (см. init_session).
+_C30_CHECKS_DEFAULTS_VER = 3
+
+
 def init_session():
     defaults = {
         'c30_project_id': None,
@@ -657,10 +663,12 @@ def init_session():
         'c30_check_index_404': False,  # 404 среди страниц в индексе (Вебмастер) - тяжёлая, по запросу
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
+        'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
         'c30_check_w3c': True,         # п.1.16 - валидация W3C + скорость
         'c30_check_static': True,      # п.1.17 - сжатие/кеш статики
         'c30_check_404': True,         # п.1.18 - страница 404
         'c30_check_ps_filters': True,  # п.1.19 - фильтры/санкции ПС
+        'c30_check_link_profile': True,   # п.1.20 - lite-профиль ссылок (Вебмастер API)
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -678,6 +686,16 @@ def init_session():
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+    # Одноразовое обновление дефолтов галочек при выкатке новой версии блока
+    # «Что проверять». Без него в уже открытой (сохранённой) сессии остаются
+    # СТАРЫЕ значения ключей - init выше их не трогает (k уже в session_state),
+    # и новые пункты/включённые по умолчанию проверки выглядят «снятыми».
+    # Бампаем версию - при следующем открытии страницы блок выбран целиком.
+    if st.session_state.get('c30_checks_defaults_ver') != _C30_CHECKS_DEFAULTS_VER:
+        for k, v in defaults.items():
+            if k.startswith('c30_check_'):
+                st.session_state[k] = v
+        st.session_state['c30_checks_defaults_ver'] = _C30_CHECKS_DEFAULTS_VER
 
 
 init_session()
@@ -1075,7 +1093,8 @@ if pid:
                      'c30_check_meta', 'c30_check_region', 'c30_check_cis',
                      'c30_check_layout', 'c30_check_markup', 'c30_check_security',
                      'c30_check_images', 'c30_check_w3c', 'c30_check_static',
-                     'c30_check_404', 'c30_check_ps_filters']
+                     'c30_check_404', 'c30_check_ps_filters',
+                     'c30_check_link_profile']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
@@ -1219,6 +1238,19 @@ if pid:
                              'дней по маркерам («ручные меры», «security '
                              'issue») + ссылка на ручную сверку в Search '
                              'Console. Отдельный лист «Фильтры ПС».')
+            st.checkbox('1.20  Ссылочный профиль (беклинки, lite)',
+                        key='c30_check_link_profile',
+                        help='Беклинки по официальным данным Яндекс.Вебмастера '
+                             '(тот же OAuth-токен, что и диагностика): объём '
+                             '(всего внешних ссылок и доноров), динамика '
+                             '(резкий обвал = потеря ссылок, всплеск = '
+                             'возможный спам/накрутка) и подозрительные доноры '
+                             '(мусорные зоны, gambling/adult). Глубокий аудит '
+                             '(Ahrefs/Majestic) платный - здесь его нет. У '
+                             'Google API беклинков нет - ссылка на ручную '
+                             'сверку в GSC. Нужен настроенный токен Вебмастера '
+                             '(webmaster_oauth). Отдельный лист «Ссылочный '
+                             'профиль».')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1297,6 +1329,42 @@ if pid:
                          'ресайзе (масштаб Ctrl+/- покрыт той же сеткой), на '
                          'мобильном шрифт минимум 14px. Тяжёлый браузерный '
                          'проход - по запросу.')
+        _ck_stress = st.checkbox(
+            'Ошибки сервера: парсинг, нагрузка, дубли URL (по запросу)',
+            key='c30_check_stress',
+            help='В конце прогона гоняет три сетевые пробы на прод: (1) '
+                 'быстрый обход страниц парсингом; (2) параллельный залп '
+                 'по репрезентативным страницам; (3) кривые дубли адресов '
+                 'категорий/фильтров/товаров (сдвоенный сегмент, двойной '
+                 'слэш, глубокая пагинация). Ищем ошибки сервера (5xx), '
+                 'обрывы и деградацию скорости. При первых 5xx/обрывах проба '
+                 'сама останавливается (не добивает сервер); поймали бан на '
+                 'парсинге - нагрузку и дубли пропускаем. Создаёт реальную '
+                 'нагрузку на боевой сайт - по запросу. Результат: лист '
+                 '«Нагрузка и парсинг».')
+        if _ck_stress:
+            _sc1, _sc2 = st.columns(2)
+            with _sc1:
+                st.slider('Параллельных запросов в залпе',
+                          min_value=10, max_value=50, value=30, step=5,
+                          key='c30_stress_concurrency',
+                          help='Сколько запросов летят к ОДНОЙ странице '
+                               'одновременно. 15 - лёгкий безопасный всплеск; '
+                               '30 (по умолчанию) - заметный, показательный; '
+                               'выше - ближе к тому, что защита примет за '
+                               'атаку (риск бана). Каждая страница получает '
+                               'этот залп в 2 волны (итого запросов на '
+                               'страницу = число × 2).')
+            with _sc2:
+                st.slider('Сколько страниц под залпом',
+                          min_value=1, max_value=8, value=3, step=1,
+                          key='c30_stress_load_pages',
+                          help='На сколько разных страниц по очереди пойдёт '
+                               'залп нагрузки. Сначала берутся разнотипные '
+                               '(главная/категория/фильтр/товар), потом '
+                               'добираются остальные из прогона. Больше '
+                               'страниц - шире картина, но выше суммарная '
+                               'нагрузка на сайт.')
 
         # ── Автокликер (локальный Chrome или облако с сессией) ──────
         _ck_ac = st.checkbox(
@@ -1382,6 +1450,10 @@ if pid:
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_check_filter_fn', False)),
         bool(st.session_state.get('c30_check_console', False)),
+        bool(st.session_state.get('c30_check_stress', False)),
+        int(st.session_state.get('c30_stress_concurrency', 30)),
+        int(st.session_state.get('c30_stress_load_pages', 3)),
+        bool(st.session_state.get('c30_check_link_profile', False)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1441,6 +1513,10 @@ if pid:
                 'check_index_404': st.session_state.get('c30_check_index_404', False),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'check_console': st.session_state.get('c30_check_console', False),
+                'check_stress': st.session_state.get('c30_check_stress', False),
+                'stress_concurrency': int(st.session_state.get('c30_stress_concurrency', 30)),
+                'stress_load_pages': int(st.session_state.get('c30_stress_load_pages', 3)),
+                'check_link_profile': st.session_state.get('c30_check_link_profile', False),
                 'check_w3c': st.session_state.get('c30_check_w3c', False),
                 'check_static': st.session_state.get('c30_check_static', False),
                 'check_404': st.session_state.get('c30_check_404', True),

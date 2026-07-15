@@ -996,6 +996,90 @@ def run_check(pid, params, creds, log, progress):
             except Exception as _e:
                 log(f'⚠ Фильтры ПС: {_e}')
 
+        # ── Lite-проверка ссылочного профиля (по галочке) ──
+        # Официальные данные Яндекс.Вебмастера (links/external): объём,
+        # доноры, динамика, спам. Тот же OAuth-токен, что и диагностика.
+        _link_profile = None
+        if params.get('check_link_profile'):
+            _lp_token = creds.get('webmaster_oauth')
+            if _lp_token:
+                try:
+                    from link_profile import fetch_link_profile
+                    log('Ссылочный профиль: тяну данные Вебмастера…')
+                    _link_profile = fetch_link_profile(
+                        pid, _lp_token, _proxy, log=lambda m: log(m))
+                    _lp_hosts = (_link_profile or {}).get('hosts') or []
+                    _lp_warn = sum(len(h.get('warnings') or [])
+                                   for h in _lp_hosts)
+                    log(f'✓ Ссылочный профиль: хостов {len(_lp_hosts)}, '
+                        f'предупреждений {_lp_warn}')
+                except Exception as _e:
+                    log(f'⚠ Ссылочный профиль: {_e}')
+            else:
+                log('⚠ Ссылочный профиль: OAuth-токен Вебмастера не задан '
+                    '(webmaster_oauth) - пропуск.')
+                _link_profile = {'available': False,
+                                 'note': 'OAuth-токен Вебмастера не задан.'}
+
+        # ── Ошибки сервера: парсинг / нагрузка / дубли URL (по галочке) ──
+        # Тяжёлые сетевые пробы на прод: гоняем В КОНЦЕ, отчёт по страницам
+        # уже собран - падение сервера/бан здесь = находка, не сбой прогона.
+        _stress_check = None
+        if params.get('check_stress'):
+            try:
+                from stress_checker import run_stress_check
+                _ok = [r for r in results if r.is_ok]
+
+                def _first_ok(tc):
+                    return next((r for r in _ok if r.type_code == tc), None)
+                # Парсинг - выборка каталога (категории/фильтры/товары).
+                _parse = [r.url for r in _ok
+                          if r.type_code in ('category', 'filter', 'product')]
+                # Нагрузка - N репрезентативных страниц. Сначала по одной
+                # каждого типа (главная/категория/фильтр/товар - разнообразие),
+                # потом добираем остальными до нужного числа.
+                _n_load = max(1, int(params.get('stress_load_pages', 3)))
+                _load_rs, _seen = [], set()
+                for _tc in ('main', 'category', 'filter', 'product'):
+                    _r = _first_ok(_tc)
+                    if _r and _r.url not in _seen:
+                        _load_rs.append(_r)
+                        _seen.add(_r.url)
+                for _r in _ok:
+                    if len(_load_rs) >= _n_load:
+                        break
+                    if _r.url not in _seen:
+                        _load_rs.append(_r)
+                        _seen.add(_r.url)
+                _load_rs = _load_rs[:_n_load]
+                _load_pages = [r.url for r in _load_rs]
+                _baselines = {r.url: r.elapsed_ms for r in _load_rs
+                              if r.elapsed_ms}
+                # Дубли - по одному образцу каждого типа каталога.
+                _dup = [(tc, _first_ok(tc).url)
+                        for tc in ('category', 'filter', 'product')
+                        if _first_ok(tc)]
+                _conc = int(params.get('stress_concurrency', 30))
+                if _parse or _load_pages or _dup:
+                    log('Ошибки сервера (парсинг/нагрузка/дубли): '
+                        f'параллельность {_conc}…')
+                    _stress_check = asyncio.run(run_stress_check(
+                        parse_urls=_parse, load_pages=_load_pages,
+                        dup_samples=_dup, baselines=_baselines,
+                        proxy_url=proxy_url, concurrency=_conc,
+                        log=lambda m: log(m)))
+                    _p = (_stress_check or {}).get('parsing') or {}
+                    _l = (_stress_check or {}).get('load') or {}
+                    _d = (_stress_check or {}).get('duplicates') or {}
+                    _n5 = (len(_p.get('server_errors') or [])
+                           + sum(pg.get('server_5xx', 0)
+                                 for pg in (_l.get('pages') or []))
+                           + len(_d.get('server_errors') or []))
+                    log(f'✓ Ошибки сервера: 5xx-находок {_n5}'
+                        + (', БАН на парсинге' if _p.get('banned') else ''))
+            except Exception as _e:
+                log(f'⚠ Ошибки сервера (стресс-пробы): {_e}')
+
         # ── Загружаем из кеша и строим отчёт ОДИН раз (сразу полный) ──
         # Кеш почты/Метрики/сервисов подтягиваем ТОЛЬКО при включённых
         # галочках: выключил сбор - листов «Уведомления» / «404 из Метрики» /
@@ -1034,7 +1118,8 @@ def run_check(pid, params, creds, log, progress):
             filters_test=_filters_test, console_check=_console_check,
             w3c_check=_w3c_check, p404_check=_p404_check,
             ps_filters=_ps_filters, search_check=_search_check,
-            index_404_check=_index_404)
+            index_404_check=_index_404,
+            stress_check=_stress_check, link_profile=_link_profile)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
