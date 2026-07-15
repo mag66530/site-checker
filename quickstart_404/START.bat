@@ -1,51 +1,51 @@
-﻿@echo off
-chcp 65001 >nul
+@echo off
 cd /d "%~dp0"
 
 if not exist "autoclick_browser.py" (
-    echo ============================================================
-    echo  ОШИБКА: рядом нет файла autoclick_browser.py
+    echo ERROR: autoclick_browser.py not found next to this file.
     echo.
-    echo  Эта папка должна лежать ВНУТРИ папки проекта site-checker
-    echo  ^(там же, где app.py, gsc_save_session.py и другие файлы^).
-    echo  Переместите webmaster_404_export.py и СТАРТ.bat прямо в
-    echo  папку проекта и запустите СТАРТ.bat уже оттуда.
-    echo ============================================================
+    echo This folder must be placed INSIDE the site-checker project
+    echo folder - next to app.py and gsc_save_session.py.
+    echo.
+    echo Move webmaster_404_export.py and START.bat there, then run
+    echo START.bat again from that location.
     pause
     exit /b 1
 )
 
 echo ============================================================
-echo  ШАГ 1 из 3: открываю Chrome и проверяю вход в Google
+echo  STEP 1 of 3: opening Chrome
 echo ============================================================
-echo  Откроется ОТДЕЛЬНОЕ окно Chrome. Если попросит войти в
-echo  Google - войдите, затем нажмите Enter В ЭТОМ окне (в
-echo  чёрном окне терминала, не в Chrome).
+echo  A SEPARATE Chrome window will open now.
+echo  If it asks you to log into Google - log in there, then come
+echo  back to THIS black window and press Enter.
 echo ============================================================
 echo.
 python gsc_save_session.py
 
 echo.
 echo ============================================================
-echo  ШАГ 2 из 3: в ТОМ ЖЕ Chrome откройте новую вкладку с
-echo  адресом webmaster.yandex.ru и войдите в Яндекс, если ещё
-echo  не вошли.
+echo  STEP 2 of 3: log into Yandex Webmaster
+echo ============================================================
+echo  In the SAME Chrome window: open a new tab, go to
+echo  webmaster.yandex.ru and log in there, if you are not
+echo  logged in yet.
 echo.
-echo  Когда будете готовы - нажмите любую клавишу здесь.
+echo  When ready - press any key HERE.
 echo ============================================================
 pause >nul
 
 echo.
 echo ============================================================
-echo  ШАГ 3 из 3: пробный запуск проверки
-echo  (ничего не скачивает и никуда не звонит - только смотрит)
+echo  STEP 3 of 3: safe test run
+echo  (downloads nothing, does not call any pages)
 echo ============================================================
 echo.
 python webmaster_404_export.py --dry-run --project mpe --limit 1
 
 echo.
 echo ============================================================
-echo  ГОТОВО. Скопируйте ВЕСЬ текст выше ^(от "ШАГ 3" и ниже^) и
-echo  пришлите его в чат.
+echo  DONE. Copy ALL the text above (from "STEP 3" down to here)
+echo  and send it in the chat.
 echo ============================================================
 pause
