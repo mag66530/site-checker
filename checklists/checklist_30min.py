@@ -105,6 +105,34 @@ def get_gsc_credentials(project_id):
     return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
 
 
+def get_gsc_sa(project_id):
+    """Сервисный аккаунт Google для Search Console API - источник «Google» в
+    «404 в индексе» через API (работает на облаке, без браузера).
+
+    Секрет gsc_service_account_<pid> (или общий gsc_service_account) в одном из
+    видов: base64 JSON-ключа (удобнее всего для TOML), строка-JSON или
+    TOML-секция. Возвращает разобранный ключ (dict) или None."""
+    import base64
+    import json as _json
+    val = _secret_pid('gsc_service_account', project_id)
+    if val is None:
+        return None
+    if isinstance(val, dict):        # TOML-секция
+        return dict(val)
+    s = str(val).strip()
+    if not s:
+        return None
+    if s.startswith('{'):            # строка-JSON
+        try:
+            return _json.loads(s)
+        except Exception:
+            return None
+    try:                             # иначе base64
+        return _json.loads(base64.b64decode(''.join(s.split())).decode('utf-8'))
+    except Exception:
+        return None
+
+
 def get_yabusiness_credentials(project_id):
     cfg = YABUSINESS_YANDEX_CONFIG.get(project_id)
     if not cfg:
@@ -1308,15 +1336,19 @@ if pid:
                          'дедупятся по прогону (сквозное меню звоним один раз), '
                          'общий лимит 2500 прозвонов. Дольше обычного - по '
                          'запросу на каждую новую ссылку.')
-        st.checkbox('Проверять 404 среди страниц в индексе (Яндекс.Вебмастер)',
+        st.checkbox('Проверять 404 среди страниц в индексе (Яндекс.Вебмастер + Google)',
                     key='c30_check_index_404',
-                    help='Браузер сам заходит в Вебмастер на «Страницы в поиске» '
-                         'каждого сайта и качает выгрузку - в ней уже есть код '
-                         'ответа (httpCode) и статус. Отмечаем страницы, '
-                         'отдающие 404/410/5xx: они в индексе, но битые. Ничего '
-                         'на сайте не пингуется. Нужна сохранённая сессия Яндекса '
-                         '(та же, что для автокликеров: «Автокликеры» → «Экспорт '
-                         'сессии для облака»). Отдельный лист «404 в индексе».')
+                    help='Ищем страницы, которые есть в индексе, но отдают '
+                         '404/410/5xx. Источники объединяются в один лист '
+                         '«404 в индексе»:\n'
+                         '• Яндекс.Вебмастер - браузер качает выгрузку «Страницы '
+                         'в поиске» (код ответа уже в ней). Нужна сохранённая '
+                         'сессия Яндекса («Автокликеры» → «Экспорт сессии для '
+                         'облака»).\n'
+                         '• Google - через Search Console API на сервисном '
+                         'аккаунте: берём проиндексированные страницы и '
+                         'прозваниваем на 404. Работает на облаке, без браузера. '
+                         'Нужен секрет gsc_service_account_<проект>.')
         st.checkbox('Проверять фильтрацию товаров (браузер)',
                     key='c30_check_filter_fn',
                     help='Открывает категорию в браузере и применяет фильтр по '
@@ -1684,6 +1716,9 @@ if pid:
                 'tg_recipients': get_telegram_recipients(pid),
                 'metrika': get_metrika_credentials(pid),
                 'gsc': get_gsc_credentials(pid),
+                # Сервисный аккаунт GSC для источника «Google» в «404 в индексе»
+                # через Search Console API (работает на облаке, без браузера).
+                'gsc_sa': get_gsc_sa(pid),
                 'yab': get_yabusiness_credentials(pid),
                 'twogis': get_twogis_credentials(pid),
                 'google': get_google_accounts_credentials(pid),

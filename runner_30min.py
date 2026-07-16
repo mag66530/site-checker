@@ -1039,9 +1039,33 @@ def run_check(pid, params, creds, log, progress):
                     log(f'⚠ 404 в индексе (GSC): {_gsc_404["error"]}')
                 else:
                     log(f'404 в индексе (GSC): битых {_gsc_404.get("total_dead", 0)}')
+            # Источник 4 — Google Search Console через API (сервисный аккаунт).
+            # В отличие от браузерного источника выше, работает на облаке и в
+            # расписании без Chrome/сессии: берём список проиндексированных
+            # страниц (Search Analytics) и прозваниваем их на 404 нашим чекером.
+            _gsc_api_404 = None
+            _gsc_sa = creds.get('gsc_sa')
+            if _gsc_sa:
+                try:
+                    from index_gsc_api import check_gsc_api_404
+                    log('404 в индексе (Google API): беру список страниц из '
+                        'Search Console…')
+                    _gsc_api_404 = check_gsc_api_404(
+                        pid, _gsc_sa, proxy_url=proxy_url,
+                        max_urls=int(params.get('index_404_gsc_api_max', 3000)),
+                        days=int(params.get('index_404_gsc_api_days', 90)),
+                        log=_nlog)
+                    if _gsc_api_404.get('error'):
+                        log(f'⚠ 404 в индексе (Google API): {_gsc_api_404["error"]}')
+                    else:
+                        log(f'404 в индексе (Google API): проверено '
+                            f'{_gsc_api_404.get("total_checked", 0)}, битых '
+                            f'{_gsc_api_404.get("total_dead", 0)}')
+                except Exception as _e:
+                    log(f'⚠ 404 в индексе (Google API): {_e}')
             # Слияние источников в одну таблицу отчёта.
             from index_export_parser import merge_index_404
-            _index_404 = merge_index_404(_wm_404, _sm_404, _gsc_404)
+            _index_404 = merge_index_404(_wm_404, _sm_404, _gsc_404, _gsc_api_404)
             # Живая перепроверка: оставляем только страницы, которые ПРЯМО СЕЙЧАС
             # отдают 404/5xx. Убирает ложные (уже починили → 200; медленные →
             # таймаут). Так в отчёте нет ссылок, которые на самом деле открываются.

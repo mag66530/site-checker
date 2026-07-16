@@ -10,5 +10,6 @@
   "mandatory_city": "Москва",
   "has_filters": true,
   "use_proxy": true,
+  "gsc_resource": "sc-domain:inmetprom.ru",
   "kp_sheet_url": ""
 }
