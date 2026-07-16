@@ -146,7 +146,9 @@ async def _scrape(pid: str, scout: bool, log) -> dict:
 
     async with async_playwright() as p:
         try:
-            browser, page = await open_browser(p, log)
+            # Firefox: легче по памяти, на бесплатном Streamlit Chromium падает.
+            # Только для этой проверки; остальные браузерные проверки - Chromium.
+            browser, page = await open_browser(p, log, engine="firefox")
         except Exception as e:  # noqa: BLE001
             return {"error": f"браузер/сессия недоступны: {e}"}
         try:
