@@ -133,27 +133,67 @@ async def _google_login(page, email, password, log) -> tuple:
     браузер», подтверждение по телефону. Если что-то из этого всплывает,
     автоматом не пройти — возвращаем False с понятной причиной."""
     _BLOCK = ('небезопасн', 'not secure', 'подтвердите, что это вы', "verify it",
-              '验证', 'captcha', 'капча', 'необычн', 'unusual', '2-этап',
-              'two-step', 'two-factor', 'двухэтап', 'код подтверждения',
-              'verification code', 'recovery', 'восстановлен')
+              'captcha', 'капча', 'необычн', 'unusual', '2-этап', 'two-step',
+              'two-factor', 'двухэтап', 'код подтверждения', 'verification code',
+              'recovery', 'восстановлен', 'проверьте телефон', 'check your phone')
+
+    async def _is_visible(sel) -> bool:
+        try:
+            loc = page.locator(sel).first
+            return bool(await loc.count()) and await loc.is_visible()
+        except Exception:
+            return False
+
+    async def _click(sel, t=8000) -> bool:
+        try:
+            await page.locator(sel).first.click(timeout=t)
+            return True
+        except Exception:
+            return False
+
     try:
         if 'accounts.google.com' not in page.url:
             await page.goto('https://accounts.google.com/signin/v2/identifier?hl=ru',
                             wait_until='domcontentloaded', timeout=45000)
-            await page.wait_for_timeout(2500)
-        # E-mail
-        await page.locator('input[type="email"]').first.fill(email, timeout=15000)
-        await page.locator('#identifierNext, button:has-text("Далее"), '
-                           'button:has-text("Next")').first.click(timeout=10000)
-        await page.wait_for_timeout(4000)
+        await page.wait_for_timeout(3000)
         body = (await page.inner_text('body')).lower()
-        if any(k in body for k in _BLOCK) or 'не удалось найти' in body:
-            return False, 'Google просит доп. проверку на шаге логина (капча/аккаунт)'
-        # Пароль
-        await page.locator('input[type="password"]').first.fill(password, timeout=15000)
-        await page.locator('#passwordNext, button:has-text("Далее"), '
-                           'button:has-text("Next")').first.click(timeout=10000)
+
+        # Экран «Выберите аккаунт» - кликаем нужный по e-mail.
+        if ('выбер' in body and 'аккаунт' in body) or 'choose an account' in body:
+            try:
+                await page.get_by_text(email, exact=False).first.click(timeout=8000)
+                await page.wait_for_timeout(3500)
+                body = (await page.inner_text('body')).lower()
+            except Exception:
+                pass
+
+        # Поле e-mail есть - вводим e-mail и жмём «Далее». Нет (аккаунт
+        # запомнен / выбран) - сразу к паролю.
+        if await _is_visible('input[type="email"]'):
+            try:
+                await page.locator('input[type="email"]').first.fill(email, timeout=8000)
+            except Exception:
+                pass
+            await _click('#identifierNext, button:has-text("Далее"), '
+                         'button:has-text("Next")')
+            await page.wait_for_timeout(4000)
+            body = (await page.inner_text('body')).lower()
+
+        if any(k in body for k in _BLOCK):
+            return False, 'Google просит доп. проверку (капча/2FA/подтверждение)'
+
+        # Поле пароля - ждём появления (могло прийти после шага e-mail).
+        try:
+            await page.locator('input[type="password"]').first.wait_for(
+                state='visible', timeout=12000)
+        except Exception:
+            return False, ('поле пароля не появилось - экран входа другой '
+                           '(2FA / выбор аккаунта / подтверждение)')
+        await page.locator('input[type="password"]').first.fill(password, timeout=8000)
+        await _click('#passwordNext, button:has-text("Далее"), '
+                     'button:has-text("Next")')
         await page.wait_for_timeout(5000)
+
         if 'accounts.google.com' not in page.url:
             return True, ''                      # ушли с логина → вошли
         body = (await page.inner_text('body')).lower()
@@ -186,6 +226,23 @@ async def _ensure_logged_in(page, res, acct, email, password, log) -> bool:
     ok, reason = await _google_login(page, email, password, log)
     if not ok:
         log(f'  автовход не удался: {reason}')
+        # Диагностика: что за экран показал Google (чтобы отличить 2FA/капчу
+        # от поправимого экрана и понять, возможен ли автовход в принципе).
+        try:
+            heads = []
+            for el in await page.query_selector_all('h1, h2, [role="heading"]'):
+                t = ((await el.inner_text()) or '').strip().replace('\n', ' ')
+                if t:
+                    heads.append(t[:60])
+            fields = []
+            for sel in ('input[type="email"]', 'input[type="password"]',
+                        'input[type="tel"]', 'input[type="text"]'):
+                if await page.locator(sel).first.count():
+                    fields.append(sel)
+            log(f'  диагностика входа: заголовки={heads[:3]} · поля={fields} · '
+                f'url={page.url[:60]}')
+        except Exception:
+            pass
         return False
     log('  автовход выполнен - переоткрываю отчёт')
     try:
