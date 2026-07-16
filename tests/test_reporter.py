@@ -192,7 +192,8 @@ def test_every_detail_sheet_is_grouped():
     from reporter import _SHEET_GROUPS
     src = (Path(__file__).parent.parent / 'reporter.py').read_text(encoding='utf-8')
     literal_sheets = set(_re.findall(r"create_sheet\('([^']+)'\)", src))
-    covered = {m for _, ms in _SHEET_GROUPS for m in ms} | {'Обзор', 'Все детали'}
+    covered = ({m for _, ms in _SHEET_GROUPS for m in ms}
+               | {'Обзор', 'Все детали', 'Структура страниц'})
     orph = literal_sheets - covered
     assert not orph, f'листы вне групп (потеряются): {sorted(orph)}'
     print(f'✓ Все {len(literal_sheets)} листов распределены по группам')
@@ -290,10 +291,10 @@ def test_tech_section_mandatory_bug_and_broken_links():
                      selected_subdomains=selected, results=results, output_path=out)
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        # «Структура страниц» теперь - секция внутри группового «Техничка».
-        assert 'Техничка' in wb.sheetnames
-        assert 'Структура страниц' not in wb.sheetnames
-        ws = wb['Техничка']
+        # «Структура страниц» - отдельный лист (не в группе), сразу после «Обзора».
+        assert 'Структура страниц' in wb.sheetnames
+        assert wb.sheetnames[1] == 'Структура страниц'
+        ws = wb['Структура страниц']
         blob = ' | '.join(str(c) for row in ws.iter_rows(values_only=True)
                           for c in row if c)
         assert 'Карта: БАГ' in blob       # обязательный спец-элемент отсутствует
