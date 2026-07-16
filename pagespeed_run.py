@@ -23,6 +23,7 @@ pagespeed_run.py - фоновый прогон проверки скорости
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -45,6 +46,13 @@ def _out_dir(pid: str) -> Path:
     d = CACHE_DIR / pid
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _stable_seed(pid: str) -> int:
+    """Фиксированный seed на проект: выборка категорий/фильтров одинаковая от
+    прогона к прогону - чтобы сравнение периодов было «яблоки к яблокам» (те же
+    страницы), а не сравнение разных случайных наборов."""
+    return int(hashlib.md5(pid.encode("utf-8")).hexdigest()[:8], 16)
 
 
 def _log(msg: str) -> None:
@@ -87,7 +95,7 @@ def _sample_urls(pid: str, per_type: int, want_products: bool) -> list[tuple[str
         filters_per_subdomain=per_type,
         products_per_subdomain=per_type,
         check_products=want_products and bool(sources.products),
-        seed=None,
+        seed=_stable_seed(pid),     # стабильная выборка - для сравнения периодов
     )
     return [(t.url, t.type_code) for t in plan.tasks]
 
