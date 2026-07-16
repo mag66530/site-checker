@@ -3220,19 +3220,17 @@ def _build_index_404_sheet(wb, index_404_check):
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
-    # Пояснение простыми словами.
+    # Короткий подзаголовок (перепроверено — в списке нет рабочих ссылок).
     ws.merge_cells('B3:F3')
     c = ws['B3']
-    c.value = ('Это страницы, которые есть в поиске (Яндекс) или заявлены нами в '
-               'sitemap, но при заходе отдают ошибку — человек кликает из поиска '
-               'и попадает в никуда. Такие нужно починить или убрать из поиска. '
-               'Столбец «Источник» показывает, откуда узнали про страницу. '
-               'Таблицу можно сортировать и фильтровать — стрелки в шапке.')
+    c.value = ('Страницы, которые Яндекс/Google держат в поиске, и которые ПРЯМО '
+               'СЕЙЧАС отдают ошибку — каждая перепроверена живым запросом, '
+               'рабочих ссылок в списке нет. Столбец «Источник» — откуда узнали.')
     c.font = _font(size=10, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 42
+    ws.row_dimensions[3].height = 28
 
-    row = 5
+    row = 4
 
     # Проверка не выполнилась / нет данных.
     if index_404_check.get('error') and not hosts:
@@ -3254,26 +3252,27 @@ def _build_index_404_sheet(wb, index_404_check):
     total_checked = index_404_check.get('total_checked', 0)
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
     c = ws.cell(row=row, column=2)
+    _rev = ' · перепроверено живьём' if index_404_check.get('reverified') else ''
     if has_any:
-        c.value = (f'Найдено {len(problems)} битых страниц в поиске на {bad_sites} '
-                   f'сайт(ах).      🔴 Удалены (404): {n_dead}      '
-                   f'🟠 Ошибка сервера: {n_err}')
+        c.value = (f'Найдено {len(problems)} битых страниц на {bad_sites} '
+                   f'сайт(ах):   🔴 удалены (404): {n_dead}   '
+                   f'🟠 ошибка сервера: {n_err}{_rev}')
         c.font = _font(size=13, bold=True, color=C.err)
     else:
-        c.value = (f'✅ Битых страниц в поиске не найдено. Проверено '
-                   f'{total_checked} страниц — все отвечают нормально.')
+        c.value = ('✅ Битых страниц в поиске не найдено — все, что поисковики '
+                   'считали битыми, при живой перепроверке открылись нормально.')
         c.font = _font(size=13, bold=True, color=C.ok)
-    ws.row_dimensions[row].height = 24
+    ws.row_dimensions[row].height = 22
     row += 1
 
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-    c = ws.cell(row=row, column=2)
-    _src_txt = f'   ·   источники: {", ".join(src_list)}' if src_list else ''
-    c.value = (f'Всего проверено страниц: {total_checked} на {len(hosts)} '
-               f'сайтах{_src_txt}.')
-    c.font = _font(size=10, color=C.text_muted)
-    ws.row_dimensions[row].height = 16
-    row += 1
+    _src_txt = f'источники: {", ".join(src_list)}' if src_list else ''
+    if _src_txt:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        c = ws.cell(row=row, column=2)
+        c.value = _src_txt
+        c.font = _font(size=10, color=C.text_muted)
+        ws.row_dimensions[row].height = 14
+        row += 1
 
     if not has_any:
         return
@@ -3281,14 +3280,12 @@ def _build_index_404_sheet(wb, index_404_check):
     # Что делать — простыми словами, один раз.
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
     c = ws.cell(row=row, column=2)
-    c.value = ('Что делать:  🔴 404 — страницу удалили, а из поиска она ещё не '
-               'выпала: поставьте 301-редирект на живой раздел (или верните '
-               'страницу).   🟠 Ошибка сервера (5xx) — сервер не смог отдать '
-               'страницу (часто это тяжёлые страницы фильтров): проверьте, не '
-               'отваливается ли сервер на этих адресах.')
+    c.value = ('Что делать:  🔴 404 — 301-редирект на живой раздел или убрать из '
+               'индекса.   🟠 5xx — проверить, почему сервер отваливается (часто '
+               'тяжёлые страницы фильтров).')
     c.font = _font(size=10, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[row].height = 42
+    ws.row_dimensions[row].height = 28
     row += 1
 
     # Инсайт: почти все битые — страницы фильтров.
@@ -3296,15 +3293,13 @@ def _build_index_404_sheet(wb, index_404_check):
     if len(problems) >= 10 and n_filter / len(problems) >= 0.6:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
         c = ws.cell(row=row, column=2)
-        c.value = (f'⚠ {n_filter} из {len(problems)} битых адресов — это страницы '
-                   f'фильтров каталога (…/filter/…). Похоже, фильтры плодят ссылки '
-                   f'на несуществующие комбинации — их стоит закрыть от индексации '
-                   f'или чинить на уровне шаблона фильтра.')
+        c.value = (f'⚠ {n_filter} из {len(problems)} — страницы фильтров каталога '
+                   f'(…/filter/…): фильтры плодят ссылки на несуществующие '
+                   f'комбинации, их стоит закрыть от индексации.')
         c.font = _font(size=10, color=C.warn)
         c.alignment = _align(wrap=True, vertical='top')
-        ws.row_dimensions[row].height = 30
+        ws.row_dimensions[row].height = 26
         row += 1
-    row += 1
 
     # Шапка таблицы.
     hdr = row
