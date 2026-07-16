@@ -15,11 +15,3 @@ libatspi2.0-0
 libpango-1.0-0
 libcairo2
 libxshmfence1
-libdbus-glib-1-2
-libgtk-3-0
-libx11-xcb1
-libxcursor1
-libxi6
-libxtst6
-libxrender1
-libpci3
