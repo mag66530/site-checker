@@ -384,8 +384,11 @@ def _run_admin_settings(pid, params, creds, log):
             '--from-env', '--out', str(_res_file)]
     if params.get('admin_crud'):
         args.append('--crud')
-        if not params.get('admin_execute', True):
-            args.append('--no-execute')
+    if params.get('admin_product_crud'):
+        args.append('--product-crud')
+    if (params.get('admin_crud') or params.get('admin_product_crud')) \
+            and not params.get('admin_execute', True):
+        args.append('--no-execute')
     log('Настройки в админке: запускаю браузер…')
     try:
         proc = subprocess.Popen(
@@ -1170,7 +1173,8 @@ def run_check(pid, params, creds, log, progress):
         # Пункт 2 (admin_crud): CRUD поддоменов/категорий (симуляция + запись
         # с откатом при admin_execute). Креды приходят из UI/Secrets.
         _admin_settings = None
-        if params.get('check_admin_settings') or params.get('admin_crud'):
+        if (params.get('check_admin_settings') or params.get('admin_crud')
+                or params.get('admin_product_crud')):
             _adm_creds = creds.get('admin_settings') or {}
             if _adm_creds.get('login') and _adm_creds.get('domain'):
                 _admin_settings = _run_admin_settings(pid, params, creds, log)

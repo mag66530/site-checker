@@ -632,7 +632,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 # Версия набора дефолтов галочек «Что проверять». Поднимать при добавлении
 # нового пункта или смене дефолта, чтобы автовыбор применился и к уже
 # открытым (сохранённым) сессиям (см. init_session).
-_C30_CHECKS_DEFAULTS_VER = 4
+_C30_CHECKS_DEFAULTS_VER = 5
 
 
 def init_session():
@@ -671,6 +671,7 @@ def init_session():
         'c30_check_link_profile': True,   # п.1.20 - lite-профиль ссылок (Вебмастер API)
         'c30_check_admin_settings': False,  # админка: функции настройки работают (рендер)
         'c30_check_admin_crud': False,      # админка: CRUD поддоменов/категорий
+        'c30_check_admin_product_crud': False,  # админка: CRUD товаров (по CMS)
         'c30_adm_execute': True,            # CRUD с записью (симуляция + откат)
         # Сервисные проверки
         'c30_check_webmaster': True,
@@ -1466,8 +1467,18 @@ if pid:
                  'правка → скрытие → удаление, чистится в конце) + массовая '
                  'загрузка (импорт). Пишет в БД только при включённом подпункте '
                  '«писать в БД». В отчёт идёт аудит «было → стало».')
+        _ck_pcrud = st.checkbox(
+            'CRUD + сортировка + вывод в разные категории — товары (опционально по CMS)',
+            key='c30_check_admin_product_crud',
+            help='CRUD товаров, если товары в CMS - элементы каталога. На '
+                 'временном СКРЫТОМ товаре «[ТЕСТ ЧЕКЕРА]» (без реальной цены, '
+                 'удаляется в конце): создание → сортировка (поле SORT) → '
+                 'вывод в разные категории (привязка к 2+ разделам) → правка → '
+                 'удаление. Пишет в БД только при включённом подпункте «писать '
+                 'в БД». Если товары в вашей CMS не элементы каталога - пункт '
+                 'помечается «неприменимо». Аудит «было → стало».')
 
-        if _ck_adm or _ck_crud:
+        if _ck_adm or _ck_crud or _ck_pcrud:
             # Дефолты полей: секрет admin_settings_<pid> (JSON) →
             # локальный admin.local.json → admin.test.local.json.
             if not st.session_state.get('c30_adm_prefilled'):
@@ -1510,11 +1521,11 @@ if pid:
             with _adm4:
                 st.text_input('Basic-пароль', key='c30_adm_basic_password',
                               type='password')
-            if _ck_crud:
-                st.caption('CRUD категорий выполняется на временном скрытом '
-                           'разделе и откатывается; поддомены реально не '
-                           'создаются (симуляция) и не удаляются (наличие '
-                           'функции). Обкатано на тестовом контуре.')
+            if _ck_crud or _ck_pcrud:
+                st.caption('CRUD категорий/товаров выполняется на временных '
+                           'СКРЫТЫХ разделе/товаре и откатывается; поддомены '
+                           'реально не создаются (симуляция) и не удаляются '
+                           '(наличие функции). Обкатано на тестовом контуре.')
 
     # «Подпись прогона» - проект + объём выборки + что проверяем. По ней решаем,
     # показывать ли блок результатов/лог: показываем только для прогона, который
@@ -1543,6 +1554,7 @@ if pid:
         bool(st.session_state.get('c30_check_link_profile', False)),
         bool(st.session_state.get('c30_check_admin_settings', False)),
         bool(st.session_state.get('c30_check_admin_crud', False)),
+        bool(st.session_state.get('c30_check_admin_product_crud', False)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1608,6 +1620,7 @@ if pid:
                 'check_link_profile': st.session_state.get('c30_check_link_profile', False),
                 'check_admin_settings': st.session_state.get('c30_check_admin_settings', False),
                 'admin_crud': st.session_state.get('c30_check_admin_crud', False),
+                'admin_product_crud': st.session_state.get('c30_check_admin_product_crud', False),
                 'admin_execute': st.session_state.get('c30_adm_execute', True),
                 'check_w3c': st.session_state.get('c30_check_w3c', False),
                 'check_static': st.session_state.get('c30_check_static', False),

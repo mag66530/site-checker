@@ -44,9 +44,11 @@ CATALOG_IBLOCK_ID = 2
 HL_PRODUCTS_ENTITY_ID = 6       # HL-блок «Ассортимент»
 MAIN_SITE_ID = 's1'             # главный сайт мультисайта (Москва)
 
-# Метка временного тестового раздела (по ней чистим «хвосты» прошлых прогонов).
+# Метка временного тестового раздела/товара (по ней чистим «хвосты»).
 TEST_SECTION_MARK = '[ТЕСТ ЧЕКЕРА]'
 TEST_SECTION_CODE = 'checker-tmp-section'
+TEST_PRODUCT_CODE = 'checker-tmp-product'
+TEST_PRODUCT_PRICE = '1'         # каталог требует цену - ставим 1, товар скрыт
 
 PATH_SUBDOMAINS = 'sm_domain_tool.php?lang=ru'
 PATH_SECTIONS = ('cat_section_admin.php?lang=ru&type={t}&IBLOCK_ID={ib}'
@@ -56,6 +58,14 @@ PATH_SECTION_NEW = ('iblock_section_edit.php?IBLOCK_ID={ib}&type={t}'
 PATH_SECTION_EDIT = ('iblock_section_edit.php?IBLOCK_ID={ib}&type={t}'
                      '&lang=ru&ID={sid}')
 PATH_SECTION_IMPORT = 'iblock_data_import.php?lang=ru&type={t}&IBLOCK_ID={ib}'
+PATH_ELEMENT_NEW = ('iblock_element_edit.php?IBLOCK_ID={ib}&type={t}'
+                    '&lang=ru&find_section_section=0')
+PATH_ELEMENT_EDIT = ('iblock_element_edit.php?IBLOCK_ID={ib}&type={t}'
+                     '&lang=ru&ID={eid}')
+PATH_ELEMENT_LIST = ('iblock_element_admin.php?IBLOCK_ID={ib}&type={t}'
+                     '&lang=ru&find_el_name={name}&set_filter=Y')
+PATH_ELEMENT_DELETE = ('iblock_element_admin.php?IBLOCK_ID={ib}&type={t}'
+                       '&lang=ru&action=delete&ID={eid}&sessid={sessid}')
 PATH_HL_ROWS = 'highloadblock_rows_list.php?ENTITY_ID={eid}&lang=ru'
 PATH_FILEMAN = 'fileman_admin.php?lang=ru&site={site}&logical=Y&path=%2F'
 PATH_FILE_EDIT = 'fileman_file_edit.php?lang=ru&site={site}&path=%2Findex.php'
@@ -500,6 +510,248 @@ def _check_categories(page, domain, log, crud=False, execute=True):
                      operations=ops)
 
 
+# ── Товары: CRUD элемента каталога (опционально по CMS) ──────────────
+def _elem_edit_url(domain, eid):
+    return f'{domain}/bitrix/admin/' + PATH_ELEMENT_EDIT.format(
+        ib=CATALOG_IBLOCK_ID, t=IBLOCK_TYPE, eid=eid)
+
+
+def _elem_read(page):
+    """Состояние формы товара: name, sort, active, привязанные разделы."""
+    return page.evaluate("""() => {
+        const sel = document.querySelector("select[name='IBLOCK_SECTION[]']");
+        const secs = sel ? [...sel.selectedOptions].map(o=>o.value)
+                              .filter(v=>v && v!=='0') : [];
+        return {
+          name: (document.querySelector("input[name='NAME']")||{}).value||'',
+          sort: (document.querySelector("input[name='SORT']")||{}).value||'',
+          active: (document.querySelector("input[name='ACTIVE']")||{}).checked,
+          sections: secs
+        };
+    }""")
+
+
+def _two_section_ids(page):
+    """Два реальных id раздела из мультиселекта привязки (для теста
+    мультикатегории). [] если селект пуст."""
+    return page.evaluate("""() => {
+        const sel = document.querySelector("select[name='IBLOCK_SECTION[]']");
+        if (!sel) return [];
+        return [...sel.options].map(o=>o.value)
+            .filter(v=>/^\\d+$/.test(v) && v!=='0').slice(0,2);
+    }""")
+
+
+def _sessid(page):
+    return page.evaluate(
+        "() => (window.BX && BX.bitrix_sessid) ? BX.bitrix_sessid() : "
+        "((document.querySelector(\"input[name='sessid']\")||{}).value||'')")
+
+
+def _elem_delete(domain, page, eid):
+    """Удалить элемент каталога через список (action=delete + sessid).
+    True, если форма этого ID больше не отдаёт NAME."""
+    sid = _sessid(page)
+    page.goto(f'{domain}/bitrix/admin/' + PATH_ELEMENT_DELETE.format(
+        ib=CATALOG_IBLOCK_ID, t=IBLOCK_TYPE, eid=eid, sessid=sid),
+        wait_until='domcontentloaded', timeout=60000)
+    page.wait_for_timeout(2000)
+    page.goto(_elem_edit_url(domain, eid), wait_until='domcontentloaded',
+              timeout=60000)
+    page.wait_for_timeout(1200)
+    return not _elem_read(page).get('name')
+
+
+def _cleanup_test_products(page, domain, log):
+    """Подчистить хвосты тестовых товаров прошлых прогонов по метке."""
+    try:
+        from urllib.parse import quote
+        page.goto(f'{domain}/bitrix/admin/' + PATH_ELEMENT_LIST.format(
+            ib=CATALOG_IBLOCK_ID, t=IBLOCK_TYPE,
+            name=quote(TEST_SECTION_MARK)),
+            wait_until='domcontentloaded', timeout=60000)
+        page.wait_for_timeout(2000)
+        ids = page.evaluate("""() => [...document.querySelectorAll('.main-grid-row')]
+            .filter(r => (r.textContent||'').includes('[ТЕСТ ЧЕКЕРА]'))
+            .map(r => (r.getAttribute('data-id')||'').replace(/\\D+/g,''))
+            .filter(Boolean)""")
+        for eid in ids:
+            if _elem_delete(domain, page, eid):
+                log(f'  подчищен хвост тестового товара ID={eid}')
+    except Exception:
+        pass
+
+
+def _check_products_crud(page, domain, log, execute=True):
+    """CRUD товара (элемент каталога iblock 2): создать скрытым + SORT +
+    привязка к 2 разделам (вывод в разные категории) → правка (имя+SORT) →
+    удаление. Опционально по CMS: товары должны быть элементами каталога."""
+    # Открываем форму нового элемента - проверяем применимость.
+    page.goto(f'{domain}/bitrix/admin/' + PATH_ELEMENT_NEW.format(
+        ib=CATALOG_IBLOCK_ID, t=IBLOCK_TYPE),
+        wait_until='domcontentloaded', timeout=60000)
+    page.wait_for_timeout(2000)
+    if page.locator("input[name='NAME']").count() == 0:
+        return _mk_check('products_crud', 'Товары (CRUD)', False,
+                         'форма товара (элемент каталога) не открылась - '
+                         'товарный CRUD неприменим для этой CMS',
+                         operations=[])
+    has_sort = page.locator("input[name='SORT']").count() > 0
+    has_sec = page.locator("select[name='IBLOCK_SECTION[]']").count() > 0
+
+    # Без записи - только наличие функций.
+    if not execute:
+        ops = [
+            _op('create', 'Создание товара',
+                'ok' if page.locator("input[name='NAME']").count() else 'fail',
+                'ui', after='форма нового товара открывается',
+                note='тест-выполнение выключено'),
+            _op('sort', 'Сортировка товара', 'ok' if has_sort else 'fail',
+                'ui', after='поле SORT на форме' if has_sort else 'нет SORT',
+                note='реально не меняем'),
+            _op('multicat', 'Вывод в разные категории',
+                'ok' if has_sec else 'fail', 'ui',
+                after='мультиселект привязки к разделам на форме' if has_sec
+                else 'нет привязки к разделам', note='реально не привязываем'),
+            _op('edit', 'Правка товара',
+                'ok' if page.locator("input[name='NAME']").count() else 'fail',
+                'ui', after='поле названия редактируемо',
+                note='реально не правим'),
+            _op('delete', 'Удаление товара', 'ok', 'ui',
+                after='удаление элемента доступно (список каталога)',
+                note='реально не удаляем - тест-выполнение выключено')]
+        bad = [o for o in ops if o['result'] == 'fail']
+        return _mk_check('products_crud', 'Товары (CRUD)', not bad,
+                         'CRUD-функции товара на месте (без записи)',
+                         operations=ops)
+
+    _cleanup_test_products(page, domain, log)
+    ops = []
+    name1 = f'{TEST_SECTION_MARK} товар'
+    name2 = f'{TEST_SECTION_MARK} товар (правка)'
+    eid = None
+    try:
+        page.goto(f'{domain}/bitrix/admin/' + PATH_ELEMENT_NEW.format(
+            ib=CATALOG_IBLOCK_ID, t=IBLOCK_TYPE),
+            wait_until='domcontentloaded', timeout=60000)
+        page.wait_for_timeout(2000)
+        secs = _two_section_ids(page)
+        if len(secs) < 2:
+            return _mk_check('products_crud', 'Товары (CRUD)', False,
+                             'в каталоге меньше 2 разделов - негде проверить '
+                             'вывод в разные категории', operations=[])
+        # ── Создание: скрытый товар, SORT, цена, привязка к 2 разделам ──
+        page.evaluate("""args => {
+            const [nm, code, price, sa, sb] = args;
+            const n=document.querySelector("input[name='NAME']");
+            n.value=nm; n.dispatchEvent(new Event('change',{bubbles:true}));
+            const c=document.querySelector("input[name='CODE']");
+            if(c){c.value=code; c.dispatchEvent(new Event('change',{bubbles:true}));}
+            const s=document.querySelector("input[name='SORT']");
+            if(s){s.value='7777'; s.dispatchEvent(new Event('change',{bubbles:true}));}
+            const a=document.querySelector("input[name='ACTIVE']");
+            if(a && a.checked) a.click();
+            const p=document.querySelector("input[name='CAT_BASE_PRICE']");
+            if(p){p.value=price; p.dispatchEvent(new Event('change',{bubbles:true}));}
+            const sel=document.querySelector("select[name='IBLOCK_SECTION[]']");
+            if(sel){ [...sel.options].forEach(o=>o.selected=(o.value===sa||o.value===sb));
+                     sel.dispatchEvent(new Event('change',{bubbles:true})); }
+        }""", [name1, TEST_PRODUCT_CODE, TEST_PRODUCT_PRICE, secs[0], secs[1]])
+        _sec_apply(page)
+        m = re.search(r'[?&]ID=(\d+)', page.url)
+        eid = m.group(1) if m else None
+        st = _elem_read(page) if eid else {}
+        created = (bool(eid) and st.get('name') == name1
+                   and not st.get('active'))
+        ops.append(_op(
+            'create', 'Создание товара', 'ok' if created else 'fail',
+            'executed', before='товара нет',
+            after=(f'создан товар ID={eid}, «{name1}», скрыт, цена '
+                   f'{TEST_PRODUCT_PRICE}' if created else 'создать не удалось'),
+            note='временный скрытый товар, удаляется в конце'))
+        if not created:
+            raise RuntimeError('товар не создан')
+
+        # ── Сортировка ──
+        sort_ok = st.get('sort') == '7777'
+        # меняем SORT на 8888 и проверяем
+        page.goto(_elem_edit_url(domain, eid), wait_until='domcontentloaded',
+                  timeout=60000)
+        page.wait_for_timeout(1200)
+        page.evaluate("""() => { const s=document.querySelector("input[name='SORT']");
+            s.value='8888'; s.dispatchEvent(new Event('change',{bubbles:true})); }""")
+        _sec_apply(page)
+        page.goto(_elem_edit_url(domain, eid), wait_until='domcontentloaded',
+                  timeout=60000)
+        page.wait_for_timeout(1000)
+        sort2 = _elem_read(page).get('sort') == '8888'
+        ops.append(_op(
+            'sort', 'Сортировка товара', 'ok' if (sort_ok and sort2) else 'fail',
+            'executed', before='SORT=7777 (при создании)',
+            after='SORT изменён на 8888 и сохранён' if sort2 else
+            'сортировка не применилась'))
+
+        # ── Вывод в разные категории (привязка к 2 разделам) ──
+        cur = _elem_read(page)
+        multi_ok = len(cur.get('sections') or []) >= 2
+        ops.append(_op(
+            'multicat', 'Вывод в разные категории',
+            'ok' if multi_ok else 'fail', 'executed',
+            before='без привязки',
+            after=(f'привязан к разделам: {", ".join(cur["sections"])} '
+                   f'(вывод в {len(cur["sections"])} категории)' if multi_ok
+                   else 'привязка к нескольким разделам не сохранилась')))
+
+        # ── Правка (переименование) ──
+        page.goto(_elem_edit_url(domain, eid), wait_until='domcontentloaded',
+                  timeout=60000)
+        page.wait_for_timeout(1000)
+        page.evaluate("""nm => { const n=document.querySelector("input[name='NAME']");
+            n.value=nm; n.dispatchEvent(new Event('change',{bubbles:true})); }""",
+            name2)
+        _sec_apply(page)
+        page.goto(_elem_edit_url(domain, eid), wait_until='domcontentloaded',
+                  timeout=60000)
+        page.wait_for_timeout(1000)
+        renamed = _elem_read(page).get('name') == name2
+        ops.append(_op(
+            'edit', 'Правка товара', 'ok' if renamed else 'fail', 'executed',
+            before=f'название: «{name1}»',
+            after=f'название: «{name2}»' if renamed else 'правка не применилась'))
+
+        # ── Удаление ──
+        deleted = _elem_delete(domain, page, eid)
+        ops.append(_op(
+            'delete', 'Удаление товара', 'ok' if deleted else 'fail',
+            'executed', before=f'товар ID={eid} существует',
+            after='товар удалён' if deleted else
+            f'НЕ УДАЛЁН - удалите товар ID={eid} вручную'))
+        eid = None if deleted else eid
+    except Exception as e:
+        log(f'⚠ CRUD товара: {e}')
+        ops.append(_op('error', 'CRUD товара', 'fail', 'executed',
+                       note=str(e)[:200]))
+    finally:
+        if eid:
+            try:
+                if _elem_delete(domain, page, eid):
+                    log(f'  тестовый товар ID={eid} удалён (страховка)')
+            except Exception:
+                log(f'⚠ ОСТАЛСЯ тестовый товар ID={eid} - удалите вручную')
+
+    warns = []
+    if any(o['result'] == 'fail' and o['op'] == 'delete' for o in ops):
+        warns.append('тестовый товар мог не удалиться - проверьте каталог '
+                     'на «[ТЕСТ ЧЕКЕРА]»')
+    bad = [o for o in ops if o['result'] == 'fail']
+    detail = ('полный CRUD товара (создание/сортировка/вывод в разные '
+              'категории/правка/удаление) выполнен и откатан' if not bad else
+              'не сработали операции: '
+              + ', '.join(o['label'] for o in bad))
+    return _mk_check('products_crud', 'Товары (CRUD)', not bad, detail, warns,
+                     operations=ops)
+
+
 def _check_products(page, domain, log,
                     entity_id=HL_PRODUCTS_ENTITY_ID):
     """Товарная подсистема (HL-блок «Ассортимент»): список записей +
@@ -560,13 +812,15 @@ def _check_tech_pages(page, domain, log, site_id=MAIN_SITE_ID):
                      detail + '; редактор файла открывается с контентом')
 
 
-def check_admin_settings(creds, crud=False, execute=True, log=None,
-                         headless=True):
+def check_admin_settings(creds, crud=False, product_crud=False, execute=True,
+                         log=None, headless=True):
     """Проверка функций настройки в админке. creds - dict из
     load_admin_creds (+ domain обязателен).
-    crud - проверять CRUD-операции поддоменов/категорий (пункт 2 UI);
-    execute - выполнять их реально (симуляция поддомена + запись раздела
-    с откатом) vs только наличие функций. Возвращает dict для отчёта."""
+    crud - CRUD-операции поддоменов/категорий (пункт 2 UI);
+    product_crud - CRUD товаров (создание/сортировка/вывод в разные
+    категории, пункт 3 UI, опционально по CMS);
+    execute - выполнять их реально (симуляция поддомена + запись с
+    откатом) vs только наличие функций. Возвращает dict для отчёта."""
     def _log(m):
         if log:
             log(m)
@@ -596,11 +850,16 @@ def check_admin_settings(creds, crud=False, execute=True, log=None,
                 'проверьте логин/пароль (и basic-доступ на тестовом '
                 'контуре)'))
             if ok:
-                for fn in (lambda p, d, l: _check_subdomains(
-                               p, d, l, crud=crud, execute=execute),
-                           lambda p, d, l: _check_categories(
-                               p, d, l, crud=crud, execute=execute),
-                           _check_products, _check_tech_pages):
+                fns = [lambda p, d, l: _check_subdomains(
+                           p, d, l, crud=crud, execute=execute),
+                       lambda p, d, l: _check_categories(
+                           p, d, l, crud=crud, execute=execute),
+                       _check_products]
+                if product_crud:
+                    fns.append(lambda p, d, l: _check_products_crud(
+                        p, d, l, execute=execute))
+                fns.append(_check_tech_pages)
+                for fn in fns:
                     try:
                         c = fn(page, domain, _log)
                     except Exception as e:
