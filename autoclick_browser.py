@@ -77,14 +77,21 @@ async def open_browser(p, log=None):
                   '--disable-session-crashed-bubble'],
             no_viewport=True, locale='ru-RU', timezone_id='Europe/Moscow',
         )
-        try:
-            ctx = await p.chromium.launch_persistent_context(profile, **launch_kw)
-        except Exception as e:
-            # Chromium от Playwright не установлен - пробуем системный Chrome.
-            _log(f'Chromium Playwright не запустился ({str(e)[:80]}) - '
-                 'пробую системный Google Chrome…')
-            ctx = await p.chromium.launch_persistent_context(
-                profile, channel='chrome', **launch_kw)
+        # Пробуем по очереди: Chromium от Playwright → системный Chrome →
+        # Edge (Edge есть на любой Windows 10/11). Первый, что открылся, - берём.
+        ctx, _errs = None, []
+        for _try in ({}, {'channel': 'chrome'}, {'channel': 'msedge'}):
+            _which = _try.get('channel', 'chromium')
+            try:
+                ctx = await p.chromium.launch_persistent_context(
+                    profile, **launch_kw, **_try)
+                _log(f'Браузер открыт ({_which}).')
+                break
+            except Exception as e:
+                _errs.append(f'{_which}: {str(e)[:70]}')
+        if ctx is None:
+            raise RuntimeError('не удалось открыть видимый браузер — '
+                               + ' | '.join(_errs))
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         # navigator.webdriver прячем и здесь - на всякий случай.
         try:
