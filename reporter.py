@@ -11,6 +11,7 @@ reporter.py - формирование xlsx-отчёта.
   Скорость, с | Оценка скорости | Битые переменные | Откуда перешли
 """
 import re
+from copy import copy
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -18,7 +19,7 @@ from typing import Optional
 from openpyxl import Workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
 
 
 # ── Стили (цвета как в Node.js версии) ──────────────────────────────
@@ -5195,6 +5196,143 @@ def _build_meta_unique_sheet(wb, results):
         row += 1
 
 
+# ── Пересборка листов в тематические группы ─────────────────────────
+# Каждый детальный лист строится как раньше (временный), затем переносится
+# СЕКЦИЕЙ в один из 7 групповых листов. Так весь рендер сохраняется без
+# переписывания, а отчёт группируется по темам.
+
+# Группа → упорядоченный список исходных листов (что в неё сливается).
+_SHEET_GROUPS = [
+    ('Техничка', [
+        'Структура страниц', 'Индексация', 'Метаданные', 'Заголовки и мета',
+        'Разметка', 'Безопасность', 'Ошибки JavaScript',
+        'Валидация и скорость', 'Страница 404', '404 в индексе',
+        'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
+    ]),
+    ('Верстка', ['Вёрстка']),
+    ('КП', ['Контакты по городам', 'Регион и СНГ']),
+    ('Формы', []),                 # детальный отчёт форм - отдельный файл
+    ('Админка', ['Настройки в админке']),
+    ('Аналитика', [
+        '404 из Метрики', 'Уведомления', 'Ошибки сервисов', 'Автокликер',
+        'Ссылочный профиль',
+    ]),
+    ('Контент', ['Изображения']),
+]
+
+# Групповые листы, которым добавляем поясняющую секцию, даже если исходных
+# листов нет (чтобы структура из 7 листов существовала и была понятной).
+_GROUP_NOTES = {
+    'Формы': ('Детальная проверка форм — в отдельном отчёте форм-тестера '
+              '(свой файл). Здесь, в основном отчёте, форма заявки/телефон '
+              'проверяется как часть страниц (см. лист «Техничка» → блоки '
+              'страниц и «Страница 404»).'),
+    'Контент': ('Изображения (alt, современные форматы webp/avif, вес, '
+                'lazy, уникальность картинок категорий) — если проверка '
+                'выполнялась, показаны ниже. SEO-текст частотных категорий '
+                '(нейроответы) и блоки товара (похожие/отзывы/сортировка) — '
+                'на листе «Техничка» («Метаданные» и блоки страниц).'),
+}
+
+_GROUP_TAB_RANK = {C.err: 0, C.warn: 1}   # для агрегированного цвета вкладки
+
+
+def _append_sheet_as_section(dst, src, start_row, title, gap=2):
+    """Скопировать содержимое листа src в dst начиная со start_row (значения,
+    стили, слияния, ширины колонок, высоты строк, гиперссылки, комментарии).
+    Перед секцией — цветная полоса-разделитель с title. Возвращает следующую
+    свободную строку."""
+    # Полоса-разделитель секции (навигационный якорь).
+    dst.merge_cells(start_row=start_row, start_column=2,
+                    end_row=start_row, end_column=8)
+    band = dst.cell(row=start_row, column=2, value='▸ ' + title)
+    band.font = _font(size=12, bold=True, color='FFFFFF')
+    band.fill = _fill(C.text_soft)
+    band.alignment = _align(indent=1)
+    dst.row_dimensions[start_row].height = 22
+    row0 = start_row + 1
+    offset = row0 - 1                          # src-строка r → dst-строка r+offset
+
+    for col, dim in src.column_dimensions.items():
+        if dim.width:
+            cur = dst.column_dimensions[col].width or 0
+            dst.column_dimensions[col].width = max(cur, dim.width)
+
+    max_row, max_col = src.max_row, src.max_column
+    for r in range(1, max_row + 1):
+        for cc in range(1, max_col + 1):
+            s = src.cell(row=r, column=cc)
+            if s.value is None and not s.has_style:
+                continue
+            d = dst.cell(row=r + offset, column=cc)
+            d.value = s.value
+            if s.has_style:
+                d.font = copy(s.font)
+                d.fill = copy(s.fill)
+                d.border = copy(s.border)
+                d.alignment = copy(s.alignment)
+                d.number_format = s.number_format
+            if s.hyperlink:
+                d.hyperlink = s.hyperlink.target
+            if s.comment:
+                d.comment = Comment(s.comment.text,
+                                    s.comment.author or 'Site Checker')
+        rd = src.row_dimensions.get(r)
+        if rd is not None and rd.height:
+            dst.row_dimensions[r + offset].height = rd.height
+
+    for mr in list(src.merged_cells.ranges):
+        c1, r1, c2, r2 = range_boundaries(str(mr))
+        dst.merge_cells(start_row=r1 + offset, start_column=c1,
+                        end_row=r2 + offset, end_column=c2)
+
+    return max_row + offset + gap
+
+
+def _regroup_into_groups(wb):
+    """Собрать детальные листы в 7 тематических групповых листов.
+    Обзор остаётся первым, «Все детали» - последним."""
+    for group_name, members in _SHEET_GROUPS:
+        present = [m for m in members if m in wb.sheetnames]
+        note = _GROUP_NOTES.get(group_name)
+        if not present and not note:
+            continue
+        grp = wb.create_sheet(group_name)
+        grp.sheet_view.showGridLines = False
+        grp.column_dimensions['A'].width = 3
+        # Цвет вкладки - худший среди секций.
+        _rank = 9
+        for m in present:
+            _tc = getattr(wb[m].sheet_properties, 'tabColor', None)
+            _tcv = getattr(_tc, 'rgb', None) or _tc
+            if isinstance(_tcv, str):
+                _rank = min(_rank, _GROUP_TAB_RANK.get(_tcv[-6:].upper(), 9))
+        grp.sheet_properties.tabColor = (
+            C.err if _rank == 0 else C.warn if _rank == 1 else C.ok)
+
+        row = 2
+        if note:
+            grp.merge_cells(start_row=row, start_column=2,
+                            end_row=row, end_column=8)
+            c = grp.cell(row=row, column=2, value=note)
+            c.font = _font(size=10, italic=True, color=C.text_soft)
+            c.alignment = _align(wrap=True, vertical='top', indent=1)
+            grp.row_dimensions[row].height = 60
+            row += 2
+        for m in present:
+            row = _append_sheet_as_section(grp, wb[m], row, m)
+        # Удаляем исходные листы после переноса.
+        for m in present:
+            del wb[m]
+
+    # Порядок: Обзор → 7 групп → Все детали.
+    order = (['Обзор'] + [g for g, _ in _SHEET_GROUPS if g in wb.sheetnames]
+             + ['Все детали'])
+    ordered = [wb[n] for n in order if n in wb.sheetnames]
+    ordered += [ws for ws in wb.worksheets if ws not in ordered]
+    wb._sheets = ordered
+
+
 # ── Главная функция ────────────────────────────────────────────────
 
 
@@ -5461,6 +5599,12 @@ def build_report(
                              + ', '.join(_adm_bad)
                              + ' (см. лист «Настройки в админке»).')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
+    # Ссылки на старые листы → на группу-лист (блок внутри группы), т.к.
+    # детальные листы теперь секции в 7 тематических листах.
+    _sheet_to_group = {m: g for g, ms in _SHEET_GROUPS for m in ms}
+    for _old, _grp in _sheet_to_group.items():
+        summary_text = summary_text.replace(
+            f'лист «{_old}»', f'лист «{_grp}» (блок «{_old}»)')
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
     c.alignment = _align(wrap=True)
@@ -5504,28 +5648,17 @@ def build_report(
     c.font = _font(size=10, bold=True, color=C.text_muted)
     c.alignment = _align()
 
+    # Отчёт собран в 7 тематических листов (каждый - несколько блоков-секций).
     nav_items = [
         ('Обзор', 'эта страница: сколько проверено, сколько работает и сколько сломано.'),
-        ('Структура страниц', 'что чинить в контенте - где нет цены, кнопок заказа, заголовка. Красное = баг.'),
-        ('Индексация', 'если есть лист - расхождения сигналов страниц с robots.txt (noindex, canonical) и sitemap↔robots.'),
-        ('Метаданные', 'если есть лист - title/description/H1: наличие, город, длины и дубли (в т.ч. дубли адресов).'),
-        ('Заголовки и мета', 'если есть лист - единственность title/description/H1, дубли H2 и заголовки вне текста.'),
-        ('Вёрстка', 'если есть лист - тег viewport, загрузка CSS, адаптивность (@media), переходы из меню шапки и работа фильтров товаров (браузерный тест).'),
-        ('Разметка', 'если есть лист - OpenGraph-теги и Schema.org (крошки, компания, товар, цены, фото).'),
-        ('Изображения', 'если есть лист - alt у картинок, современные форматы (webp/avif), вес и уникальность картинок категорий (п.1.15).'),
-        ('Регион и СНГ', 'если есть лист - чужой город/телефон/почта на странице города и чистота СНГ-доменов.'),
-        ('Ошибки JavaScript', 'если есть лист - страницы, где в консоли браузера есть ошибки JS (п.1.14).'),
-        ('Валидация и скорость', 'если есть лист - валидность HTML/CSS (W3C) и время загрузки ресурсов по выборке (п.1.16).'),
-        ('Страница 404', 'если есть лист - несуществующий адрес отдаёт 404, дизайн/тексты/навигация 404-страницы (п.1.18).'),
-        ('404 в индексе', 'если есть лист - страницы, которые Яндекс держит в поиске, но они отдают 404/410/soft-404 (регулярный мониторинг).'),
-        ('Фильтры ПС', 'если есть лист - санкции поисковых систем: диагностика Вебмастера + маркеры ручных мер в почте GSC (п.1.19).'),
-        ('Нагрузка и парсинг', 'если есть лист - нет ли ошибок сервера при быстром обходе (парсинге), параллельной нагрузке и кривых дублях URL категорий/фильтров/товаров.'),
-        ('Ссылочный профиль', 'если есть лист - lite-проверка беклинков по Яндекс.Вебмастеру: объём, доноры, динамика (обвал/всплеск), спам-доноры.'),
-        ('Настройки в админке', 'если есть лист - работают ли функции настройки в админке: поддомены, категории, товары, тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
+        ('Техничка', 'SEO-техничка: проверка страниц (главная/каталог/категории/фильтры/товары, цены), индексация (robots/sitemap/canonical), метаданные и единственность заголовков, микроразметка (OG/Schema), безопасность и редиректы, ошибки JavaScript, валидность W3C и скорость, страница 404 и 404 в индексе, санкции ПС, нагрузка/парсинг, битые переменные.'),
+        ('Верстка', 'вёрстка и адаптивность: viewport, CSS, сетка на пк/моб/планшет, переходы из меню, работа фильтров товаров, поиск по категориям.'),
+        ('КП', 'сверка с картой присутствия: контакты по городам (телефон/почта/адрес), верные переменные города, чистота СНГ-доменов от РФ.'),
+        ('Формы', 'формы: детальная проверка - в отдельном отчёте форм-тестера; здесь - точки формы на страницах.'),
+        ('Админка', 'работа функций настройки в админке: поддомены/категории/товары/тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
+        ('Аналитика', '404 из Метрики, письма Вебмастера/GSC, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений, lite-профиль беклинков.'),
+        ('Контент', 'изображения (alt, webp/avif, вес, lazy, уникальность картинок категорий); SEO-текст частотных категорий - в «Техничке».'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
-        ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
-        ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
-        ('Уведомления', 'если есть лист - письма от Яндекс.Вебмастера и GSC за выбранный период.'),
     ]
     for i, (sheet_name, desc) in enumerate(nav_items):
         r = nav_row + 1 + i
@@ -6061,6 +6194,10 @@ def build_report(
     _build_autoclick_sheet(wb, autoclick)
 
     # Фильтрация товаров - теперь секцией на листе «Вёрстка» (см. выше).
+
+    # ── Пересборка детальных листов в 7 тематических групп ──────────
+    # (Техничка / Верстка / КП / Формы / Админка / Аналитика / Контент)
+    _regroup_into_groups(wb)
 
     # ── Сохраняем ──────────────────────────────────────────────────
     output_path = Path(output_path)

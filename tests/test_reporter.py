@@ -108,17 +108,17 @@ def test_report_with_text_issues():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        assert 'Битые тексты' in wb.sheetnames
-        
-        # На листе - заголовок + пояснение + пусто + шапка + 2 строки данных
-        ws = wb['Битые тексты']
-        # Проверяем что нужные значения есть
+        # «Битые тексты» теперь - секция внутри группового листа «Техничка».
+        assert 'Техничка' in wb.sheetnames
+        assert 'Битые тексты' not in wb.sheetnames
+        ws = wb['Техничка']
         all_cells = []
         for row in ws.iter_rows(values_only=True):
             all_cells.extend(c for c in row if c)
         assert '{{city}}' in all_cells
         assert '%price%' in all_cells
-    print('✓ Лист «Битые тексты» добавляется')
+        assert '▸ Битые тексты' in all_cells   # полоса-разделитель секции
+    print('✓ Секция «Битые тексты» в листе «Техничка»')
 
 
 def test_redirect_chain_in_path_column():
@@ -275,8 +275,10 @@ def test_tech_section_mandatory_bug_and_broken_links():
                      selected_subdomains=selected, results=results, output_path=out)
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        assert 'Структура страниц' in wb.sheetnames
-        ws = wb['Структура страниц']
+        # «Структура страниц» теперь - секция внутри группового «Техничка».
+        assert 'Техничка' in wb.sheetnames
+        assert 'Структура страниц' not in wb.sheetnames
+        ws = wb['Техничка']
         blob = ' | '.join(str(c) for row in ws.iter_rows(values_only=True)
                           for c in row if c)
         assert 'Карта: БАГ' in blob       # обязательный спец-элемент отсутствует
@@ -345,12 +347,14 @@ def test_metrika_404_goal_есть():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        assert '404 из Метрики' in wb.sheetnames
-        ws = wb['404 из Метрики']
+        # «404 из Метрики» теперь - секция внутри группового «Аналитика».
+        assert 'Аналитика' in wb.sheetnames
+        assert '404 из Метрики' not in wb.sheetnames
+        ws = wb['Аналитика']
         text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
         assert 'Цель на 404' in text
         assert 'есть' in text.lower()
-    print('✓ Лист «404 из Метрики»: строка «цель есть» появляется')
+    print('✓ Секция «404 из Метрики» в листе «Аналитика»: «цель есть»')
 
 
 def test_metrika_404_goal_не_найдена():
@@ -369,12 +373,13 @@ def test_metrika_404_goal_не_найдена():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        assert '404 из Метрики' in wb.sheetnames
-        ws = wb['404 из Метрики']
+        assert 'Аналитика' in wb.sheetnames
+        assert '404 из Метрики' not in wb.sheetnames
+        ws = wb['Аналитика']
         text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
         assert 'не найдена' in text.lower()
         assert 'стоит создать' in text.lower()
-    print('✓ Лист «404 из Метрики»: строка «цель не найдена» появляется')
+    print('✓ Секция «404 из Метрики» в «Аналитике»: «цель не найдена»')
 
 
 def test_metrika_404_goal_none_без_данных_лист_не_создаётся():
