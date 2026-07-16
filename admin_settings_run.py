@@ -36,8 +36,10 @@ def main():
                     help='тестовый контур (admin.test.local.json)')
     ap.add_argument('--domain', default=None,
                     help='домен админки (если не задан в json-файле)')
-    ap.add_argument('--no-roundtrip', action='store_true',
-                    help='без тест-сохранения (только рендер разделов)')
+    ap.add_argument('--crud', action='store_true',
+                    help='проверять CRUD-операции поддоменов/категорий')
+    ap.add_argument('--no-execute', action='store_true',
+                    help='CRUD без записи - только наличие функций')
     ap.add_argument('--headed', action='store_true',
                     help='показывать браузер')
     ap.add_argument('--from-env', action='store_true',
@@ -70,9 +72,11 @@ def main():
 
     _src = ('креды из прогона' if args.from_env
             else 'тест' if args.test else 'прод')
-    print(f'Проверка настроек в админке: {creds["domain"]} '
-          f'({_src}, {"без" if args.no_roundtrip else "с"} тест-сохранением)')
-    res = check_admin_settings(creds, roundtrip=not args.no_roundtrip,
+    _crud_txt = ('CRUD с записью' if args.crud and not args.no_execute
+                 else 'CRUD (наличие)' if args.crud else 'без CRUD')
+    print(f'Проверка настроек в админке: {creds["domain"]} ({_src}, {_crud_txt})')
+    res = check_admin_settings(creds, crud=args.crud,
+                               execute=not args.no_execute,
                                log=print, headless=not args.headed)
 
     if not res.get('available'):

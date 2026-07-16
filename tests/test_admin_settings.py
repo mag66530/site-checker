@@ -73,6 +73,15 @@ def test_creds_missing(tmp_path):
     assert load_admin_creds(tmp_path) is None
 
 
+def test_check_admin_settings_signature():
+    # crud/execute — новые параметры вместо roundtrip
+    import inspect
+    from admin_settings_check import check_admin_settings
+    params = inspect.signature(check_admin_settings).parameters
+    assert 'crud' in params and 'execute' in params
+    assert 'roundtrip' not in params
+
+
 def test_creds_prod_and_test_are_separate_files(tmp_path):
     _write(tmp_path, 'admin.local.json',
            {'login': 'prod', 'password': 'p1'})

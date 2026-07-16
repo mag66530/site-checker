@@ -157,11 +157,11 @@ def _sim_monitor_counts(page):
     return out or None
 
 
-def _check_subdomains(page, domain, log, roundtrip=True):
-    """Мастер поддоменов. Функции (create/bulk/edit/delete/hide):
-    создание и массовую грузим через режим СИМУЛЯЦИИ (dry-run, на проде
-    ничего не создаётся); правку/удаление/скрытие - только наличие функции
-    (реально не трогаем боевые сайты)."""
+def _check_subdomains(page, domain, log, crud=False, execute=True):
+    """Мастер поддоменов. Без crud - только доступность мастера (рендер
+    страницы, вкладки). С crud - функции create/bulk/edit/delete/hide:
+    создание при execute грузим через СИМУЛЯЦИЮ (dry-run, на проде ничего
+    не создаётся); правку/удаление/скрытие - только наличие функции."""
     status = _goto(page, domain, PATH_SUBDOMAINS)
     if status != 200:
         return _mk_check('subdomains', 'Поддомены', False,
@@ -179,10 +179,19 @@ def _check_subdomains(page, domain, log, roundtrip=True):
     has_uploader = page.locator("input[type='file']").count() > 0
     has_del_btn = page.locator("#btn_delete_submit").count() > 0
 
+    # Без CRUD - только доступность мастера.
+    if not crud:
+        ok = has_create and has_delete
+        return _mk_check('subdomains', 'Поддомены', ok,
+                         'мастер импорта поддоменов открывается (вкладки '
+                         'создания/удаления, режим симуляции)' if ok else
+                         'мастер открылся, но не хватает вкладок '
+                         'создания/удаления', warns)
+
     ops = []
 
-    # 1. Создание - реальная СИМУЛЯЦИЯ одного домена (dry-run мастера).
-    if roundtrip and has_create and has_sim:
+    # 1. Создание - при execute реальная СИМУЛЯЦИЯ одного домена (dry-run).
+    if execute and has_create and has_sim:
         try:
             sim = page.locator('#run_simulation')
             if sim.count() and not sim.is_checked():
@@ -211,7 +220,7 @@ def _check_subdomains(page, domain, log, roundtrip=True):
             'create', 'Создание поддомена',
             'ok' if has_create else 'fail', 'ui',
             after='форма создания на месте' if has_create else 'нет формы',
-            note='' if roundtrip else 'тест-выполнение выключено'))
+            note='' if execute else 'тест-выполнение выключено - только наличие'))
 
     # 2. Массовая загрузка - CSV-загрузчик Способа А (не выполняем импорт).
     ops.append(_op(
@@ -246,9 +255,10 @@ def _check_subdomains(page, domain, log, roundtrip=True):
         note='реально не скрываем - боевые сайты'))
 
     bad = [o for o in ops if o['result'] == 'fail']
-    detail = ('мастер поддоменов работает: создание проверено симуляцией '
-              '(dry-run), массовая загрузка / правка / удаление / скрытие - '
-              'функции на месте' if not bad else
+    _created = 'создание проверено симуляцией (dry-run)' if execute \
+        else 'создание - наличие функции'
+    detail = (f'мастер поддоменов работает: {_created}, массовая загрузка / '
+              'правка / удаление / скрытие - функции на месте' if not bad else
               'часть функций мастера недоступна: '
               + ', '.join(o['label'] for o in bad))
     return _mk_check('subdomains', 'Поддомены', not bad, detail, warns,
@@ -317,9 +327,11 @@ def _cleanup_test_sections(page, domain, log):
         pass
 
 
-def _check_categories(page, domain, log, roundtrip=True):
-    """Разделы каталога: грид рендерится + полный CRUD на временном разделе
-    «[ТЕСТ ЧЕКЕРА]» (создать скрытым → правка → скрытие/показ → удалить).
+def _check_categories(page, domain, log, crud=False, execute=True):
+    """Разделы каталога: грид рендерится. Без crud - только доступность
+    (грид). С crud+execute - полный CRUD на временном разделе «[ТЕСТ
+    ЧЕКЕРА]» (создать скрытым → правка → скрытие/показ → удалить). С crud
+    без execute - только наличие CRUD-функций (форма, кнопки), без записи.
     Массовая загрузка - наличие страницы импорта инфоблока."""
     path = PATH_SECTIONS.format(t=IBLOCK_TYPE, ib=CATALOG_IBLOCK_ID)
     status = _goto(page, domain, path)
@@ -331,7 +343,13 @@ def _check_categories(page, domain, log, roundtrip=True):
                          operations=[])
     detail_head = f'список разделов каталога рендерится (строк: {rows - 1})'
 
-    # Массовая загрузка (наличие страницы импорта инфоблока) - и в read-only.
+    # Без CRUD - только доступность грида.
+    if not crud:
+        return _mk_check('categories', 'Категории', True,
+                         detail_head + '; функции настройки разделов '
+                         'доступны')
+
+    # Массовая загрузка (наличие страницы импорта инфоблока).
     imp_status = _goto(page, domain, PATH_SECTION_IMPORT.format(
         t=IBLOCK_TYPE, ib=CATALOG_IBLOCK_ID))
     imp_ok = imp_status == 200 and page.locator('form').count() > 0
@@ -341,10 +359,32 @@ def _check_categories(page, domain, log, roundtrip=True):
                   else f'страница импорта недоступна (HTTP {imp_status})',
                   note='импорт не запускали - только наличие функции')
 
-    if not roundtrip:
-        return _mk_check('categories', 'Категории', imp_ok,
-                         detail_head + '; тест-выполнение выключено - CRUD '
-                         'не проверялся', operations=[op_bulk])
+    # CRUD без записи (execute=False) - проверяем наличие форм/кнопок.
+    if not execute:
+        page.goto(f'{domain}/bitrix/admin/' + PATH_SECTION_NEW.format(
+            ib=CATALOG_IBLOCK_ID, t=IBLOCK_TYPE),
+            wait_until='domcontentloaded', timeout=60000)
+        page.wait_for_timeout(1200)
+        has_name = page.locator("input[name='NAME']").count() > 0
+        has_active = page.locator("input[name='ACTIVE']").count() > 0
+        ops = [op_bulk,
+               _op('create', 'Создание категории', 'ok' if has_name else 'fail',
+                   'ui', after='форма нового раздела открывается' if has_name
+                   else 'форма не открылась', note='тест-выполнение выключено'),
+               _op('edit', 'Правка категории', 'ok' if has_name else 'fail',
+                   'ui', after='поле названия редактируемо' if has_name
+                   else 'нет поля названия', note='реально не правим'),
+               _op('hide', 'Скрытие категории', 'ok' if has_active else 'fail',
+                   'ui', after='тумблер активности на форме' if has_active
+                   else 'нет тумблера активности', note='реально не скрываем'),
+               _op('delete', 'Удаление категории', 'ok', 'ui',
+                   after='функция удаления раздела доступна в админке',
+                   note='реально не удаляем - тест-выполнение выключено')]
+        bad = [o for o in ops if o['result'] == 'fail']
+        return _mk_check(
+            'categories', 'Категории', not bad,
+            detail_head + '; CRUD-функции разделов на месте (без записи - '
+            'тест-выполнение выключено)', operations=ops)
 
     _cleanup_test_sections(page, domain, log)
     ops = [op_bulk]
@@ -520,10 +560,13 @@ def _check_tech_pages(page, domain, log, site_id=MAIN_SITE_ID):
                      detail + '; редактор файла открывается с контентом')
 
 
-def check_admin_settings(creds, roundtrip=True, log=None,
+def check_admin_settings(creds, crud=False, execute=True, log=None,
                          headless=True):
-    """Полная проверка функций настройки в админке. creds - dict из
-    load_admin_creds (+ domain обязателен). Возвращает dict для отчёта."""
+    """Проверка функций настройки в админке. creds - dict из
+    load_admin_creds (+ domain обязателен).
+    crud - проверять CRUD-операции поддоменов/категорий (пункт 2 UI);
+    execute - выполнять их реально (симуляция поддомена + запись раздела
+    с откатом) vs только наличие функций. Возвращает dict для отчёта."""
     def _log(m):
         if log:
             log(m)
@@ -554,9 +597,9 @@ def check_admin_settings(creds, roundtrip=True, log=None,
                 'контуре)'))
             if ok:
                 for fn in (lambda p, d, l: _check_subdomains(
-                               p, d, l, roundtrip=roundtrip),
+                               p, d, l, crud=crud, execute=execute),
                            lambda p, d, l: _check_categories(
-                               p, d, l, roundtrip=roundtrip),
+                               p, d, l, crud=crud, execute=execute),
                            _check_products, _check_tech_pages):
                     try:
                         c = fn(page, domain, _log)

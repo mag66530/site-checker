@@ -382,8 +382,10 @@ def _run_admin_settings(pid, params, creds, log):
         creds.get('admin_settings') or {}, ensure_ascii=False)
     args = [_sys.executable, 'admin_settings_run.py', '--project', pid,
             '--from-env', '--out', str(_res_file)]
-    if not params.get('admin_roundtrip', True):
-        args.append('--no-roundtrip')
+    if params.get('admin_crud'):
+        args.append('--crud')
+        if not params.get('admin_execute', True):
+            args.append('--no-execute')
     log('Настройки в админке: запускаю браузер…')
     try:
         proc = subprocess.Popen(
@@ -1151,10 +1153,11 @@ def run_check(pid, params, creds, log, progress):
                                  'note': 'OAuth-токен Вебмастера не задан.'}
 
         # ── Настройки в админке (доп. чек-лист, по галочке) ──
-        # Браузерная проверка: вход + поддомены/категории/товары/тех.страницы
-        # (+ round-trip сохранения на категории). Креды приходят из UI/Secrets.
+        # Пункт 1: функции настройки работают (рендер разделов админки).
+        # Пункт 2 (admin_crud): CRUD поддоменов/категорий (симуляция + запись
+        # с откатом при admin_execute). Креды приходят из UI/Secrets.
         _admin_settings = None
-        if params.get('check_admin_settings'):
+        if params.get('check_admin_settings') or params.get('admin_crud'):
             _adm_creds = creds.get('admin_settings') or {}
             if _adm_creds.get('login') and _adm_creds.get('domain'):
                 _admin_settings = _run_admin_settings(pid, params, creds, log)
@@ -1167,7 +1170,7 @@ def run_check(pid, params, creds, log, progress):
                     'админки - пропуск.')
                 _admin_settings = {'available': False,
                                    'note': 'Не заданы домен/логин/пароль '
-                                           'админки (поля под галочкой 1.21 '
+                                           'админки (поля в блоке «Админка» '
                                            'или секрет admin_settings_<pid>).'}
 
         # ── Ошибки сервера: парсинг / нагрузка / дубли URL (по галочке) ──
