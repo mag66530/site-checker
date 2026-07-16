@@ -20,8 +20,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from admin_settings_check import (check_admin_settings, load_admin_creds,
-                                  summarize)
+from admin_settings_check import (check_admin_settings, load_admin_config,
+                                  load_admin_creds, summarize)
 
 BASE = Path(__file__).parent
 CACHE_DIR = BASE / 'cache' / 'admin-settings'
@@ -90,11 +90,13 @@ def main():
     _crud_txt = (', '.join(_parts) + (' с записью' if not args.no_execute
                  else ' (наличие)')) if _parts else 'без CRUD'
     print(f'Проверка настроек в админке: {creds["domain"]} ({_src}, {_crud_txt})')
+    cfg = load_admin_config(args.project)
     res = check_admin_settings(creds, crud=args.crud,
                                product_crud=args.product_crud,
                                tech_crud=args.tech_crud,
                                counters=args.counters,
                                execute=not args.no_execute,
+                               config=cfg,
                                log=print, headless=not args.headed)
 
     if not res.get('available'):

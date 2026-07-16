@@ -86,6 +86,81 @@ _COUNTER_MARKERS = (
     ('Top.Mail.ru', re.compile(r'top-fwz1\.mail|_tmr\.push', re.I)),
 )
 
+# Поля формы товара каталога - СТАНДАРТНЫЕ для Bitrix (одинаковы во всех
+# Bitrix-проектах), поэтому в коде, не в пер-проектном конфиге:
+# CAT_BASE_PRICE (базовая цена), IBLOCK_SECTION[] (привязка к разделам).
+
+# Селекторы «Мастера импорта поддоменов» (кастомный модуль) - под проект.
+SUBDOMAIN_SEL = {
+    'row_city': '.m-name',        # поле «Название города» строки ручного ввода
+    'row_code': '.m-prefix',      # поле «Код/Префикс»
+    'row_email': '.m-email',      # поле «Email»
+    'add_row_button': "input[value='+ Добавить строку']",
+    'sim_checkbox': '#run_simulation',
+    'run_button': 'Запустить создание (Таблица)',
+    'delete_button': '#btn_delete_submit',
+    'tab_create': 'Создание доменов',
+    'tab_delete': 'Удаление доменов',
+}
+
+# ── Пер-проектный конфиг админки ─────────────────────────────────────
+# Всё, что специфично для конкретной админки/CMS (Bitrix+СМУ по умолчанию),
+# вынесено сюда. Для ИМП/МПЭ/другой CMS - файл catalogs/admin-config-<pid>.json
+# перекрывает нужные ключи (глубокий merge). Скрипт НЕ «зашит под текущую
+# админку» - он конфигурируется под каждый проект.
+ADMIN_CONFIG_DEFAULT = {
+    'cms': 'bitrix',
+    'iblock_type': 'ural_metall',
+    'catalog_iblock_id': 2,
+    'hl_products_entity_id': 6,        # HL-блок «Ассортимент»
+    'main_site_id': 's1',
+    'test_product_price': '1',
+    'subdomain': dict(SUBDOMAIN_SEL),
+    'counters': {'type': 'file', 'path': '/localviews/layout/counters.php'},
+}
+
+
+def _deep_merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def load_admin_config(project_id: str = None) -> dict:
+    """Конфиг админки: дефолт (Bitrix/СМУ) + перекрытие из
+    catalogs/admin-config-<pid>.json (если есть). Для ИМП/МПЭ кладём туда
+    свои iblock id / поля / селекторы / путь счётчиков."""
+    cfg = dict(ADMIN_CONFIG_DEFAULT)
+    cfg['subdomain'] = dict(ADMIN_CONFIG_DEFAULT['subdomain'])
+    cfg['counters'] = dict(ADMIN_CONFIG_DEFAULT['counters'])
+    if not project_id:
+        return cfg
+    f = (Path(__file__).parent / 'catalogs'
+         / f'admin-config-{project_id}.json')
+    if f.is_file():
+        try:
+            cfg = _deep_merge(cfg, json.loads(f.read_text(encoding='utf-8')))
+        except Exception:
+            pass
+    return cfg
+
+
+def _apply_config(cfg: dict):
+    """Применить конфиг к модульным переменным (скрипт - один прогон)."""
+    global IBLOCK_TYPE, CATALOG_IBLOCK_ID, HL_PRODUCTS_ENTITY_ID
+    global MAIN_SITE_ID, TEST_PRODUCT_PRICE, SUBDOMAIN_SEL
+    cfg = cfg or {}
+    IBLOCK_TYPE = cfg.get('iblock_type', IBLOCK_TYPE)
+    CATALOG_IBLOCK_ID = cfg.get('catalog_iblock_id', CATALOG_IBLOCK_ID)
+    HL_PRODUCTS_ENTITY_ID = cfg.get('hl_products_entity_id', HL_PRODUCTS_ENTITY_ID)
+    MAIN_SITE_ID = cfg.get('main_site_id', MAIN_SITE_ID)
+    TEST_PRODUCT_PRICE = str(cfg.get('test_product_price', TEST_PRODUCT_PRICE))
+    SUBDOMAIN_SEL = _deep_merge(SUBDOMAIN_SEL, cfg.get('subdomain') or {})
+
 
 def load_admin_creds(project_dir, test=False):
     """Креды админки из admin.local.json / admin.test.local.json.
@@ -199,11 +274,11 @@ def _check_subdomains(page, domain, log, crud=False, execute=True):
         warns.append('у модуля Bitrix истекла стандартная лицензия '
                      '(баннер в админке) - на работу мастера не влияет, '
                      'но обновлений нет')
-    has_create = 'Создание доменов' in body
-    has_delete = 'Удаление доменов' in body
+    has_create = SUBDOMAIN_SEL['tab_create'] in body
+    has_delete = SUBDOMAIN_SEL['tab_delete'] in body
     has_sim = 'симуляци' in body.lower()
     has_uploader = page.locator("input[type='file']").count() > 0
-    has_del_btn = page.locator("#btn_delete_submit").count() > 0
+    has_del_btn = page.locator(SUBDOMAIN_SEL['delete_button']).count() > 0
 
     # Без CRUD - только доступность мастера.
     if not crud:
@@ -216,20 +291,39 @@ def _check_subdomains(page, domain, log, crud=False, execute=True):
 
     ops = []
 
+    # Заполнить ручные строки мастера N городами и запустить в СИМУЛЯЦИИ.
+    def _sim_rows(rows):
+        """rows: [(city, code, email)]. Возвращает счётчики монитора.
+        Каждый вызов - со свежей формой мастера. Поля строк - по классам
+        (.m-name/.m-prefix/.m-email), устойчиво к добавленным строкам."""
+        _goto(page, domain, PATH_SUBDOMAINS)
+        sim = page.locator(SUBDOMAIN_SEL['sim_checkbox'])
+        if sim.count() and not sim.is_checked():
+            sim.check()
+        add_btn = page.locator(SUBDOMAIN_SEL['add_row_button'])
+        cities = page.locator(SUBDOMAIN_SEL['row_city'])
+        for _ in range(max(0, len(rows) - cities.count())):
+            if add_btn.count():
+                add_btn.first.click()
+                page.wait_for_timeout(250)
+        cities = page.locator(SUBDOMAIN_SEL['row_city'])
+        codes = page.locator(SUBDOMAIN_SEL['row_code'])
+        mails = page.locator(SUBDOMAIN_SEL['row_email'])
+        for i, (c, cd, em) in enumerate(rows):
+            if i < cities.count():
+                cities.nth(i).fill(c)
+                codes.nth(i).fill(cd)
+                mails.nth(i).fill(em)
+        page.get_by_text(SUBDOMAIN_SEL['run_button'],
+                         exact=False).first.click()
+        page.wait_for_timeout(6000)
+        return _sim_monitor_counts(page) or {}
+
     # 1. Создание - при execute реальная СИМУЛЯЦИЯ одного домена (dry-run).
     if execute and has_create and has_sim:
         try:
-            sim = page.locator('#run_simulation')
-            if sim.count() and not sim.is_checked():
-                sim.check()
-            page.fill("input[placeholder='Напр: Тула']", 'Тест Чекера')
-            page.fill("input[placeholder='tula']", 'checker-sim')
-            page.fill("input[placeholder='tula@stalmetural.ru']",
-                      'checker-sim@example.ru')
-            page.get_by_text('Запустить создание (Таблица)',
-                             exact=False).first.click()
-            page.wait_for_timeout(6000)
-            cnt = _sim_monitor_counts(page) or {}
+            cnt = _sim_rows([('Тест Чекера', 'checker-sim',
+                              'checker-sim@example.ru')])
             ok = cnt.get('created', 0) >= 1 and cnt.get('errors', 1) == 0
             ops.append(_op(
                 'create', 'Создание поддомена',
@@ -248,13 +342,34 @@ def _check_subdomains(page, domain, log, crud=False, execute=True):
             after='форма создания на месте' if has_create else 'нет формы',
             note='' if execute else 'тест-выполнение выключено - только наличие'))
 
-    # 2. Массовая загрузка - CSV-загрузчик Способа А (не выполняем импорт).
-    ops.append(_op(
-        'bulk', 'Массовая загрузка (CSV)',
-        'ok' if has_uploader else 'fail', 'ui',
-        after='загрузчик CSV на месте (Способ А, очередь)' if has_uploader
-        else 'загрузчик CSV не найден',
-        note='файл не загружали - только наличие функции'))
+    # 2. Массовая загрузка - СИМУЛЯЦИЯ создания СРАЗУ 2 доменов (dry-run):
+    # проверяем, что массовое создание реально отрабатывает, не только форма.
+    if execute and has_create and has_sim:
+        try:
+            cnt = _sim_rows([('Тест Чекера Опт', 'checker-bulk1',
+                              'checker-bulk1@example.ru'),
+                             ('Тест Чекера Двас', 'checker-bulk2',
+                              'checker-bulk2@example.ru')])
+            n = cnt.get('created', 0)
+            ok = n >= 2 and cnt.get('errors', 1) == 0
+            ops.append(_op(
+                'bulk', 'Массовая загрузка (симуляция)',
+                'ok' if ok else 'fail', 'simulated',
+                before='2 доменов нет',
+                after=(f'симуляция пакета: создано {n}, ошибок '
+                       f'{cnt.get("errors", 0)} (реально НЕ созданы)'),
+                note='массовое создание отработало в dry-run + есть '
+                     'CSV-загрузчик Способа А'))
+        except Exception as e:
+            ops.append(_op('bulk', 'Массовая загрузка (симуляция)', 'fail',
+                           'simulated', note=f'симуляция пакета упала: {e}'))
+    else:
+        ops.append(_op(
+            'bulk', 'Массовая загрузка (CSV)',
+            'ok' if has_uploader else 'fail', 'ui',
+            after='загрузчик CSV на месте (Способ А, очередь)' if has_uploader
+            else 'загрузчик CSV не найден',
+            note='файл не загружали - только наличие функции'))
 
     # 3. Правка - ручной ввод/редактирование строки домена (наличие).
     ops.append(_op(
@@ -768,10 +883,10 @@ def _check_products_crud(page, domain, log, execute=True):
                      operations=ops)
 
 
-def _check_products(page, domain, log,
-                    entity_id=HL_PRODUCTS_ENTITY_ID):
+def _check_products(page, domain, log, entity_id=None):
     """Товарная подсистема (HL-блок «Ассортимент»): список записей +
     форма редактирования записи с UF_-полями."""
+    entity_id = entity_id or HL_PRODUCTS_ENTITY_ID
     status = _goto(page, domain, PATH_HL_ROWS.format(eid=entity_id))
     rows = page.locator('table.adm-list-table tr').count()
     if status != 200 or rows <= 1:
@@ -806,8 +921,9 @@ def _check_products(page, domain, log,
                      f'(UF-полей: {uf})')
 
 
-def _check_tech_pages(page, domain, log, site_id=MAIN_SITE_ID):
+def _check_tech_pages(page, domain, log, site_id=None):
     """Тех.страницы: «Структура сайта» главного сайта + редактор файла."""
+    site_id = site_id or MAIN_SITE_ID
     status = _goto(page, domain, PATH_FILEMAN.format(site=site_id))
     rows = page.locator('table.adm-list-table tr').count()
     if status != 200 or rows <= 1:
@@ -828,12 +944,13 @@ def _check_tech_pages(page, domain, log, site_id=MAIN_SITE_ID):
                      detail + '; редактор файла открывается с контентом')
 
 
-def _check_tech_pages_crud(page, domain, log, site_id=MAIN_SITE_ID):
+def _check_tech_pages_crud(page, domain, log, site_id=None):
     """CRUD техстраниц (файлы в «Структуре сайта», fileman). ВСЕ операции -
     проверка НАЛИЧИЯ функции (mode='ui'), без записи: техстраница = публичный
     файл в корне сайта, создавать/удалять его на боевом проекте небезопасно
     (в отличие от скрытых записей БД у категорий/товаров). Проверяем, что
     формы/загрузчик/редактор/удаление доступны."""
+    site_id = site_id or MAIN_SITE_ID
     ops = []
 
     # 1. Создание - форма нового файла (title/filename/save на месте).
@@ -892,7 +1009,7 @@ def _check_tech_pages_crud(page, domain, log, site_id=MAIN_SITE_ID):
                      detail, operations=ops)
 
 
-def _check_counters(page, domain, log, cfg=None, site_id=MAIN_SITE_ID):
+def _check_counters(page, domain, log, cfg=None, site_id=None):
     """«Добавление счётчиков аналитики» (админ-функция). cfg:
     {'type':'file','path':...} - счётчики в файле «Структуры сайта» (smu:
     /localviews/layout/counters.php), проверяем что файл открывается в
@@ -900,6 +1017,7 @@ def _check_counters(page, domain, log, cfg=None, site_id=MAIN_SITE_ID):
     {'type':'module','url':...} - отдельная страница/модуль в админке.
     По умолчанию - файл COUNTERS_FILE_DEFAULT."""
     cfg = cfg or {'type': 'file', 'path': COUNTERS_FILE_DEFAULT}
+    site_id = site_id or MAIN_SITE_ID
 
     if cfg.get('type') == 'module' and cfg.get('url'):
         status = _goto(page, domain, cfg['url'].lstrip('/').replace(
@@ -946,22 +1064,23 @@ def _check_counters(page, domain, log, cfg=None, site_id=MAIN_SITE_ID):
 
 def check_admin_settings(creds, crud=False, product_crud=False,
                          tech_crud=False, counters=False, execute=True,
-                         log=None, headless=True):
+                         config=None, log=None, headless=True):
     """Проверка функций настройки в админке. creds - dict из
-    load_admin_creds (+ domain обязателен).
-    crud - CRUD-операции поддоменов/категорий (пункт 2 UI);
-    product_crud - CRUD товаров (создание/сортировка/вывод в разные
-    категории, пункт 3 UI, опционально по CMS);
-    tech_crud - CRUD техстраниц (файлы, пункт 4 UI) - только наличие
-    функций (публичные файлы на проде не трогаем);
-    execute - выполнять crud/product_crud реально (симуляция поддомена +
-    запись с откатом) vs только наличие функций. Для отчёта."""
+    load_admin_creds (+ domain обязателен). config - пер-проектный конфиг
+    (load_admin_config): iblock id / тип / HL / счётчики / селекторы мастера.
+    crud - CRUD поддоменов/категорий; product_crud - CRUD товаров;
+    tech_crud - CRUD техстраниц; counters - счётчики аналитики;
+    execute - выполнять crud/product_crud реально vs только наличие."""
+    _apply_config(config or {})
     def _log(m):
         if log:
             log(m)
     domain = (creds.get('domain') or '').rstrip('/')
     if not domain:
         return {'available': False, 'note': 'домен админки не задан'}
+    # Конфиг счётчиков: из config, иначе из creds (обр. совместимость).
+    _counters_cfg = ((config or {}).get('counters')
+                     or creds.get('counters'))
 
     from playwright.sync_api import sync_playwright
     checks = []
@@ -997,9 +1116,8 @@ def check_admin_settings(creds, crud=False, product_crud=False,
                 if tech_crud:
                     fns.append(_check_tech_pages_crud)
                 if counters:
-                    _cnt_cfg = creds.get('counters')
                     fns.append(lambda p, d, l: _check_counters(
-                        p, d, l, cfg=_cnt_cfg))
+                        p, d, l, cfg=_counters_cfg))
                 for fn in fns:
                     try:
                         c = fn(page, domain, _log)

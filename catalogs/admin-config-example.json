@@ -1,0 +1,29 @@
+{
+  "_comment": "Пример пер-проектного конфига проверки админки. Скопируй в admin-config-<pid>.json (напр. admin-config-imp.json / admin-config-mpe.json) и укажи значения проекта. Любой ключ можно опустить - возьмётся дефолт (Bitrix/СМУ). Файл читается admin_settings_check.load_admin_config(pid).",
+
+  "cms": "bitrix",
+  "iblock_type": "ural_metall",
+  "catalog_iblock_id": 2,
+  "hl_products_entity_id": 6,
+  "main_site_id": "s1",
+  "test_product_price": "1",
+
+  "subdomain": {
+    "_comment": "Селекторы кастомного «Мастера импорта поддоменов». Если у проекта другой мастер - поправь классы полей строки и тексты кнопок/вкладок.",
+    "row_city": ".m-name",
+    "row_code": ".m-prefix",
+    "row_email": ".m-email",
+    "add_row_button": "input[value='+ Добавить строку']",
+    "sim_checkbox": "#run_simulation",
+    "run_button": "Запустить создание (Таблица)",
+    "delete_button": "#btn_delete_submit",
+    "tab_create": "Создание доменов",
+    "tab_delete": "Удаление доменов"
+  },
+
+  "counters": {
+    "_comment": "СМУ - файл: {'type':'file','path':'/localviews/layout/counters.php'}. МПЭ (самописный модуль) - {'type':'module','url':'<путь модуля от /bitrix/admin/>'}.",
+    "type": "file",
+    "path": "/localviews/layout/counters.php"
+  }
+}
