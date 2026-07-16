@@ -223,17 +223,23 @@ def _run_index404_download(pid, params, log, session_b64=None):
                 'error': f'результат не прочитан: {e}'}
 
 
-def _run_gsc_index404(pid, params, log, session_b64=None):
+def _run_gsc_index404(pid, params, log, session_b64=None, gsc_login=None):
     """Авто-экспорт «Не найдено (404)» / «Ошибка сервера (5xx)» из Google
-    Search Console браузером. Та же сессия, что у автокликеров/Яндекса
-    (у Google свои cookies в ней). Возвращает dict в форме «404 в индексе»
-    с source='Google' у записей."""
+    Search Console браузером. Основа — сохранённая сессия (путь B); слетела —
+    автологин по логину/паролю Google (путь C, gsc_login=(email,password)).
+    Возвращает dict в форме «404 в индексе» с source='Google' у записей."""
     import os as _os
     import subprocess
     import sys as _sys
     root = Path(__file__).parent
     _env = dict(_os.environ)
     _env['PYTHONIOENCODING'] = 'utf-8'
+    # Запасной автовход (C): передаём логин/пароль Google в подпроцесс.
+    if params.get('index_404_gsc_autologin', True) and gsc_login:
+        _gl_email, _gl_pass = (gsc_login or (None, None))
+        if _gl_email and _gl_pass:
+            _env['GSC_LOGIN_EMAIL'] = _gl_email
+            _env['GSC_LOGIN_PASSWORD'] = _gl_pass
     if not _cdp_alive():
         if session_b64:
             try:
@@ -974,7 +980,8 @@ def run_check(pid, params, creds, log, progress):
             _gsc_404 = None
             if params.get('index_404_gsc', True):
                 _gsc_404 = _run_gsc_index404(
-                    pid, params, log, session_b64=creds.get('autoclick_session'))
+                    pid, params, log, session_b64=creds.get('autoclick_session'),
+                    gsc_login=creds.get('gsc'))
                 if _gsc_404.get('error'):
                     log(f'⚠ 404 в индексе (GSC): {_gsc_404["error"]}')
                 else:

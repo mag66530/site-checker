@@ -32,6 +32,7 @@ import asyncio
 import csv
 import io
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -124,6 +125,77 @@ async def _scout(page):
                 pass
 
 
+async def _google_login(page, email, password, log) -> tuple:
+    """Автоматический вход в Google логином/паролем (запасной путь C, когда
+    сохранённая сессия слетела). (ok, причина_если_нет).
+
+    Честно: Google активно против автовхода — 2FA, капча, «небезопасный
+    браузер», подтверждение по телефону. Если что-то из этого всплывает,
+    автоматом не пройти — возвращаем False с понятной причиной."""
+    _BLOCK = ('небезопасн', 'not secure', 'подтвердите, что это вы', "verify it",
+              '验证', 'captcha', 'капча', 'необычн', 'unusual', '2-этап',
+              'two-step', 'two-factor', 'двухэтап', 'код подтверждения',
+              'verification code', 'recovery', 'восстановлен')
+    try:
+        if 'accounts.google.com' not in page.url:
+            await page.goto('https://accounts.google.com/signin/v2/identifier?hl=ru',
+                            wait_until='domcontentloaded', timeout=45000)
+            await page.wait_for_timeout(2500)
+        # E-mail
+        await page.locator('input[type="email"]').first.fill(email, timeout=15000)
+        await page.locator('#identifierNext, button:has-text("Далее"), '
+                           'button:has-text("Next")').first.click(timeout=10000)
+        await page.wait_for_timeout(4000)
+        body = (await page.inner_text('body')).lower()
+        if any(k in body for k in _BLOCK) or 'не удалось найти' in body:
+            return False, 'Google просит доп. проверку на шаге логина (капча/аккаунт)'
+        # Пароль
+        await page.locator('input[type="password"]').first.fill(password, timeout=15000)
+        await page.locator('#passwordNext, button:has-text("Далее"), '
+                           'button:has-text("Next")').first.click(timeout=10000)
+        await page.wait_for_timeout(5000)
+        if 'accounts.google.com' not in page.url:
+            return True, ''                      # ушли с логина → вошли
+        body = (await page.inner_text('body')).lower()
+        if any(k in body for k in _BLOCK):
+            return False, '2FA / подтверждение по телефону — автоматом не пройти'
+        if 'wrong password' in body or 'неверный пароль' in body:
+            return False, 'неверный пароль (проверь секрет gsc_<pid>_password)'
+        return False, 'вход не завершился (Google требует доп. проверку)'
+    except Exception as e:
+        return False, f'{type(e).__name__}: {str(e)[:120]}'
+
+
+async def _ensure_logged_in(page, res, acct, email, password, log) -> bool:
+    """Открыть отчёт GSC; если сессия жива — True. Если слетела — пробуем
+    автологин по логину/паролю (запасной путь C) и проверяем снова."""
+    url = GSC_REPORT.format(acct=acct, res=res)
+    try:
+        await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+    except Exception as e:
+        log(f'  отчёт не открылся: {e}')
+        return False
+    await page.wait_for_timeout(5000)
+    if 'accounts.google.com' not in page.url and 'signin' not in page.url:
+        return True                              # сессия жива (путь B)
+    if not (email and password):
+        log('  сессия слетела, а логина/пароля Google нет (gsc_<pid>_email/password) '
+            '- автовход невозможен')
+        return False
+    log('  сессия слетела - пробую автоматический вход по логину/паролю…')
+    ok, reason = await _google_login(page, email, password, log)
+    if not ok:
+        log(f'  автовход не удался: {reason}')
+        return False
+    log('  автовход выполнен - переоткрываю отчёт')
+    try:
+        await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+    except Exception:
+        pass
+    await page.wait_for_timeout(5000)
+    return 'accounts.google.com' not in page.url
+
+
 async def _export_reason(page, res, acct, reason_text, scout) -> bytes | None:
     """Открыть отчёт «Страницы», провалиться в причину reason_text и скачать
     CSV. Возвращает байты файла или None."""
@@ -134,8 +206,6 @@ async def _export_reason(page, res, acct, reason_text, scout) -> bytes | None:
         _log(f'  отчёт не открылся: {e}')
         return None
     await page.wait_for_timeout(6000)
-    if 'accounts.google.com' in page.url or 'signin' in page.url:
-        raise RuntimeError('НЕ АВТОРИЗОВАН в Google (сессия слетела/нет доступа)')
 
     # Скроллим - таблица причин подгружается ниже.
     for _ in range(6):
@@ -180,6 +250,9 @@ async def _run(pid: str, scout: bool) -> dict:
         return {'available': False, 'source': 'gsc', 'hosts': [],
                 'error': 'не задан GSC-ресурс (gsc_resource / root_domain)'}
     _log(f'GSC: ресурс {res}, аккаунт /u/{acct}/')
+    # Запасной путь C: логин/пароль Google для автовхода, если сессия слетела.
+    email = os.environ.get('GSC_LOGIN_EMAIL') or ''
+    password = os.environ.get('GSC_LOGIN_PASSWORD') or ''
 
     by_host = {}
     async with async_playwright() as p:
@@ -189,6 +262,14 @@ async def _run(pid: str, scout: bool) -> dict:
             return {'available': False, 'source': 'gsc', 'hosts': [],
                     'error': f'браузер/сессия недоступны: {e}'}
         try:
+            # Вход: сначала сохранённая сессия (B); слетела - автологин (C).
+            if not scout:
+                if not await _ensure_logged_in(page, res, acct, email, password, _log):
+                    return {'available': False, 'source': 'gsc', 'hosts': [],
+                            'error': ('НЕ АВТОРИЗОВАН в Google: сессия слетела, а '
+                                      'автовход не прошёл (2FA/капча или нет '
+                                      'логина/пароля). Переэкспортируй сессию или '
+                                      'убери 2FA у робота-аккаунта.')}
             for verdict, reason_text in REASONS:
                 try:
                     data = await _export_reason(page, res, acct, reason_text, scout)
