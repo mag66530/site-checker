@@ -10,5 +10,6 @@
   "mandatory_city": "Москва",
   "has_filters": false,
   "use_proxy": false,
+  "gsc_resource": "sc-domain:mepen.ru",
   "kp_sheet_url": ""
 }
