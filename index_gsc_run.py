@@ -298,11 +298,15 @@ async def _export_reason(page, res, acct, reason_text, scout) -> bytes | None:
         return None
 
 
-async def _run(pid: str, scout: bool) -> dict:
+async def _run(pid: str, scout: bool, acct_override=None, res_override=None) -> dict:
     from autoclick_browser import open_browser
     from playwright.async_api import async_playwright
 
     res, acct = _gsc_target(pid)
+    if res_override:
+        res = res_override
+    if acct_override is not None:
+        acct = str(acct_override)
     if not res:
         return {'available': False, 'source': 'gsc', 'hosts': [],
                 'error': 'не задан GSC-ресурс (gsc_resource / root_domain)'}
@@ -374,8 +378,13 @@ def main():
     ap = argparse.ArgumentParser(description='404 в индексе из Google Search Console')
     ap.add_argument('--project', required=True)
     ap.add_argument('--scout', action='store_true')
+    ap.add_argument('--account', default=None,
+                    help='номер Google-аккаунта /u/N/ (локально обычно 0)')
+    ap.add_argument('--resource', default=None,
+                    help='GSC-ресурс, напр. sc-domain:stalmetural.ru')
     a = ap.parse_args()
-    res = asyncio.run(_run(a.project, a.scout))
+    res = asyncio.run(_run(a.project, a.scout, acct_override=a.account,
+                           res_override=a.resource))
     (ROOT / 'cache').mkdir(exist_ok=True)
     out = ROOT / 'cache' / f'index_gsc_{a.project}.json'
     out.write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding='utf-8')
