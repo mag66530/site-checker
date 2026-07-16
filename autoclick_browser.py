@@ -43,31 +43,36 @@ def session_file_from_secret(b64: str) -> str:
     return f.name
 
 
-async def open_browser(p, log=None):
+async def open_browser(p, log=None, engine='chromium'):
     """Открыть браузер по режиму. Возвращает (browser, page).
 
-    p - активный async_playwright. Ошибки бросаем наружу - вызывающий
-    скрипт пишет их в свой лог."""
+    p - активный async_playwright. engine - 'chromium' (по умолчанию, для всех
+    проверок) или 'firefox' (легче по памяти - для отдельных проверок на
+    бесплатном облаке, где Chromium падает по памяти; включается точечно
+    вызывающим кодом). Ошибки бросаем наружу - вызывающий скрипт пишет их в
+    свой лог."""
     def _log(msg):
         if log:
             log(msg)
 
     if is_cloud_mode():
+        eng = 'firefox' if str(engine).lower() == 'firefox' else 'chromium'
+        bt = p.firefox if eng == 'firefox' else p.chromium
         # НЕ browser_setup.ensure_browser: он открывает sync_playwright, что
-        # внутри asyncio-цикла падает. Путь Chromium берём у уже открытого
-        # async-playwright, доустанавливаем subprocess-ом при необходимости.
+        # внутри asyncio-цикла падает. Путь берём у уже открытого async-
+        # playwright, доустанавливаем subprocess-ом при необходимости.
         _path = None
         try:
-            _path = p.chromium.executable_path
+            _path = bt.executable_path
         except Exception:
             pass
         if not (_path and os.path.exists(_path)):
             import subprocess
             import sys
-            _log('Chromium не найден - доустанавливаю (~1 мин)…')
+            _log(f'{eng} не найден - доустанавливаю (~1 мин)…')
             try:
                 subprocess.run(
-                    [sys.executable, '-m', 'playwright', 'install', 'chromium'],
+                    [sys.executable, '-m', 'playwright', 'install', eng],
                     check=True, capture_output=True, text=True, timeout=900)
             except Exception as e:
                 detail = getattr(e, 'stderr', '') or str(e)
@@ -79,21 +84,29 @@ async def open_browser(p, log=None):
                 'нет файла сессии. Экспортируй сессию локально '
                 '(кнопка на вкладке «Автокликеры» или session_export.py) '
                 f'и положи в Streamlit Secrets: {SESSION_SECRET_KEY}')
-        browser = await p.chromium.launch(headless=True, args=[
-            '--disable-blink-features=AutomationControlled',
-            '--no-sandbox', '--disable-dev-shm-usage',
-        ])
-        ctx = await browser.new_context(
-            storage_state=state, user_agent=UA, locale='ru-RU',
-            viewport={'width': 1440, 'height': 900},
-            timezone_id='Europe/Moscow',
-        )
+        if eng == 'firefox':
+            # Firefox легче по памяти (важно на бесплатном Streamlit).
+            # Chromium-аргументы (--no-sandbox и т.п.) ему не нужны.
+            browser = await p.firefox.launch(headless=True)
+        else:
+            browser = await p.chromium.launch(headless=True, args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox', '--disable-dev-shm-usage',
+            ])
+        # UA-маску ставим только Chromium; Firefox пусть шлёт свой честный UA
+        # (Chrome-UA на движке Firefox выглядит подозрительно для анти-бота).
+        _ctx = dict(storage_state=state, locale='ru-RU',
+                    viewport={'width': 1440, 'height': 900},
+                    timezone_id='Europe/Moscow')
+        if eng == 'chromium':
+            _ctx['user_agent'] = UA
+        ctx = await browser.new_context(**_ctx)
         # navigator.webdriver=true выдаёт автоматизацию - прячем
         await ctx.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', "
             "{get: () => undefined})")
         page = await ctx.new_page()
-        _log('Облачный браузер: headless Chromium + сессия из секрета')
+        _log(f'Облачный браузер: headless {eng} + сессия из секрета')
         return browser, page
 
     # Локальный режим: твой залогиненный Chrome (CDP 9222).
