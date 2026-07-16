@@ -165,6 +165,114 @@ def _run_autoclicker(pid, params, log, session_b64=None):
     return {'available': True, 'sites': sites}
 
 
+def _run_index404_download(pid, params, log, session_b64=None):
+    """Авто-скачать выгрузку «Страницы в поиске» браузером и разобрать на 404.
+    Локальный залогиненный Chrome (CDP 9222) в приоритете; нет его, но есть
+    сессия (Secrets: autoclick_session) - облачный headless-режим. Логина с
+    нуля нет (у Яндекса капча) - только сохранённая сессия.
+    Возвращает dict в форме листа «404 в индексе»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    if not _cdp_alive():
+        if session_b64:
+            try:
+                from autoclick_browser import (
+                    session_file_from_secret, MODE_ENV, SESSION_FILE_ENV)
+                _env[MODE_ENV] = 'cloud'
+                _env[SESSION_FILE_ENV] = session_file_from_secret(session_b64)
+                log('404 в индексе: локального Chrome нет - облачный режим '
+                    '(headless + сессия из Secrets).')
+            except Exception as _e:
+                return {'available': False, 'source': 'yandex_export', 'hosts': [],
+                        'error': f'сессия autoclick_session не читается: {_e}'}
+        else:
+            return {'available': False, 'source': 'yandex_export', 'hosts': [],
+                    'error': ('нет ни локального Chrome (CDP 9222), ни сессии в '
+                              'Secrets (autoclick_session). Настрой сессию один '
+                              'раз: вкладка «Автокликеры» → «Экспорт сессии для '
+                              'облака».')}
+    (root / 'cache').mkdir(exist_ok=True)
+    _res_file = root / 'cache' / f'index404_{pid}.json'
+    try:
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    args = [_sys.executable, 'index404_run.py', '--project', pid]
+    if params.get('index_404_max_hosts'):
+        args += ['--max-hosts', str(params['index_404_max_hosts'])]
+    log('404 в индексе: запускаю браузер, качаю выгрузки «Страницы в поиске»…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [404-индекс] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        return {'available': False, 'source': 'yandex_export', 'hosts': [],
+                'error': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'source': 'yandex_export', 'hosts': [],
+                'error': f'результат не прочитан: {e}'}
+
+
+def _run_gsc_index404(pid, params, log, session_b64=None):
+    """Авто-экспорт «Не найдено (404)» / «Ошибка сервера (5xx)» из Google
+    Search Console браузером. Та же сессия, что у автокликеров/Яндекса
+    (у Google свои cookies в ней). Возвращает dict в форме «404 в индексе»
+    с source='Google' у записей."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    if not _cdp_alive():
+        if session_b64:
+            try:
+                from autoclick_browser import (
+                    session_file_from_secret, MODE_ENV, SESSION_FILE_ENV)
+                _env[MODE_ENV] = 'cloud'
+                _env[SESSION_FILE_ENV] = session_file_from_secret(session_b64)
+            except Exception as _e:
+                return {'available': False, 'source': 'gsc', 'hosts': [],
+                        'error': f'сессия autoclick_session не читается: {_e}'}
+        else:
+            return {'available': False, 'source': 'gsc', 'hosts': [],
+                    'error': ('нет ни локального Chrome, ни сессии в Secrets '
+                              '(autoclick_session) - GSC пропущен.')}
+    (root / 'cache').mkdir(exist_ok=True)
+    _res_file = root / 'cache' / f'index_gsc_{pid}.json'
+    try:
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    args = [_sys.executable, 'index_gsc_run.py', '--project', pid]
+    log('404 в индексе (GSC): открываю Search Console, качаю 404/5xx…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [404-GSC] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        return {'available': False, 'source': 'gsc', 'hosts': [], 'error': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'source': 'gsc', 'hosts': [],
+                'error': f'результат GSC не прочитан: {e}'}
+
+
 def _run_filters_test(pid, params, log, category_urls=None):
     """Фильтр-тест товаров в браузере (доп. чек-лист). Отдельный процесс
     filters_run.py (Playwright): локальный CDP-Chrome не нужен, каталог
@@ -823,6 +931,59 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Страница 404: {_e}')
 
+        # ── 404 среди страниц В ИНДЕКСЕ (регулярный мониторинг) ──
+        # Браузер (сохранённая сессия) сам заходит на «Страницы в поиске»
+        # каждого хоста в Вебмастере и качает выгрузку - там уже есть код
+        # ответа (httpCode) и статус. Отмечаем строки 404/410/5xx/HTTP_ERROR.
+        # Ничего на боевом сайте не пингуем - данные из выгрузки Яндекса.
+        _index_404 = None
+        if params.get('check_index_404'):
+            import time as _time
+            _t404 = _time.monotonic()
+            # Источник 1 — Яндекс.Вебмастер: браузер качает выгрузку «Страницы
+            # в поиске» (код ответа уже в ней, боевой сайт не пингуем).
+            _wm_404 = _run_index404_download(
+                pid, params, log, session_b64=creds.get('autoclick_session'))
+            if _wm_404.get('error'):
+                log(f'⚠ 404 в индексе (Яндекс): {_wm_404["error"]}')
+            # Источник 2 — Sitemap: порция URL с ротацией по дате, прозвон на 404.
+            _sm_404 = None
+            if params.get('index_404_sitemap', True):
+                try:
+                    from index_sitemap_checker import check_sitemap_404
+                    log('404 в индексе: проверяю sitemap (порция с ротацией)…')
+                    _sm_404 = check_sitemap_404(
+                        pid, proxy_url=proxy_url,
+                        max_urls=int(params.get('index_404_sitemap_max', 1000)),
+                        log=_nlog)
+                    if _sm_404.get('error'):
+                        log(f'⚠ 404 в индексе (sitemap): {_sm_404["error"]}')
+                    else:
+                        log(f'404 в индексе (sitemap): проверено '
+                            f'{_sm_404.get("total_checked", 0)}, битых '
+                            f'{_sm_404.get("total_dead", 0)}')
+                except Exception as _e:
+                    log(f'⚠ 404 в индексе (sitemap): {_e}')
+            # Источник 3 — Google Search Console: браузер экспортирует причины
+            # «Не найдено (404)» и «Ошибка сервера (5xx)». Domain-ресурс покрывает
+            # и поддомены, поэтому ловит 404, которых нет у Яндекса/в sitemap.
+            _gsc_404 = None
+            if params.get('index_404_gsc', True):
+                _gsc_404 = _run_gsc_index404(
+                    pid, params, log, session_b64=creds.get('autoclick_session'))
+                if _gsc_404.get('error'):
+                    log(f'⚠ 404 в индексе (GSC): {_gsc_404["error"]}')
+                else:
+                    log(f'404 в индексе (GSC): битых {_gsc_404.get("total_dead", 0)}')
+            # Слияние источников в одну таблицу отчёта.
+            from index_export_parser import merge_index_404
+            _index_404 = merge_index_404(_wm_404, _sm_404, _gsc_404)
+            if _index_404 and not _index_404.get('error'):
+                log(f'404 в индексе (итог за {int(_time.monotonic() - _t404)}с): '
+                    f'проверено {_index_404.get("total_checked", 0)}, битых 404/410 '
+                    f'{_index_404.get("total_dead", 0)}, '
+                    f'источники: {", ".join(_index_404.get("sources") or []) or "—"}')
+
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный
         # из прогона, а если фильтров в выборке нет - из базы каталога.
@@ -1044,6 +1205,7 @@ def run_check(pid, params, creds, log, progress):
             filters_test=_filters_test, console_check=_console_check,
             w3c_check=_w3c_check, p404_check=_p404_check,
             ps_filters=_ps_filters, search_check=_search_check,
+            index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
@@ -1116,7 +1278,9 @@ def run_check(pid, params, creds, log, progress):
                         if getattr(r, 'has_layout_issues', False)),
                     markup_issues_pages=sum(
                         1 for r in results
-                        if getattr(r, 'has_markup_issues', False)))
+                        if getattr(r, 'has_markup_issues', False)),
+                    index_404_dead=((_index_404 or {}).get('total_dead', 0)
+                                    + (_index_404 or {}).get('total_soft', 0)))
                 tg_result = send_run_notification(
                     bot_token=tg_token, recipients=tg_recipients,
                     project_name=cfg['name'], summary_text=summary_text,

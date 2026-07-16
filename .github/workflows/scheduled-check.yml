@@ -71,6 +71,11 @@ jobs:
           yandex_oauth_smu: ${{ secrets.yandex_oauth_smu }}
           yandex_oauth_imp: ${{ secrets.yandex_oauth_imp }}
           yandex_oauth_mpe: ${{ secrets.yandex_oauth_mpe }}
+          # Сессия Яндекса для headless-браузера (404 в индексе: авто-скачивание
+          # выгрузки «Страницы в поиске»). Тот же секрет, что у автокликеров.
+          autoclick_session_smu: ${{ secrets.autoclick_session_smu }}
+          autoclick_session_imp: ${{ secrets.autoclick_session_imp }}
+          autoclick_session_mpe: ${{ secrets.autoclick_session_mpe }}
         run: |
           python run_scheduled.py \
             --projects "${{ github.event.inputs.projects || 'smu,imp,mpe' }}" \

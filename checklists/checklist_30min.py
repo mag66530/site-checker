@@ -660,6 +660,7 @@ def init_session():
         'c30_check_security': True,    # доп. 1.8 - заголовки безопасности HTTP
         'c30_check_images': True,      # пункт 1.15 - изображения (alt/webp/вес)
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
+        'c30_check_index_404': False,  # 404 среди страниц в индексе (Вебмастер) - тяжёлая, по запросу
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
         'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
@@ -1301,6 +1302,15 @@ if pid:
                          'дедупятся по прогону (сквозное меню звоним один раз), '
                          'общий лимит 2500 прозвонов. Дольше обычного - по '
                          'запросу на каждую новую ссылку.')
+        st.checkbox('Проверять 404 среди страниц в индексе (Яндекс.Вебмастер)',
+                    key='c30_check_index_404',
+                    help='Браузер сам заходит в Вебмастер на «Страницы в поиске» '
+                         'каждого сайта и качает выгрузку - в ней уже есть код '
+                         'ответа (httpCode) и статус. Отмечаем страницы, '
+                         'отдающие 404/410/5xx: они в индексе, но битые. Ничего '
+                         'на сайте не пингуется. Нужна сохранённая сессия Яндекса '
+                         '(та же, что для автокликеров: «Автокликеры» → «Экспорт '
+                         'сессии для облака»). Отдельный лист «404 в индексе».')
         st.checkbox('Проверять фильтрацию товаров (браузер)',
                     key='c30_check_filter_fn',
                     help='Открывает категорию в браузере и применяет фильтр по '
@@ -1500,6 +1510,7 @@ if pid:
                 'check_security': st.session_state.get('c30_check_security', True),
                 'check_images': st.session_state.get('c30_check_images', True),
                 'check_links': st.session_state.get('c30_check_links', False),
+                'check_index_404': st.session_state.get('c30_check_index_404', False),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'check_console': st.session_state.get('c30_check_console', False),
                 'check_stress': st.session_state.get('c30_check_stress', False),
