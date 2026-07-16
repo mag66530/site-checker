@@ -689,6 +689,7 @@ def init_session():
         'c30_check_images': True,      # пункт 1.15 - изображения (alt/webp/вес)
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         'c30_check_index_404': False,  # 404 среди страниц в индексе (Вебмастер) - тяжёлая, по запросу
+        'c30_check_gsc_pages': False,  # количество страниц в ГСК по статусам - браузер, по запросу
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
         'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
@@ -1349,6 +1350,16 @@ if pid:
                          'аккаунте: берём проиндексированные страницы и '
                          'прозваниваем на 404. Работает на облаке, без браузера. '
                          'Нужен секрет gsc_service_account_<проект>.')
+        st.checkbox('Количество страниц в ГСК (индексировано / не индексировано / сумма)',
+                    key='c30_check_gsc_pages',
+                    help='Снимает из отчёта Google Search Console «Индексирование '
+                         '→ Страницы» три числа: «Проиндексировано», '
+                         '«Просканировано, но пока не проиндексировано» и их сумму '
+                         '(+ сравнение с прошлым снятием). API этих счётчиков не '
+                         'отдаёт - берём браузером, поэтому нужна живая сессия '
+                         'Google (та же, что для GSC-404 браузерного). На облаке '
+                         'сессия часто слетает - тогда пункт пропустится с '
+                         'пометкой, прогон не упадёт.')
         st.checkbox('Проверять фильтрацию товаров (браузер)',
                     key='c30_check_filter_fn',
                     help='Открывает категорию в браузере и применяет фильтр по '
@@ -1666,6 +1677,7 @@ if pid:
                 'check_images': st.session_state.get('c30_check_images', True),
                 'check_links': st.session_state.get('c30_check_links', False),
                 'check_index_404': st.session_state.get('c30_check_index_404', False),
+                'check_gsc_pages': st.session_state.get('c30_check_gsc_pages', False),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'check_console': st.session_state.get('c30_check_console', False),
                 'check_stress': st.session_state.get('c30_check_stress', False),
