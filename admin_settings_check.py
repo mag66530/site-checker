@@ -37,6 +37,7 @@ admin.test.local.json (тестовый контур: + basic_login/basic_passwo
 import json
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 # Разделы админки (пути от /bitrix/admin/).
 IBLOCK_TYPE = 'ural_metall'
@@ -72,6 +73,18 @@ PATH_FILE_EDIT = 'fileman_file_edit.php?lang=ru&site={site}&path=%2Findex.php'
 PATH_FILE_NEW = ('fileman_file_edit.php?lang=ru&site={site}'
                  '&path=%2Fchecker-tmp-page.php&new=Y')
 PATH_FILE_UPLOAD = 'fileman_file_upload.php?lang=ru&logical=Y&site={site}&path=%2F'
+PATH_FILE_EDIT_PATH = 'fileman_file_edit.php?lang=ru&site={site}&path={path}'
+
+# Счётчики аналитики. По умолчанию (smu) - файл в «Структуре сайта»
+# /localviews/layout/counters.php (правится в fileman). Для других CMS -
+# передаётся через creds['counters'] (напр. {'type':'module','url':...}).
+COUNTERS_FILE_DEFAULT = '/localviews/layout/counters.php'
+_COUNTER_MARKERS = (
+    ('Яндекс.Метрика', re.compile(r'mc\.yandex|ym\(|metrika', re.I)),
+    ('Google Analytics/GA4', re.compile(r'gtag\(|google-analytics|googletagmanager\.com/gtag', re.I)),
+    ('Google Tag Manager', re.compile(r'GTM-[A-Z0-9]{4,}|googletagmanager\.com/gtm', re.I)),
+    ('Top.Mail.ru', re.compile(r'top-fwz1\.mail|_tmr\.push', re.I)),
+)
 
 
 def load_admin_creds(project_dir, test=False):
@@ -879,8 +892,60 @@ def _check_tech_pages_crud(page, domain, log, site_id=MAIN_SITE_ID):
                      detail, operations=ops)
 
 
+def _check_counters(page, domain, log, cfg=None, site_id=MAIN_SITE_ID):
+    """«Добавление счётчиков аналитики» (админ-функция). cfg:
+    {'type':'file','path':...} - счётчики в файле «Структуры сайта» (smu:
+    /localviews/layout/counters.php), проверяем что файл открывается в
+    редакторе (=есть где добавлять/править счётчики) + какие счётчики в нём;
+    {'type':'module','url':...} - отдельная страница/модуль в админке.
+    По умолчанию - файл COUNTERS_FILE_DEFAULT."""
+    cfg = cfg or {'type': 'file', 'path': COUNTERS_FILE_DEFAULT}
+
+    if cfg.get('type') == 'module' and cfg.get('url'):
+        status = _goto(page, domain, cfg['url'].lstrip('/').replace(
+            'bitrix/admin/', ''))
+        ok = status == 200 and page.locator('form').count() > 0 \
+            and not _page_errors(page)
+        return _mk_check('counters', 'Счётчики аналитики', ok,
+                         'страница/модуль добавления счётчиков открывается'
+                         if ok else 'модуль счётчиков недоступен '
+                         f'(HTTP {status})')
+
+    # Файловый вариант: открыть файл счётчиков в редакторе fileman.
+    path = cfg.get('path', COUNTERS_FILE_DEFAULT)
+    status = _goto(page, domain, PATH_FILE_EDIT_PATH.format(
+        site=cfg.get('site', site_id), path=quote(path)))
+    is_new = ('Создание нового файла' in page.title()
+              or page.locator("input[name='new']").count() > 0)
+    content = ''
+    tas = page.locator('textarea')
+    if tas.count():
+        try:
+            content = tas.first.input_value()
+        except Exception:
+            content = ''
+    found = [name for name, rx in _COUNTER_MARKERS if rx.search(content)]
+
+    if status != 200 or is_new:
+        return _mk_check(
+            'counters', 'Счётчики аналитики', True,
+            f'файл счётчиков ({path}) по этому пути не найден - на текущем '
+            f'контуре его нет (проверьте путь / это только на проде)',
+            warnings=[f'редактор открылся как «новый файл» - счётчики по '
+                      f'пути {path} не заведены'])
+    detail = (f'файл счётчиков ({path}) открывается в редакторе - есть где '
+              f'добавлять/править счётчики')
+    if found:
+        detail += '; сейчас в нём: ' + ', '.join(found)
+    else:
+        detail += '; счётчиков в файле не распознано'
+    warns = [] if found else ['в файле счётчиков не распознано известных '
+                              'счётчиков (Метрика/GA/GTM/Mail.ru)']
+    return _mk_check('counters', 'Счётчики аналитики', True, detail, warns)
+
+
 def check_admin_settings(creds, crud=False, product_crud=False,
-                         tech_crud=False, execute=True,
+                         tech_crud=False, counters=False, execute=True,
                          log=None, headless=True):
     """Проверка функций настройки в админке. creds - dict из
     load_admin_creds (+ domain обязателен).
@@ -931,6 +996,10 @@ def check_admin_settings(creds, crud=False, product_crud=False,
                 fns.append(_check_tech_pages)
                 if tech_crud:
                     fns.append(_check_tech_pages_crud)
+                if counters:
+                    _cnt_cfg = creds.get('counters')
+                    fns.append(lambda p, d, l: _check_counters(
+                        p, d, l, cfg=_cnt_cfg))
                 for fn in fns:
                     try:
                         c = fn(page, domain, _log)

@@ -396,6 +396,8 @@ def _run_admin_settings(pid, params, creds, log):
         args.append('--product-crud')
     if params.get('admin_tech_crud'):
         args.append('--tech-crud')
+    if params.get('admin_counters'):
+        args.append('--counters')
     if (params.get('admin_crud') or params.get('admin_product_crud')) \
             and not params.get('admin_execute', True):
         args.append('--no-execute')
@@ -1186,7 +1188,8 @@ def run_check(pid, params, creds, log, progress):
         _admin_settings = None
         if (params.get('check_admin_settings') or params.get('admin_crud')
                 or params.get('admin_product_crud')
-                or params.get('admin_tech_crud')):
+                or params.get('admin_tech_crud')
+                or params.get('admin_counters')):
             _adm_creds = creds.get('admin_settings') or {}
             if _adm_creds.get('login') and _adm_creds.get('domain'):
                 _admin_settings = _run_admin_settings(pid, params, creds, log)

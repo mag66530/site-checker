@@ -632,7 +632,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 # Версия набора дефолтов галочек «Что проверять». Поднимать при добавлении
 # нового пункта или смене дефолта, чтобы автовыбор применился и к уже
 # открытым (сохранённым) сессиям (см. init_session).
-_C30_CHECKS_DEFAULTS_VER = 6
+_C30_CHECKS_DEFAULTS_VER = 7
 
 
 def init_session():
@@ -673,6 +673,7 @@ def init_session():
         'c30_check_admin_crud': False,      # админка: CRUD поддоменов/категорий
         'c30_check_admin_product_crud': False,  # админка: CRUD товаров (по CMS)
         'c30_check_admin_tech_crud': False,  # админка: CRUD техстраниц (наличие)
+        'c30_check_admin_counters': False,  # админка: счётчики аналитики
         'c30_adm_execute': True,            # CRUD с записью (симуляция + откат)
         # Сервисные проверки
         'c30_check_webmaster': True,
@@ -1487,8 +1488,17 @@ if pid:
                  'удаляем: техстраница - публичный файл в корне сайта, на боевом '
                  'проекте это небезопасно (в отличие от скрытых записей БД у '
                  'категорий/товаров). Подпункт «писать в БД» тут не применяется.')
+        _ck_cnt = st.checkbox(
+            'Добавление счётчиков аналитики',
+            key='c30_check_admin_counters',
+            help='Проверяет, что в админке есть где добавлять/править счётчики '
+                 'аналитики (Метрика/GA/GTM/Mail.ru). Для СМУ - файл '
+                 '«Структуры сайта» /localviews/layout/counters.php (открываем '
+                 'в редакторе fileman, показываем какие счётчики в нём). Для '
+                 'других CMS с самописным модулем - путь настраивается '
+                 '(секрет admin_settings → counters). Ничего не пишем.')
 
-        if _ck_adm or _ck_crud or _ck_pcrud or _ck_tcrud:
+        if _ck_adm or _ck_crud or _ck_pcrud or _ck_tcrud or _ck_cnt:
             # Дефолты полей: секрет admin_settings_<pid> (JSON) →
             # локальный admin.local.json → admin.test.local.json.
             if not st.session_state.get('c30_adm_prefilled'):
@@ -1566,6 +1576,7 @@ if pid:
         bool(st.session_state.get('c30_check_admin_crud', False)),
         bool(st.session_state.get('c30_check_admin_product_crud', False)),
         bool(st.session_state.get('c30_check_admin_tech_crud', False)),
+        bool(st.session_state.get('c30_check_admin_counters', False)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1633,6 +1644,7 @@ if pid:
                 'admin_crud': st.session_state.get('c30_check_admin_crud', False),
                 'admin_product_crud': st.session_state.get('c30_check_admin_product_crud', False),
                 'admin_tech_crud': st.session_state.get('c30_check_admin_tech_crud', False),
+                'admin_counters': st.session_state.get('c30_check_admin_counters', False),
                 'admin_execute': st.session_state.get('c30_adm_execute', True),
                 'check_w3c': st.session_state.get('c30_check_w3c', False),
                 'check_static': st.session_state.get('c30_check_static', False),
