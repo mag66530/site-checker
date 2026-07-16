@@ -183,6 +183,21 @@ def test_speed_with_comma():
     print('✓ Скорость с запятой')
 
 
+def test_every_detail_sheet_is_grouped():
+    """Защита от потери функционала: КАЖДЫЙ лист, создаваемый в reporter
+    через create_sheet('литерал'), должен попадать либо в группу
+    (_SHEET_GROUPS), либо быть standalone (Обзор/Все детали). Иначе новый
+    лист «осиротеет» - появится после «Все детали» и потеряется в группировке."""
+    import re as _re
+    from reporter import _SHEET_GROUPS
+    src = (Path(__file__).parent.parent / 'reporter.py').read_text(encoding='utf-8')
+    literal_sheets = set(_re.findall(r"create_sheet\('([^']+)'\)", src))
+    covered = {m for _, ms in _SHEET_GROUPS for m in ms} | {'Обзор', 'Все детали'}
+    orph = literal_sheets - covered
+    assert not orph, f'листы вне групп (потеряются): {sorted(orph)}'
+    print(f'✓ Все {len(literal_sheets)} листов распределены по группам')
+
+
 def test_make_report_filename():
     """Имена файлов: smu-21.05.2026, smu-21.05.2026_2, ..."""
     with tempfile.TemporaryDirectory() as tmp:
