@@ -5,13 +5,43 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from admin_settings_check import _mk_check, load_admin_creds, summarize
+from admin_settings_check import (_mk_check, _op, _sim_monitor_counts,
+                                  load_admin_creds, summarize)
 
 
 def test_mk_check_basic():
     c = _mk_check('login', 'Вход', True, 'ок')
     assert c == {'code': 'login', 'title': 'Вход', 'ok': True,
                  'detail': 'ок', 'warnings': []}
+
+
+def test_op_shape():
+    o = _op('create', 'Создание', 'ok', 'executed',
+            before='нет', after='ID=5')
+    assert o == {'op': 'create', 'label': 'Создание', 'result': 'ok',
+                 'mode': 'executed', 'before': 'нет', 'after': 'ID=5',
+                 'note': ''}
+
+
+def test_mk_check_operations_attached():
+    ops = [_op('create', 'C', 'ok', 'executed')]
+    c = _mk_check('categories', 'Категории', True, operations=ops)
+    assert c['operations'] is ops
+
+
+def test_sim_monitor_counts_parses():
+    class _FakePage:
+        def inner_text(self, sel):
+            return '1\nСОЗДАНО\n0\nПРОПУЩЕНО\n0\nОШИБКИ\n[12:00] готово'
+    got = _sim_monitor_counts(_FakePage())
+    assert got == {'created': 1, 'skipped': 0, 'errors': 0}
+
+
+def test_sim_monitor_counts_none_when_absent():
+    class _FakePage:
+        def inner_text(self, sel):
+            return 'просто текст без блока мониторинга'
+    assert _sim_monitor_counts(_FakePage()) is None
 
 
 def test_mk_check_roundtrip_kept():

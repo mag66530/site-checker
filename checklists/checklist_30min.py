@@ -1253,69 +1253,6 @@ if pid:
                              'сверку в GSC. Нужен настроенный токен Вебмастера '
                              '(webmaster_oauth). Отдельный лист «Ссылочный '
                              'профиль».')
-            _ck_adm = st.checkbox(
-                '1.21  Настройки в админке (браузер, нужны креды)',
-                key='c30_check_admin_settings',
-                help='Браузер заходит в админку Bitrix и проверяет функции '
-                     'настройки: мастер поддоменов (вкладки, режим симуляции), '
-                     'разделы каталога + тест-сохранение с откатом (SORT '
-                     'раздела +1 → сохранить → вернуть), товарная подсистема '
-                     '(HL-блок «Ассортимент», форма записи), структура сайта '
-                     'и редактор файлов тех.страниц. Проверяется ВСЁ разом. '
-                     'Нужны домен и логин/пароль админки (поля ниже или '
-                     'секрет admin_settings_<проект> - JSON). Отдельный лист '
-                     '«Настройки в админке».')
-            if _ck_adm:
-                # Дефолты полей: секрет admin_settings_<pid> (JSON) →
-                # локальный admin.local.json → admin.test.local.json.
-                if not st.session_state.get('c30_adm_prefilled'):
-                    _pre = {}
-                    try:
-                        _raw = _secret_pid('admin_settings', pid)
-                        if _raw:
-                            _pre = json.loads(_raw) if isinstance(_raw, str) \
-                                else dict(_raw)
-                    except Exception:
-                        _pre = {}
-                    if not _pre:
-                        try:
-                            from admin_settings_check import load_admin_creds
-                            _pdir = PROJECT_ROOT / 'forms_tester' / 'projects' / pid
-                            _pre = (load_admin_creds(_pdir)
-                                    or load_admin_creds(_pdir, test=True) or {})
-                        except Exception:
-                            _pre = {}
-                    for _f, _k in (('domain', 'c30_adm_domain'),
-                                   ('login', 'c30_adm_login'),
-                                   ('password', 'c30_adm_password'),
-                                   ('basic_login', 'c30_adm_basic_login'),
-                                   ('basic_password', 'c30_adm_basic_password')):
-                        if _pre.get(_f) and not st.session_state.get(_k):
-                            st.session_state[_k] = _pre[_f]
-                    st.session_state['c30_adm_prefilled'] = True
-                st.text_input('Домен админки (https://…)',
-                              key='c30_adm_domain',
-                              placeholder='https://test.stalmetural.ru')
-                _adm1, _adm2 = st.columns(2)
-                with _adm1:
-                    st.text_input('Логин Bitrix', key='c30_adm_login')
-                with _adm2:
-                    st.text_input('Пароль Bitrix', key='c30_adm_password',
-                                  type='password')
-                _adm3, _adm4 = st.columns(2)
-                with _adm3:
-                    st.text_input('Basic-логин (если есть заглушка)',
-                                  key='c30_adm_basic_login')
-                with _adm4:
-                    st.text_input('Basic-пароль', key='c30_adm_basic_password',
-                                  type='password')
-                st.checkbox('Тест-сохранение с откатом (категория)',
-                            key='c30_adm_roundtrip',
-                            help='Реально меняет сортировку одного раздела '
-                                 'на +1 и сразу откатывает - проверяет, что '
-                                 'запись в БД через админку проходит. '
-                                 'Выключи, если на проде это нежелательно - '
-                                 'останется проверка рендера разделов и форм.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1493,6 +1430,80 @@ if pid:
                 _bt = ', '.join(f'{lbl}: {n}' for lbl, n
                                 in _Counter(t.type_label for t in _typed).items())
                 st.success(f'Будет добавлено {len(_typed)} URL - {_bt}')
+
+    # БЛОК 4 - Админка: браузерная проверка функций настройки (нужны креды).
+    with st.container(border=True):
+        st.markdown('### Админка')
+        _ck_adm = st.checkbox(
+            '1.21  Работают функции настройки (поддомены/категории/товары/тех.страницы)',
+            key='c30_check_admin_settings',
+            help='Браузер заходит в админку Bitrix и проверяет функции '
+                 'настройки. Поддомены: создание (симуляция-dry-run, на сайте '
+                 'ничего не создаётся), массовая загрузка, правка, удаление, '
+                 'скрытие. Категории: полный CRUD на временном разделе '
+                 '«[ТЕСТ ЧЕКЕРА]» (создание → правка → скрытие → удаление, '
+                 'создаётся скрытым и удаляется в конце) + массовая загрузка. '
+                 'Товары и тех.страницы - рендер списков и форм. Нужны домен '
+                 'и логин/пароль админки (поля ниже или секрет '
+                 'admin_settings_<проект> - JSON). Отдельный лист «Настройки '
+                 'в админке» с аудитом «было → стало».')
+        if _ck_adm:
+            # Дефолты полей: секрет admin_settings_<pid> (JSON) →
+            # локальный admin.local.json → admin.test.local.json.
+            if not st.session_state.get('c30_adm_prefilled'):
+                _pre = {}
+                try:
+                    _raw = _secret_pid('admin_settings', pid)
+                    if _raw:
+                        _pre = json.loads(_raw) if isinstance(_raw, str) \
+                            else dict(_raw)
+                except Exception:
+                    _pre = {}
+                if not _pre:
+                    try:
+                        from admin_settings_check import load_admin_creds
+                        _pdir = PROJECT_ROOT / 'forms_tester' / 'projects' / pid
+                        _pre = (load_admin_creds(_pdir)
+                                or load_admin_creds(_pdir, test=True) or {})
+                    except Exception:
+                        _pre = {}
+                for _f, _k in (('domain', 'c30_adm_domain'),
+                               ('login', 'c30_adm_login'),
+                               ('password', 'c30_adm_password'),
+                               ('basic_login', 'c30_adm_basic_login'),
+                               ('basic_password', 'c30_adm_basic_password')):
+                    if _pre.get(_f) and not st.session_state.get(_k):
+                        st.session_state[_k] = _pre[_f]
+                st.session_state['c30_adm_prefilled'] = True
+            st.text_input('Домен админки (https://…)', key='c30_adm_domain',
+                          placeholder='https://test.stalmetural.ru')
+            _adm1, _adm2 = st.columns(2)
+            with _adm1:
+                st.text_input('Логин Bitrix', key='c30_adm_login')
+            with _adm2:
+                st.text_input('Пароль Bitrix', key='c30_adm_password',
+                              type='password')
+            _adm3, _adm4 = st.columns(2)
+            with _adm3:
+                st.text_input('Basic-логин (если есть заглушка)',
+                              key='c30_adm_basic_login')
+            with _adm4:
+                st.text_input('Basic-пароль', key='c30_adm_basic_password',
+                              type='password')
+            st.checkbox('Тест-выполнение с откатом (CRUD категорий + симуляция поддоменов)',
+                        key='c30_adm_roundtrip',
+                        help='ВКЛ (рекомендуется): реально создаёт-правит-'
+                             'скрывает-удаляет временный раздел «[ТЕСТ ЧЕКЕРА]» '
+                             '(без товаров, удаляется сразу) и прогоняет '
+                             'симуляцию создания поддомена - в отчёт идёт '
+                             'аудит «было → стало». ВЫКЛ: только рендер '
+                             'списков/форм и наличие функций, ничего не '
+                             'пишется. Тест-раздел скрыт всё время жизни, но '
+                             'если не хочешь любых записей на проде - выключи.')
+            st.caption('CRUD категорий выполняется на временном скрытом '
+                       'разделе и откатывается; поддомены реально не создаются '
+                       '(симуляция) и не удаляются (проверка наличия функции). '
+                       'Обкатано на тестовом контуре.')
 
     # «Подпись прогона» - проект + объём выборки + что проверяем. По ней решаем,
     # показывать ли блок результатов/лог: показываем только для прогона, который

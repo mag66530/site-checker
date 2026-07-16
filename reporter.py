@@ -3822,13 +3822,14 @@ def _build_admin_settings_sheet(wb, admin_settings):
     ws.merge_cells('B3:D3')
     c = ws['B3']
     c.value = ('Браузер заходит в админку Bitrix и проверяет, что функции '
-               'настройки работают: мастер поддоменов открывается (вкладки '
-               'создания/удаления, режим симуляции), разделы каталога '
-               'рендерятся и реально сохраняются (тест-изменение поля '
-               'сортировки с откатом), товарная подсистема (HL-блок '
-               '«Ассортимент») открывает форму записи, структура сайта и '
-               'редактор файлов тех.страниц работают. Данные не меняются '
-               '(кроме тест-сохранения с откатом).')
+               'настройки работают. Поддомены: создание (симуляция-dry-run), '
+               'массовая загрузка, правка, удаление, скрытие. Категории: '
+               'полный CRUD на временном скрытом разделе «[ТЕСТ ЧЕКЕРА]» '
+               '(создание → правка → скрытие → удаление, удаляется в конце) + '
+               'массовая загрузка. Товары и тех.страницы - рендер списков и '
+               'форм. Ниже - аудит каждой операции «было → стало». Боевые '
+               'данные не меняются: категорийный тест-раздел удаляется, '
+               'поддомены реально не создаются/не удаляются.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 62
@@ -3850,11 +3851,31 @@ def _build_admin_settings_sheet(wb, admin_settings):
     c.alignment = _align(indent=1)
     row += 2
 
+    # Пояснение режимов операций (появляется, если есть хоть один аудит).
+    _has_ops = any(ch.get('operations') for ch in checks)
+    if _has_ops:
+        ws.merge_cells(f'B{row}:D{row}')
+        c = ws[f'B{row}']
+        c.value = ('Режимы операций: «выполнено» - реально сделано и '
+                   'откатано (запись в БД проверена); «симуляция» - dry-run '
+                   'мастера, на сайте ничего не создаётся; «функция» - '
+                   'проверено только наличие (реально не трогаем - боевые '
+                   'данные).')
+        c.font = _font(size=9, italic=True, color=C.text_muted)
+        c.alignment = _align(wrap=True, indent=1)
+        ws.row_dimensions[row].height = 30
+        row += 2
+
+    _MODE_LABEL = {'executed': 'выполнено', 'simulated': 'симуляция',
+                   'ui': 'функция'}
+    _RES = {'ok': ('✓', C.ok), 'fail': ('✗', C.err),
+            'skip': ('—', C.text_muted)}
+
     for ch in checks:
         ws.row_dimensions[row].height = 18
         b = ws[f'B{row}']
         b.value = ('✅ ' if ch.get('ok') else '❌ ') + (ch.get('title') or '')
-        b.font = _font(size=10, bold=True,
+        b.font = _font(size=11, bold=True,
                        color=C.ok if ch.get('ok') else C.err)
         b.alignment = _align(indent=1, vertical='top')
         ws.merge_cells(f'C{row}:D{row}')
@@ -3872,6 +3893,48 @@ def _build_admin_settings_sheet(wb, admin_settings):
             wc.alignment = _align(wrap=True, indent=1)
             ws.row_dimensions[row].height = 16
             row += 1
+
+        # Таблица операций (аудит было→стало) - если есть.
+        ops = ch.get('operations') or []
+        if ops:
+            # Шапка мини-таблицы
+            for col, title in (('B', 'Операция'), ('C', 'Что менялось (было → стало)'),
+                               ('D', 'Режим')):
+                hc = ws[f'{col}{row}']
+                hc.value = title
+                hc.font = _font(size=9, bold=True, color=C.text_muted)
+                hc.fill = _fill(C.surface)
+                hc.alignment = _align(indent=1)
+                hc.border = _border(color=C.border_light)
+            ws.row_dimensions[row].height = 16
+            row += 1
+            for o in ops:
+                mark, mcolor = _RES.get(o.get('result'), ('•', C.text_muted))
+                oc = ws[f'B{row}']
+                oc.value = f'{mark} {o.get("label", "")}'
+                oc.font = _font(size=10, color=mcolor)
+                oc.alignment = _align(indent=1, vertical='top', wrap=True)
+                oc.border = _border(color=C.border_light)
+                # было → стало (+ примечание)
+                before, after = o.get('before', ''), o.get('after', '')
+                if before and after:
+                    txt = f'{before}  →  {after}'
+                else:
+                    txt = after or before or '-'
+                if o.get('note'):
+                    txt += f'\n({o["note"]})'
+                cc = ws[f'C{row}']
+                cc.value = txt
+                cc.font = _font(size=9, color=C.text_soft)
+                cc.alignment = _align(wrap=True, vertical='top', indent=1)
+                cc.border = _border(color=C.border_light)
+                mc = ws[f'D{row}']
+                mc.value = _MODE_LABEL.get(o.get('mode'), o.get('mode', ''))
+                mc.font = _font(size=9, color=C.text_muted)
+                mc.alignment = _align(vertical='top', horizontal='center')
+                mc.border = _border(color=C.border_light)
+                ws.row_dimensions[row].height = 30 if o.get('note') else 18
+                row += 1
         row += 1
 
 
