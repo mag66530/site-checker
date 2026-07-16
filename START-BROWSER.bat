@@ -1,32 +1,33 @@
 @echo off
-chcp 65001 >nul
 cd /d "%~dp0"
 title Site Checker
 
-rem ── какой Python звать ───────────────────────────────────
+rem --- which Python to call ---
 set "PY=python"
 where py >nul 2>&1 && set "PY=py -3"
 
 echo.
 echo ==================================================
-echo  ШАГ 1. Открываю Chrome для входа.
-echo  Войди в нём: в Google и в Яндекс (webmaster.yandex.ru).
-echo  Chrome НЕ закрывай - проверка будет ходить в нём.
+echo  SHAG 1. Otkryvayu Chrome dlya vhoda.
+echo  Voydi v nyom: v Google i v Yandex.
+echo  Yandex: otkroy tam zhe webmaster.yandex.ru i voydi.
+echo  Chrome NE zakryvay - proverka budet hodit imenno v nyom.
 echo ==================================================
 echo.
 %PY% open_browser.py
 
 echo.
 echo ==================================================
-echo  ШАГ 2. Открываю сайт: http://localhost:8501
-echo  На сайте: слева "Чек-лист" - блок "Дополнительно" -
-echo    галочка "Проверять 404 среди страниц в индексе" - Запустить.
-echo  СМОТРИ на окно Chrome из шага 1 - в нём пойдёт проверка.
-echo  ЭТО чёрное окно НЕ закрывай (закроешь - всё выключится).
+echo  SHAG 2. Otkryvayu sayt: http://localhost:8501
+echo  Na sayte sleva: "Chek-list" - blok "Dopolnitelno" -
+echo    galka "Proveryat 404 sredi stranic v indekse" - "Zapustit".
+echo  SMOTRI na okno Chrome iz shaga 1 - v nyom poydyot proverka,
+echo  i uvidish, na chyom ona spotykaetsya.
+echo  ETO chyornoe okno NE zakryvay - zakroesh, vsyo vyklyuchitsya.
 echo ==================================================
 echo.
 
-rem убрать вопрос про email при первом старте Streamlit
+rem skip Streamlit email question on first start
 if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit" >nul 2>&1
 >"%USERPROFILE%\.streamlit\credentials.toml" echo [general]
 >>"%USERPROFILE%\.streamlit\credentials.toml" echo email = ""
@@ -34,5 +35,5 @@ if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit" >nul 2>
 %PY% -m streamlit run app.py
 
 echo.
-echo ===== Если сайт НЕ запустился - сфоткай это окно и пришли мне. =====
+echo ===== Esli sayt NE zapustilsya - sfotkay eto okno i prishli mne. =====
 pause
