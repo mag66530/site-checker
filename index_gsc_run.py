@@ -206,6 +206,65 @@ async def _google_login(page, email, password, log) -> tuple:
         return False, f'{type(e).__name__}: {str(e)[:120]}'
 
 
+async def _visible_prefill(page, email, password, log):
+    """Видимое окно: робот сам вводит e-mail и жмёт «Далее» (и пароль, если он
+    задан). Селекторы под ТЕКУЩУЮ страницу Google: поле #identifierId
+    (type=text, name=identifier — НЕ type=email!), кнопка #identifierNext.
+    Что робот не осилит (пароль/2FA/капча) — человек доделает в этом же окне."""
+    async def _click_first(selectors, t=4000) -> bool:
+        for sel in selectors:
+            try:
+                await page.locator(sel).first.click(timeout=t)
+                return True
+            except Exception:
+                continue
+        return False
+    try:
+        await page.wait_for_timeout(1500)
+        try:
+            body = (await page.inner_text('body')).lower()
+        except Exception:
+            body = ''
+        # Экран «Выберите аккаунт» — кликнем по нужному e-mail и выходим.
+        if ('выбер' in body and 'аккаунт' in body) or 'choose an account' in body:
+            try:
+                await page.get_by_text(email, exact=False).first.click(timeout=5000)
+                log(f'  Выбрал аккаунт {email}.')
+                await page.wait_for_timeout(2500)
+                return
+            except Exception:
+                pass
+        # Поле e-mail: у Google это input#identifierId (type=text), не type=email.
+        loc = page.locator(
+            '#identifierId, input[name="identifier"], input[type="email"]').first
+        try:
+            await loc.wait_for(state='visible', timeout=8000)
+        except Exception:
+            log('  (поля e-mail не видно — возможно, уже вошли или другой экран)')
+            return
+        await loc.fill(email, timeout=6000)
+        log(f'  Ввёл e-mail {email} — жму «Далее».')
+        await _click_first(['#identifierNext button', '#identifierNext',
+                             'button:has-text("Далее")', 'button:has-text("Next")'])
+        await page.wait_for_timeout(4000)
+        # Пароль — только если задан (обычно его не передаём, вводит человек).
+        if password:
+            pw = page.locator('input[type="password"]').first
+            try:
+                await pw.wait_for(state='visible', timeout=8000)
+                await pw.fill(password, timeout=6000)
+                log('  Ввёл пароль — жму «Далее».')
+                await _click_first(['#passwordNext button', '#passwordNext',
+                                     'button:has-text("Далее")',
+                                     'button:has-text("Next")'])
+                await page.wait_for_timeout(4000)
+            except Exception:
+                pass
+    except Exception as e:
+        log(f'  (автоввод e-mail не удался: {type(e).__name__}: '
+            f'{str(e)[:80]} — введи руками в окне)')
+
+
 async def _ensure_logged_in(page, res, acct, email, password, log) -> bool:
     """Открыть отчёт GSC; если сессия жива — True. Если слетела — пробуем
     автологин по логину/паролю (запасной путь C) и проверяем снова."""
@@ -221,8 +280,14 @@ async def _ensure_logged_in(page, res, acct, email, password, log) -> bool:
     # ВИДИМЫЙ режим: не залогинены - ждём, пока человек войдёт руками прямо
     # в открытом окне браузера. Никакого автовхода (его Google блокирует).
     if os.environ.get('AUTOCLICK_MODE', '').strip().lower() == 'visible':
-        log('  ⚠ ВОЙДИ в Google в открывшемся окне браузера — тот аккаунт, где '
-            'Search Console по этому сайту. Жду до 5 минут…')
+        # Робот сам вводит e-mail (и пароль, если задан) и жмёт «Далее».
+        # Пароль/2FA/капчу, если всплывут, доделает человек в этом же окне.
+        if email:
+            await _visible_prefill(page, email, password, log)
+        else:
+            log('  ⚠ ВОЙДИ в Google в открывшемся окне браузера — тот аккаунт, '
+                'где Search Console по этому сайту.')
+        log('  Жду до 5 минут, пока вход завершится (доделай в окне, если надо)…')
         for _ in range(100):                     # 100 × 3с = 5 минут
             await page.wait_for_timeout(3000)
             try:
@@ -230,7 +295,7 @@ async def _ensure_logged_in(page, res, acct, email, password, log) -> bool:
             except Exception:
                 cur = ''
             if 'accounts.google.com' not in cur and 'signin' not in cur:
-                log('  ✓ Вижу, что ты вошла — открываю отчёт.')
+                log('  ✓ Вход выполнен — открываю отчёт.')
                 try:
                     await page.goto(url, wait_until='domcontentloaded',
                                     timeout=60000)
@@ -238,7 +303,7 @@ async def _ensure_logged_in(page, res, acct, email, password, log) -> bool:
                 except Exception:
                     pass
                 return 'accounts.google.com' not in page.url
-        log('  ⏰ За 5 минут вход не увидел — пропускаю GSC в этот раз.')
+        log('  ⏰ За 5 минут вход не завершился — пропускаю GSC в этот раз.')
         return False
     if not (email and password):
         log('  сессия слетела, а логина/пароля Google нет (gsc_<pid>_email/password) '
