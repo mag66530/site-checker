@@ -33,7 +33,7 @@ PID_FILE = OUT_ROOT / 'run.pid'
 
 PROJECTS = {
     'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром',
-    'mpe': 'МПЭ - Мепэн', 'avia': 'АПС - Авиапромсталь',
+    'mpe': 'МПЭ - Мепэн',
 }
 
 # цвета (в тон приложению + пороги Google)
@@ -306,7 +306,7 @@ _no_urls = (not scope.startswith('Выборка')) and not (locals().get('urls_
 c1, c2 = st.columns([3, 1])
 with c1:
     if st.button('▶ Запустить проверку скорости', use_container_width=True,
-                 disabled=alive or _no_urls, type='primary'):
+                 disabled=alive or _no_urls):
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         LOG_FILE.write_text('', encoding='utf-8')
         args = ['pagespeed_run.py', '--project', pid, '--compare', compare]
