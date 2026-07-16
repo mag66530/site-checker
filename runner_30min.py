@@ -946,9 +946,13 @@ def run_check(pid, params, creds, log, progress):
                 pid, params, log, session_b64=creds.get('autoclick_session'))
             if _wm_404.get('error'):
                 log(f'⚠ 404 в индексе (Яндекс): {_wm_404["error"]}')
-            # Источник 2 — Sitemap: порция URL с ротацией по дате, прозвон на 404.
+            # Источник 2 — Sitemap: слепой прозвон всех URL из sitemap. По
+            # умолчанию ВЫКЛ: он медленный (сайт тормозит на страницах фильтров)
+            # и почти всегда находит только таймауты, а не реальные 404 -
+            # sitemap и так чистый. Реальную пользу даёт перепроверка кандидатов
+            # от Яндекса/Google ниже. Включается флагом index_404_sitemap.
             _sm_404 = None
-            if params.get('index_404_sitemap', True):
+            if params.get('index_404_sitemap', False):
                 try:
                     from index_sitemap_checker import check_sitemap_404
                     log('404 в индексе: проверяю sitemap (порция с ротацией)…')
@@ -978,6 +982,15 @@ def run_check(pid, params, creds, log, progress):
             # Слияние источников в одну таблицу отчёта.
             from index_export_parser import merge_index_404
             _index_404 = merge_index_404(_wm_404, _sm_404, _gsc_404)
+            # Живая перепроверка: оставляем только страницы, которые ПРЯМО СЕЙЧАС
+            # отдают 404/5xx. Убирает ложные (уже починили → 200; медленные →
+            # таймаут). Так в отчёте нет ссылок, которые на самом деле открываются.
+            if _index_404 and _index_404.get('available') and params.get('index_404_reverify', True):
+                try:
+                    from index_reverify import reverify_index_404
+                    _index_404 = reverify_index_404(_index_404, proxy_url=proxy_url, log=_nlog)
+                except Exception as _e:
+                    log(f'⚠ 404 в индексе (перепроверка): {_e}')
             if _index_404 and not _index_404.get('error'):
                 log(f'404 в индексе (итог за {int(_time.monotonic() - _t404)}с): '
                     f'проверено {_index_404.get("total_checked", 0)}, битых 404/410 '

@@ -105,9 +105,10 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'check_security': True,  # доп. 1.8 - заголовки безопасности HTTP
         'check_images': True,    # п.1.15 - изображения (alt/webp/вес)
         'check_links': False,   # «ссылки открываются (404)» - тяжёлая, по запросу
-        'check_index_404': True,  # 404 в индексе: Яндекс + sitemap + GSC (браузер+сессия)
-        'index_404_sitemap': True,        # источник sitemap (порция с ротацией)
-        'index_404_sitemap_max': 1000,    # URL из sitemap за прогон (остальное — в след. дни)
+        'check_index_404': True,  # 404 в индексе: Яндекс + GSC, с живой перепроверкой
+        'index_404_reverify': True,       # перепроверять кандидатов живьём (убирает ложные)
+        'index_404_sitemap': False,       # слепой прозвон sitemap — медленный, по умолчанию выкл
+        'index_404_sitemap_max': 1000,    # URL из sitemap за прогон, если включён
         'index_404_gsc': True,            # источник Google Search Console (экспорт причин 404/5xx)
         'check_filter_fn': False,  # фильтр-тест (браузер) - по запросу, не в расписании
         'check_console': False,    # п.1.14 ошибки JS (браузер) - по запросу
