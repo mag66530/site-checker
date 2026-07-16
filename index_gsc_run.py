@@ -32,6 +32,7 @@ import asyncio
 import csv
 import io
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -124,6 +125,134 @@ async def _scout(page):
                 pass
 
 
+async def _google_login(page, email, password, log) -> tuple:
+    """Автоматический вход в Google логином/паролем (запасной путь C, когда
+    сохранённая сессия слетела). (ok, причина_если_нет).
+
+    Честно: Google активно против автовхода — 2FA, капча, «небезопасный
+    браузер», подтверждение по телефону. Если что-то из этого всплывает,
+    автоматом не пройти — возвращаем False с понятной причиной."""
+    _BLOCK = ('небезопасн', 'not secure', 'подтвердите, что это вы', "verify it",
+              'captcha', 'капча', 'необычн', 'unusual', '2-этап', 'two-step',
+              'two-factor', 'двухэтап', 'код подтверждения', 'verification code',
+              'recovery', 'восстановлен', 'проверьте телефон', 'check your phone')
+
+    async def _is_visible(sel) -> bool:
+        try:
+            loc = page.locator(sel).first
+            return bool(await loc.count()) and await loc.is_visible()
+        except Exception:
+            return False
+
+    async def _click(sel, t=8000) -> bool:
+        try:
+            await page.locator(sel).first.click(timeout=t)
+            return True
+        except Exception:
+            return False
+
+    try:
+        if 'accounts.google.com' not in page.url:
+            await page.goto('https://accounts.google.com/signin/v2/identifier?hl=ru',
+                            wait_until='domcontentloaded', timeout=45000)
+        await page.wait_for_timeout(3000)
+        body = (await page.inner_text('body')).lower()
+
+        # Экран «Выберите аккаунт» - кликаем нужный по e-mail.
+        if ('выбер' in body and 'аккаунт' in body) or 'choose an account' in body:
+            try:
+                await page.get_by_text(email, exact=False).first.click(timeout=8000)
+                await page.wait_for_timeout(3500)
+                body = (await page.inner_text('body')).lower()
+            except Exception:
+                pass
+
+        # Поле e-mail есть - вводим e-mail и жмём «Далее». Нет (аккаунт
+        # запомнен / выбран) - сразу к паролю.
+        if await _is_visible('input[type="email"]'):
+            try:
+                await page.locator('input[type="email"]').first.fill(email, timeout=8000)
+            except Exception:
+                pass
+            await _click('#identifierNext, button:has-text("Далее"), '
+                         'button:has-text("Next")')
+            await page.wait_for_timeout(4000)
+            body = (await page.inner_text('body')).lower()
+
+        if any(k in body for k in _BLOCK):
+            return False, 'Google просит доп. проверку (капча/2FA/подтверждение)'
+
+        # Поле пароля - ждём появления (могло прийти после шага e-mail).
+        try:
+            await page.locator('input[type="password"]').first.wait_for(
+                state='visible', timeout=12000)
+        except Exception:
+            return False, ('поле пароля не появилось - экран входа другой '
+                           '(2FA / выбор аккаунта / подтверждение)')
+        await page.locator('input[type="password"]').first.fill(password, timeout=8000)
+        await _click('#passwordNext, button:has-text("Далее"), '
+                     'button:has-text("Next")')
+        await page.wait_for_timeout(5000)
+
+        if 'accounts.google.com' not in page.url:
+            return True, ''                      # ушли с логина → вошли
+        body = (await page.inner_text('body')).lower()
+        if any(k in body for k in _BLOCK):
+            return False, '2FA / подтверждение по телефону — автоматом не пройти'
+        if 'wrong password' in body or 'неверный пароль' in body:
+            return False, 'неверный пароль (проверь секрет gsc_<pid>_password)'
+        return False, 'вход не завершился (Google требует доп. проверку)'
+    except Exception as e:
+        return False, f'{type(e).__name__}: {str(e)[:120]}'
+
+
+async def _ensure_logged_in(page, res, acct, email, password, log) -> bool:
+    """Открыть отчёт GSC; если сессия жива — True. Если слетела — пробуем
+    автологин по логину/паролю (запасной путь C) и проверяем снова."""
+    url = GSC_REPORT.format(acct=acct, res=res)
+    try:
+        await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+    except Exception as e:
+        log(f'  отчёт не открылся: {e}')
+        return False
+    await page.wait_for_timeout(5000)
+    if 'accounts.google.com' not in page.url and 'signin' not in page.url:
+        return True                              # сессия жива (путь B)
+    if not (email and password):
+        log('  сессия слетела, а логина/пароля Google нет (gsc_<pid>_email/password) '
+            '- автовход невозможен')
+        return False
+    log('  сессия слетела - пробую автоматический вход по логину/паролю…')
+    ok, reason = await _google_login(page, email, password, log)
+    if not ok:
+        log(f'  автовход не удался: {reason}')
+        # Диагностика: что за экран показал Google (чтобы отличить 2FA/капчу
+        # от поправимого экрана и понять, возможен ли автовход в принципе).
+        try:
+            heads = []
+            for el in await page.query_selector_all('h1, h2, [role="heading"]'):
+                t = ((await el.inner_text()) or '').strip().replace('\n', ' ')
+                if t:
+                    heads.append(t[:60])
+            fields = []
+            for sel in ('input[type="email"]', 'input[type="password"]',
+                        'input[type="tel"]', 'input[type="text"]'):
+                if await page.locator(sel).first.count():
+                    fields.append(sel)
+            log(f'  диагностика входа: заголовки={heads[:3]} · поля={fields} · '
+                f'url={page.url[:60]}')
+        except Exception:
+            pass
+        return False
+    log('  автовход выполнен - переоткрываю отчёт')
+    try:
+        await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+    except Exception:
+        pass
+    await page.wait_for_timeout(5000)
+    return 'accounts.google.com' not in page.url
+
+
 async def _export_reason(page, res, acct, reason_text, scout) -> bytes | None:
     """Открыть отчёт «Страницы», провалиться в причину reason_text и скачать
     CSV. Возвращает байты файла или None."""
@@ -134,8 +263,6 @@ async def _export_reason(page, res, acct, reason_text, scout) -> bytes | None:
         _log(f'  отчёт не открылся: {e}')
         return None
     await page.wait_for_timeout(6000)
-    if 'accounts.google.com' in page.url or 'signin' in page.url:
-        raise RuntimeError('НЕ АВТОРИЗОВАН в Google (сессия слетела/нет доступа)')
 
     # Скроллим - таблица причин подгружается ниже.
     for _ in range(6):
@@ -171,15 +298,22 @@ async def _export_reason(page, res, acct, reason_text, scout) -> bytes | None:
         return None
 
 
-async def _run(pid: str, scout: bool) -> dict:
+async def _run(pid: str, scout: bool, acct_override=None, res_override=None) -> dict:
     from autoclick_browser import open_browser
     from playwright.async_api import async_playwright
 
     res, acct = _gsc_target(pid)
+    if res_override:
+        res = res_override
+    if acct_override is not None:
+        acct = str(acct_override)
     if not res:
         return {'available': False, 'source': 'gsc', 'hosts': [],
                 'error': 'не задан GSC-ресурс (gsc_resource / root_domain)'}
     _log(f'GSC: ресурс {res}, аккаунт /u/{acct}/')
+    # Запасной путь C: логин/пароль Google для автовхода, если сессия слетела.
+    email = os.environ.get('GSC_LOGIN_EMAIL') or ''
+    password = os.environ.get('GSC_LOGIN_PASSWORD') or ''
 
     by_host = {}
     async with async_playwright() as p:
@@ -189,6 +323,14 @@ async def _run(pid: str, scout: bool) -> dict:
             return {'available': False, 'source': 'gsc', 'hosts': [],
                     'error': f'браузер/сессия недоступны: {e}'}
         try:
+            # Вход: сначала сохранённая сессия (B); слетела - автологин (C).
+            if not scout:
+                if not await _ensure_logged_in(page, res, acct, email, password, _log):
+                    return {'available': False, 'source': 'gsc', 'hosts': [],
+                            'error': ('НЕ АВТОРИЗОВАН в Google: сессия слетела, а '
+                                      'автовход не прошёл (2FA/капча или нет '
+                                      'логина/пароля). Переэкспортируй сессию или '
+                                      'убери 2FA у робота-аккаунта.')}
             for verdict, reason_text in REASONS:
                 try:
                     data = await _export_reason(page, res, acct, reason_text, scout)
@@ -236,8 +378,13 @@ def main():
     ap = argparse.ArgumentParser(description='404 в индексе из Google Search Console')
     ap.add_argument('--project', required=True)
     ap.add_argument('--scout', action='store_true')
+    ap.add_argument('--account', default=None,
+                    help='номер Google-аккаунта /u/N/ (локально обычно 0)')
+    ap.add_argument('--resource', default=None,
+                    help='GSC-ресурс, напр. sc-domain:stalmetural.ru')
     a = ap.parse_args()
-    res = asyncio.run(_run(a.project, a.scout))
+    res = asyncio.run(_run(a.project, a.scout, acct_override=a.account,
+                           res_override=a.resource))
     (ROOT / 'cache').mkdir(exist_ok=True)
     out = ROOT / 'cache' / f'index_gsc_{a.project}.json'
     out.write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding='utf-8')
