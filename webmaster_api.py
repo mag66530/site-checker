@@ -268,7 +268,9 @@ def _get(token: str, path: str, proxy_url: Optional[str] = None,
 
 
 def _panel_url(host_id: str) -> str:
-    return f'https://webmaster.yandex.ru/site/{host_id}/diagnostics/'
+    # Путь /diagnostics/ в панели больше не существует (404) - диагностика
+    # живёт на /optimization/checklist/ (проверено запросом: 302 на логин).
+    return f'https://webmaster.yandex.ru/site/{host_id}/optimization/checklist/'
 
 
 def _extract_inprogress_codes(payload) -> set:

@@ -1432,7 +1432,7 @@ def _build_service_issues_sheet(wb, service_issues):
 
             # «Открыть» - ссылка в панель сервиса
             link_cell = ws.cell(row=row, column=6)
-            _u = getattr(i, 'url', '')
+            _u = _wm_alive_url(getattr(i, 'url', ''))
             if _u:
                 link_cell.value = 'открыть'
                 link_cell.hyperlink = _u
@@ -3135,6 +3135,18 @@ def _build_404_sheet(wb, p404_check):
         row += 1
 
 
+def _wm_alive_url(url, section='optimization/checklist/'):
+    """Живая ссылка в панель Вебмастера. Старые кеши хранят мёртвые пути
+    (/diagnostics/ и /links/external/ отдают 404 - панель переехала) -
+    подменяем хвост на актуальный раздел."""
+    if not url:
+        return None
+    for dead in ('diagnostics/', 'links/external/'):
+        if url.endswith(dead):
+            return url[:-len(dead)] + section
+    return url
+
+
 # ── Лист «Фильтры ПС» (п.1.19: санкции поисковых систем) ───────────
 
 
@@ -3199,7 +3211,7 @@ def _build_ps_filters_sheet(wb, ps_filters):
         for s in sanc:
             _line(f'❌ {s.get("host", "")}: {s.get("title", s.get("code", ""))} '
                   f'({s.get("date", "")}) - открыть панель',
-                  C.err, link=s.get('url') or None)
+                  C.err, link=_wm_alive_url(s.get('url')))
     else:
         _line(f'✅ Санкций/угроз в диагностике Вебмастера нет '
               f'(хостов: {ps_filters.get("wm_hosts", 0)}, '
@@ -3374,97 +3386,192 @@ def _build_stress_sheet(wb, stress_check):
 # ── Лист «Ссылочный профиль» (lite-проверка беклинков, Вебмастер) ──
 
 
+def _lp_rank(h):
+    """Сортировка хостов: сначала самые проблемные. Группы: 0 - обвал массы,
+    1 - спам-доноры/всплеск, 2 - прочие предупреждения, 3 - профиля нет,
+    4 - норма. Внутри группы - по глубине просадки, затем по числу спама."""
+    hist = h.get('history') or {}
+    if hist.get('dropped'):
+        grp = 0
+    elif h.get('spam_count') or hist.get('spiked'):
+        grp = 1
+    elif h.get('warnings'):
+        grp = 2
+    elif h.get('infos'):
+        grp = 3
+    else:
+        grp = 4
+    return (grp, -(hist.get('drop_pct') or 0),
+            -(h.get('spam_count') or 0), h.get('host') or '')
+
+
 def _build_link_profile_sheet(wb, link_profile):
-    """Лист «Ссылочный профиль»: объём/доноры/динамика/спам по данным
-    Яндекс.Вебмастера + ссылка на ручную сверку GSC. Добавляется, только
-    если проверка выполнялась."""
+    """Лист «Ссылочный профиль»: таблица по всем хостам (объём/доноры/
+    динамика/спам, данные Яндекс.Вебмастера), самые проблемные - сверху.
+    Добавляется, только если проверка выполнялась."""
     if not link_profile:
         return
-    hosts = link_profile.get('hosts') or []
-    has_warn = any(h.get('warnings') for h in hosts)
+    hosts = sorted(link_profile.get('hosts') or [], key=_lp_rank)
+    n_drop = sum(1 for h in hosts if (h.get('history') or {}).get('dropped'))
+    n_spam = sum(1 for h in hosts
+                 if h.get('spam_count') or (h.get('history') or {}).get('spiked'))
+    n_warn = sum(1 for h in hosts if h.get('warnings'))
+    n_empty = sum(1 for h in hosts
+                  if h.get('infos') and not h.get('warnings'))
 
     ws = wb.create_sheet('Ссылочный профиль')
     ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.warn if has_warn else C.ok
-    for col, w in (('A', 3), ('B', 34), ('C', 62), ('D', 42), ('E', 3)):
+    ws.sheet_properties.tabColor = (C.err if n_drop or n_spam
+                                    else C.warn if n_warn else C.ok)
+    for col, w in (('A', 3), ('B', 28), ('C', 11), ('D', 11), ('E', 20),
+                   ('F', 11), ('G', 16), ('H', 66), ('I', 10), ('J', 3)):
         ws.column_dimensions[col].width = w
 
-    ws.merge_cells('B2:D2')
+    ws.merge_cells('B2:H2')
     c = ws['B2']
     c.value = 'Ссылочный профиль (lite)'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
-    ws.merge_cells('B3:D3')
+    ws.merge_cells('B3:H3')
     c = ws['B3']
     c.value = ('Беклинки по официальным данным Яндекс.Вебмастера (API v4). '
                'Смотрим: объём (всего внешних ссылок и доноров), динамику '
                '(резкий обвал = потеря ссылок; резкий всплеск = возможный '
                'спам/накрутка) и подозрительных доноров (мусорные зоны, '
-               'gambling/adult). Глубокий аудит (Ahrefs/Majestic) - платный, '
-               'здесь его нет. У Google API беклинков нет - в конце ссылка '
+               'gambling/adult). Таблица отсортирована: самые проблемные '
+               'хосты сверху. Глубокий аудит (Ahrefs/Majestic) - платный, '
+               'здесь его нет. У Google API беклинков нет - внизу ссылка '
                'на ручную сверку в GSC.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 62
 
-    row = 5
-
-    def _line(text, color, bold=False, link=None, indent=1):
-        nonlocal row
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-        c = ws.cell(row=row, column=2)
-        c.value = text
-        c.font = _font(size=10, bold=bold, color=color,
-                       underline='single' if link else None)
-        if link:
-            c.hyperlink = link
-        c.alignment = _align(indent=indent, wrap=True)
-        ws.row_dimensions[row].height = 18
-        row += 1
-
     if not link_profile.get('available'):
-        _line(f'⚪ {link_profile.get("note", "Проверка не выполнена.")}',
-              C.text_muted)
+        ws.merge_cells('B5:H5')
+        c = ws['B5']
+        c.value = f'⚪ {link_profile.get("note", "Проверка не выполнена.")}'
+        c.font = _font(size=10, color=C.text_muted)
+        c.alignment = _align(indent=1, wrap=True)
         return
     if not hosts:
-        _line('⚪ Верифицированных в Вебмастере хостов проекта не нашлось - '
-              'привяжите сайт в Вебмастере под тем же аккаунтом.', C.text_muted)
+        ws.merge_cells('B5:H5')
+        c = ws['B5']
+        c.value = ('⚪ Верифицированных в Вебмастере хостов проекта не '
+                   'нашлось - привяжите сайт в Вебмастере под тем же '
+                   'аккаунтом.')
+        c.font = _font(size=10, color=C.text_muted)
+        c.alignment = _align(indent=1, wrap=True)
+        return
 
+    # Сводка: сколько хостов в какой группе
+    ws.merge_cells('B5:H5')
+    c = ws['B5']
+    c.value = (f'Хостов: {len(hosts)} · обвал массы: {n_drop} · '
+               f'спам/всплеск: {n_spam} · прочие предупреждения: '
+               f'{max(n_warn - n_drop - n_spam, 0)} · без профиля: {n_empty} · '
+               f'в норме: {len(hosts) - n_warn - n_empty}')
+    c.font = _font(size=10, bold=True,
+                   color=C.err if n_drop or n_spam else C.text)
+    c.alignment = _align(indent=1)
+    ws.row_dimensions[5].height = 20
+
+    # Шапка таблицы
+    hdr_row = 7
+    headers = [('B', 'Хост'), ('C', 'Ссылок'), ('D', 'Доноров'),
+               ('E', 'Динамика (было → сейчас)'), ('F', 'Просадка'),
+               ('G', 'Статус'), ('H', 'Что не так'), ('I', 'Панель')]
+    for col, title in headers:
+        cell = ws[f'{col}{hdr_row}']
+        cell.value = title
+        cell.font = _font(size=10, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align(horizontal='center' if col in 'CDFI' else 'left',
+                                indent=0 if col in 'CDFI' else 1)
+        cell.border = _border()
+    ws.row_dimensions[hdr_row].height = 24
+    ws.freeze_panes = f'A{hdr_row + 1}'
+    ws.auto_filter.ref = f'B{hdr_row}:I{hdr_row + len(hosts)}'
+
+    _STATUS = {0: ('❌ обвал', C.err, C.err_soft),
+               1: ('⚠ спам/всплеск', C.err, C.err_soft),
+               2: ('⚠ внимание', C.warn, C.warn_soft),
+               3: ('· нет профиля', C.text_muted, None),
+               4: ('✅ норма', C.ok, None)}
+
+    row = hdr_row + 1
     for h in hosts:
-        _line(h.get('host', ''), C.text, bold=True)
-        _hist = h.get('history') or {}
-        _dyn = ''
-        if _hist.get('points'):
-            _dyn = (f' · динамика: было {_hist.get("first")} → сейчас '
-                    f'{_hist.get("latest")} (пик {_hist.get("peak")})')
-        _line(f'Всего внешних ссылок: {h.get("total", 0)} · доноров в выборке: '
-              f'{h.get("distinct_hosts", 0)} (из {h.get("sample_size", 0)} '
-              f'ссылок){_dyn}', C.text_soft, indent=2)
-        for w in (h.get('warnings') or []):
-            _line(f'⚠ {w}', C.warn, indent=2)
+        hist = h.get('history') or {}
+        grp = _lp_rank(h)[0]
+        label, color, bg = _STATUS[grp]
+
+        # Что не так: предупреждения + примеры спам-доноров + инфо
+        problems = list(h.get('warnings') or [])
         if h.get('spam_hosts'):
-            _line('  спам-доноры (примеры): '
-                  + ', '.join(h['spam_hosts'])
-                  + (f' … +{h["spam_count"] - len(h["spam_hosts"])}'
-                     if h.get('spam_count', 0) > len(h['spam_hosts']) else ''),
-                  C.text_muted, indent=2)
-        for inf in (h.get('infos') or []):
-            _line(f'· {inf}', C.text_muted, indent=2)
-        if not (h.get('warnings') or h.get('infos')):
-            _line('✅ Профиль в норме: динамика стабильна, спам-доноров в '
-                  'выборке нет.', C.ok, indent=2)
-        if h.get('panel_url'):
-            _line('Открыть раздел «Ссылки» в Вебмастере', C.accent, indent=2,
-                  link=h['panel_url'])
+            more = (f' … +{h["spam_count"] - len(h["spam_hosts"])}'
+                    if h.get('spam_count', 0) > len(h['spam_hosts']) else '')
+            problems.append('спам-доноры: ' + ', '.join(h['spam_hosts']) + more)
+        problems.extend(h.get('infos') or [])
+        problems_text = ('; '.join(problems) if problems
+                         else 'динамика стабильна, спам-доноров в выборке нет')
+
+        dyn = (f'{hist.get("first")} → {hist.get("latest")} '
+               f'(пик {hist.get("peak")})' if hist.get('points') else '-')
+        drop = (f'−{hist.get("drop_pct")}%'
+                if (hist.get('drop_pct') or 0) > 0 else '-')
+
+        cells = [
+            ('B', h.get('host', ''), _font(size=10, color=C.text),
+             _align(indent=1)),
+            ('C', h.get('total', 0), _font(size=10, color=C.text_soft),
+             _align(horizontal='center')),
+            ('D', h.get('distinct_hosts', 0),
+             _font(size=10, color=C.text_soft), _align(horizontal='center')),
+            ('E', dyn, _font(size=10, color=C.text_soft), _align(indent=1)),
+            ('F', drop,
+             _font(size=10, bold=hist.get('dropped', False),
+                   color=C.err if hist.get('dropped') else C.text_muted),
+             _align(horizontal='center')),
+            ('G', label, _font(size=10, bold=grp <= 1, color=color),
+             _align(indent=1)),
+            ('H', problems_text,
+             _font(size=9, color=color if problems else C.text_muted),
+             _align(indent=1, wrap=True)),
+        ]
+        for col, val, fnt, algn in cells:
+            cell = ws[f'{col}{row}']
+            cell.value = val
+            cell.font = fnt
+            cell.alignment = algn
+            cell.border = _border(color=C.border_light)
+            if bg:
+                cell.fill = _fill(bg)
+
+        lc = ws[f'I{row}']
+        lc.border = _border(color=C.border_light)
+        lc.alignment = _align(horizontal='center')
+        purl = _wm_alive_url(h.get('panel_url'), 'links/incoming/')
+        if purl:
+            lc.value = 'открыть'
+            lc.hyperlink = purl
+            lc.font = _font(size=9, color=C.accent, underline='single')
+        else:
+            lc.value = '-'
+            lc.font = _font(size=9, color=C.text_muted)
+        if bg:
+            lc.fill = _fill(bg)
         row += 1
 
     # ── Google - ручная сверка ──
-    _line('Google (беклинков по API нет - ручная сверка)', C.text, bold=True)
-    _line('Search Console → «Ссылки»: внешние ссылки, топ сайтов-доноров, '
-          'анкоры.', C.accent,
-          link=link_profile.get('gsc_links_url')
-          or 'https://search.google.com/search-console/links')
+    row += 1
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+    c = ws.cell(row=row, column=2)
+    c.value = ('Google (беклинков по API нет): Search Console → «Ссылки» - '
+               'внешние ссылки, топ сайтов-доноров, анкоры.')
+    c.font = _font(size=10, color=C.accent, underline='single')
+    c.hyperlink = (link_profile.get('gsc_links_url')
+                   or 'https://search.google.com/search-console/links')
+    c.alignment = _align(indent=1)
 
 
 # ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
