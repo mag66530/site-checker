@@ -199,7 +199,7 @@ def check_gsc_api_404(project_id: str, sa_info: dict, *, proxy_url=None,
         t0 = time.monotonic()
 
         def _prog(done, tot):
-            if done % 200 == 0 or done == tot:
+            if done % 50 == 0 or done == tot:
                 _log(f"GSC API: прозвон {done}/{tot} "
                      f"({int(time.monotonic() - t0)}с)")
         return await _check_all(pairs, proxy_url, progress=_prog)
