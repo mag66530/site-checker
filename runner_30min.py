@@ -1058,7 +1058,7 @@ def run_check(pid, params, creds, log, progress):
                         # интерактивный прогон - небольшая порция (боевой сайт
                         # отвечает секунды; полное покрытие набирается ротацией по
                         # дням). Плановый CLI может брать больше.
-                        max_urls=int(params.get('index_404_gsc_api_max', 800)),
+                        max_urls=int(params.get('index_404_gsc_api_max', 200)),
                         days=int(params.get('index_404_gsc_api_days', 90)),
                         log=_nlog)
                     if _gsc_api_404.get('error'):
