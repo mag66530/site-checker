@@ -281,6 +281,55 @@ def _run_gsc_index404(pid, params, log, session_b64=None, gsc_login=None):
                 'error': f'результат GSC не прочитан: {e}'}
 
 
+def _run_gsc_pages(pid, params, log, session_b64=None):
+    """Количество страниц в ГСК по статусам индексации (браузер + сессия Google).
+    Отдельный процесс gsc_pages_count.py; результат — cache/gsc_pages_result_{pid}.json.
+    Как GSC-404 браузерный: локальный CDP-Chrome или облачная сессия из Secrets."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    if not _cdp_alive():
+        if session_b64:
+            try:
+                from autoclick_browser import (
+                    session_file_from_secret, MODE_ENV, SESSION_FILE_ENV)
+                _env[MODE_ENV] = 'cloud'
+                _env[SESSION_FILE_ENV] = session_file_from_secret(session_b64)
+            except Exception as _e:
+                return {'available': False,
+                        'error': f'сессия autoclick_session не читается: {_e}'}
+        else:
+            return {'available': False,
+                    'error': ('нет ни локального Chrome, ни сессии в Secrets '
+                              '(autoclick_session) - ГСК-страницы пропущены.')}
+    (root / 'cache').mkdir(exist_ok=True)
+    _res_file = root / 'cache' / f'gsc_pages_result_{pid}.json'
+    try:
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    args = [_sys.executable, 'gsc_pages_count.py', '--project', pid,
+            '--save', '--out', str(_res_file)]
+    log('Количество страниц в ГСК: открываю отчёт «Страницы»…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [ГСК-страницы] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        return {'available': False, 'error': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'error': f'результат ГСК-страниц не прочитан: {e}'}
+
+
 def _run_filters_test(pid, params, log, category_urls=None):
     """Фильтр-тест товаров в браузере (доп. чек-лист). Отдельный процесс
     filters_run.py (Playwright): локальный CDP-Chrome не нужен, каталог
@@ -1086,6 +1135,21 @@ def run_check(pid, params, creds, log, progress):
                     f'проверено {_index_404.get("total_checked", 0)}, битых 404/410 '
                     f'{_index_404.get("total_dead", 0)}, '
                     f'источники: {", ".join(_index_404.get("sources") or []) or "—"}')
+
+        # ── Количество страниц в ГСК (индексировано / не индексировано / сумма) ──
+        # Браузером снимаем 3 числа из отчёта «Страницы» GSC (в API их нет).
+        # Нужна живая сессия Google (та же, что у GSC-404 браузерного).
+        _gsc_pages = None
+        if params.get('check_gsc_pages'):
+            _gsc_pages = _run_gsc_pages(
+                pid, params, log, session_b64=creds.get('autoclick_session'))
+            if _gsc_pages.get('error'):
+                log(f'⚠ Количество страниц в ГСК: {_gsc_pages["error"]}')
+            else:
+                log(f'Количество страниц в ГСК: индексировано '
+                    f'{_gsc_pages.get("indexed")}, просканировано-не-индексировано '
+                    f'{_gsc_pages.get("crawled_not_indexed")}, сумма '
+                    f'{_gsc_pages.get("total")}')
 
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный
