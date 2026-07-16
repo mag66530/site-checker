@@ -3794,6 +3794,87 @@ def _build_link_profile_sheet(wb, link_profile):
     c.alignment = _align(indent=1)
 
 
+# ── Лист «Настройки в админке» (доп. чек-лист: функции настройки) ──
+
+
+def _build_admin_settings_sheet(wb, admin_settings):
+    """Лист «Настройки в админке»: работают ли функции настройки поддоменов/
+    категорий/товаров/тех.страниц (браузерная проверка + round-trip
+    сохранения). Добавляется, только если проверка выполнялась."""
+    if not admin_settings:
+        return
+    checks = admin_settings.get('checks') or []
+    verdict = admin_settings.get('verdict') or 'ok'
+
+    ws = wb.create_sheet('Настройки в админке')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = (C.err if verdict == 'fail'
+                                    else C.warn if verdict == 'warn' else C.ok)
+    for col, w in (('A', 3), ('B', 22), ('C', 78), ('D', 40), ('E', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:D2')
+    c = ws['B2']
+    c.value = 'Настройки в админке (п.1.21)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:D3')
+    c = ws['B3']
+    c.value = ('Браузер заходит в админку Bitrix и проверяет, что функции '
+               'настройки работают: мастер поддоменов открывается (вкладки '
+               'создания/удаления, режим симуляции), разделы каталога '
+               'рендерятся и реально сохраняются (тест-изменение поля '
+               'сортировки с откатом), товарная подсистема (HL-блок '
+               '«Ассортимент») открывает форму записи, структура сайта и '
+               'редактор файлов тех.страниц работают. Данные не меняются '
+               '(кроме тест-сохранения с откатом).')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 62
+
+    row = 5
+    if not admin_settings.get('available'):
+        ws.merge_cells(f'B{row}:D{row}')
+        c = ws[f'B{row}']
+        c.value = f'⚪ {admin_settings.get("note", "Проверка не выполнена.")}'
+        c.font = _font(size=10, color=C.text_muted)
+        c.alignment = _align(indent=1, wrap=True)
+        return
+
+    ws.merge_cells(f'B{row}:D{row}')
+    c = ws[f'B{row}']
+    _dom = admin_settings.get('domain') or ''
+    c.value = f'Админка: {_dom}'
+    c.font = _font(size=10, bold=True, color=C.text)
+    c.alignment = _align(indent=1)
+    row += 2
+
+    for ch in checks:
+        ws.row_dimensions[row].height = 18
+        b = ws[f'B{row}']
+        b.value = ('✅ ' if ch.get('ok') else '❌ ') + (ch.get('title') or '')
+        b.font = _font(size=10, bold=True,
+                       color=C.ok if ch.get('ok') else C.err)
+        b.alignment = _align(indent=1, vertical='top')
+        ws.merge_cells(f'C{row}:D{row}')
+        d = ws[f'C{row}']
+        d.value = ch.get('detail') or ''
+        d.font = _font(size=10,
+                       color=C.text_soft if ch.get('ok') else C.err)
+        d.alignment = _align(wrap=True, vertical='top')
+        row += 1
+        for w in ch.get('warnings') or []:
+            ws.merge_cells(f'C{row}:D{row}')
+            wc = ws[f'C{row}']
+            wc.value = f'⚠ {w}'
+            wc.font = _font(size=9, color=C.warn)
+            wc.alignment = _align(wrap=True, indent=1)
+            ws.row_dimensions[row].height = 16
+            row += 1
+        row += 1
+
+
 # ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
 
 
@@ -5084,6 +5165,7 @@ def build_report(
     index_404_check: dict = None,  # 404 среди страниц в индексе - лист «404 в индексе»
     stress_check: dict = None,     # ошибки сервера: парсинг/нагрузка/дубли - лист «Нагрузка и парсинг»
     link_profile: dict = None,     # lite-профиль ссылок (Вебмастер) - лист «Ссылочный профиль»
+    admin_settings: dict = None,   # функции настройки в админке (п.1.21) - лист «Настройки в админке»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -5312,6 +5394,13 @@ def build_report(
             summary_text += (f'\nСсылочный профиль: замечаний {_lp_w} '
                              f'(обвал/всплеск/спам) - см. лист «Ссылочный '
                              f'профиль».')
+    if admin_settings and admin_settings.get('available'):
+        _adm_bad = [c.get('title') for c in (admin_settings.get('checks') or [])
+                    if not c.get('ok')]
+        if _adm_bad:
+            summary_text += ('\nНастройки в админке: не работают - '
+                             + ', '.join(_adm_bad)
+                             + ' (см. лист «Настройки в админке»).')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     c.value = summary_text
     c.font = _font(size=11, color=C.text_soft)
@@ -5373,6 +5462,7 @@ def build_report(
         ('Фильтры ПС', 'если есть лист - санкции поисковых систем: диагностика Вебмастера + маркеры ручных мер в почте GSC (п.1.19).'),
         ('Нагрузка и парсинг', 'если есть лист - нет ли ошибок сервера при быстром обходе (парсинге), параллельной нагрузке и кривых дублях URL категорий/фильтров/товаров.'),
         ('Ссылочный профиль', 'если есть лист - lite-проверка беклинков по Яндекс.Вебмастеру: объём, доноры, динамика (обвал/всплеск), спам-доноры.'),
+        ('Настройки в админке', 'если есть лист - работают ли функции настройки в админке: поддомены, категории (с тест-сохранением), товары, тех.страницы (п.1.21).'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
         ('Битые тексты', 'если есть лист - страницы с незаменёнными переменными ({{city}} и т.п.).'),
         ('404 из Метрики', 'если есть лист - страницы, куда заходили люди и упёрлись в 404.'),
@@ -5436,6 +5526,9 @@ def build_report(
 
     # ─── Лист «Ссылочный профиль» - если lite-проверка выполнялась ─────
     _build_link_profile_sheet(wb, link_profile)
+
+    # ─── Лист «Настройки в админке» - если проверка выполнялась ────────
+    _build_admin_settings_sheet(wb, admin_settings)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

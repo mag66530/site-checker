@@ -361,6 +361,48 @@ def _run_console_check(pid, urls, log):
                 'note': f'результат проверки консоли не прочитан: {e}'}
 
 
+def _run_admin_settings(pid, params, creds, log):
+    """Проверка «работают функции настройки» в админке (доп. чек-лист).
+    Отдельный процесс admin_settings_run.py (Playwright): креды уходят через
+    env ADMIN_SETTINGS_CREDS (JSON) - пароль на диск не пишется. Возвращает
+    dict для листа «Настройки в админке»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    (root / 'cache' / 'admin-settings').mkdir(parents=True, exist_ok=True)
+    _res_file = root / 'cache' / 'admin-settings' / f'{pid}-run.json'
+    try:
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    _env['ADMIN_SETTINGS_CREDS'] = json.dumps(
+        creds.get('admin_settings') or {}, ensure_ascii=False)
+    args = [_sys.executable, 'admin_settings_run.py', '--project', pid,
+            '--from-env', '--out', str(_res_file)]
+    if not params.get('admin_roundtrip', True):
+        args.append('--no-roundtrip')
+    log('Настройки в админке: запускаю браузер…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [админка] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        log(f'⚠ Настройки в админке: {e}')
+        return {'available': False, 'note': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False,
+                'note': f'результат проверки админки не прочитан: {e}'}
+
+
 def run_check(pid, params, creds, log, progress):
     """Выполнить прогон. log(msg), progress(frac, text) - колбэки.
     Возвращает dict с results / report_path / started_at / finished_at / error."""
@@ -1108,6 +1150,26 @@ def run_check(pid, params, creds, log, progress):
                 _link_profile = {'available': False,
                                  'note': 'OAuth-токен Вебмастера не задан.'}
 
+        # ── Настройки в админке (доп. чек-лист, по галочке) ──
+        # Браузерная проверка: вход + поддомены/категории/товары/тех.страницы
+        # (+ round-trip сохранения на категории). Креды приходят из UI/Secrets.
+        _admin_settings = None
+        if params.get('check_admin_settings'):
+            _adm_creds = creds.get('admin_settings') or {}
+            if _adm_creds.get('login') and _adm_creds.get('domain'):
+                _admin_settings = _run_admin_settings(pid, params, creds, log)
+                _adm_checks = (_admin_settings or {}).get('checks') or []
+                _adm_bad = sum(1 for c in _adm_checks if not c.get('ok'))
+                log(f'✓ Настройки в админке: проверок {len(_adm_checks)}, '
+                    f'провалов {_adm_bad}')
+            else:
+                log('⚠ Настройки в админке: не заданы домен/логин/пароль '
+                    'админки - пропуск.')
+                _admin_settings = {'available': False,
+                                   'note': 'Не заданы домен/логин/пароль '
+                                           'админки (поля под галочкой 1.21 '
+                                           'или секрет admin_settings_<pid>).'}
+
         # ── Ошибки сервера: парсинг / нагрузка / дубли URL (по галочке) ──
         # Тяжёлые сетевые пробы на прод: гоняем В КОНЦЕ, отчёт по страницам
         # уже собран - падение сервера/бан здесь = находка, не сбой прогона.
@@ -1206,7 +1268,8 @@ def run_check(pid, params, creds, log, progress):
             w3c_check=_w3c_check, p404_check=_p404_check,
             ps_filters=_ps_filters, search_check=_search_check,
             index_404_check=_index_404,
-            stress_check=_stress_check, link_profile=_link_profile)
+            stress_check=_stress_check, link_profile=_link_profile,
+            admin_settings=_admin_settings)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

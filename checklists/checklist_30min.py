@@ -669,6 +669,8 @@ def init_session():
         'c30_check_404': True,         # п.1.18 - страница 404
         'c30_check_ps_filters': True,  # п.1.19 - фильтры/санкции ПС
         'c30_check_link_profile': True,   # п.1.20 - lite-профиль ссылок (Вебмастер API)
+        'c30_check_admin_settings': False,  # п.1.21 - функции настройки в админке (браузер, нужны креды)
+        'c30_adm_roundtrip': True,          # тест-сохранение с откатом (категория)
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
@@ -1251,6 +1253,69 @@ if pid:
                              'сверку в GSC. Нужен настроенный токен Вебмастера '
                              '(webmaster_oauth). Отдельный лист «Ссылочный '
                              'профиль».')
+            _ck_adm = st.checkbox(
+                '1.21  Настройки в админке (браузер, нужны креды)',
+                key='c30_check_admin_settings',
+                help='Браузер заходит в админку Bitrix и проверяет функции '
+                     'настройки: мастер поддоменов (вкладки, режим симуляции), '
+                     'разделы каталога + тест-сохранение с откатом (SORT '
+                     'раздела +1 → сохранить → вернуть), товарная подсистема '
+                     '(HL-блок «Ассортимент», форма записи), структура сайта '
+                     'и редактор файлов тех.страниц. Проверяется ВСЁ разом. '
+                     'Нужны домен и логин/пароль админки (поля ниже или '
+                     'секрет admin_settings_<проект> - JSON). Отдельный лист '
+                     '«Настройки в админке».')
+            if _ck_adm:
+                # Дефолты полей: секрет admin_settings_<pid> (JSON) →
+                # локальный admin.local.json → admin.test.local.json.
+                if not st.session_state.get('c30_adm_prefilled'):
+                    _pre = {}
+                    try:
+                        _raw = _secret_pid('admin_settings', pid)
+                        if _raw:
+                            _pre = json.loads(_raw) if isinstance(_raw, str) \
+                                else dict(_raw)
+                    except Exception:
+                        _pre = {}
+                    if not _pre:
+                        try:
+                            from admin_settings_check import load_admin_creds
+                            _pdir = PROJECT_ROOT / 'forms_tester' / 'projects' / pid
+                            _pre = (load_admin_creds(_pdir)
+                                    or load_admin_creds(_pdir, test=True) or {})
+                        except Exception:
+                            _pre = {}
+                    for _f, _k in (('domain', 'c30_adm_domain'),
+                                   ('login', 'c30_adm_login'),
+                                   ('password', 'c30_adm_password'),
+                                   ('basic_login', 'c30_adm_basic_login'),
+                                   ('basic_password', 'c30_adm_basic_password')):
+                        if _pre.get(_f) and not st.session_state.get(_k):
+                            st.session_state[_k] = _pre[_f]
+                    st.session_state['c30_adm_prefilled'] = True
+                st.text_input('Домен админки (https://…)',
+                              key='c30_adm_domain',
+                              placeholder='https://test.stalmetural.ru')
+                _adm1, _adm2 = st.columns(2)
+                with _adm1:
+                    st.text_input('Логин Bitrix', key='c30_adm_login')
+                with _adm2:
+                    st.text_input('Пароль Bitrix', key='c30_adm_password',
+                                  type='password')
+                _adm3, _adm4 = st.columns(2)
+                with _adm3:
+                    st.text_input('Basic-логин (если есть заглушка)',
+                                  key='c30_adm_basic_login')
+                with _adm4:
+                    st.text_input('Basic-пароль', key='c30_adm_basic_password',
+                                  type='password')
+                st.checkbox('Тест-сохранение с откатом (категория)',
+                            key='c30_adm_roundtrip',
+                            help='Реально меняет сортировку одного раздела '
+                                 'на +1 и сразу откатывает - проверяет, что '
+                                 'запись в БД через админку проходит. '
+                                 'Выключи, если на проде это нежелательно - '
+                                 'останется проверка рендера разделов и форм.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1454,6 +1519,7 @@ if pid:
         int(st.session_state.get('c30_stress_concurrency', 30)),
         int(st.session_state.get('c30_stress_load_pages', 3)),
         bool(st.session_state.get('c30_check_link_profile', False)),
+        bool(st.session_state.get('c30_check_admin_settings', False)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1517,6 +1583,8 @@ if pid:
                 'stress_concurrency': int(st.session_state.get('c30_stress_concurrency', 30)),
                 'stress_load_pages': int(st.session_state.get('c30_stress_load_pages', 3)),
                 'check_link_profile': st.session_state.get('c30_check_link_profile', False),
+                'check_admin_settings': st.session_state.get('c30_check_admin_settings', False),
+                'admin_roundtrip': st.session_state.get('c30_adm_roundtrip', True),
                 'check_w3c': st.session_state.get('c30_check_w3c', False),
                 'check_static': st.session_state.get('c30_check_static', False),
                 'check_404': st.session_state.get('c30_check_404', True),
@@ -1567,6 +1635,15 @@ if pid:
                 'autoclick_session': _secret_pid('autoclick_session', pid),
                 'webmaster_keys_hint': _wm_hint,
                 'secret_keys_hint': _sk_hint,
+                # Креды админки (п.1.21): из полей UI; пустые значения не шлём
+                'admin_settings': {
+                    k: v for k, v in (
+                        ('domain', st.session_state.get('c30_adm_domain', '').strip()),
+                        ('login', st.session_state.get('c30_adm_login', '').strip()),
+                        ('password', st.session_state.get('c30_adm_password', '')),
+                        ('basic_login', st.session_state.get('c30_adm_basic_login', '').strip()),
+                        ('basic_password', st.session_state.get('c30_adm_basic_password', '')),
+                    ) if v},
             }
             # Доп. СНГ-домены по пресету (быстрая 0, стандарт/полная 1) - помимо
             # обязательного smg.az (см. mandatory_hosts в smu.json).
