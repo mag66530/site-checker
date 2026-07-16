@@ -274,11 +274,25 @@ def deltas(nums: dict, prev: dict | None) -> dict:
                                "not_indexed_total", "total")}
 
 
+def save_manual(pid: str, indexed: int, crawled_ni: int, when: str | None = None) -> dict:
+    """Ручной ввод чисел из GSC (без браузера, самый надёжный путь). Сумма =
+    проиндексировано + просканировано-не-индексировано. Пишет в историю и
+    считает дельту к прошлому снятию."""
+    nums = {"available": True, "error": None, "project": pid, "manual": True,
+            "indexed": int(indexed), "crawled_not_indexed": int(crawled_ni),
+            "not_indexed_total": None,
+            "total": int(indexed) + int(crawled_ni)}
+    prev = previous_row(pid, before=when)
+    nums["deltas"] = deltas(nums, prev)
+    append_history(pid, nums, when=when)
+    return nums
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 def _main():
     import json
     ap = argparse.ArgumentParser(description="Количество страниц в GSC по статусам")
-    ap.add_argument("project")
+    ap.add_argument("--project", required=True)
     ap.add_argument("--scout", action="store_true", help="только диагностика DOM")
     ap.add_argument("--save", action="store_true", help="дописать в историю")
     ap.add_argument("--out", default="", help="файл для JSON результата")

@@ -1360,6 +1360,19 @@ if pid:
                          'Google (та же, что для GSC-404 браузерного). На облаке '
                          'сессия часто слетает - тогда пункт пропустится с '
                          'пометкой, прогон не упадёт.')
+        if st.session_state.get('c30_check_gsc_pages'):
+            _gc1, _gc2 = st.columns(2)
+            with _gc1:
+                st.number_input('→ Проиндексировано (вписать из GSC)',
+                                min_value=0, step=1, key='c30_gsc_indexed')
+            with _gc2:
+                st.number_input('→ Просканировано, не проиндексировано',
+                                min_value=0, step=1, key='c30_gsc_crawled_ni')
+            st.caption('Впиши 2 числа из отчёта GSC «Индексирование → Страницы» '
+                       '(ты их и так видишь в браузере) — надёжно, без входа '
+                       'браузера тула; сумма посчитается сама, история и разница '
+                       'сохранятся. Оставишь нули — тул попробует снять сам '
+                       '(нужна сессия Google, на облаке часто недоступна).')
         st.checkbox('Проверять фильтрацию товаров (браузер)',
                     key='c30_check_filter_fn',
                     help='Открывает категорию в браузере и применяет фильтр по '
@@ -1678,6 +1691,8 @@ if pid:
                 'check_links': st.session_state.get('c30_check_links', False),
                 'check_index_404': st.session_state.get('c30_check_index_404', False),
                 'check_gsc_pages': st.session_state.get('c30_check_gsc_pages', False),
+                'gsc_pages_indexed': int(st.session_state.get('c30_gsc_indexed', 0) or 0),
+                'gsc_pages_crawled_ni': int(st.session_state.get('c30_gsc_crawled_ni', 0) or 0),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'check_console': st.session_state.get('c30_check_console', False),
                 'check_stress': st.session_state.get('c30_check_stress', False),
