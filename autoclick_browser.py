@@ -60,7 +60,37 @@ async def open_browser(p, log=None):
             log(msg)
 
     if is_visible_mode():
-        # ВИДИМОЕ окно браузера (headed) со СВОИМ постоянным профилем. Логин
+        # (a) Есть СОХРАНЁННАЯ сессия (файл storage_state) - открываем видимое
+        # окно, УЖЕ залогиненное. Логиниться не нужно: подходит для «любой
+        # человек запускает проверку». Сессию создаёт setup_session.py один раз.
+        session = os.environ.get(SESSION_FILE_ENV, '')
+        if session and os.path.exists(session):
+            _log('Открываю видимое окно с СОХРАНЁННЫМ входом — логиниться не нужно.')
+            _launch = dict(
+                headless=False,
+                args=['--disable-blink-features=AutomationControlled',
+                      '--start-maximized', '--no-first-run',
+                      '--no-default-browser-check',
+                      '--disable-session-crashed-bubble'])
+            browser, _e2 = None, []
+            for _try in ({}, {'channel': 'chrome'}, {'channel': 'msedge'}):
+                try:
+                    browser = await p.chromium.launch(**_launch, **_try)
+                    break
+                except Exception as e:
+                    _e2.append(f"{_try.get('channel', 'chromium')}: {str(e)[:60]}")
+            if browser is None:
+                raise RuntimeError('не удалось открыть браузер — ' + ' | '.join(_e2))
+            ctx = await browser.new_context(
+                storage_state=session, user_agent=UA, locale='ru-RU',
+                timezone_id='Europe/Moscow', no_viewport=True)
+            await ctx.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', "
+                "{get: () => undefined})")
+            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            return browser, page
+
+        # (b) Сессии нет - ВИДИМОЕ окно со СВОИМ постоянным профилем. Логин
         # хранится в профиле: один раз вошла в Google/Яндекс в этом окне -
         # дальше помнит. Заранее открытый Chrome (CDP) НЕ нужен - окно
         # откроется само, и человек видит, как оно ходит по сервисам.
