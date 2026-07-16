@@ -69,6 +69,9 @@ PATH_ELEMENT_DELETE = ('iblock_element_admin.php?IBLOCK_ID={ib}&type={t}'
 PATH_HL_ROWS = 'highloadblock_rows_list.php?ENTITY_ID={eid}&lang=ru'
 PATH_FILEMAN = 'fileman_admin.php?lang=ru&site={site}&logical=Y&path=%2F'
 PATH_FILE_EDIT = 'fileman_file_edit.php?lang=ru&site={site}&path=%2Findex.php'
+PATH_FILE_NEW = ('fileman_file_edit.php?lang=ru&site={site}'
+                 '&path=%2Fchecker-tmp-page.php&new=Y')
+PATH_FILE_UPLOAD = 'fileman_file_upload.php?lang=ru&logical=Y&site={site}&path=%2F'
 
 
 def load_admin_creds(project_dir, test=False):
@@ -812,15 +815,82 @@ def _check_tech_pages(page, domain, log, site_id=MAIN_SITE_ID):
                      detail + '; редактор файла открывается с контентом')
 
 
-def check_admin_settings(creds, crud=False, product_crud=False, execute=True,
+def _check_tech_pages_crud(page, domain, log, site_id=MAIN_SITE_ID):
+    """CRUD техстраниц (файлы в «Структуре сайта», fileman). ВСЕ операции -
+    проверка НАЛИЧИЯ функции (mode='ui'), без записи: техстраница = публичный
+    файл в корне сайта, создавать/удалять его на боевом проекте небезопасно
+    (в отличие от скрытых записей БД у категорий/товаров). Проверяем, что
+    формы/загрузчик/редактор/удаление доступны."""
+    ops = []
+
+    # 1. Создание - форма нового файла (title/filename/save на месте).
+    status = _goto(page, domain, PATH_FILE_NEW.format(site=site_id))
+    has_new = (status == 200
+               and page.locator("input[name='filename']").count() > 0
+               and page.locator("input[name='save'], input[name='apply']").count() > 0)
+    ops.append(_op('create', 'Создание техстраницы',
+                   'ok' if has_new else 'fail', 'ui',
+                   after='форма нового файла открывается (имя/заголовок/'
+                   'сохранить)' if has_new else 'форма нового файла недоступна',
+                   note='файл не создаём - публичная страница на боевом сайте'))
+
+    # 2. Массовая загрузка - загрузчик файлов fileman.
+    status = _goto(page, domain, PATH_FILE_UPLOAD.format(site=site_id))
+    has_up = status == 200 and (page.locator("input[type='file']").count() > 0
+                                or page.locator('form').count() > 0)
+    ops.append(_op('bulk', 'Массовая загрузка (файлы)',
+                   'ok' if has_up else 'fail', 'ui',
+                   after='загрузчик файлов доступен' if has_up
+                   else 'загрузчик файлов недоступен',
+                   note='файлы не загружаем - только наличие функции'))
+
+    # 3. Правка - редактор существующего файла с контентом.
+    status = _goto(page, domain, PATH_FILE_EDIT.format(site=site_id))
+    has_edit = (status == 200 and (page.locator('textarea').count() > 0
+                or page.locator('.CodeMirror, [contenteditable="true"]').count() > 0))
+    ops.append(_op('edit', 'Правка техстраницы',
+                   'ok' if has_edit else 'fail', 'ui',
+                   after='редактор файла открывается с контентом' if has_edit
+                   else 'редактор файла не открылся',
+                   note='реально не правим - боевые страницы'))
+
+    # 4. Удаление + 5. Скрытие - через «Структуру сайта» (рендерится + меню
+    # действий над файлами). Проверяем, что структура доступна.
+    status = _goto(page, domain, PATH_FILEMAN.format(site=site_id))
+    rows = page.locator('table.adm-list-table tr').count()
+    has_struct = status == 200 and rows > 1
+    ops.append(_op('delete', 'Удаление техстраницы',
+                   'ok' if has_struct else 'fail', 'ui',
+                   after='управление файлами в «Структуре сайта» доступно' if
+                   has_struct else 'структура сайта недоступна',
+                   note='реально не удаляем - боевые страницы'))
+    ops.append(_op('hide', 'Скрытие техстраницы',
+                   'ok' if has_struct else 'fail', 'ui',
+                   after='файл исключается из меню/переименованием (структура '
+                   'доступна)' if has_struct else 'структура сайта недоступна',
+                   note='реально не скрываем - боевые страницы'))
+
+    bad = [o for o in ops if o['result'] == 'fail']
+    detail = ('CRUD-функции техстраниц (файлов) на месте: форма создания, '
+              'загрузчик, редактор, управление в структуре. Реально не '
+              'пишем - публичные файлы на боевом сайте' if not bad else
+              'недоступны функции: ' + ', '.join(o['label'] for o in bad))
+    return _mk_check('tech_pages_crud', 'Тех. страницы (CRUD)', not bad,
+                     detail, operations=ops)
+
+
+def check_admin_settings(creds, crud=False, product_crud=False,
+                         tech_crud=False, execute=True,
                          log=None, headless=True):
     """Проверка функций настройки в админке. creds - dict из
     load_admin_creds (+ domain обязателен).
     crud - CRUD-операции поддоменов/категорий (пункт 2 UI);
     product_crud - CRUD товаров (создание/сортировка/вывод в разные
     категории, пункт 3 UI, опционально по CMS);
-    execute - выполнять их реально (симуляция поддомена + запись с
-    откатом) vs только наличие функций. Возвращает dict для отчёта."""
+    tech_crud - CRUD техстраниц (файлы, пункт 4 UI) - только наличие
+    функций (публичные файлы на проде не трогаем);
+    execute - выполнять crud/product_crud реально (симуляция поддомена +
+    запись с откатом) vs только наличие функций. Для отчёта."""
     def _log(m):
         if log:
             log(m)
@@ -859,6 +929,8 @@ def check_admin_settings(creds, crud=False, product_crud=False, execute=True,
                     fns.append(lambda p, d, l: _check_products_crud(
                         p, d, l, execute=execute))
                 fns.append(_check_tech_pages)
+                if tech_crud:
+                    fns.append(_check_tech_pages_crud)
                 for fn in fns:
                     try:
                         c = fn(page, domain, _log)

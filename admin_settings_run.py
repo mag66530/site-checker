@@ -40,6 +40,8 @@ def main():
                     help='проверять CRUD-операции поддоменов/категорий')
     ap.add_argument('--product-crud', action='store_true',
                     help='CRUD товаров (создание/сортировка/мультикатегория)')
+    ap.add_argument('--tech-crud', action='store_true',
+                    help='CRUD техстраниц (наличие функций, файлы не трогаем)')
     ap.add_argument('--no-execute', action='store_true',
                     help='CRUD без записи - только наличие функций')
     ap.add_argument('--headed', action='store_true',
@@ -79,11 +81,14 @@ def main():
         _parts.append('CRUD подд./кат.')
     if args.product_crud:
         _parts.append('CRUD товаров')
+    if args.tech_crud:
+        _parts.append('CRUD техстраниц')
     _crud_txt = (', '.join(_parts) + (' с записью' if not args.no_execute
                  else ' (наличие)')) if _parts else 'без CRUD'
     print(f'Проверка настроек в админке: {creds["domain"]} ({_src}, {_crud_txt})')
     res = check_admin_settings(creds, crud=args.crud,
                                product_crud=args.product_crud,
+                               tech_crud=args.tech_crud,
                                execute=not args.no_execute,
                                log=print, headless=not args.headed)
 
