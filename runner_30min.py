@@ -234,8 +234,10 @@ def _run_gsc_index404(pid, params, log, session_b64=None, gsc_login=None):
     root = Path(__file__).parent
     _env = dict(_os.environ)
     _env['PYTHONIOENCODING'] = 'utf-8'
-    # Запасной автовход (C): передаём логин/пароль Google в подпроцесс.
-    if params.get('index_404_gsc_autologin', True) and gsc_login:
+    # Запасной автовход (C) ВЫКЛ по умолчанию: Google блокирует автоматический
+    # вход («Не удалось войти в аккаунт» — анти-бот стена), а повторные попытки
+    # рискуют залочить аккаунт. Оставлен под флагом для робота-аккаунта без 2FA.
+    if params.get('index_404_gsc_autologin', False) and gsc_login:
         _gl_email, _gl_pass = (gsc_login or (None, None))
         if _gl_email and _gl_pass:
             _env['GSC_LOGIN_EMAIL'] = _gl_email
