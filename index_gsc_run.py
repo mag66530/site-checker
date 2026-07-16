@@ -218,6 +218,28 @@ async def _ensure_logged_in(page, res, acct, email, password, log) -> bool:
     await page.wait_for_timeout(5000)
     if 'accounts.google.com' not in page.url and 'signin' not in page.url:
         return True                              # сессия жива (путь B)
+    # ВИДИМЫЙ режим: не залогинены - ждём, пока человек войдёт руками прямо
+    # в открытом окне браузера. Никакого автовхода (его Google блокирует).
+    if os.environ.get('AUTOCLICK_MODE', '').strip().lower() == 'visible':
+        log('  ⚠ ВОЙДИ в Google в открывшемся окне браузера — тот аккаунт, где '
+            'Search Console по этому сайту. Жду до 5 минут…')
+        for _ in range(100):                     # 100 × 3с = 5 минут
+            await page.wait_for_timeout(3000)
+            try:
+                cur = page.url
+            except Exception:
+                cur = ''
+            if 'accounts.google.com' not in cur and 'signin' not in cur:
+                log('  ✓ Вижу, что ты вошла — открываю отчёт.')
+                try:
+                    await page.goto(url, wait_until='domcontentloaded',
+                                    timeout=60000)
+                    await page.wait_for_timeout(4000)
+                except Exception:
+                    pass
+                return 'accounts.google.com' not in page.url
+        log('  ⏰ За 5 минут вход не увидел — пропускаю GSC в этот раз.')
+        return False
     if not (email and password):
         log('  сессия слетела, а логина/пароля Google нет (gsc_<pid>_email/password) '
             '- автовход невозможен')

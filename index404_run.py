@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import csv
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -100,7 +101,27 @@ async def _collect_account_sites(page) -> list:
         return []
     await page.wait_for_timeout(4000)
     if 'passport.yandex' in page.url:
-        raise RuntimeError('НЕ АВТОРИЗОВАН в Яндексе (сессия слетела или не задана)')
+        # ВИДИМЫЙ режим: ждём, пока человек войдёт в Яндекс руками в окне.
+        if os.environ.get('AUTOCLICK_MODE', '').strip().lower() == 'visible':
+            _log('  ⚠ ВОЙДИ в Яндекс в открывшемся окне браузера '
+                 '(webmaster.yandex.ru). Жду до 5 минут…')
+            for _ in range(100):                 # 100 × 3с = 5 минут
+                await page.wait_for_timeout(3000)
+                if 'passport.yandex' not in page.url:
+                    break
+            else:
+                raise RuntimeError('НЕ АВТОРИЗОВАН в Яндексе (за 5 мин вход не увидел)')
+            _log('  ✓ Вижу вход — открываю список сайтов.')
+            try:
+                await page.goto(SITES_URL, wait_until='domcontentloaded',
+                                timeout=45000)
+                await page.wait_for_timeout(3000)
+            except Exception:
+                pass
+            if 'passport.yandex' in page.url:
+                raise RuntimeError('НЕ АВТОРИЗОВАН в Яндексе (сессия слетела или не задана)')
+        else:
+            raise RuntimeError('НЕ АВТОРИЗОВАН в Яндексе (сессия слетела или не задана)')
     out, seen = [], set()
     for a in await page.query_selector_all('a[href*="/site/"]'):
         href = await a.get_attribute('href') or ''

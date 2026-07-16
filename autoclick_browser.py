@@ -31,6 +31,13 @@ def is_cloud_mode() -> bool:
     return os.environ.get(MODE_ENV, '').strip().lower() == 'cloud'
 
 
+def is_visible_mode() -> bool:
+    """Видимый режим: открыть НАСТОЯЩЕЕ окно браузера (headed) со своим
+    постоянным профилем. Для локального запуска «хочу видеть, как он ходит».
+    Не требует заранее открытого Chrome (CDP) - браузер откроется сам."""
+    return os.environ.get(MODE_ENV, '').strip().lower() == 'visible'
+
+
 def session_file_from_secret(b64: str) -> str:
     """base64-секрет → временный файл storage_state. Возвращает путь.
     Бросает исключение, если секрет не декодируется/не JSON."""
@@ -51,6 +58,42 @@ async def open_browser(p, log=None):
     def _log(msg):
         if log:
             log(msg)
+
+    if is_visible_mode():
+        # ВИДИМОЕ окно браузера (headed) со СВОИМ постоянным профилем. Логин
+        # хранится в профиле: один раз вошла в Google/Яндекс в этом окне -
+        # дальше помнит. Заранее открытый Chrome (CDP) НЕ нужен - окно
+        # откроется само, и человек видит, как оно ходит по сервисам.
+        from pathlib import Path as _Path
+        profile = (os.environ.get('AUTOCLICK_PROFILE_DIR')
+                   or str(_Path(__file__).parent / 'visible_browser_profile'))
+        _log(f'Открываю ВИДИМОЕ окно браузера (профиль: {profile}). '
+             'Если попросит войти - войди прямо в этом окне.')
+        launch_kw = dict(
+            headless=False,
+            args=['--disable-blink-features=AutomationControlled',
+                  '--start-maximized', '--no-first-run',
+                  '--no-default-browser-check',
+                  '--disable-session-crashed-bubble'],
+            no_viewport=True, locale='ru-RU', timezone_id='Europe/Moscow',
+        )
+        try:
+            ctx = await p.chromium.launch_persistent_context(profile, **launch_kw)
+        except Exception as e:
+            # Chromium от Playwright не установлен - пробуем системный Chrome.
+            _log(f'Chromium Playwright не запустился ({str(e)[:80]}) - '
+                 'пробую системный Google Chrome…')
+            ctx = await p.chromium.launch_persistent_context(
+                profile, channel='chrome', **launch_kw)
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        # navigator.webdriver прячем и здесь - на всякий случай.
+        try:
+            await ctx.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', "
+                "{get: () => undefined})")
+        except Exception:
+            pass
+        return ctx, page
 
     if is_cloud_mode():
         # НЕ browser_setup.ensure_browser: он открывает sync_playwright, что

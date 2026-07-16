@@ -177,7 +177,12 @@ def _run_index404_download(pid, params, log, session_b64=None):
     root = Path(__file__).parent
     _env = dict(_os.environ)
     _env['PYTHONIOENCODING'] = 'utf-8'
-    if not _cdp_alive():
+    _visible = _os.environ.get('AUTOCLICK_MODE', '').strip().lower() == 'visible'
+    if _visible:
+        _env['AUTOCLICK_MODE'] = 'visible'
+        log('404 в индексе (Яндекс): открываю ВИДИМОЕ окно браузера — смотри '
+            'новое окно, проверка пойдёт в нём.')
+    elif not _cdp_alive():
         if session_b64:
             try:
                 from autoclick_browser import (
@@ -237,12 +242,17 @@ def _run_gsc_index404(pid, params, log, session_b64=None, gsc_login=None):
     # Запасной автовход (C) ВЫКЛ по умолчанию: Google блокирует автоматический
     # вход («Не удалось войти в аккаунт» — анти-бот стена), а повторные попытки
     # рискуют залочить аккаунт. Оставлен под флагом для робота-аккаунта без 2FA.
-    if params.get('index_404_gsc_autologin', False) and gsc_login:
+    _visible = _os.environ.get('AUTOCLICK_MODE', '').strip().lower() == 'visible'
+    if params.get('index_404_gsc_autologin', False) and gsc_login and not _visible:
         _gl_email, _gl_pass = (gsc_login or (None, None))
         if _gl_email and _gl_pass:
             _env['GSC_LOGIN_EMAIL'] = _gl_email
             _env['GSC_LOGIN_PASSWORD'] = _gl_pass
-    if not _cdp_alive():
+    if _visible:
+        _env['AUTOCLICK_MODE'] = 'visible'
+        log('404 в индексе (GSC): открываю ВИДИМОЕ окно браузера — смотри новое '
+            'окно; если попросит войти в Google — войди прямо в нём.')
+    elif not _cdp_alive():
         if session_b64:
             try:
                 from autoclick_browser import (
