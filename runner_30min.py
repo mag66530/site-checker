@@ -1031,7 +1031,10 @@ def run_check(pid, params, creds, log, progress):
             # «Не найдено (404)» и «Ошибка сервера (5xx)». Domain-ресурс покрывает
             # и поддомены, поэтому ловит 404, которых нет у Яндекса/в sitemap.
             _gsc_404 = None
-            if params.get('index_404_gsc', True):
+            # Браузерный Google-источник (капризная сессия) — запасной: только
+            # когда НЕ настроен сервисный аккаунт. Если gsc_sa задан, Google идёт
+            # надёжно через API (ниже), а браузерный не гоняем и не пугаем ⚠.
+            if params.get('index_404_gsc', True) and not creds.get('gsc_sa'):
                 _gsc_404 = _run_gsc_index404(
                     pid, params, log, session_b64=creds.get('autoclick_session'),
                     gsc_login=creds.get('gsc'))
@@ -1052,7 +1055,10 @@ def run_check(pid, params, creds, log, progress):
                         'Search Console…')
                     _gsc_api_404 = check_gsc_api_404(
                         pid, _gsc_sa, proxy_url=proxy_url,
-                        max_urls=int(params.get('index_404_gsc_api_max', 3000)),
+                        # интерактивный прогон - небольшая порция (боевой сайт
+                        # отвечает секунды; полное покрытие набирается ротацией по
+                        # дням). Плановый CLI может брать больше.
+                        max_urls=int(params.get('index_404_gsc_api_max', 800)),
                         days=int(params.get('index_404_gsc_api_days', 90)),
                         log=_nlog)
                     if _gsc_api_404.get('error'):
