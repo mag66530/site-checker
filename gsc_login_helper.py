@@ -29,6 +29,7 @@ import argparse
 import asyncio
 import base64
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -42,6 +43,31 @@ UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 LOGIN_URL = 'https://accounts.google.com/signin/v2/identifier?hl=ru'
 SESSION_MAX_SEC = 900          # держим сессию входа до 15 минут
 STEP_WAIT_SEC = 180            # ждём ввод человека на каждом шаге до 3 минут
+
+
+def _start_xvfb():
+    """Поднять виртуальный экран (Xvfb) для headful-браузера. Google не пускает
+    headless-браузер («небезопасный»), а с настоящим экраном (headful) проходит
+    заметно чаще. Возвращает Popen (чтобы потом закрыть) или None, если экран уже
+    есть / пакет xvfb не установлен - тогда останемся в headless."""
+    import shutil
+    import subprocess
+    if os.environ.get('DISPLAY'):
+        return None                       # экран уже есть (локально)
+    if not shutil.which('Xvfb'):
+        return None                       # пакета нет - fallback в headless
+    disp = ':99'
+    if os.path.exists('/tmp/.X99-lock'):
+        os.environ['DISPLAY'] = disp      # экран с прошлого запуска - переиспользуем
+        return None
+    try:
+        proc = subprocess.Popen(
+            ['Xvfb', disp, '-screen', '0', '1360x1020x24', '-nolisten', 'tcp'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.environ['DISPLAY'] = disp
+        return proc
+    except Exception:
+        return None
 
 
 def _dir(pid: str) -> Path:
@@ -99,13 +125,34 @@ async def run(pid: str) -> int:
                 status('error', msg=f'браузер не готов: {str(e)[:200]}')
                 return 1
 
+        # Виртуальный экран → браузер с настоящим экраном (headful): Google не
+        # блокирует его как «небезопасный», в отличие от headless.
+        xvfb = _start_xvfb()
+        headful = bool(os.environ.get('DISPLAY'))
+        if headful:
+            await asyncio.sleep(1.2)      # дать Xvfb подняться
+            status('start', msg='Открываю браузер с экраном…')
         try:
-            browser = await p.chromium.launch(headless=True, args=[
+            browser = await p.chromium.launch(headless=not headful, args=[
                 '--no-sandbox', '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled'])
+                '--disable-blink-features=AutomationControlled',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--window-size=1360,1020', '--start-maximized'])
         except Exception as e:
-            status('error', msg=f'не запустился браузер: {str(e)[:200]}')
-            return 1
+            # headful не поднялся - пробуем headless, чтобы хоть что-то показать
+            try:
+                browser = await p.chromium.launch(headless=True, args=[
+                    '--no-sandbox', '--disable-dev-shm-usage',
+                    '--disable-blink-features=AutomationControlled'])
+                headful = False
+            except Exception:
+                status('error', msg=f'не запустился браузер: {str(e)[:200]}')
+                if xvfb:
+                    try:
+                        xvfb.terminate()
+                    except Exception:
+                        pass
+                return 1
 
         ctx = await browser.new_context(
             user_agent=UA, locale='ru-RU', timezone_id='Europe/Moscow',
@@ -256,6 +303,11 @@ async def run(pid: str) -> int:
 
         try:
             await browser.close()
+        except Exception:
+            pass
+    if xvfb:
+        try:
+            xvfb.terminate()
         except Exception:
             pass
     return 0
