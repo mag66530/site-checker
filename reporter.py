@@ -3964,6 +3964,49 @@ def _build_yabusiness_sheet(wb, yabusiness):
                 size=9, color=C.text_muted)
             ws.row_dimensions[row].height = 15
             row += 1
+        row += 1
+
+    # ── Пункт: все филиалы объединены в Сеть ──
+    cch = yabusiness.get('chain_check') or {}
+    if cch:
+        row += 1
+        united = cch.get('united')
+        _hdr(('✅ ' if united else '❌ ') + 'Все филиалы объединены в Сеть')
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        cc = ws.cell(row=row, column=2)
+        if united:
+            cc.value = 'филиалы объединены в сеть (отдельных компаний нет)'
+            cc.font = _font(size=10, color=C.ok)
+        else:
+            cc.value = (f'НЕ объединены: {cch.get("standalone_companies", 0)} '
+                        f'отдельных компаний (карточек), сетей в аккаунте '
+                        f'{cch.get("chains", 0)} - филиалы нужно свести в одну '
+                        f'Сеть')
+            cc.font = _font(size=10, color=C.err)
+        cc.alignment = _align(indent=1, wrap=True)
+        ws.row_dimensions[row].height = 30
+        row += 2
+
+    # ── Пункт: максимально заполнен профиль ──
+    pch = yabusiness.get('profile_check') or {}
+    porgs = pch.get('orgs') or []
+    if porgs:
+        row += 1
+        _hdr(('✅ ' if pch.get('all_full') else '⚠ ')
+             + f'Заполненность профиля организаций ({len(porgs)})')
+        for o in porgs:
+            miss = o.get('missing') or []
+            ws.cell(row=row, column=2, value=o.get('city') or '').font = _font(
+                size=10, color=C.ok if not miss else C.warn)
+            ws.cell(row=row, column=3,
+                    value=f'заполнено {o.get("filled",0)}/{o.get("total",0)}'
+                    ).font = _font(size=9, color=C.text_soft)
+            ws.cell(row=row, column=4,
+                    value=('всё заполнено' if not miss
+                           else 'не заполнено: ' + ', '.join(miss))).font = \
+                _font(size=9, color=C.text_muted if not miss else C.warn)
+            ws.row_dimensions[row].height = 15
+            row += 1
 
 
 def _build_admin_settings_sheet(wb, admin_settings):

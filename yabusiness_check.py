@@ -98,21 +98,41 @@ def load_session_cookies(project_id: str, b64: str = None) -> dict:
 
 
 _RE_PERMALINK = re.compile(r'"(?:chain_)?permalink"\s*:\s*(\d{6,})')
+_RE_CHAIN_PERMALINK = re.compile(r'"chain_permalink"\s*:\s*(\d{6,})')
+_RE_PLAIN_PERMALINK = re.compile(r'"permalink"\s*:\s*(\d{6,})')
 _RE_REGION = re.compile(r'"region_code"\s*:\s*"([^"]+)"')
 _RE_LOCALITY = re.compile(
     r'"kind"\s*:\s*"locality"[^}]*?"name"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"')
 _RE_ADDR = re.compile(r'"formatted"\s*:\s*\{\s*"value"\s*:\s*"([^"]{3,120})"')
+
+# Поля профиля Я.Бизнеса: (ключ находки, подпись, regex непустого наличия).
+# Проверяем, что массив/поле НЕ пустое (есть хотя бы один элемент).
+PROFILE_FIELDS = [
+    ('phones', 'телефон', re.compile(r'"phones"\s*:\s*\[\s*\{')),
+    ('emails', 'почта', re.compile(r'"emails"\s*:\s*\[\s*[\{"]')),
+    ('hours', 'время работы',
+     re.compile(r'"(?:base_)?work_intervals"\s*:\s*\[\s*\{')),
+    ('social', 'соцсети/мессенджеры', re.compile(r'"accounts"\s*:\s*\[\s*\{')),
+    ('photos', 'фото', re.compile(r'"photos"\s*:\s*\[\s*\{')),
+    ('rubrics', 'рубрики',
+     re.compile(r'"rubric(?:_id)?"\s*:\s*(?:\d+|\{)')),
+    ('features', 'особенности', re.compile(r'"features"\s*:\s*\[\s*\{')),
+]
 
 
 def _org_card_from_html(html: str, permalink: str) -> dict:
     m_city = _RE_LOCALITY.search(html)
     m_reg = _RE_REGION.search(html)
     m_addr = _RE_ADDR.search(html)
+    profile = {key: bool(rx.search(html)) for key, _lbl, rx in PROFILE_FIELDS}
+    # регион/город тоже часть «заполненности».
+    profile['region'] = bool(m_reg)
     return {
         'permalink': permalink,
         'city': m_city.group(1) if m_city else None,
         'region': m_reg.group(1) if m_reg else None,
         'addr': m_addr.group(1) if m_addr else None,
+        'profile': profile,
     }
 
 
@@ -137,20 +157,23 @@ def fetch_orgs(state: dict, proxy_url: str = None, log=None):
             if 'passport' in page.url or 'auth' in page.url.split('?')[0]:
                 return False, None
             html = page.content()
-            perms = sorted(set(_RE_PERMALINK.findall(html)))
-            if not perms:
-                return True, []
+            chains = set(_RE_CHAIN_PERMALINK.findall(html))
+            plain = set(_RE_PLAIN_PERMALINK.findall(html))
+            standalone = sorted(plain - chains)   # отдельные компании (не сети)
+            if not (chains or standalone):
+                return True, None
+            # Карточки только по отдельным компаниям (у сети своего города нет).
             orgs = []
-            for p in perms:
+            for p in standalone:
                 try:
                     page.goto(f'{CABINET}/{p}/p/edit/main',
                               wait_until='domcontentloaded', timeout=60000)
                     page.wait_for_timeout(1500)
                     orgs.append(_org_card_from_html(page.content(), p))
                 except Exception:
-                    orgs.append({'permalink': p, 'city': None,
-                                 'region': None, 'addr': None})
-            return True, orgs
+                    orgs.append({'permalink': p, 'city': None, 'region': None,
+                                 'addr': None, 'profile': {}})
+            return True, {'chains': sorted(chains), 'companies': orgs}
         finally:
             br.close()
 
@@ -169,10 +192,9 @@ def _subdomains(project_id: str) -> list:
     return out
 
 
-def check_subdomain_regions(orgs: list, project_id: str) -> dict:
-    """Сверка: у каждого поддомена есть орг под его городом. orgs - список
-    карточек (fetch_org_card). Возвращает dict для отчёта."""
-    active = [o for o in orgs if o.get('city')]
+def check_subdomain_regions(companies: list, project_id: str) -> dict:
+    """Сверка: у каждого поддомена есть орг под его городом."""
+    active = [o for o in companies if o.get('city')]
     org_by_city = {}
     for o in active:
         org_by_city.setdefault(_norm_city(o['city']), []).append(o)
@@ -182,24 +204,56 @@ def check_subdomain_regions(orgs: list, project_id: str) -> dict:
     for url, city, country in subs:
         orgs_here = org_by_city.get(_norm_city(city))
         if orgs_here:
-            matched.append({'url': url, 'city': city,
-                            'org': orgs_here[0]})
+            matched.append({'url': url, 'city': city, 'org': orgs_here[0]})
         else:
             missing.append({'url': url, 'city': city, 'country': country})
-    # Орги, чей город не совпал ни с одним поддоменом (лишние/чужие).
     sub_cities = {_norm_city(c) for _, c, _ in subs}
     orphan_orgs = [o for o in active if _norm_city(o['city']) not in sub_cities]
 
     return {
         'total_subdomains': len(subs),
-        'total_orgs': len(orgs),
         'active_orgs': len(active),
-        'chains_or_empty': len(orgs) - len(active),
         'matched': matched,
         'missing': missing,
         'orphan_orgs': orphan_orgs,
         'orgs': active,
     }
+
+
+def check_chain(chains: list, companies: list) -> dict:
+    """«Все филиалы объединены в Сеть». Активные компании с городом - это
+    ОТДЕЛЬНЫЕ карточки (не члены сети): если такие есть - филиалы не
+    объединены. OK, если отдельных активных компаний нет."""
+    standalone = [o for o in companies if o.get('city')]
+    ok = len(standalone) == 0
+    return {
+        'chains': len(chains),
+        'standalone_companies': len(standalone),
+        'united': ok,
+        'standalone_list': [{'permalink': o['permalink'], 'city': o.get('city')}
+                            for o in standalone],
+    }
+
+
+def check_profile(companies: list) -> dict:
+    """«Максимально заполнен профиль». По каждой активной компании - какие
+    поля профиля не заполнены (телефон/почта/часы/соцсети/фото/рубрики/
+    особенности/регион)."""
+    labels = {k: lbl for k, lbl, _ in PROFILE_FIELDS}
+    labels['region'] = 'регион'
+    order = [k for k, _, _ in PROFILE_FIELDS] + ['region']
+    per_org, all_full = [], True
+    for o in companies:
+        if not o.get('city'):
+            continue
+        prof = o.get('profile') or {}
+        missing = [labels[k] for k in order if not prof.get(k)]
+        if missing:
+            all_full = False
+        per_org.append({'permalink': o['permalink'], 'city': o.get('city'),
+                        'missing': missing,
+                        'filled': len(order) - len(missing), 'total': len(order)})
+    return {'all_full': all_full, 'orgs': per_org}
 
 
 def run(project_id: str, session_b64: str = None, proxy_url: str = None,
@@ -215,20 +269,28 @@ def run(project_id: str, session_b64: str = None, proxy_url: str = None,
                 'note': 'Нет сессии Яндекса (autoclick_session_<pid>). '
                         'Экспортируйте сессию, как для автокликеров.'}
     try:
-        logged_in, orgs = fetch_orgs(state, proxy_url=proxy_url, log=log)
+        logged_in, data = fetch_orgs(state, proxy_url=proxy_url, log=log)
     except Exception as e:
         return {'available': False, 'note': f'Я.Бизнес: {e}'}
     if not logged_in:
         return {'available': False,
                 'note': 'Сессия Яндекса протухла (увело на passport) - '
                         'переэкспортируйте сессию.'}
-    if orgs is None or len(orgs) == 0:
+    if not data:
         return {'available': False,
                 'note': 'Организаций в Я.Бизнесе аккаунта не найдено '
                         '(или сессия не под тем аккаунтом).'}
-    _log(f'Я.Бизнес: организаций/сетей в аккаунте {len(orgs)}')
-    res = check_subdomain_regions(orgs, project_id)
+    chains = data.get('chains') or []
+    companies = data.get('companies') or []
+    _log(f'Я.Бизнес: сетей {len(chains)}, отдельных компаний {len(companies)}')
+    res = check_subdomain_regions(companies, project_id)
+    res['chains_or_empty'] = len(chains)
+    res['total_orgs'] = len(chains) + len(companies)
+    res['chain_check'] = check_chain(chains, companies)
+    res['profile_check'] = check_profile(companies)
     res['available'] = True
-    _log(f'Я.Бизнес: активных карточек {res["active_orgs"]}, '
-         f'поддоменов с орг {len(res["matched"])}/{res["total_subdomains"]}')
+    _log(f'Я.Бизнес: активных карточек {res["active_orgs"]}, поддоменов с орг '
+         f'{len(res["matched"])}/{res["total_subdomains"]}; в сеть '
+         f'объединены: {res["chain_check"]["united"]}; профиль полон: '
+         f'{res["profile_check"]["all_full"]}')
     return res
