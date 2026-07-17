@@ -24,6 +24,7 @@ scope sprav:all) требует активации партнёрского до
 """
 import base64
 import csv
+import datetime
 import json
 import re
 from pathlib import Path
@@ -37,9 +38,42 @@ BASE = Path(__file__).parent
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36')
 CABINET = 'https://yandex.ru/sprav'
+MAPS = 'https://yandex.ru/maps/org'
+
+# Отзывы: за сколько последних календарных месяцев требуем ≥1 отзыв.
+REVIEWS_MONTHS = 3
 
 # Из storage_state берём только куки Яндекса (для запросов к кабинету).
 _YANDEX_COOKIE_DOMAINS = ('yandex.ru', '.yandex.ru', 'ya.ru')
+
+# Разбор русской даты отзыва («9 апреля», «17 января 2025»).
+_RU_MONTHS = [('январ', 1), ('феврал', 2), ('март', 3), ('апрел', 4),
+              ('ма[йя]', 5), ('июн', 6), ('июл', 7), ('август', 8),
+              ('сентябр', 9), ('октябр', 10), ('ноябр', 11), ('декабр', 12)]
+_RU_MONTHS_NOM = ['', 'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+                  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
+
+
+def _parse_review_date(text: str) -> str:
+    """«9 апреля» / «17 января 2025» → 'YYYY-MM-DD'. Без года = текущий год
+    (Яндекс год не показывает только для текущего). None, если не распознали."""
+    m = re.search(r'(\d{1,2})\s+([а-я]+)(?:\s+(\d{4}))?', (text or '').lower())
+    if not m:
+        return None
+    day, word, year = int(m.group(1)), m.group(2), m.group(3)
+    month = next((n for pat, n in _RU_MONTHS if re.match(pat, word)), None)
+    if not month:
+        return None
+    y = int(year) if year else datetime.date.today().year
+    try:
+        return datetime.date(y, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def _month_label(ym: tuple) -> str:
+    y, m = ym
+    return f'{_RU_MONTHS_NOM[m]} {y}'
 
 
 def _norm_city(s: str) -> str:
@@ -173,9 +207,44 @@ def fetch_orgs(state: dict, proxy_url: str = None, log=None):
                 except Exception:
                     orgs.append({'permalink': p, 'city': None, 'region': None,
                                  'addr': None, 'profile': {}})
+            # Отзывы (даты) по активным компаниям - публичная карточка Карт.
+            for o in orgs:
+                if o.get('city'):
+                    try:
+                        o['review_dates'] = _fetch_review_dates(page,
+                                                                o['permalink'])
+                    except Exception:
+                        o['review_dates'] = []
             return True, {'chains': sorted(chains), 'companies': orgs}
         finally:
             br.close()
+
+
+def _fetch_review_dates(page, permalink: str) -> list:
+    """Даты отзывов организации с публичной страницы Карт
+    yandex.ru/maps/org/<permalink>/reviews/. Прокручиваем ленту, чтобы
+    подгрузить все, парсим `.business-review-view__date`. → ['YYYY-MM-DD', ...]"""
+    page.goto(f'{MAPS}/{permalink}/reviews/',
+              wait_until='networkidle', timeout=45000)
+    page.wait_for_timeout(2500)
+    prev = -1
+    for _ in range(10):
+        nodes = page.query_selector_all('.business-review-view__date')
+        if len(nodes) == prev:
+            break
+        prev = len(nodes)
+        if nodes:
+            try:
+                nodes[-1].scroll_into_view_if_needed(timeout=3000)
+            except Exception:
+                pass
+        page.wait_for_timeout(1000)
+    dates = []
+    for n in page.query_selector_all('.business-review-view__date'):
+        d = _parse_review_date((n.inner_text() or '').strip())
+        if d:
+            dates.append(d)
+    return dates
 
 
 def _subdomains(project_id: str) -> list:
@@ -256,6 +325,42 @@ def check_profile(companies: list) -> dict:
     return {'all_full': all_full, 'orgs': per_org}
 
 
+def check_reviews(companies: list, months: int = REVIEWS_MONTHS) -> dict:
+    """«Закупаются отзывы на важные филиалы (≥1 в месяц)». Важные филиалы =
+    все активные орг с городом. Требуем: за каждый из последних `months`
+    календарных месяцев ≥1 отзыв. Провал у орг, где хоть один месяц пуст."""
+    today = datetime.date.today()
+    targets, y, m = [], today.year, today.month
+    for _ in range(months):
+        targets.append((y, m))
+        m -= 1
+        if m == 0:
+            m, y = 12, y - 1
+    per_org, all_ok = [], True
+    for o in companies:
+        if not o.get('city'):
+            continue
+        dates = []
+        for d in (o.get('review_dates') or []):
+            try:
+                dates.append(datetime.date.fromisoformat(d))
+            except (ValueError, TypeError):
+                pass
+        covered = {(d.year, d.month) for d in dates}
+        missing = [ym for ym in targets if ym not in covered]
+        ok = not missing
+        if not ok:
+            all_ok = False
+        per_org.append({
+            'permalink': o['permalink'], 'city': o.get('city'),
+            'total_reviews': len(dates),
+            'last_review': max(dates).isoformat() if dates else None,
+            'missing_months': [_month_label(ym) for ym in missing],
+            'ok': ok,
+        })
+    return {'months': months, 'all_ok': all_ok, 'orgs': per_org}
+
+
 def run(project_id: str, session_b64: str = None, proxy_url: str = None,
         log=None) -> dict:
     """Полная проверка Я.Бизнеса на сессии. Возвращает dict для отчёта
@@ -288,9 +393,11 @@ def run(project_id: str, session_b64: str = None, proxy_url: str = None,
     res['total_orgs'] = len(chains) + len(companies)
     res['chain_check'] = check_chain(chains, companies)
     res['profile_check'] = check_profile(companies)
+    res['reviews_check'] = check_reviews(companies)
     res['available'] = True
     _log(f'Я.Бизнес: активных карточек {res["active_orgs"]}, поддоменов с орг '
          f'{len(res["matched"])}/{res["total_subdomains"]}; в сеть '
          f'объединены: {res["chain_check"]["united"]}; профиль полон: '
-         f'{res["profile_check"]["all_full"]}')
+         f'{res["profile_check"]["all_full"]}; отзывы ≥1/мес: '
+         f'{res["reviews_check"]["all_ok"]}')
     return res

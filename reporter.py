@@ -4008,6 +4008,33 @@ def _build_yabusiness_sheet(wb, yabusiness):
             ws.row_dimensions[row].height = 15
             row += 1
 
+    # ── Пункт: закупаются отзывы на важные филиалы (≥1 в месяц) ──
+    rch = yabusiness.get('reviews_check') or {}
+    rorgs = rch.get('orgs') or []
+    if rorgs:
+        row += 1
+        n_mon = rch.get('months', 3)
+        bad = [o for o in rorgs if not o.get('ok')]
+        _hdr(('✅ ' if rch.get('all_ok') else '❌ ')
+             + f'Отзывы на важные филиалы (≥1/мес за {n_mon} мес) - '
+             + (f'без отзыва в срок: {len(bad)} из {len(rorgs)}'
+                if bad else 'у всех есть'))
+        for o in rorgs:
+            miss = o.get('missing_months') or []
+            ws.cell(row=row, column=2, value=o.get('city') or '').font = _font(
+                size=10, color=C.ok if o.get('ok') else C.err)
+            last = o.get('last_review')
+            ws.cell(row=row, column=3,
+                    value=f'всего отзывов {o.get("total_reviews",0)}'
+                    + (f' · последний {last}' if last else ' · отзывов нет')
+                    ).font = _font(size=9, color=C.text_soft)
+            ws.cell(row=row, column=4,
+                    value=('норма' if o.get('ok')
+                           else 'нет отзыва за: ' + ', '.join(miss))).font = \
+                _font(size=9, color=C.text_muted if o.get('ok') else C.err)
+            ws.row_dimensions[row].height = 15
+            row += 1
+
 
 def _build_admin_settings_sheet(wb, admin_settings):
     """Лист «Настройки в админке»: работают ли функции настройки поддоменов/
