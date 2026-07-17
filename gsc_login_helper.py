@@ -176,6 +176,20 @@ async def run(pid: str) -> int:
                     try:
                         val = inp.read_text(encoding='utf-8')
                         inp.unlink(missing_ok=True)
+                        # Сфокусировать поле ввода: Google обычно фокусирует его
+                        # сам, но если фокус слетел - печать уйдёт «в никуда».
+                        # Пробуем кликнуть видимое поле (почта/пароль/код).
+                        for sel in ('input[type="email"]',
+                                    'input[type="password"]',
+                                    'input[type="tel"]',
+                                    'input[autofocus]', 'input:visible'):
+                            try:
+                                el = await page.query_selector(sel)
+                                if el and await el.is_visible():
+                                    await el.click()
+                                    break
+                            except Exception:
+                                pass
                         await page.keyboard.type(val.strip(), delay=45)
                         await page.wait_for_timeout(300)
                         await page.keyboard.press('Enter')
