@@ -281,16 +281,24 @@ def _run_gsc_index404(pid, params, log, session_b64=None, gsc_login=None):
                 'error': f'результат GSC не прочитан: {e}'}
 
 
-def _run_gsc_pages(pid, params, log, session_b64=None):
-    """Количество страниц в ГСК по статусам индексации (браузер + сессия Google).
-    Отдельный процесс gsc_pages_count.py; результат — cache/gsc_pages_result_{pid}.json.
-    Как GSC-404 браузерный: локальный CDP-Chrome или облачная сессия из Secrets."""
+def _run_gsc_pages(pid, params, log, session_b64=None, gsc_login=None):
+    """Количество страниц в ГСК по статусам индексации (браузер + сессия/автологин
+    Google). Отдельный процесс gsc_pages_count.py; результат —
+    cache/gsc_pages_result_{pid}.json. gsc_login=(email, password) включает
+    автологин — нужен робо-аккаунт Google БЕЗ 2FA с доступом к ресурсу."""
     import os as _os
     import subprocess
     import sys as _sys
     root = Path(__file__).parent
     _env = dict(_os.environ)
     _env['PYTHONIOENCODING'] = 'utf-8'
+    # Автологин: логин/пароль робо-аккаунта Google (2FA должна быть ВЫКЛючена,
+    # иначе Google попросит код и автомат невозможен).
+    if gsc_login:
+        _gl_email, _gl_pass = (gsc_login or (None, None))
+        if _gl_email and _gl_pass:
+            _env['GSC_LOGIN_EMAIL'] = _gl_email
+            _env['GSC_LOGIN_PASSWORD'] = _gl_pass
     if not _cdp_alive():
         if session_b64:
             try:
@@ -1183,33 +1191,32 @@ def run_check(pid, params, creds, log, progress):
             _mi = int(params.get('gsc_pages_indexed', 0) or 0)
             _mc = int(params.get('gsc_pages_crawled_ni', 0) or 0)
             if _mi or _mc:
-                # Ручной ввод чисел из GSC - основной путь, без браузера/сессии.
+                # Если числа вписали вручную - берём их (переопределяет автомат).
                 try:
                     from gsc_pages_count import save_manual
                     _gsc_pages = save_manual(pid, _mi, _mc)
-                    log(f'Количество страниц в ГСК: индексировано {_mi}, '
+                    log(f'Количество страниц в ГСК (вручную): индексировано {_mi}, '
                         f'просканировано-не-индексировано {_mc}, сумма '
                         f'{_gsc_pages.get("total")} (Δ {_gsc_pages.get("deltas")})')
                 except Exception as _e:
                     log(f'⚠ Количество страниц в ГСК: {_e}')
-            elif params.get('gsc_pages_try_browser'):
-                # Явный опт-ин в браузерный автомат (нужна ЖИВАЯ сессия Google;
-                # на облаке она почти всегда мёртвая - поэтому по умолчанию ВЫКЛ,
-                # чтобы не пугать ошибкой «НЕ АВТОРИЗОВАН»).
+            else:
+                # АВТОМАТ: браузер + автологин Google (сессия из Secrets как первый
+                # способ; слетела → автовход по gsc-логину/паролю, если заданы и
+                # у аккаунта выключена 2FA).
                 _gsc_pages = _run_gsc_pages(
-                    pid, params, log, session_b64=creds.get('autoclick_session'))
+                    pid, params, log,
+                    session_b64=creds.get('autoclick_session'),
+                    gsc_login=creds.get('gsc'))
                 if _gsc_pages.get('error'):
-                    log(f'⚠ Количество страниц в ГСК: {_gsc_pages["error"]}')
+                    log(f'⚠ Количество страниц в ГСК: {_gsc_pages["error"]} '
+                        f'(для автомата нужен Google-аккаунт БЕЗ 2FA + пароль в '
+                        f'Secrets; можно и вписать 2 числа вручную на странице)')
                 else:
                     log(f'Количество страниц в ГСК: индексировано '
                         f'{_gsc_pages.get("indexed")}, просканировано-не-индексировано '
                         f'{_gsc_pages.get("crawled_not_indexed")}, сумма '
                         f'{_gsc_pages.get("total")}')
-            else:
-                log('Количество страниц в ГСК: впиши 2 числа в полях под галочкой '
-                    '(«Проиндексировано» и «Просканировано, не проиндексировано» - '
-                    'их видно в GSC «Индексирование → Страницы»). Пусто - пропускаю, '
-                    'браузер на облаке не трогаю.')
 
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный
