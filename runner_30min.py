@@ -300,6 +300,22 @@ def _run_gsc_pages(pid, params, log, session_b64=None, gsc_login=None):
             _env['GSC_LOGIN_EMAIL'] = _gl_email
             _env['GSC_LOGIN_PASSWORD'] = _gl_pass
     if not _cdp_alive():
+        # Источник сессии: сначала Secrets (autoclick_session), иначе — свежая
+        # из скриншот-логина на странице «Вход в Google»
+        # (cache/gsc_login/<pid>/session.b64). Так «Количество страниц в ГСК»
+        # снимается без ручного ввода: человек один раз проходит вход по
+        # скриншотам, дальше прогоны берут ту же сессию, пока жив контейнер.
+        if not session_b64:
+            _sess_file = root / 'cache' / 'gsc_login' / pid / 'session.b64'
+            try:
+                if _sess_file.exists():
+                    _cand = _sess_file.read_text(encoding='utf-8').strip()
+                    if _cand:
+                        session_b64 = _cand
+                        log('  Сессия из входа по скриншотам '
+                            '(страница «Вход в Google»).')
+            except Exception:
+                pass
         if session_b64:
             try:
                 from autoclick_browser import (
@@ -308,11 +324,12 @@ def _run_gsc_pages(pid, params, log, session_b64=None, gsc_login=None):
                 _env[SESSION_FILE_ENV] = session_file_from_secret(session_b64)
             except Exception as _e:
                 return {'available': False,
-                        'error': f'сессия autoclick_session не читается: {_e}'}
+                        'error': f'сессия не читается: {_e}'}
         else:
             return {'available': False,
-                    'error': ('нет ни локального Chrome, ни сессии в Secrets '
-                              '(autoclick_session) - ГСК-страницы пропущены.')}
+                    'error': ('нет входа в Google. Открой страницу «Вход в '
+                              'Google», пройди вход по скриншотам — и запусти '
+                              'снова (сессия сохранится на время работы).')}
     (root / 'cache').mkdir(exist_ok=True)
     _res_file = root / 'cache' / f'gsc_pages_result_{pid}.json'
     try:
