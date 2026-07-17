@@ -8,7 +8,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from image_checker import (category_image, category_image_dups, _img_key,
-                           product_image, product_image_dups, product_slug)
+                           product_image, product_image_dups, product_slug,
+                           product_category)
 
 
 BASE = 'https://x.ru/catalog/truby/'
@@ -117,6 +118,34 @@ def test_product_slug_last_segment():
     print('✓ slug товара - последний сегмент пути')
 
 
+def test_product_category_from_url():
+    """Категория из URL - родительский путь (у СМУ/металлопроката это и есть
+    категория листинга)."""
+    assert product_category(
+        '/catalog/armatura-a4-a600/2938017-armatura-10-mm/') \
+        == '/catalog/armatura-a4-a600'
+    assert product_category('https://msk.x.ru/catalog/truby/5000-truba-57/') \
+        == '/catalog/truby'
+    print('✓ категория товара по URL - родительский путь')
+
+
+def test_metalloprokat_same_category_reuse_not_dup():
+    """Металлопрокат: арматура 10 мм и 12 мм - разные товары одной категории с
+    одним фото. Внутри категории общее фото - норма, НЕ дубль."""
+    armat = {'key': '/upload/iblock/ab/armatura.jpg', 'name': 'armatura.jpg',
+             'source': 'og:image', 'placeholder': False}
+    prods = [
+        ('msk', 'https://msk.x.ru/catalog/armatura/2938017-armatura-10-mm/',
+         armat),
+        ('msk', 'https://msk.x.ru/catalog/armatura/2938018-armatura-12-mm/',
+         armat),
+        ('msk', 'https://msk.x.ru/catalog/armatura/2938019-armatura-14-mm/',
+         armat),
+    ]
+    assert product_image_dups(prods) == {}
+    print('✓ металлопрокат: одно фото внутри категории - норма, не дубль')
+
+
 def test_same_product_different_categories_not_dup():
     """«Малиновое варенье» в «Сладостях» и «Подарках» - один товар (тот же
     slug), одно фото. Это норма CMS, не дубль (скриншот из ТЗ)."""
@@ -130,31 +159,56 @@ def test_same_product_different_categories_not_dup():
     print('✓ один товар в разных категориях (тот же slug) - не дубль')
 
 
-def test_different_products_same_photo_is_dup():
-    """Разные товары (разные slug'и) с одним фото - реальный дубль."""
-    img = {'key': '/upload/iblock/ab/stock.jpg', 'name': 'stock.jpg',
-           'source': 'og:image', 'placeholder': False}
-    other = {'key': '/upload/iblock/cd/own.jpg', 'name': 'own.jpg',
+def test_photo_across_categories_is_dup():
+    """Одно фото у РАЗНЫХ товаров из РАЗНЫХ категорий (арматура и труба) -
+    реальный дубль. Зеркало города и своё фото не в счёт."""
+    stock = {'key': '/upload/iblock/ab/stock.jpg', 'name': 'stock.jpg',
              'source': 'og:image', 'placeholder': False}
+    own = {'key': '/upload/iblock/cd/own.jpg', 'name': 'own.jpg',
+           'source': 'og:image', 'placeholder': False}
     prods = [
-        ('msk', 'https://msk.x.ru/catalog/c/malina/', img),
-        ('msk', 'https://msk.x.ru/catalog/c/klubnika/', img),   # др. товар
-        ('spb', 'https://spb.x.ru/catalog/c/malina/', img),     # зеркало
-        ('msk', 'https://msk.x.ru/catalog/c/vishnya/', other),  # своё фото
+        ('msk', 'https://msk.x.ru/catalog/armatura/2938017-armatura-10-mm/',
+         stock),
+        ('msk', 'https://msk.x.ru/catalog/truby/5000-truba-57mm/', stock),
+        ('spb', 'https://spb.x.ru/catalog/armatura/2938017-armatura-10-mm/',
+         stock),  # зеркало города - не дубль
+        ('msk', 'https://msk.x.ru/catalog/truby/5001-truba-89mm/', own),
     ]
     dups = product_image_dups(prods)
     assert list(dups) == [('msk', '/upload/iblock/ab/stock.jpg')]
     assert sorted(dups[('msk', '/upload/iblock/ab/stock.jpg')]) == [
-        'https://msk.x.ru/catalog/c/klubnika/',
-        'https://msk.x.ru/catalog/c/malina/']
-    print('✓ разные товары с одним фото - дубль; зеркало города и своё фото ок')
+        'https://msk.x.ru/catalog/armatura/2938017-armatura-10-mm/',
+        'https://msk.x.ru/catalog/truby/5000-truba-57mm/']
+    print('✓ одно фото у товаров из разных категорий - дубль; зеркало/своё ок')
+
+
+def test_category_of_callback_for_hidden_categories():
+    """У МПЭ/ИМП категория из URL товара не видна (/catalog/tovar/<slug>/) -
+    реальную категорию передаём через category_of. Без него URL-родитель у
+    обоих одинаковый и дубль бы не нашёлся."""
+    stock = {'key': '/upload/iblock/ab/stock.jpg', 'name': 'stock.jpg',
+             'source': 'og:image', 'placeholder': False}
+    prods = [
+        ('msk', 'https://msk.x.ru/catalog/tovar/list-a/', stock),
+        ('msk', 'https://msk.x.ru/catalog/tovar/truba-b/', stock),
+    ]
+    # Без category_of: у обоих родитель /catalog/tovar - одна категория, не дубль
+    assert product_image_dups(prods) == {}
+    # С реальными категориями из базы листингов - дубль между категориями
+    cat_map = {'/catalog/tovar/list-a/': '/catalog/listy/',
+               '/catalog/tovar/truba-b/': '/catalog/truby/'}
+    from urllib.parse import urlsplit
+    cat_of = lambda u: cat_map.get(urlsplit(u).path, '')
+    dups = product_image_dups(prods, category_of=cat_of)
+    assert list(dups) == [('msk', '/upload/iblock/ab/stock.jpg')]
+    print('✓ скрытые в URL категории берутся из базы через category_of')
 
 
 def test_product_placeholder_not_counted_as_dup():
     plh = {'key': '/img/no-photo.png', 'name': 'no-photo.png',
            'source': 'после h1', 'placeholder': True}
-    prods = [('msk', 'https://msk.x.ru/catalog/c/a/', plh),
-             ('msk', 'https://msk.x.ru/catalog/c/b/', plh)]
+    prods = [('msk', 'https://msk.x.ru/catalog/a/item1/', plh),
+             ('msk', 'https://msk.x.ru/catalog/b/item2/', plh)]
     assert product_image_dups(prods) == {}
     print('✓ заглушки товаров в дубли не считаются (у них своё предупреждение)')
 
@@ -170,7 +224,10 @@ if __name__ == '__main__':
     test_placeholders_not_counted_as_dups()
     test_product_image_same_extractor_as_category()
     test_product_slug_last_segment()
+    test_product_category_from_url()
+    test_metalloprokat_same_category_reuse_not_dup()
     test_same_product_different_categories_not_dup()
-    test_different_products_same_photo_is_dup()
+    test_photo_across_categories_is_dup()
+    test_category_of_callback_for_hidden_categories()
     test_product_placeholder_not_counted_as_dup()
     print('Все тесты картинок категорий и товаров пройдены.')

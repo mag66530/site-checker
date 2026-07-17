@@ -185,23 +185,46 @@ def product_slug(url: str) -> str:
     return path.rsplit('/', 1)[-1].lower()
 
 
-def product_image_dups(prods) -> dict:
-    """prods: [(subdomain, url, prod_img|None)] -> {(subdomain, key): [urls]},
-    где одно фото стоит у >=2 РАЗНЫХ товаров ОДНОГО поддомена.
+def product_category(url: str) -> str:
+    """Категория товара по URL - путь без последнего сегмента (slug). Для
+    сайтов вида /catalog/<категория>/<товар>/ (СМУ - металлопрокат) это и есть
+    категория листинга. Когда категория в URL не видна (товар лежит в
+    /catalog/tovar/<slug>/ или в корне), runner передаёт реальную категорию из
+    базы листингов через category_of - здесь только запасной вариант."""
+    path = (urlsplit(url or '').path or '').rstrip('/')
+    parent = path.rsplit('/', 1)[0]
+    return (parent or '/').lower()
 
-    Тонкость чек-листа (см. алгоритм поиска дублей): один и тот же товар,
-    выведенный в несколько категорий, ссылается на одно фото - это штатная
-    работа CMS, а не дубль (таким карточкам нужен rel=canonical - отдельная
-    проверка). Такие адреса имеют одинаковый slug, поэтому дублем считаем
-    картинку, которую делят >=2 РАЗНЫХ slug'а. Города-поддомены зеркалят
-    каталог - сравниваем в пределах одного поддомена. Заглушки (no-photo) в
-    дубли не берём - у них своё предупреждение."""
+
+def product_image_dups(prods, category_of=None) -> dict:
+    """prods: [(subdomain, url, prod_img|None)] -> {(subdomain, key): [urls]},
+    где одно фото стоит у товаров из >=2 РАЗНЫХ категорий ОДНОГО поддомена.
+
+    Пункт чек-листа - «изображения товаров В РАЗНЫХ КАТЕГОРИЯХ не
+    дублируются», поэтому сравниваем именно по категориям:
+      • внутри одной категории общее фото - НОРМА (металлопрокат: арматура
+        разных диаметров, лист разной толщины часто с одним фото);
+      • одно фото в двух и более категориях - находка.
+    Дополнительно: один и тот же товар, выведенный в несколько категорий,
+    ссылается на одно фото - это штатная работа CMS, не дубль (ему нужен
+    rel=canonical). У таких адресов одинаковый slug, поэтому требуем ещё и
+    >=2 РАЗНЫХ товаров (slug'а). Города-поддомены зеркалят каталог -
+    сравниваем в пределах одного поддомена. Заглушки (no-photo) не берём -
+    у них своё предупреждение.
+
+    category_of(url) -> категория; по умолчанию берётся из URL (родительский
+    путь, product_category)."""
+    cat_of = category_of or product_category
     groups = {}
     for sub, url, pi in prods:
         if pi and pi.get('key') and not pi.get('placeholder'):
             groups.setdefault((sub, pi['key']), []).append(url)
-    return {k: urls for k, urls in groups.items()
-            if len({product_slug(u) for u in urls}) >= 2}
+    out = {}
+    for k, urls in groups.items():
+        if (len({product_slug(u) for u in urls}) >= 2
+                and len({cat_of(u) for u in urls}) >= 2):
+            out[k] = urls
+    return out
 
 
 def imgs_no_alt(html: str) -> list:

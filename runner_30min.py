@@ -811,7 +811,8 @@ def run_check(pid, params, creds, log, progress):
         # не в warnings: чтобы не смешивались с форматами/весом.
         if params.get('check_images', True):
             from image_checker import (category_image_dups,
-                                       product_image_dups, product_slug)
+                                       product_image_dups, product_slug,
+                                       product_category)
             _cats15 = [(r.subdomain, r.url, r.images.get('cat_img'))
                        for r in results
                        if r.type_code == 'category'
@@ -836,20 +837,39 @@ def run_check(pid, params, creds, log, progress):
                     _cw.append('у категории вместо своей картинки заглушка '
                                '(no-photo/placeholder)')
 
-            # ── Уникальные фото товаров (тот же п.1.15) ──
-            # «Изображения товаров в разных категориях не дублируются»: одно
-            # фото не должно стоять у РАЗНЫХ товаров поддомена. Один товар,
-            # выведенный в несколько категорий, ссылается на одно фото - это
-            # норма CMS (product_image_dups отсекает по slug), не находка.
+            # ── Уникальные фото товаров В РАЗНЫХ КАТЕГОРИЯХ (тот же п.1.15) ──
+            # Пункт чек-листа - «изображения товаров в разных категориях не
+            # дублируются». Металлопрокат: внутри одной категории (арматура
+            # разных диаметров, лист разной толщины) общее фото - норма;
+            # находка - когда одно фото уходит в ДРУГУЮ категорию. Категорию
+            # берём из базы листингов (у МПЭ/ИМП в URL товара её не видно),
+            # иначе - из URL (у СМУ категория = родительский путь).
+            _prod_cats_map = {}
+            try:
+                from product_links import load_product_categories
+                _prod_cats_map = load_product_categories(pid) or {}
+            except Exception:
+                _prod_cats_map = {}
+
+            def _cat_of(_u):
+                _p = urlparse(_u).path or ''
+                return (_prod_cats_map.get(_p)
+                        or _prod_cats_map.get(_p.rstrip('/') + '/')
+                        or _prod_cats_map.get(_p.rstrip('/'))
+                        or product_category(_u))
+
             _prods15 = [(r.subdomain, r.url, r.images.get('prod_img'))
                         for r in results
                         if r.type_code == 'product'
                         and getattr(r, 'images', None)]
             _pdup15 = {}
-            for (_sub, _key), _urls in product_image_dups(_prods15).items():
+            for (_sub, _key), _urls in product_image_dups(
+                    _prods15, category_of=_cat_of).items():
                 _npr = len({product_slug(_u) for _u in _urls})
+                _ncat = len({_cat_of(_u) for _u in _urls})
                 for _u in _urls:
-                    _pdup15[_u] = {'name': _key.rsplit('/', 1)[-1], 'n': _npr}
+                    _pdup15[_u] = {'name': _key.rsplit('/', 1)[-1],
+                                   'n': _npr, 'cats': _ncat}
             for r in results:
                 if r.type_code != 'product' \
                         or not getattr(r, 'images', None):
@@ -858,9 +878,9 @@ def run_check(pid, params, creds, log, progress):
                 _pw = r.images.setdefault('prod_warnings', [])
                 if r.url in _pdup15:
                     r.images['prod_dup'] = _pdup15[r.url]
-                    _pw.append('фото товара не уникально - та же картинка у '
-                               'других товаров (каждому товару нужно своё '
-                               'фото)')
+                    _pw.append('фото товара дублируется в разных категориях - '
+                               'та же картинка у товаров из других разделов '
+                               '(в каждой категории свои фото товаров)')
                 elif _pi15 and _pi15.get('placeholder'):
                     _pw.append('у товара вместо фото заглушка '
                                '(no-photo/placeholder)')

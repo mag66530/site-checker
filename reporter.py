@@ -2709,9 +2709,11 @@ def _build_images_sheet(wb, results):
                'категории (og:image / первая после h1) не повторяется на '
                'других категориях того же поддомена и не заглушка. '
                '(7) Уникальные фото товаров - изображения товаров в разных '
-               'категориях не дублируются: одно фото не стоит у разных '
-               'товаров поддомена (один товар в нескольких категориях - '
-               'норма, ему нужен rel=canonical). Вес берётся по Content-Length.')
+               'категориях не дублируются: одно фото не встречается у товаров '
+               'из разных категорий (внутри одной категории общее фото - '
+               'норма для металлопроката; один товар в нескольких категориях '
+               'тоже норма, ему нужен rel=canonical). Вес берётся по '
+               'Content-Length.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
@@ -2738,11 +2740,15 @@ def _build_images_sheet(wb, results):
         return ''
 
     def _prod_extra(r):
-        """Контекст находки по фото товара: какое фото и у скольких товаров."""
+        """Контекст находки по фото товара: какое фото, в скольких категориях
+        и у скольких товаров оно встретилось."""
         im = getattr(r, 'images', None) or {}
         if im.get('prod_dup'):
-            return (f'та же картинка: {im["prod_dup"]["name"]} '
-                    f'(у {im["prod_dup"]["n"]} товаров)')
+            d = im['prod_dup']
+            cats = d.get('cats')
+            cat_txt = f'в {cats} категориях, ' if cats else ''
+            return (f'та же картинка: {d["name"]} '
+                    f'({cat_txt}у {d["n"]} товаров)')
         if im.get('prod_img'):
             return f'заглушка: {im["prod_img"]["name"]}'
         return ''
@@ -2835,17 +2841,20 @@ def _build_images_sheet(wb, results):
             ws.row_dimensions[row].height = 22
             row += 2
 
-    # ── Уникальные фото товаров (изображения товаров не дублируются) ──
+    # ── Фото товаров в разных категориях не дублируются ──
     # Секция появляется, когда в прогоне были карточки товаров. Дубль - одно
-    # фото у РАЗНЫХ товаров; один товар в нескольких категориях (тот же slug)
-    # дублем не считается (это норма CMS, для него - rel=canonical).
+    # фото у товаров из РАЗНЫХ категорий; внутри одной категории общее фото -
+    # норма (металлопрокат: арматура/лист разных размеров с одним фото). Один
+    # товар в нескольких категориях (тот же slug) тоже не дубль - ему нужен
+    # rel=canonical.
     prods = [r for r in checked if getattr(r, 'type_code', '') == 'product']
     if prods:
         prod_bad = [r for r in prods if r.images.get('prod_warnings')]
         recognized_p = sum(1 for r in prods if r.images.get('prod_img'))
         _meta_section_title(
             ws, row,
-            f'Картинки товаров - уникальность  ({len(prod_bad)})',
+            f'Фото товаров в разных категориях - уникальность  '
+            f'({len(prod_bad)})',
             C.warn if prod_bad else C.ok)
         row += 1
         if prod_bad:
@@ -2854,9 +2863,9 @@ def _build_images_sheet(wb, results):
                 C.warn, extra=_prod_extra)
         elif recognized_p:
             _meta_ok_line(ws, row,
-                          f'✅ У каждого товара своё фото, дублей и заглушек '
-                          f'нет (товаров: {len(prods)}, фото распознано у '
-                          f'{recognized_p}).')
+                          f'✅ Фото товаров не дублируются между категориями, '
+                          f'заглушек нет (товаров: {len(prods)}, фото '
+                          f'распознано у {recognized_p}).')
             row += 2
         else:
             ws.merge_cells(start_row=row, start_column=2,
