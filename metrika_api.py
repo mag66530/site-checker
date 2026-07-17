@@ -326,7 +326,15 @@ PAGE_TYPE_LABELS = {
     'product': 'Товар', 'filter': 'Фильтр', 'tag': 'Тег',
     'info': 'Информационная', 'tech': 'Техническая',
 }
-_CHUNK = 20   # счётчиков в одном запросе к API
+# Счётчиков в одном запросе. У mpe ~166 счётчиков - крупные чанки режут
+# число запросов (быстрее), но слишком крупный чанк × длинный период Метрика
+# не считает («Query is too complicated»). 50 - компромисс с выборкой ниже.
+_CHUNK = 50
+# Выборка (sampling): считать по 10% визитов и экстраполировать. Без неё запрос
+# «166 счётчиков × год × разбивка по URL» отдаёт HTTP 400 «Query is too
+# complicated» или уходит в таймаут. Для ДИНАМИКИ трафика выборки достаточно.
+_ACCURACY = '0.1'
+_HTTP_TIMEOUT = 60   # год по сотне счётчиков не влезал в 45с
 
 
 def _load_pagetypes(project_id):
@@ -380,25 +388,30 @@ def _classify_path(path, cfg):
 
 
 def _metrika_json(ids_csv, token, proxy_url, d1, d2, extra, log):
-    """GET к stat/v1/data. Возвращает payload (dict) или None при ошибке."""
-    params = {'ids': ids_csv, 'date1': d1, 'date2': d2, 'accuracy': 'full'}
+    """GET к stat/v1/data (с выборкой _ACCURACY). Ретрай 1 раз на таймаут/сеть.
+    Возвращает payload (dict) или None при ошибке."""
+    params = {'ids': ids_csv, 'date1': d1, 'date2': d2, 'accuracy': _ACCURACY}
     params.update(extra)
     headers = {'Authorization': f'OAuth {token}'}
     proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
-    try:
-        r = requests.get(API_URL, params=params, headers=headers,
-                         proxies=proxies, timeout=45)
-    except Exception as e:
-        log(f'⚠ Метрика-трафик {d1}…{d2}: сеть - {e}')
-        return None
-    if r.status_code >= 400:
-        log(f'⚠ Метрика-трафик {d1}…{d2}: HTTP {r.status_code}: {r.text[:140]}')
-        return None
-    try:
-        return r.json() or {}
-    except Exception as e:
-        log(f'⚠ Метрика-трафик: разбор - {e}')
-        return None
+    for attempt in (1, 2):
+        try:
+            r = requests.get(API_URL, params=params, headers=headers,
+                             proxies=proxies, timeout=_HTTP_TIMEOUT)
+        except Exception as e:
+            if attempt == 1:
+                continue
+            log(f'⚠ Метрика-трафик {d1}…{d2}: сеть - {e}')
+            return None
+        if r.status_code >= 400:
+            log(f'⚠ Метрика-трафик {d1}…{d2}: HTTP {r.status_code}: '
+                f'{r.text[:140]}')
+            return None
+        try:
+            return r.json() or {}
+        except Exception as e:
+            log(f'⚠ Метрика-трафик: разбор - {e}')
+            return None
 
 
 def _agg_dim(counters, token, proxy_url, d1, d2, metric, dim, log,

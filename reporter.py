@@ -4240,44 +4240,94 @@ def _build_traffic_sheet(wb, traffic):
         h.font = _font(size=9, bold=True, color=C.text)
         h.fill = _fill(C.surface)
         h.alignment = _align(wrap=True, vertical='center', horizontal='center')
+        h.border = _border()
     ws.row_dimensions[hrow].height = 30
+
+    _PAGES = ('main', 'category', 'service', 'product', 'filter', 'tag',
+              'info', 'tech')
 
     def _fmt(iso):
         return '.'.join(reversed(iso.split('-')))
 
-    row = hrow + 1
+    def _daterange(r):
+        a, b = _fmt(r['d1']), _fmt(r['d2'])
+        return a if a == b else f'{a} – {b}'
+
+    def _nums(r):
+        p = r.get('pages') or {}
+        return ([r.get('visits', 0), r.get('direct', 0), r.get('yandex', 0),
+                 r.get('google', 0), r.get('leads', 0), r.get('conv', 0),
+                 r.get('bounce', 0), r.get('depth', 0), r.get('duration', 0)]
+                + [p.get(t, 0) for t in _PAGES])
+
+    def _disp(r):
+        n = _nums(r)
+        n[8] = _fmt_duration(n[8])   # время: секунды → м:сс
+        return n
+
+    def _delta(cur, prev):
+        if not prev:
+            return '—', C.text_muted
+        pct = round((cur - prev) / prev * 100, 1)
+        if pct > 0:
+            return f'+{pct}%', C.ok
+        if pct < 0:
+            return f'{pct}%', C.err
+        return '0%', C.text_muted
+
+    def _put(row, idx, value, **fkw):
+        cell = ws.cell(row=row, column=2 + idx, value=value)
+        cell.font = _font(size=9, **fkw)
+        cell.alignment = _align(horizontal='center', vertical='center')
+        cell.border = _border()
+        return cell
+
     order = ['День', 'Месяц', 'Год']
     seen_periods = sorted({r['period'] for r in rows},
                           key=lambda p: order.index(p) if p in order else 9)
+    row = hrow + 1
     for period in seen_periods:
         prs = [r for r in rows if r['period'] == period]
-        prs.sort(key=lambda r: 0 if r['kind'] == 'текущий' else 1)
-        for r in prs:
+        cur = next((r for r in prs if r['kind'] == 'текущий'), None)
+        prev = next((r for r in prs if r['kind'] == 'прошлый'), None)
+
+        # Полоса-заголовок блока (день/месяц/год) с датами сравнения.
+        ws.merge_cells(start_row=row, start_column=2, end_row=row,
+                       end_column=last_col)
+        band = ws.cell(row=row, column=2, value=(
+            f'{period}   ·   {_daterange(cur) if cur else "?"}   vs   '
+            f'{_daterange(prev) if prev else "?"}'))
+        band.font = _font(size=11, bold=True, color='FFFFFF')
+        band.fill = _fill(C.text_soft)
+        band.alignment = _align(indent=1, vertical='center')
+        ws.row_dimensions[row].height = 20
+        row += 1
+
+        for r in (cur, prev):
+            if not r:
+                continue
             is_cur = r['kind'] == 'текущий'
             base = C.text if is_cur else C.text_muted
-            vals = [
-                r.get('year'), period, r.get('kind'),
-                r.get('visits', 0), r.get('direct', 0), r.get('yandex', 0),
-                r.get('google', 0), r.get('leads', 0), r.get('conv', 0),
-                r.get('bounce', 0), r.get('depth', 0),
-                _fmt_duration(r.get('duration', 0)),
-            ]
-            pages = r.get('pages') or {}
-            vals += [pages.get(t, 0) for t in
-                     ('main', 'category', 'service', 'product', 'filter',
-                      'tag', 'info', 'tech')]
-            for idx, val in enumerate(vals):
-                cell = ws.cell(row=row, column=2 + idx, value=val)
-                cell.font = _font(size=9, bold=(idx == 3 and is_cur),
-                                  color=base)
-                cell.alignment = _align(horizontal='center')
-            sc = ws.cell(row=row, column=4)
-            sc.value = f'{r.get("kind")}\n{_fmt(r["d1"])}–{_fmt(r["d2"])}'
-            sc.font = _font(size=8, color=base)
-            sc.alignment = _align(wrap=True, horizontal='center',
-                                  vertical='center')
-            ws.row_dimensions[row].height = 24
+            _put(row, 0, r.get('year'), color=base)
+            _put(row, 1, period, color=base)
+            _put(row, 2, r.get('kind'), color=base)
+            for j, val in enumerate(_disp(r)):
+                _put(row, 3 + j, val, color=base, bold=(j == 0 and is_cur))
+            ws.row_dimensions[row].height = 16
             row += 1
+
+        # Строка динамики (%): текущий vs прошлый по каждой колонке.
+        if cur and prev:
+            _put(row, 0, '', color=C.text_muted)
+            _put(row, 1, '', color=C.text_muted)
+            _put(row, 2, 'Δ, %', color=C.text, bold=True)
+            cn, pn = _nums(cur), _nums(prev)
+            for j in range(len(cn)):
+                txt, clr = _delta(cn[j], pn[j])
+                _put(row, 3 + j, txt, color=clr, bold=True)
+            ws.row_dimensions[row].height = 16
+            row += 1
+        row += 1   # пустая строка-разделитель между блоками
 
 
 def _build_admin_settings_sheet(wb, admin_settings):
