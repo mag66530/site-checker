@@ -4110,6 +4110,92 @@ def _build_yabusiness_sheet(wb, yabusiness):
             row += 1
 
 
+def _build_traffic_sheet(wb, traffic):
+    """Лист «Динамика трафика»: сравнение визитов/посетителей день/месяц/год
+    из Яндекс.Метрики. Добавляется, только если сравнение выполнялось."""
+    if not traffic:
+        return
+    periods = traffic.get('periods') or []
+    if not periods:
+        return
+
+    def _pct(v):
+        if v is None:
+            return '—', C.text_muted
+        if v > 0:
+            return f'+{v}%', C.ok
+        if v < 0:
+            return f'{v}%', C.err
+        return '0%', C.text_muted
+
+    declined = any((p.get('delta_visits_pct') or 0) < 0 for p in periods)
+    ws = wb.create_sheet('Динамика трафика')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.warn if declined else C.ok
+    for col, w in (('A', 3), ('B', 22), ('C', 28), ('D', 28), ('E', 16),
+                   ('F', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Динамика трафика (Метрика)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('Сравнение трафика по Яндекс.Метрике (все счётчики проекта, '
+               f'{traffic.get("counters", 0)} шт). Визиты и посетители: день '
+               '(сегодня vs вчера), месяц (с 1-го числа до сегодня vs тот же '
+               'отрезок прошлого месяца), год (с 1 января vs прошлый год до '
+               'той же даты). Текущий период неполный - сравнивается с таким '
+               'же неполным отрезком прошлого.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 54
+
+    row = 5
+    for col, txt in ((2, 'Период'), (3, 'Текущий'), (4, 'Прошлый'),
+                     (5, 'Динамика')):
+        h = ws.cell(row=row, column=col, value=txt)
+        h.font = _font(size=10, bold=True, color=C.text)
+        h.fill = _fill(C.surface)
+        h.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 18
+    row += 1
+
+    def _fmt(iso):
+        return '.'.join(reversed(iso.split('-')))
+
+    labels = {'день': 'День (сегодня vs вчера)', 'месяц': 'Месяц (к дате)',
+              'год': 'Год (к дате)'}
+    for p in periods:
+        cur, prev = p['cur'], p['prev']
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        hh = ws.cell(row=row, column=2, value=(
+            labels.get(p['label'], p['label'])
+            + f'  ·  {_fmt(cur["d1"])}–{_fmt(cur["d2"])} vs '
+            + f'{_fmt(prev["d1"])}–{_fmt(prev["d2"])}'))
+        hh.font = _font(size=11, bold=True, color=C.text)
+        hh.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 18
+        row += 1
+        for mkey, mlabel, dkey in (('visits', 'Визиты', 'delta_visits_pct'),
+                                   ('users', 'Посетители', 'delta_users_pct')):
+            ws.cell(row=row, column=2, value=mlabel).font = _font(
+                size=10, color=C.text_soft)
+            ws.cell(row=row, column=3, value=cur.get(mkey, 0)).font = _font(
+                size=10, color=C.text)
+            ws.cell(row=row, column=4, value=prev.get(mkey, 0)).font = _font(
+                size=10, color=C.text_muted)
+            txt, col = _pct(p.get(dkey))
+            ws.cell(row=row, column=5, value=txt).font = _font(
+                size=10, bold=True, color=col)
+            ws.row_dimensions[row].height = 15
+            row += 1
+        row += 1
+
+
 def _build_admin_settings_sheet(wb, admin_settings):
     """Лист «Настройки в админке»: работают ли функции настройки поддоменов/
     категорий/товаров/тех.страниц (браузерная проверка + round-trip
@@ -5534,8 +5620,8 @@ _SHEET_GROUPS = [
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
-        '404 из Метрики', 'Уведомления', 'Ошибки сервисов', 'Автокликер',
-        'Ссылочный профиль',
+        '404 из Метрики', 'Динамика трафика', 'Уведомления', 'Ошибки сервисов',
+        'Автокликер', 'Ссылочный профиль',
     ]),
     ('Контент', ['Изображения']),
 ]
@@ -5688,6 +5774,7 @@ def build_report(
     yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
     gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
     home_dupes: dict = None,       # дубли главной страницы - лист «Дубли главной»
+    traffic: dict = None,          # сравнение трафика день/месяц/год - лист «Динамика трафика»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -6053,6 +6140,9 @@ def build_report(
 
     # ─── Лист «Я.Бизнес/GMB» - если проверка выполнялась ──────────────
     _build_yabusiness_sheet(wb, yabusiness)
+
+    # ─── Лист «Динамика трафика» - если сравнение выполнялось ──────────
+    _build_traffic_sheet(wb, traffic)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

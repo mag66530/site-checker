@@ -282,6 +282,124 @@ def fetch_today_404(project_id: str, token: str,
         pages=all_pages, total_views=total_views, total_pages=len(all_pages))
 
 
+def _last_day_of_month(y, m):
+    import calendar
+    return calendar.monthrange(y, m)[1]
+
+
+def _clamp_date(y, m, d):
+    """date(y, m, d) с усечением дня до последнего дня месяца (31 мар → 28/29
+    фев для прошлого месяца; 29 фев → 28 фев для невисокосного года)."""
+    from datetime import date
+    return date(y, m, min(d, _last_day_of_month(y, m)))
+
+
+def _traffic_periods(today=None):
+    """Календарные периоды «к дате» для сравнения трафика:
+      день   - сегодня            vs вчера;
+      месяц  - 1-е..сегодня       vs 1-е..та же дата прошлого месяца;
+      год    - 1 янв..сегодня     vs 1 янв..та же дата прошлого года.
+    → [(label, (cur1, cur2), (prev1, prev2)), ...] (все - date)."""
+    from datetime import date, timedelta
+    today = today or date.today()
+    yest = today - timedelta(days=1)
+    day = ('день', (today, today), (yest, yest))
+
+    cur_m_start = today.replace(day=1)
+    prev_m_last = cur_m_start - timedelta(days=1)
+    prev_m_start = prev_m_last.replace(day=1)
+    prev_m_end = _clamp_date(prev_m_last.year, prev_m_last.month, today.day)
+    month = ('месяц', (cur_m_start, today), (prev_m_start, prev_m_end))
+
+    cur_y_start = today.replace(month=1, day=1)
+    prev_y_start = cur_y_start.replace(year=today.year - 1)
+    prev_y_end = _clamp_date(today.year - 1, today.month, today.day)
+    year = ('год', (cur_y_start, today), (prev_y_start, prev_y_end))
+    return [day, month, year]
+
+
+def _traffic_totals(ids_csv, token, proxy_url, d1, d2, log):
+    """Суммарные визиты/посетители по группе счётчиков за период. None - если
+    запрос не удался (отличать от нулей)."""
+    params = {'ids': ids_csv, 'date1': d1, 'date2': d2,
+              'metrics': 'ym:s:visits,ym:s:users', 'accuracy': 'full'}
+    headers = {'Authorization': f'OAuth {token}'}
+    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    try:
+        r = requests.get(API_URL, params=params, headers=headers,
+                         proxies=proxies, timeout=40)
+    except Exception as e:
+        log(f'⚠ Метрика-трафик {d1}…{d2}: сеть - {e}')
+        return None
+    if r.status_code >= 400:
+        log(f'⚠ Метрика-трафик {d1}…{d2}: HTTP {r.status_code}: {r.text[:160]}')
+        return None
+    try:
+        totals = (r.json() or {}).get('totals') or []
+    except Exception as e:
+        log(f'⚠ Метрика-трафик: разбор - {e}')
+        return None
+    v = int(round(float(totals[0]))) if len(totals) > 0 else 0
+    u = int(round(float(totals[1]))) if len(totals) > 1 else 0
+    return {'visits': v, 'users': u}
+
+
+def _sum_traffic(counters, token, proxy_url, d1, d2, log):
+    """Сумма трафика по всем счётчикам проекта за период (счётчики бьём на
+    группы по 10 - у проектов с сотнями счётчиков один запрос не потянет)."""
+    tot, ok = {'visits': 0, 'users': 0}, False
+    for i in range(0, len(counters), 10):
+        part = _traffic_totals(','.join(counters[i:i + 10]), token, proxy_url,
+                               d1, d2, log)
+        if part is None:
+            continue
+        ok = True
+        tot['visits'] += part['visits']
+        tot['users'] += part['users']
+    return tot if ok else None
+
+
+def fetch_traffic_comparison(project_id, token, proxy_url=None, counter=None,
+                             log=None) -> Optional[dict]:
+    """Сравнение трафика день/месяц/год (визиты и посетители) по ВСЕМ
+    счётчикам проекта. Возвращает dict для листа «Динамика трафика» или None."""
+    def _log(m):
+        if log:
+            log('info', m)
+
+    if requests is None or not token:
+        _log('⚠ Метрика-трафик: нет requests или токена')
+        return None
+    counters = _counters_for(project_id, counter, token=token,
+                             proxy_url=proxy_url, log=log)
+    if not counters:
+        _log(f'⚠ Метрика-трафик: нет счётчиков для {project_id}')
+        return None
+    _log(f'Метрика-трафик: {len(counters)} счётчик(ов), сравнение день/месяц/год')
+
+    def _delta(a, b):
+        return None if b == 0 else round((a - b) / b * 100, 1)
+
+    out = {'available': True, 'counters': len(counters), 'periods': []}
+    for label, (c1, c2), (p1, p2) in _traffic_periods():
+        cur = _sum_traffic(counters, token, proxy_url, c1.isoformat(),
+                           c2.isoformat(), _log)
+        prev = _sum_traffic(counters, token, proxy_url, p1.isoformat(),
+                            p2.isoformat(), _log)
+        if cur is None or prev is None:
+            continue
+        out['periods'].append({
+            'label': label,
+            'cur': {'d1': c1.isoformat(), 'd2': c2.isoformat(), **cur},
+            'prev': {'d1': p1.isoformat(), 'd2': p2.isoformat(), **prev},
+            'delta_visits_pct': _delta(cur['visits'], prev['visits']),
+            'delta_users_pct': _delta(cur['users'], prev['users']),
+        })
+        _log(f'  {label}: визиты {cur["visits"]} vs {prev["visits"]}, '
+             f'посетители {cur["users"]} vs {prev["users"]}')
+    return out if out['periods'] else None
+
+
 def list_counters(token, proxy_url=None):
     """Вывести все счётчики, доступные токену (Management API).
     Показывает id, имя, сайт и зеркала (поддомены) - для поиска нужного."""
@@ -528,6 +646,18 @@ if __name__ == '__main__':
         _cnt = sys.argv[3]
         _prx = sys.argv[4] if len(sys.argv) > 4 else None
         counter_info(_tok, _cnt, _prx)
+        sys.exit(0)
+
+    # Сравнение трафика день/месяц/год
+    if sys.argv[1] == 'traffic':
+        _pid = sys.argv[2]
+        _tok = sys.argv[3]
+        _cnt = sys.argv[4] if len(sys.argv) > 4 else None
+        _prx = sys.argv[5] if len(sys.argv) > 5 else None
+        res = fetch_traffic_comparison(_pid, _tok, _prx, counter=_cnt,
+                                       log=lambda lvl, m: print(m))
+        import json as _json
+        print('\n' + _json.dumps(res, ensure_ascii=False, indent=2))
         sys.exit(0)
 
     # Диагностика доступа без фильтра

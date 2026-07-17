@@ -660,7 +660,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 # Версия набора дефолтов галочек «Что проверять». Поднимать при добавлении
 # нового пункта или смене дефолта, чтобы автовыбор применился и к уже
 # открытым (сохранённым) сессиям (см. init_session).
-_C30_CHECKS_DEFAULTS_VER = 8
+_C30_CHECKS_DEFAULTS_VER = 9
 
 
 def init_session():
@@ -690,6 +690,7 @@ def init_session():
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         'c30_check_index_404': False,  # 404 среди страниц в индексе (Вебмастер) - тяжёлая, по запросу
         'c30_check_yabusiness': False,  # Я.Бизнес: поддомен под свой регион (сессия)
+        'c30_check_traffic': False,     # сравнение трафика день/месяц/год (Метрика)
         'c30_check_gsc_pages': False,  # количество страниц в ГСК по статусам - браузер, по запросу
         'c30_check_home_dupes': False,  # дубли главной страницы (HTTP, без браузера)
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
@@ -1362,6 +1363,14 @@ if pid:
                          '«Автокликеры» → «Экспорт сессии для облака»). Отдельный '
                          'лист «Я.Бизнес и GMB». Партнёрский API Справочника - '
                          'когда дадут доступ, перейдём на него.')
+        st.checkbox('Сравнение трафика (день/месяц/год) в Метрике',
+                    key='c30_check_traffic',
+                    help='Сравнивает трафик (визиты и посетители) по всем '
+                         'счётчикам проекта из Яндекс.Метрики: день (сегодня vs '
+                         'вчера), месяц (с 1-го числа до сегодня vs тот же '
+                         'отрезок прошлого месяца), год (с 1 января vs прошлый '
+                         'год до той же даты). Отдельный лист «Динамика трафика» '
+                         '(группа «Аналитика»). Нужен токен metrika_oauth_<проект>.')
         st.checkbox('Количество страниц в ГСК (индексировано / не индексировано / сумма)',
                     key='c30_check_gsc_pages',
                     help='Снимает из отчёта Google Search Console «Индексирование '
@@ -1647,6 +1656,7 @@ if pid:
         bool(st.session_state.get('c30_check_admin_tech_crud', False)),
         bool(st.session_state.get('c30_check_admin_counters', False)),
         bool(st.session_state.get('c30_check_yabusiness', False)),
+        bool(st.session_state.get('c30_check_traffic', False)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1705,6 +1715,7 @@ if pid:
                 'check_links': st.session_state.get('c30_check_links', False),
                 'check_index_404': st.session_state.get('c30_check_index_404', False),
                 'check_yabusiness': st.session_state.get('c30_check_yabusiness', False),
+                'check_traffic': st.session_state.get('c30_check_traffic', False),
                 'check_gsc_pages': st.session_state.get('c30_check_gsc_pages', False),
                 'check_home_dupes': st.session_state.get('c30_check_home_dupes', False),
                 'gsc_pages_indexed': int(st.session_state.get('c30_gsc_indexed', 0) or 0),

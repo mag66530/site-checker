@@ -881,6 +881,7 @@ def run_check(pid, params, creds, log, progress):
         report_path = REPORTS_DIR / report_filename
         _today_404 = None   # отчёт 404 из Метрика-API
         _404_goal = None    # есть ли в Метрике цель на отслеживание 404
+        _traffic = None     # сравнение трафика день/месяц/год (Метрика)
         _nlog = lambda lvl, msg: log(msg)
         # Прокси для почты/Метрики/Вебмастера - тот же, что и для страниц: с
         # учётом use_proxy проекта. Иначе при use_proxy=false сбор всё равно лез
@@ -1006,6 +1007,21 @@ def run_check(pid, params, creds, log, progress):
                 log(f'⚠ Метрика-API: токен не задан (metrika_oauth_{pid})')
         else:
             log('Сбор 404 из Метрики выключен.')
+
+        # ── Сравнение трафика день/месяц/год (Метрика) - по галочке ──
+        if params.get('check_traffic'):
+            _mt_token = creds.get('metrika_oauth')
+            if _mt_token:
+                log('Метрика-трафик: сравнение день/месяц/год…')
+                try:
+                    from metrika_api import fetch_traffic_comparison
+                    _traffic = fetch_traffic_comparison(
+                        pid, _mt_token, _proxy,
+                        counter=creds.get('metrika_counter'), log=_nlog)
+                except Exception as _e:
+                    log(f'⚠ Метрика-трафик: {_e}')
+            else:
+                log(f'⚠ Метрика-трафик: токен не задан (metrika_oauth_{pid})')
 
         # ── Автокликер - блокирует до перекликивания всех ошибок.
         # Локальный Chrome в приоритете, иначе облачный headless с сессией. ──
@@ -1521,7 +1537,7 @@ def run_check(pid, params, creds, log, progress):
             index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile,
             admin_settings=_admin_settings, yabusiness=_yabusiness,
-            gsc_pages=_gsc_pages, home_dupes=_home_dupes)
+            gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
