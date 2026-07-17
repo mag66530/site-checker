@@ -71,3 +71,29 @@ def test_parse_result_respects_engine_selection():
     rows = parse_result(result, want_yandex=True, want_google=False)
     assert rows[0]['yandex'] is True
     assert rows[0]['google'] is None       # Google не запрашивали
+
+
+def test_parse_result_grouped_by_engine():
+    """Реальный формат Арсенкина: результат сгруппирован по ПС (y/g), + resp."""
+    result = {
+        'y': {'https://a.ru/': 1, 'https://b.ru/': 0},
+        'g': {'https://a.ru/': 1, 'https://b.ru/': 1},
+        'resp': {'limits': 10},
+    }
+    rows = parse_result(result, want_yandex=True, want_google=True)
+    by_url = {r['url']: r for r in rows}
+    assert set(by_url) == {'https://a.ru/', 'https://b.ru/'}
+    assert by_url['https://a.ru/']['yandex'] is True
+    assert by_url['https://a.ru/']['google'] is True
+    assert by_url['https://b.ru/']['yandex'] is False
+    assert by_url['https://b.ru/']['google'] is True
+
+
+def test_parse_result_grouped_under_data_and_lists():
+    """Тот же формат, но вложен в data и списками {url,index}."""
+    result = {'data': {
+        'y': [{'url': 'https://a.ru/', 'index': 'да'}],
+        'g': [{'url': 'https://a.ru/', 'index': 'нет'}],
+    }}
+    rows = parse_result(result)
+    assert rows[0] == {'url': 'https://a.ru/', 'yandex': True, 'google': False}
