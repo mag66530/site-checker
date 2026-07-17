@@ -131,8 +131,47 @@ def summarize(indexed: int | None, reasons: list[dict]) -> dict:
 
 
 # ── Снятие с браузера ────────────────────────────────────────────────────────
-async def _scrape(pid: str, scout: bool, log) -> dict:
+_FF_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) '
+          'Gecko/20100101 Firefox/133.0')
+
+
+async def _open_browser_gsc(p, log):
+    """Открыть браузер для чтения отчёта GSC.
+
+    На облаке вход в Google делается через Firefox (страница «Вход в Google»),
+    поэтому и читаем отчёт Firefox'ом с той же сессией - cookies одного движка
+    полностью совместимы, Google не переспрашивает вход. Локально - обычный
+    open_browser (твой залогиненный Chrome по CDP)."""
+    from autoclick_browser import is_cloud_mode, SESSION_FILE_ENV
+    state = os.environ.get(SESSION_FILE_ENV, "")
+    if is_cloud_mode() and state and os.path.exists(state):
+        try:
+            _fp = p.firefox.executable_path
+        except Exception:
+            _fp = None
+        if not (_fp and os.path.exists(_fp)):
+            import subprocess
+            import sys as _sys
+            log("Ставлю Firefox для чтения отчёта…")
+            subprocess.run([_sys.executable, "-m", "playwright", "install", "firefox"],
+                           check=False, capture_output=True, timeout=900)
+        browser = await p.firefox.launch(headless=True, firefox_user_prefs={
+            "dom.webdriver.enabled": False,
+            "general.useragent.override": _FF_UA,
+        })
+        ctx = await browser.new_context(
+            storage_state=state, user_agent=_FF_UA, locale="ru-RU",
+            timezone_id="Europe/Moscow", viewport={"width": 1440, "height": 900})
+        await ctx.add_init_script(
+            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
+        page = await ctx.new_page()
+        log("Облачный браузер: Firefox + сессия из входа по скриншотам")
+        return browser, page
     from autoclick_browser import open_browser
+    return await open_browser(p, log)
+
+
+async def _scrape(pid: str, scout: bool, log) -> dict:
     from playwright.async_api import async_playwright
     from index_gsc_run import GSC_REPORT, _ensure_logged_in, _gsc_target
 
@@ -146,7 +185,7 @@ async def _scrape(pid: str, scout: bool, log) -> dict:
 
     async with async_playwright() as p:
         try:
-            browser, page = await open_browser(p, log)
+            browser, page = await _open_browser_gsc(p, log)
         except Exception as e:  # noqa: BLE001
             return {"error": f"браузер/сессия недоступны: {e}"}
         try:
