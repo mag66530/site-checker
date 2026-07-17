@@ -318,51 +318,179 @@ def _traffic_periods(today=None):
     return [day, month, year]
 
 
-def _traffic_totals(ids_csv, token, proxy_url, d1, d2, log):
-    """Суммарные визиты/посетители по группе счётчиков за период. None - если
-    запрос не удался (отличать от нулей)."""
-    params = {'ids': ids_csv, 'date1': d1, 'date2': d2,
-              'metrics': 'ym:s:visits,ym:s:users', 'accuracy': 'full'}
+# Порядок и подписи колонок «тип страницы» (по URL приземления).
+PAGE_TYPE_ORDER = ['main', 'category', 'service', 'product', 'filter', 'tag',
+                   'info', 'tech']
+PAGE_TYPE_LABELS = {
+    'main': 'Главная', 'category': 'Категория', 'service': 'Услуга',
+    'product': 'Товар', 'filter': 'Фильтр', 'tag': 'Тег',
+    'info': 'Информационная', 'tech': 'Техническая',
+}
+_CHUNK = 20   # счётчиков в одном запросе к API
+
+
+def _load_pagetypes(project_id):
+    """Правила классификации URL по типам. 5 типов ловятся Bitrix-путями
+    (main/category/product/filter/tech), 3 (service/tag/info) - паттернами из
+    catalogs/pagetypes-<pid>.json (подстроки пути). tech по умолчанию из
+    sources.TECH_PAGE_PATHS проекта; конфиг может дополнить/переопределить."""
+    cfg = {'service': [], 'tag': [], 'info': [], 'tech': []}
+    try:
+        import sources
+        cfg['tech'] = list(sources.TECH_PAGE_PATHS.get(project_id, []))
+    except Exception:
+        pass
+    f = Path(__file__).parent / 'catalogs' / f'pagetypes-{project_id}.json'
+    if f.exists():
+        try:
+            import json as _json
+            d = _json.loads(f.read_text(encoding='utf-8'))
+            for k in ('service', 'tag', 'info'):
+                if d.get(k):
+                    cfg[k] = list(d[k])
+            if d.get('tech'):
+                cfg['tech'] = cfg['tech'] + list(d['tech'])
+        except Exception:
+            pass
+    return cfg
+
+
+def _classify_path(path, cfg):
+    """URL-путь → тип страницы (см. PAGE_TYPE_ORDER) или None (прочее)."""
+    p = (path or '/').split('?')[0].split('#')[0]
+    if not p.startswith('/'):
+        p = '/' + p
+    if not p.endswith('/'):
+        p += '/'
+    low = p.lower()
+    # Конфиг-паттерны раньше общих правил (услуга/тег/инфо/тех - явные разделы).
+    for t in ('service', 'tag', 'info', 'tech'):
+        if any(frag.lower() in low for frag in cfg.get(t, [])):
+            return t
+    if '/filter/' in low:
+        return 'filter'
+    if p == '/':
+        return 'main'
+    if low.startswith('/catalog/'):
+        segs = [s for s in p.split('/') if s]
+        if len(segs) <= 1:
+            return None                  # корень /catalog/ - не считаем
+        return 'category' if len(segs) == 2 else 'product'
+    return None
+
+
+def _metrika_json(ids_csv, token, proxy_url, d1, d2, extra, log):
+    """GET к stat/v1/data. Возвращает payload (dict) или None при ошибке."""
+    params = {'ids': ids_csv, 'date1': d1, 'date2': d2, 'accuracy': 'full'}
+    params.update(extra)
     headers = {'Authorization': f'OAuth {token}'}
     proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
     try:
         r = requests.get(API_URL, params=params, headers=headers,
-                         proxies=proxies, timeout=40)
+                         proxies=proxies, timeout=45)
     except Exception as e:
         log(f'⚠ Метрика-трафик {d1}…{d2}: сеть - {e}')
         return None
     if r.status_code >= 400:
-        log(f'⚠ Метрика-трафик {d1}…{d2}: HTTP {r.status_code}: {r.text[:160]}')
+        log(f'⚠ Метрика-трафик {d1}…{d2}: HTTP {r.status_code}: {r.text[:140]}')
         return None
     try:
-        totals = (r.json() or {}).get('totals') or []
+        return r.json() or {}
     except Exception as e:
         log(f'⚠ Метрика-трафик: разбор - {e}')
         return None
-    v = int(round(float(totals[0]))) if len(totals) > 0 else 0
-    u = int(round(float(totals[1]))) if len(totals) > 1 else 0
-    return {'visits': v, 'users': u}
 
 
-def _sum_traffic(counters, token, proxy_url, d1, d2, log):
-    """Сумма трафика по всем счётчикам проекта за период (счётчики бьём на
-    группы по 10 - у проектов с сотнями счётчиков один запрос не потянет)."""
-    tot, ok = {'visits': 0, 'users': 0}, False
-    for i in range(0, len(counters), 10):
-        part = _traffic_totals(','.join(counters[i:i + 10]), token, proxy_url,
-                               d1, d2, log)
-        if part is None:
+def _agg_dim(counters, token, proxy_url, d1, d2, metric, dim, log,
+             limit=100000):
+    """Разбивка metric по dim, просуммированная по всем счётчикам (чанки).
+    → {ключ(id или name, lower): значение}. Ключ - id измерения если есть."""
+    out = {}
+    for i in range(0, len(counters), _CHUNK):
+        ids = ','.join(counters[i:i + _CHUNK])
+        payload = _metrika_json(ids, token, proxy_url, d1, d2,
+                                {'metrics': metric, 'dimensions': dim,
+                                 'limit': limit, 'sort': '-' + metric}, log)
+        if not payload:
+            continue
+        for row in payload.get('data', []) or []:
+            dims = row.get('dimensions') or [{}]
+            key = (dims[0].get('id') or dims[0].get('name') or '')
+            key = str(key).strip().lower()
+            try:
+                val = float((row.get('metrics') or [0])[0])
+            except (TypeError, ValueError):
+                val = 0.0
+            out[key] = out.get(key, 0.0) + val
+    return out
+
+
+def _row_stats(counters, token, proxy_url, d1, d2, cfg, log):
+    """Все показатели одной строки (один период) по всем счётчикам.
+    Rate-метрики (отказы/глубина/время) усредняем ВЗВЕШЕННО по визитам
+    (суммировать проценты по чанкам нельзя). → dict или None."""
+    metrics = ('ym:s:visits,ym:s:sumGoalReachesAny,ym:s:bounceRate,'
+               'ym:s:pageDepth,ym:s:avgVisitDurationSeconds')
+    visits = leads = 0.0
+    w_bounce = w_depth = w_dur = 0.0    # взвешенные суммы (× визиты чанка)
+    ok = False
+    for i in range(0, len(counters), _CHUNK):
+        ids = ','.join(counters[i:i + _CHUNK])
+        payload = _metrika_json(ids, token, proxy_url, d1, d2,
+                                {'metrics': metrics}, log)
+        if not payload:
             continue
         ok = True
-        tot['visits'] += part['visits']
-        tot['users'] += part['users']
-    return tot if ok else None
+        t = payload.get('totals') or []
+        g = lambda idx: float(t[idx]) if len(t) > idx and t[idx] is not None else 0.0
+        cv = g(0)
+        visits += cv
+        leads += g(1)
+        w_bounce += g(2) * cv
+        w_depth += g(3) * cv
+        w_dur += g(4) * cv
+    if not ok:
+        return None
+    v = visits or 1.0
+    src = _agg_dim(counters, token, proxy_url, d1, d2, 'ym:s:visits',
+                   'ym:s:lastTrafficSource', log)
+    org = _agg_dim(counters, token, proxy_url, d1, d2, 'ym:s:visits',
+                   'ym:s:lastSearchEngine', log)
+    adv = _agg_dim(counters, token, proxy_url, d1, d2, 'ym:s:visits',
+                   'ym:s:lastAdvEngine', log)
+    direct = src.get('direct', 0.0)
+    yandex = (sum(x for k, x in org.items() if 'yandex' in k)
+              + sum(x for k, x in adv.items() if k.startswith('ya')))
+    google = (sum(x for k, x in org.items() if 'google' in k)
+              + sum(x for k, x in adv.items() if 'google' in k))
+    paths = _agg_dim(counters, token, proxy_url, d1, d2, 'ym:s:visits',
+                     'ym:s:startURLPath', log)
+    pages = {t: 0.0 for t in PAGE_TYPE_ORDER}
+    for path, val in paths.items():
+        tp = _classify_path(path, cfg)
+        if tp:
+            pages[tp] += val
+    return {
+        'visits': int(round(visits)),
+        'direct': int(round(direct)),
+        'yandex': int(round(yandex)),
+        'google': int(round(google)),
+        'leads': int(round(leads)),
+        'conv': round(leads / v * 100, 2),
+        'bounce': round(w_bounce / v, 1),
+        'depth': round(w_depth / v, 2),
+        'duration': int(round(w_dur / v)),
+        'pages': {t: int(round(pages[t])) for t in PAGE_TYPE_ORDER},
+    }
 
 
 def fetch_traffic_comparison(project_id, token, proxy_url=None, counter=None,
                              log=None) -> Optional[dict]:
-    """Сравнение трафика день/месяц/год (визиты и посетители) по ВСЕМ
-    счётчикам проекта. Возвращает dict для листа «Динамика трафика» или None."""
+    """Динамика трафика по ВСЕМ счётчикам проекта: день/месяц/год, каждый в
+    двух строках (текущий период и прошлый - вчера / прошлый месяц / прошлый
+    год). По каждой строке: визиты (итого), прямые/Яндекс/Google, лиды,
+    конверсия, отказы, глубина, время, разбивка по типам страниц. → dict для
+    листа «Динамика трафика» или None."""
     def _log(m):
         if log:
             log('info', m)
@@ -375,29 +503,23 @@ def fetch_traffic_comparison(project_id, token, proxy_url=None, counter=None,
     if not counters:
         _log(f'⚠ Метрика-трафик: нет счётчиков для {project_id}')
         return None
-    _log(f'Метрика-трафик: {len(counters)} счётчик(ов), сравнение день/месяц/год')
+    cfg = _load_pagetypes(project_id)
+    _log(f'Метрика-трафик: {len(counters)} счётчик(ов), день/месяц/год × 2')
 
-    def _delta(a, b):
-        return None if b == 0 else round((a - b) / b * 100, 1)
-
-    out = {'available': True, 'counters': len(counters), 'periods': []}
+    rows = []
     for label, (c1, c2), (p1, p2) in _traffic_periods():
-        cur = _sum_traffic(counters, token, proxy_url, c1.isoformat(),
-                           c2.isoformat(), _log)
-        prev = _sum_traffic(counters, token, proxy_url, p1.isoformat(),
-                            p2.isoformat(), _log)
-        if cur is None or prev is None:
-            continue
-        out['periods'].append({
-            'label': label,
-            'cur': {'d1': c1.isoformat(), 'd2': c2.isoformat(), **cur},
-            'prev': {'d1': p1.isoformat(), 'd2': p2.isoformat(), **prev},
-            'delta_visits_pct': _delta(cur['visits'], prev['visits']),
-            'delta_users_pct': _delta(cur['users'], prev['users']),
-        })
-        _log(f'  {label}: визиты {cur["visits"]} vs {prev["visits"]}, '
-             f'посетители {cur["users"]} vs {prev["users"]}')
-    return out if out['periods'] else None
+        for kind, (a, b) in (('текущий', (c1, c2)), ('прошлый', (p1, p2))):
+            st = _row_stats(counters, token, proxy_url, a.isoformat(),
+                            b.isoformat(), cfg, _log)
+            if st is None:
+                continue
+            rows.append({'year': a.year, 'period': label.capitalize(),
+                         'kind': kind, 'd1': a.isoformat(), 'd2': b.isoformat(),
+                         **st})
+            _log(f'  {label}/{kind}: визиты {st["visits"]}, лиды {st["leads"]}')
+    if not rows:
+        return None
+    return {'available': True, 'counters': len(counters), 'rows': rows}
 
 
 def list_counters(token, proxy_url=None):
@@ -612,6 +734,7 @@ if __name__ == '__main__':
         for k in COUNTER_GROUPS:
             print(f'  {k}: {_counters_for(k)}')
         print('\nТест 404:  python metrika_api.py <pid> <token> [date1] [date2] [counter] [proxy]')
+        print('Трафик:    python metrika_api.py traffic <pid> <token> [counter] [proxy]')
         print('Проверка:  python metrika_api.py check <pid> <token> [counter] [date] [proxy]')
         print('Счётчики:  python metrika_api.py list_counters <token> [proxy]')
         print('Детали:    python metrika_api.py counter_info <token> <counter> [proxy]')
@@ -656,8 +779,15 @@ if __name__ == '__main__':
         _prx = sys.argv[5] if len(sys.argv) > 5 else None
         res = fetch_traffic_comparison(_pid, _tok, _prx, counter=_cnt,
                                        log=lambda lvl, m: print(m))
-        import json as _json
-        print('\n' + _json.dumps(res, ensure_ascii=False, indent=2))
+        if not res:
+            print('\nпусто'); sys.exit(0)
+        print(f'\nсчётчиков {res["counters"]}, строк {len(res["rows"])}')
+        for r in res['rows']:
+            print(f'  {r["year"]} {r["period"]:6} {r["kind"]:8} '
+                  f'визиты={r["visits"]:>7} прямые={r["direct"]:>6} '
+                  f'Я={r["yandex"]:>6} G={r["google"]:>6} лиды={r["leads"]:>4} '
+                  f'конв={r["conv"]}% отказы={r["bounce"]}% гл={r["depth"]} '
+                  f't={r["duration"]}s | {r["pages"]}')
         sys.exit(0)
 
     # Диагностика доступа без фильтра

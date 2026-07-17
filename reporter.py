@@ -4176,90 +4176,108 @@ def _build_yabusiness_sheet(wb, yabusiness):
             row += 1
 
 
+_TRAFFIC_COLS = [
+    ('Год', 8), ('Период', 10), ('Срез', 9),
+    ('Итого по каналам', 15), ('Прямые заходы', 13), ('Яндекс', 10),
+    ('Google', 10), ('Лиды', 8), ('Конверсия, %', 12), ('Отказы, %', 10),
+    ('Глубина', 9), ('Время на сайте', 13),
+    ('Главная', 10), ('Категория', 11), ('Услуга', 9), ('Товар', 9),
+    ('Фильтр', 9), ('Тег', 8), ('Информационная', 14), ('Техническая', 12),
+]
+
+
+def _fmt_duration(sec):
+    """Секунды → «м:сс» (0 → «0:00»)."""
+    sec = int(sec or 0)
+    return f'{sec // 60}:{sec % 60:02d}'
+
+
 def _build_traffic_sheet(wb, traffic):
-    """Лист «Динамика трафика»: сравнение визитов/посетителей день/месяц/год
-    из Яндекс.Метрики. Добавляется, только если сравнение выполнялось."""
+    """Лист «Динамика трафика»: широкая таблица по Яндекс.Метрике - день/
+    месяц/год, каждый в двух строках (текущий/прошлый). Каналы, лиды,
+    конверсия, поведение, разбивка по типам страниц. Только если выполнялось."""
     if not traffic:
         return
-    periods = traffic.get('periods') or []
-    if not periods:
+    rows = traffic.get('rows') or []
+    if not rows:
         return
 
-    def _pct(v):
-        if v is None:
-            return '—', C.text_muted
-        if v > 0:
-            return f'+{v}%', C.ok
-        if v < 0:
-            return f'{v}%', C.err
-        return '0%', C.text_muted
+    # Спад визитов: текущий < прошлый в каком-либо периоде.
+    by_period = {}
+    for r in rows:
+        by_period.setdefault(r['period'], {})[r['kind']] = r.get('visits', 0)
+    declined = any(v.get('текущий', 0) < v.get('прошлый', 0)
+                   for v in by_period.values())
 
-    declined = any((p.get('delta_visits_pct') or 0) < 0 for p in periods)
     ws = wb.create_sheet('Динамика трафика')
     ws.sheet_view.showGridLines = False
     ws.sheet_properties.tabColor = C.warn if declined else C.ok
-    for col, w in (('A', 3), ('B', 22), ('C', 28), ('D', 28), ('E', 16),
-                   ('F', 3)):
-        ws.column_dimensions[col].width = w
+    ws.column_dimensions['A'].width = 3
+    for idx, (_name, w) in enumerate(_TRAFFIC_COLS):
+        ws.column_dimensions[get_column_letter(2 + idx)].width = w
+    last_col = 1 + len(_TRAFFIC_COLS)
 
-    ws.merge_cells('B2:E2')
-    c = ws['B2']
-    c.value = 'Динамика трафика (Метрика)'
+    ws.merge_cells(start_row=2, start_column=2, end_row=2, end_column=8)
+    c = ws.cell(row=2, column=2, value='Динамика трафика (Метрика)')
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
-    ws.merge_cells('B3:E3')
-    c = ws['B3']
-    c.value = ('Сравнение трафика по Яндекс.Метрике (все счётчики проекта, '
-               f'{traffic.get("counters", 0)} шт). Визиты и посетители: день '
-               '(сегодня vs вчера), месяц (с 1-го числа до сегодня vs тот же '
-               'отрезок прошлого месяца), год (с 1 января vs прошлый год до '
-               'той же даты). Текущий период неполный - сравнивается с таким '
-               'же неполным отрезком прошлого.')
+    ws.merge_cells(start_row=3, start_column=2, end_row=3, end_column=last_col)
+    c = ws.cell(row=3, column=2, value=(
+        f'Все счётчики проекта ({traffic.get("counters", 0)} шт), Яндекс.Метрика. '
+        'День = сегодня / вчера, Месяц = с 1-го числа до сегодня / тот же '
+        'отрезок прошлого месяца, Год = с 1 января / прошлый год до той же даты. '
+        'Яндекс и Google - весь трафик источника (органика + реклама ПС). Лиды - '
+        'достижения любой цели; конверсия = лиды / визиты. Разбивка по типам '
+        'страниц - по URL приземления.'))
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 54
+    ws.row_dimensions[3].height = 46
 
-    row = 5
-    for col, txt in ((2, 'Период'), (3, 'Текущий'), (4, 'Прошлый'),
-                     (5, 'Динамика')):
-        h = ws.cell(row=row, column=col, value=txt)
-        h.font = _font(size=10, bold=True, color=C.text)
+    hrow = 5
+    for idx, (name, _w) in enumerate(_TRAFFIC_COLS):
+        h = ws.cell(row=hrow, column=2 + idx, value=name)
+        h.font = _font(size=9, bold=True, color=C.text)
         h.fill = _fill(C.surface)
-        h.alignment = _align(indent=1)
-    ws.row_dimensions[row].height = 18
-    row += 1
+        h.alignment = _align(wrap=True, vertical='center', horizontal='center')
+    ws.row_dimensions[hrow].height = 30
 
     def _fmt(iso):
         return '.'.join(reversed(iso.split('-')))
 
-    labels = {'день': 'День (сегодня vs вчера)', 'месяц': 'Месяц (к дате)',
-              'год': 'Год (к дате)'}
-    for p in periods:
-        cur, prev = p['cur'], p['prev']
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        hh = ws.cell(row=row, column=2, value=(
-            labels.get(p['label'], p['label'])
-            + f'  ·  {_fmt(cur["d1"])}–{_fmt(cur["d2"])} vs '
-            + f'{_fmt(prev["d1"])}–{_fmt(prev["d2"])}'))
-        hh.font = _font(size=11, bold=True, color=C.text)
-        hh.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 18
-        row += 1
-        for mkey, mlabel, dkey in (('visits', 'Визиты', 'delta_visits_pct'),
-                                   ('users', 'Посетители', 'delta_users_pct')):
-            ws.cell(row=row, column=2, value=mlabel).font = _font(
-                size=10, color=C.text_soft)
-            ws.cell(row=row, column=3, value=cur.get(mkey, 0)).font = _font(
-                size=10, color=C.text)
-            ws.cell(row=row, column=4, value=prev.get(mkey, 0)).font = _font(
-                size=10, color=C.text_muted)
-            txt, col = _pct(p.get(dkey))
-            ws.cell(row=row, column=5, value=txt).font = _font(
-                size=10, bold=True, color=col)
-            ws.row_dimensions[row].height = 15
+    row = hrow + 1
+    order = ['День', 'Месяц', 'Год']
+    seen_periods = sorted({r['period'] for r in rows},
+                          key=lambda p: order.index(p) if p in order else 9)
+    for period in seen_periods:
+        prs = [r for r in rows if r['period'] == period]
+        prs.sort(key=lambda r: 0 if r['kind'] == 'текущий' else 1)
+        for r in prs:
+            is_cur = r['kind'] == 'текущий'
+            base = C.text if is_cur else C.text_muted
+            vals = [
+                r.get('year'), period, r.get('kind'),
+                r.get('visits', 0), r.get('direct', 0), r.get('yandex', 0),
+                r.get('google', 0), r.get('leads', 0), r.get('conv', 0),
+                r.get('bounce', 0), r.get('depth', 0),
+                _fmt_duration(r.get('duration', 0)),
+            ]
+            pages = r.get('pages') or {}
+            vals += [pages.get(t, 0) for t in
+                     ('main', 'category', 'service', 'product', 'filter',
+                      'tag', 'info', 'tech')]
+            for idx, val in enumerate(vals):
+                cell = ws.cell(row=row, column=2 + idx, value=val)
+                cell.font = _font(size=9, bold=(idx == 3 and is_cur),
+                                  color=base)
+                cell.alignment = _align(horizontal='center')
+            sc = ws.cell(row=row, column=4)
+            sc.value = f'{r.get("kind")}\n{_fmt(r["d1"])}–{_fmt(r["d2"])}'
+            sc.font = _font(size=8, color=base)
+            sc.alignment = _align(wrap=True, horizontal='center',
+                                  vertical='center')
+            ws.row_dimensions[row].height = 24
             row += 1
-        row += 1
 
 
 def _build_admin_settings_sheet(wb, admin_settings):
