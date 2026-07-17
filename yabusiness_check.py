@@ -137,6 +137,9 @@ _RE_PLAIN_PERMALINK = re.compile(r'"permalink"\s*:\s*(\d{6,})')
 # Внутренний id сети в кабинете (роут /sprav/chain/<inner_id>/...) - отличается
 # от chain_permalink. Нужен, чтобы открыть страницу состава сети (/branches).
 _RE_CHAIN_INNER = re.compile(r'/sprav/chain/(\d+)')
+
+# Предохранитель на пагинацию списка организаций (?page=N).
+_MAX_LIST_PAGES = 80
 _RE_REGION = re.compile(r'"region_code"\s*:\s*"([^"]+)"')
 _RE_LOCALITY = re.compile(
     r'"kind"\s*:\s*"locality"[^}]*?"name"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"')
@@ -187,17 +190,38 @@ def fetch_orgs(state: dict, proxy_url: str = None, log=None):
         try:
             ctx = br.new_context(storage_state=state, **ctx_kw)
             page = ctx.new_page()
-            page.goto(f'{CABINET}/companies/?no_redirect=1',
+            page.goto(f'{CABINET}/companies/?no_redirect=1&page=1',
                       wait_until='domcontentloaded', timeout=60000)
             page.wait_for_timeout(4000)
             # Ушли на паспорт/авторизацию - сессия протухла.
             if 'passport' in page.url or 'auth' in page.url.split('?')[0]:
                 return False, None
-            html = page.content()
-            chains = set(_RE_CHAIN_PERMALINK.findall(html))
-            plain = set(_RE_PLAIN_PERMALINK.findall(html))
+            # Список организаций ПАГИНИРОВАН (?page=N, по 10). Читать только
+            # первую страницу - терять остальные (mpe: 15 страниц, 143 орг).
+            # Идём по страницам, пока не встретим 2 подряд без новых записей.
+            chains, plain, inner = set(), set(), set()
+            empty = 0
+            for pg in range(1, _MAX_LIST_PAGES + 1):
+                if pg > 1:
+                    page.goto(f'{CABINET}/companies/?no_redirect=1&page={pg}',
+                              wait_until='domcontentloaded', timeout=60000)
+                    page.wait_for_timeout(1600)
+                html = page.content()
+                pc = set(_RE_CHAIN_PERMALINK.findall(html))
+                pp = set(_RE_PLAIN_PERMALINK.findall(html))
+                pin = set(_RE_CHAIN_INNER.findall(html))
+                new = (pp - plain) | (pc - chains) | (pin - inner)
+                chains |= pc
+                plain |= pp
+                inner |= pin
+                if new:
+                    empty = 0
+                else:
+                    empty += 1
+                    if empty >= 2:
+                        break
             standalone = sorted(plain - chains)   # отдельные компании (не сети)
-            inner_ids = sorted(set(_RE_CHAIN_INNER.findall(html)))
+            inner_ids = sorted(inner)
             # Филиалы, спрятанные внутри сетей: собираем permalink'и со страниц
             # состава каждой сети (/sprav/chain/<inner>/branches). Без этого
             # города в сетях выглядят «без карточки».
