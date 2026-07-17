@@ -463,6 +463,19 @@ def check_against_kp(html: str, domain: str, kp: dict[str, KPRow]) -> KPCheckRes
                        f'{", ".join(_fmt(p) for p in site["phones"])}.',
         })
 
+    # ── Рекламный номер (подмена коллтрекингом), п. «замена рекл. номера» ──
+    # Статически (по HTML) сверяем рекламный подменный номер в конфиге
+    # коллтрекинга (Sipuni) с phone_ad города из КП. «na» - подмена не
+    # обнаружена/не разобрана (нейтрально, не баг).
+    try:
+        from calltracking_checker import check_ad_number
+        ad = check_ad_number(html, row.phone_ad)
+        if ad:
+            res.issues.append({'field': 'Реклама', 'status': ad['status'],
+                               'comment': ad['comment']})
+    except Exception:
+        pass
+
     # ── Почта ──
     # Сверяем, только если в КП реально e-mail. Иногда в поле почты стоит
     # заметка («надо заказывать», «-») - это не адрес, сверять не с чем.

@@ -5184,6 +5184,14 @@ def _build_kp_sheet(wb, results):
     total = len(rows)
     with_problems = sum(1 for r in rows if r.kp_result.get('has_issues'))
 
+    def _ad_status(r):
+        for i in r.kp_result.get('issues', []):
+            if i.get('field') == 'Реклама':
+                return i.get('status')
+        return None
+    ad_bad = sum(1 for r in rows if _ad_status(r) == 'bug')
+    ad_checked = sum(1 for r in rows if _ad_status(r) in ('ok', 'bug'))
+
     ws = wb.create_sheet('Контакты по городам')
     ws.sheet_view.showGridLines = False
     ws.sheet_properties.tabColor = C.err if with_problems else C.accent
@@ -5194,20 +5202,24 @@ def _build_kp_sheet(wb, results):
     ws.column_dimensions['D'].width = 12   # Телефон
     ws.column_dimensions['E'].width = 12   # Почта
     ws.column_dimensions['F'].width = 12   # Адрес
-    ws.column_dimensions['G'].width = 78   # Что не так
+    ws.column_dimensions['G'].width = 13   # Рекл. номер
+    ws.column_dimensions['H'].width = 74   # Что не так
 
     # Заголовок + пояснение
-    ws.merge_cells('B2:G2')
+    ws.merge_cells('B2:H2')
     c = ws['B2']
     c.value = 'Контакты по городам - сверка с КП'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 24
 
-    ws.merge_cells('B3:G3')
+    ws.merge_cells('B3:H3')
     c = ws['B3']
     c.value = ('Сверяем телефон, почту и адрес на главной каждого города (шапка + '
                'подвал) с «Картой присутствия». Телефон: ожидается SEO-номер (если '
-               'нет - рекламный, затем общий). Зелёное «✓» - совпало с КП, красное - '
+               'нет - рекламный, затем общий). «Рекл. номер» - работа замены '
+               'рекламного номера: рекламный подменный номер в коллтрекинге '
+               'сайта совпадает с phone_ad из КП (✓), не совпадает (БАГ) или '
+               'подмена не обнаружена («нет»). Зелёное «✓» - совпало с КП, красное - '
                'нет. «есть» (серое) - на сайте есть, но в КП этого поля нет (сверять '
                'не с чем, дополнить КП). «-» - нет ни в КП, ни на сайте. '
                'Что именно не так - в последнем столбце.')
@@ -5221,6 +5233,10 @@ def _build_kp_sheet(wb, results):
         ('С расхождениями', with_problems,
          C.err if with_problems else C.ok, C.err_soft if with_problems else C.ok_soft),
     ]
+    if ad_checked:
+        tiles.append(('Рекл. номер ≠ КП', ad_bad,
+                      C.err if ad_bad else C.ok,
+                      C.err_soft if ad_bad else C.ok_soft))
     col = 2
     for label, value, color, bg in tiles:
         ws.merge_cells(start_row=5, start_column=col, end_row=5, end_column=col + 1)
@@ -5242,7 +5258,8 @@ def _build_kp_sheet(wb, results):
 
     # Шапка таблицы
     hdr_row = 8
-    headers = ['Город', 'Открыть', 'Телефон', 'Почта', 'Адрес', 'Что не так']
+    headers = ['Город', 'Открыть', 'Телефон', 'Почта', 'Адрес',
+               'Рекл. номер', 'Что не так']
     for ci, h in enumerate(headers, start=2):
         cell = ws.cell(row=hdr_row, column=ci, value=h)
         cell.font = _font(size=10, bold=True, color=C.text_muted)
@@ -5252,7 +5269,7 @@ def _build_kp_sheet(wb, results):
     ws.row_dimensions[hdr_row].height = 24
     ws.freeze_panes = f'B{hdr_row + 1}'
 
-    field_to_col = {'Телефон': 4, 'Почта': 5, 'Адрес': 6}
+    field_to_col = {'Телефон': 4, 'Почта': 5, 'Адрес': 6, 'Реклама': 7}
     row = hdr_row + 1
     for r in rows:
         kp = r.kp_result
@@ -5292,6 +5309,13 @@ def _build_kp_sheet(wb, results):
                 cell.value = 'КРИТ'
                 cell.font = _font(size=9, bold=True, color=C.err)
                 cell.fill = _fill(C.err_soft)
+            elif iss['status'] == 'na':
+                # подмена не обнаружена / пул не разобран - нейтрально (не баг)
+                cell.value = 'нет'
+                cell.font = _font(size=9, color=C.text_muted)
+                if iss.get('comment'):
+                    cell.comment = Comment(iss['comment'], 'Site Checker',
+                                           height=80, width=260)
             else:
                 cell.value = 'БАГ'
                 cell.font = _font(size=10, bold=True, color=C.err)
@@ -5301,7 +5325,7 @@ def _build_kp_sheet(wb, results):
         problems = [f'{i["field"]}: {i["comment"]}'
                     for i in kp.get('issues', [])
                     if i['status'] in ('bug', 'critical') and i.get('comment')]
-        wc = ws.cell(row=row, column=7, value='\n'.join(problems))
+        wc = ws.cell(row=row, column=8, value='\n'.join(problems))
         wc.font = _font(size=9, color=C.err if problems else C.text_muted)
         wc.alignment = _align(wrap=True, vertical='top')
         wc.border = _border(color=C.border_light)
