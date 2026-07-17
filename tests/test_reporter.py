@@ -193,7 +193,7 @@ def test_every_detail_sheet_is_grouped():
     src = (Path(__file__).parent.parent / 'reporter.py').read_text(encoding='utf-8')
     literal_sheets = set(_re.findall(r"create_sheet\('([^']+)'\)", src))
     covered = ({m for _, ms in _SHEET_GROUPS for m in ms}
-               | {'Обзор', 'Все детали', 'Структура страниц'})
+               | {'Обзор', 'Все детали', 'Структура страниц', 'Я.Бизнес и GMB'})
     orph = literal_sheets - covered
     assert not orph, f'листы вне групп (потеряются): {sorted(orph)}'
     print(f'✓ Все {len(literal_sheets)} листов распределены по группам')

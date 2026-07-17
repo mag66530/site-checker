@@ -3847,6 +3847,125 @@ def _build_link_profile_sheet(wb, link_profile):
 # ── Лист «Настройки в админке» (доп. чек-лист: функции настройки) ──
 
 
+# ── Лист «Я.Бизнес/GMB» ─────────────────────────────────────────────
+
+
+def _build_yabusiness_sheet(wb, yabusiness):
+    """Лист «Я.Бизнес/GMB»: каждый поддомен зарегистрирован под свой регион
+    (Яндекс.Бизнес). Данные из кабинета Справочника на сессии. Добавляется,
+    только если проверка выполнялась."""
+    if not yabusiness:
+        return
+    missing = yabusiness.get('missing') or []
+    matched = yabusiness.get('matched') or []
+    orphans = yabusiness.get('orphan_orgs') or []
+    has_problem = bool(missing) or not yabusiness.get('available')
+
+    ws = wb.create_sheet('Я.Бизнес и GMB')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = (C.err if missing else C.ok
+                                    if yabusiness.get('available') else C.warn)
+    for col, w in (('A', 3), ('B', 30), ('C', 40), ('D', 60), ('E', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:D2')
+    c = ws['B2']
+    c.value = 'Я.Бизнес / GMB'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:D3')
+    c = ws['B3']
+    c.value = ('Каждый поддомен (город) должен быть зарегистрирован в '
+               'Яндекс.Бизнесе под своим регионом. Берём организации '
+               'аккаунта из кабинета Справочника (город/регион карточки) и '
+               'сверяем с городами поддоменов. «Сети» без единого города '
+               'пропускаем (это группы). Данные - на сессии Яндекса (как '
+               'автокликеры); при партнёрском доступе перейдём на API.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+    if not yabusiness.get('available'):
+        ws.merge_cells(f'B{row}:D{row}')
+        cc = ws[f'B{row}']
+        cc.value = f'⚪ {yabusiness.get("note", "Проверка не выполнена.")}'
+        cc.font = _font(size=10, color=C.text_muted)
+        cc.alignment = _align(indent=1, wrap=True)
+        return
+
+    n_sub = yabusiness.get('total_subdomains', 0)
+    ws.merge_cells(f'B{row}:D{row}')
+    cc = ws[f'B{row}']
+    cc.value = (f'Поддоменов: {n_sub}  ·  с орг под свой город: '
+                f'{len(matched)}  ·  БЕЗ орг: {len(missing)}  ·  активных '
+                f'карточек в аккаунте: {yabusiness.get("active_orgs", 0)} '
+                f'(сетей/пустых: {yabusiness.get("chains_or_empty", 0)})')
+    cc.font = _font(size=11, bold=True, color=C.err if missing else C.ok)
+    cc.fill = _fill(C.surface)
+    cc.alignment = _align(indent=1, wrap=True)
+    ws.row_dimensions[row].height = 22
+    row += 2
+
+    def _hdr(text):
+        nonlocal row
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        h = ws.cell(row=row, column=2, value=text)
+        h.font = _font(size=11, bold=True, color=C.text)
+        h.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 20
+        row += 1
+
+    # Поддомены без орг - главная находка.
+    if missing:
+        _hdr(f'❌ Поддомены без организации под их город ({len(missing)})')
+        for m in missing:
+            ws.cell(row=row, column=2, value=m.get('city') or '').font = _font(
+                size=10, color=C.err)
+            uc = ws.cell(row=row, column=3, value=m.get('url') or '')
+            uc.font = _font(size=9, color=C.accent, underline='single')
+            if m.get('url'):
+                uc.hyperlink = m['url']
+            ws.cell(row=row, column=4,
+                    value='нет карточки в Я.Бизнесе под этот город').font = \
+                _font(size=9, color=C.text_soft)
+            ws.row_dimensions[row].height = 15
+            row += 1
+        row += 1
+
+    # Поддомены с орг.
+    if matched:
+        _hdr(f'✅ Поддомены с организацией ({len(matched)})')
+        for m in matched:
+            o = m.get('org') or {}
+            ws.cell(row=row, column=2, value=m.get('city') or '').font = _font(
+                size=10, color=C.ok)
+            ws.cell(row=row, column=3,
+                    value=f'орг {o.get("permalink","")} · регион '
+                    f'{o.get("region","")}').font = _font(
+                size=9, color=C.text_soft)
+            ws.cell(row=row, column=4, value=o.get('addr') or '').font = _font(
+                size=9, color=C.text_muted)
+            ws.row_dimensions[row].height = 15
+            row += 1
+        row += 1
+
+    # Организации без поддомена (лишние/чужие города).
+    if orphans:
+        _hdr(f'⚠ Организации без поддомена ({len(orphans)})')
+        for o in orphans:
+            ws.cell(row=row, column=2, value=o.get('city') or '').font = _font(
+                size=10, color=C.warn)
+            ws.cell(row=row, column=3,
+                    value=f'орг {o.get("permalink","")} · регион '
+                    f'{o.get("region","")}').font = _font(size=9, color=C.text_soft)
+            ws.cell(row=row, column=4, value=o.get('addr') or '').font = _font(
+                size=9, color=C.text_muted)
+            ws.row_dimensions[row].height = 15
+            row += 1
+
+
 def _build_admin_settings_sheet(wb, admin_settings):
     """Лист «Настройки в админке»: работают ли функции настройки поддоменов/
     категорий/товаров/тех.страниц (браузерная проверка + round-trip
@@ -5383,10 +5502,10 @@ def _regroup_into_groups(wb):
         for m in present:
             del wb[m]
 
-    # Порядок: Обзор → Структура страниц (standalone) → 7 групп → Все детали.
+    # Порядок: Обзор → Структура страниц → 7 групп → Я.Бизнес/GMB → Все детали.
     order = (['Обзор', 'Структура страниц']
              + [g for g, _ in _SHEET_GROUPS if g in wb.sheetnames]
-             + ['Все детали'])
+             + ['Я.Бизнес и GMB', 'Все детали'])
     ordered = [wb[n] for n in order if n in wb.sheetnames]
     ordered += [ws for ws in wb.worksheets if ws not in ordered]
     wb._sheets = ordered
@@ -5422,6 +5541,7 @@ def build_report(
     stress_check: dict = None,     # ошибки сервера: парсинг/нагрузка/дубли - лист «Нагрузка и парсинг»
     link_profile: dict = None,     # lite-профиль ссылок (Вебмастер) - лист «Ссылочный профиль»
     admin_settings: dict = None,   # функции настройки в админке (п.1.21) - лист «Настройки в админке»
+    yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
     gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
@@ -5719,6 +5839,7 @@ def build_report(
         ('Админка', 'работа функций настройки в админке: поддомены/категории/товары/тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
         ('Аналитика', '404 из Метрики, письма Вебмастера/GSC, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений, lite-профиль беклинков.'),
         ('Контент', 'изображения (alt, webp/avif, вес, lazy, уникальность картинок категорий); SEO-текст частотных категорий - в «Техничке».'),
+        ('Я.Бизнес и GMB', 'если есть лист - каждый поддомен (город) зарегистрирован в Яндекс.Бизнесе под своим регионом; поддомены без организации.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
     ]
     for i, (sheet_name, desc) in enumerate(nav_items):
@@ -5783,6 +5904,9 @@ def build_report(
 
     # ─── Лист «Настройки в админке» - если проверка выполнялась ────────
     _build_admin_settings_sheet(wb, admin_settings)
+
+    # ─── Лист «Я.Бизнес/GMB» - если проверка выполнялась ──────────────
+    _build_yabusiness_sheet(wb, yabusiness)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

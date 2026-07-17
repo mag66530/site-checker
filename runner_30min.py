@@ -494,6 +494,45 @@ def _run_admin_settings(pid, params, creds, log):
                 'note': f'результат проверки админки не прочитан: {e}'}
 
 
+def _run_yabusiness(pid, session_b64, proxy_url, log):
+    """Я.Бизнес/GMB: поддомен под свой регион. Отдельный процесс
+    yabusiness_run.py (Playwright): сессия через env YABUSINESS_SESSION,
+    прокси через env. Возвращает dict для листа «Я.Бизнес и GMB»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    (root / 'cache' / 'yabusiness').mkdir(parents=True, exist_ok=True)
+    _res_file = root / 'cache' / 'yabusiness' / f'{pid}-run.json'
+    try:
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    _env['YABUSINESS_SESSION'] = session_b64 or ''
+    if proxy_url:
+        _env['YABUSINESS_PROXY'] = proxy_url
+    args = [_sys.executable, 'yabusiness_run.py', '--project', pid,
+            '--from-env', '--out', str(_res_file)]
+    log('Я.Бизнес: тяну организации из кабинета Справочника (браузер)…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [Я.Бизнес] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        return {'available': False, 'note': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False,
+                'note': f'результат Я.Бизнеса не прочитан: {e}'}
+
+
 def run_check(pid, params, creds, log, progress):
     """Выполнить прогон. log(msg), progress(frac, text) - колбэки.
     Возвращает dict с results / report_path / started_at / finished_at / error."""
@@ -1344,6 +1383,22 @@ def run_check(pid, params, creds, log, progress):
                                            'админки (поля в блоке «Админка» '
                                            'или секрет admin_settings_<pid>).'}
 
+        # ── Я.Бизнес/GMB: поддомен под свой регион (по галочке) ──
+        # На сессии Яндекса (autoclick_session) через БРАУЗЕР (Playwright):
+        # кабинет Справочника уводит сессию в passport-петлю для requests,
+        # браузер проходит её. Отдельный процесс (Playwright в asyncio-раннере
+        # in-process падает), как admin_settings.
+        _yabusiness = None
+        if params.get('check_yabusiness'):
+            _yabusiness = _run_yabusiness(
+                pid, creds.get('autoclick_session'), proxy_url, log)
+            if (_yabusiness or {}).get('available'):
+                log(f'✓ Я.Бизнес: без орг '
+                    f'{len(_yabusiness.get("missing") or [])} из '
+                    f'{_yabusiness.get("total_subdomains", 0)} поддоменов')
+            else:
+                log(f'⚠ Я.Бизнес: {(_yabusiness or {}).get("note")}')
+
         # ── Ошибки сервера: парсинг / нагрузка / дубли URL (по галочке) ──
         # Тяжёлые сетевые пробы на прод: гоняем В КОНЦЕ, отчёт по страницам
         # уже собран - падение сервера/бан здесь = находка, не сбой прогона.
@@ -1443,7 +1498,8 @@ def run_check(pid, params, creds, log, progress):
             ps_filters=_ps_filters, search_check=_search_check,
             index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile,
-            admin_settings=_admin_settings, gsc_pages=_gsc_pages)
+            admin_settings=_admin_settings, yabusiness=_yabusiness,
+            gsc_pages=_gsc_pages)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
