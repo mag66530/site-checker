@@ -126,9 +126,12 @@ def _result_list(result):
             if isinstance(v, list):
                 return v
             if isinstance(v, dict):
-                # dict вида {url: {...}} → список строк
+                # dict вида {url: {...}} → список строк. ТОЛЬКО url-ключи, иначе
+                # служебные ключи (y/g/resp/code) попадут в «строки».
                 out = []
                 for url, payload in v.items():
+                    if 'http' not in str(url):
+                        continue
                     if isinstance(payload, dict):
                         payload = dict(payload)
                         payload.setdefault('url', url)
@@ -153,27 +156,34 @@ _ENGINE_Y = {'y', 'yandex', 'ya', 'yandex_index'}
 _ENGINE_G = {'g', 'google', 'goo', 'google_index'}
 
 
+_URL_KEYS = ('url', 'query', 'page', 'address', 'link', 'document', 'doc', 'q')
+_IDX_KEYS = ('index', 'indexed', 'status', 'result', 'value', 'in_index',
+             'indexation', 'is_index', 'exist', 'found')
+
+
 def _engine_map(node):
-    """Данные по одной ПС → {url: bool}. Узел бывает {url: verdict} или
-    [{url, index}] или ['url', ...] (список проиндексированных)."""
+    """Данные по одной ПС → {url: bool}. Узел бывает разной формы:
+    {url: verdict}, {idx: {url, index}}, [{url, index}], ['url', ...]."""
     out = {}
+    items = []
     if isinstance(node, dict):
-        for url, v in node.items():
-            if 'http' in str(url):
-                out[str(url)] = _to_bool(v)
+        for k, v in node.items():
+            if 'http' in str(k):
+                out[str(k)] = _to_bool(v)     # {url: verdict}
+            else:
+                items.append(v)               # {idx: {...}} - соберём значения
     elif isinstance(node, list):
-        for item in node:
-            if isinstance(item, dict):
-                u = _row_field(item, ('url', 'query', 'page', 'address', 'link'))
-                b = _to_bool(_row_field(
-                    item, ('index', 'indexed', 'status', 'result', 'value',
-                           'in_index')))
-                if b is None:
-                    b = _to_bool(item)
-                if u is not None:
-                    out[str(u)] = b
-            elif isinstance(item, str) and 'http' in item:
-                out[item] = True          # список = проиндексированные URL
+        items = node
+    for item in items:
+        if isinstance(item, dict):
+            u = _row_field(item, _URL_KEYS)
+            b = _to_bool(_row_field(item, _IDX_KEYS))
+            if b is None:
+                b = _to_bool(item)
+            if u is not None:
+                out[str(u)] = b
+        elif isinstance(item, str) and 'http' in item:
+            out[item] = True          # список = проиндексированные URL
     return out
 
 
@@ -294,7 +304,7 @@ def run_indexation(token, urls, *, yandex=True, google=True, search_all=True,
     id_body = {'task_id': task_id, 'id': task_id, 'report_id': task_id}
     deadline = time.time() + max_wait_sec
     rows, result_json, gj = [], None, None
-    diagged = False
+    logged_real = False
     polls = 0
     while time.time() < deadline:
         try:
@@ -306,13 +316,18 @@ def run_indexation(token, urls, *, yandex=True, google=True, search_all=True,
         except Exception:
             time.sleep(poll_sec)
             continue
-        if not diagged:
-            diagged = True
-            _log(f'  [сырой ответ get] {str(gj)[:600]}')
-        rows = parse_result(gj, want_yandex=yandex, want_google=google)
-        if rows:
-            result_json = gj
-            break
+        # Пока задача считается, get отдаёт {"code":"RESULT_ERROR",...}. Логируем
+        # ПЕРВЫЙ настоящий (не-ошибочный) ответ - это и есть формат результата.
+        _is_err = (isinstance(gj, dict)
+                   and str(gj.get('code', '')).upper() == 'RESULT_ERROR')
+        if not logged_real and not _is_err:
+            logged_real = True
+            _log(f'  [сырой ответ get] {str(gj)[:1500]}')
+        if not _is_err:
+            rows = parse_result(gj, want_yandex=yandex, want_google=google)
+            if rows:
+                result_json = gj
+                break
         polls += 1
         if polls == 1 or polls % 6 == 0:
             _log(f'  считается… ({int(polls * poll_sec)} c)')
@@ -320,8 +335,8 @@ def run_indexation(token, urls, *, yandex=True, google=True, search_all=True,
 
     if not rows:
         return {'available': False,
-                'error': f'результат не готов/пуст за {max_wait_sec} c',
-                'raw_sample': str(gj)[:1000]}
+                'error': f'результат не готов/не разобран за {max_wait_sec} c',
+                'raw_sample': str(gj)[:1500]}
 
     ni_y = sum(1 for r in rows if yandex and r['yandex'] is False)
     ni_g = sum(1 for r in rows if google and r['google'] is False)
