@@ -134,6 +134,9 @@ def load_session_cookies(project_id: str, b64: str = None) -> dict:
 _RE_PERMALINK = re.compile(r'"(?:chain_)?permalink"\s*:\s*(\d{6,})')
 _RE_CHAIN_PERMALINK = re.compile(r'"chain_permalink"\s*:\s*(\d{6,})')
 _RE_PLAIN_PERMALINK = re.compile(r'"permalink"\s*:\s*(\d{6,})')
+# Внутренний id сети в кабинете (роут /sprav/chain/<inner_id>/...) - отличается
+# от chain_permalink. Нужен, чтобы открыть страницу состава сети (/branches).
+_RE_CHAIN_INNER = re.compile(r'/sprav/chain/(\d+)')
 _RE_REGION = re.compile(r'"region_code"\s*:\s*"([^"]+)"')
 _RE_LOCALITY = re.compile(
     r'"kind"\s*:\s*"locality"[^}]*?"name"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"')
@@ -194,19 +197,34 @@ def fetch_orgs(state: dict, proxy_url: str = None, log=None):
             chains = set(_RE_CHAIN_PERMALINK.findall(html))
             plain = set(_RE_PLAIN_PERMALINK.findall(html))
             standalone = sorted(plain - chains)   # отдельные компании (не сети)
-            if not (chains or standalone):
+            inner_ids = sorted(set(_RE_CHAIN_INNER.findall(html)))
+            # Филиалы, спрятанные внутри сетей: собираем permalink'и со страниц
+            # состава каждой сети (/sprav/chain/<inner>/branches). Без этого
+            # города в сетях выглядят «без карточки».
+            member_ids = set()
+            for inner in inner_ids:
+                member_ids |= _collect_chain_members(page, inner)
+            member_ids -= chains         # сам permalink сети - не филиал
+            member_ids -= set(standalone)
+            if not (standalone or member_ids):
                 return True, None
-            # Карточки только по отдельным компаниям (у сети своего города нет).
+            _cards = ([(p, False) for p in standalone]
+                      + [(p, True) for p in sorted(member_ids)])
+            if log:
+                log(f'Я.Бизнес: отдельных {len(standalone)}, сетей '
+                    f'{len(inner_ids)}, филиалов в сетях {len(member_ids)}')
             orgs = []
-            for p in standalone:
+            for p, in_chain in _cards:
                 try:
                     page.goto(f'{CABINET}/{p}/p/edit/main',
                               wait_until='domcontentloaded', timeout=60000)
                     page.wait_for_timeout(1500)
-                    orgs.append(_org_card_from_html(page.content(), p))
+                    card = _org_card_from_html(page.content(), p)
                 except Exception:
-                    orgs.append({'permalink': p, 'city': None, 'region': None,
-                                 'addr': None, 'profile': {}})
+                    card = {'permalink': p, 'city': None, 'region': None,
+                            'addr': None, 'profile': {}}
+                card['in_chain'] = in_chain
+                orgs.append(card)
             # Отзывы (даты) по активным компаниям - публичная карточка Карт.
             for o in orgs:
                 if o.get('city'):
@@ -218,6 +236,34 @@ def fetch_orgs(state: dict, proxy_url: str = None, log=None):
             return True, {'chains': sorted(chains), 'companies': orgs}
         finally:
             br.close()
+
+
+def _collect_chain_members(page, inner_id: str) -> set:
+    """Permalink'и филиалов внутри сети со страницы её состава
+    (/sprav/chain/<inner_id>/branches). Список виртуализированный (react-window)
+    - собираем ссылки, прокручивая, пока их число не перестанет расти."""
+    try:
+        page.goto(f'{CABINET}/chain/{inner_id}/branches',
+                  wait_until='domcontentloaded', timeout=60000)
+        page.wait_for_timeout(3000)
+    except Exception:
+        return set()
+    perms, last, stable = set(), -1, 0
+    for _ in range(50):
+        for a in page.query_selector_all('a[href*="/sprav/"]'):
+            m = re.search(r'/sprav/(\d{6,})', a.get_attribute('href') or '')
+            if m:
+                perms.add(m.group(1))
+        try:
+            page.mouse.wheel(0, 2500)
+        except Exception:
+            pass
+        page.wait_for_timeout(450)
+        stable = stable + 1 if len(perms) == last else 0
+        last = len(perms)
+        if stable >= 6:
+            break
+    return perms
 
 
 def _fetch_review_dates(page, permalink: str) -> list:
@@ -290,13 +336,16 @@ def check_subdomain_regions(companies: list, project_id: str) -> dict:
 
 
 def check_chain(chains: list, companies: list) -> dict:
-    """«Все филиалы объединены в Сеть». Активные компании с городом - это
-    ОТДЕЛЬНЫЕ карточки (не члены сети): если такие есть - филиалы не
-    объединены. OK, если отдельных активных компаний нет."""
-    standalone = [o for o in companies if o.get('city')]
+    """«Все филиалы объединены в Сеть». Филиал внутри сети помечен in_chain.
+    ОТДЕЛЬНЫЕ карточки (city есть, но in_chain=False) - не сведены в сеть:
+    если такие есть - филиалы объединены не полностью. OK, если отдельных
+    активных компаний нет (все филиалы - внутри сетей)."""
+    standalone = [o for o in companies if o.get('city') and not o.get('in_chain')]
+    in_chain = [o for o in companies if o.get('city') and o.get('in_chain')]
     ok = len(standalone) == 0
     return {
         'chains': len(chains),
+        'chain_members': len(in_chain),
         'standalone_companies': len(standalone),
         'united': ok,
         'standalone_list': [{'permalink': o['permalink'], 'city': o.get('city')}

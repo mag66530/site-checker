@@ -4113,13 +4113,15 @@ def _build_yabusiness_sheet(wb, yabusiness):
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
         cc = ws.cell(row=row, column=2)
         if united:
-            cc.value = 'филиалы объединены в сеть (отдельных компаний нет)'
+            cc.value = (f'все филиалы объединены в сети (в сетях '
+                        f'{cch.get("chain_members", 0)} филиалов, отдельных '
+                        f'компаний нет)')
             cc.font = _font(size=10, color=C.ok)
         else:
             cc.value = (f'НЕ объединены: {cch.get("standalone_companies", 0)} '
-                        f'отдельных компаний (карточек), сетей в аккаунте '
-                        f'{cch.get("chains", 0)} - филиалы нужно свести в одну '
-                        f'Сеть')
+                        f'отдельных компаний (карточек) вне сети; в сетях '
+                        f'{cch.get("chain_members", 0)} филиалов, сетей '
+                        f'{cch.get("chains", 0)} - отдельные свести в Сеть')
             cc.font = _font(size=10, color=C.err)
         cc.alignment = _align(indent=1, wrap=True)
         ws.row_dimensions[row].height = 30
