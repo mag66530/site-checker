@@ -692,6 +692,7 @@ def init_session():
         'c30_check_yabusiness': False,  # Я.Бизнес: поддомен под свой регион (сессия)
         'c30_check_gsc_pages': False,  # количество страниц в ГСК по статусам - браузер, по запросу
         'c30_check_home_dupes': False,  # дубли главной страницы (HTTP, без браузера)
+        'c30_check_arsenkin': False,  # индексация URL через API Арсенкина (токен из поля)
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
         'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
@@ -1386,6 +1387,45 @@ if pid:
                          'редирект и тег canonical. Редирект на главную или '
                          'canonical → главная = склеено (ок); 200 без этого = дубль. '
                          'Быстро, без браузера. Отдельный лист «Дубли главной».')
+        st.checkbox('Проверка индексации URL через Арсенкин (Яндекс + Google)',
+                    key='c30_check_arsenkin',
+                    help='Массово проверяет через API Арсенкина, есть ли страницы '
+                         '(категории, теги, подфильтры поддоменов и домена) в '
+                         'индексе Яндекса и Google. Без браузера, без блокировок. '
+                         'Токен и список URL вводятся в блоке ниже. Отдельный лист '
+                         '«Индексация (Арсенкин)».')
+        if st.session_state.get('c30_check_arsenkin'):
+            with st.expander('Арсенкин: токен и список URL', expanded=True):
+                st.text_input(
+                    'API-токен Арсенкина', key='c30_arsenkin_token',
+                    type='password',
+                    placeholder='вставь токен (профиль Арсенкина → API)',
+                    help='Токен берётся ТОЛЬКО из этого поля (не из Secrets). '
+                         'Один аккаунт СМУ подходит для СМУ / ИМП / МПЭ. '
+                         'Обязателен, если галочка включена.')
+                st.text_area(
+                    'URL-адреса (по одному в строке, до 5000)',
+                    key='c30_arsenkin_urls', height=160,
+                    placeholder='https://site.ru/catalog/…\nhttps://city.site.ru/tag/…',
+                    help='Категории, отслеживаемые теги/подфильтры нужного '
+                         'поддомена и домена. Какие именно — уточняй у SEO-'
+                         'специалиста проекта.')
+                _ac1, _ac2, _ac3, _ac4 = st.columns(4)
+                with _ac1:
+                    st.checkbox('Яндекс', value=True, key='c30_arsenkin_yandex')
+                with _ac2:
+                    st.checkbox('Google', value=True, key='c30_arsenkin_google')
+                with _ac3:
+                    st.checkbox('http/https/www как один', value=True,
+                                key='c30_arsenkin_search_all')
+                with _ac4:
+                    st.checkbox('inurl-перепроверка', value=False,
+                                key='c30_arsenkin_inurl',
+                                help='Для Google: перепроверяет оператором inurl: '
+                                     'страницы, которых нет в индексе, чтобы меньше '
+                                     'ложных «не в индексе».')
+                st.caption('1 URL × 1 поисковая система = 2 лимита Арсенкина. '
+                           'Проверка идёт в конце прогона, результат — в отчёте.')
         st.checkbox('Проверять фильтрацию товаров (браузер)',
                     key='c30_check_filter_fn',
                     help='Открывает категорию в браузере и применяет фильтр по '
@@ -1707,6 +1747,13 @@ if pid:
                 'check_yabusiness': st.session_state.get('c30_check_yabusiness', False),
                 'check_gsc_pages': st.session_state.get('c30_check_gsc_pages', False),
                 'check_home_dupes': st.session_state.get('c30_check_home_dupes', False),
+                'check_arsenkin': st.session_state.get('c30_check_arsenkin', False),
+                'arsenkin_token': (st.session_state.get('c30_arsenkin_token', '') or '').strip(),
+                'arsenkin_urls': st.session_state.get('c30_arsenkin_urls', '') or '',
+                'arsenkin_yandex': st.session_state.get('c30_arsenkin_yandex', True),
+                'arsenkin_google': st.session_state.get('c30_arsenkin_google', True),
+                'arsenkin_search_all': st.session_state.get('c30_arsenkin_search_all', True),
+                'arsenkin_inurl': st.session_state.get('c30_arsenkin_inurl', False),
                 'gsc_pages_indexed': int(st.session_state.get('c30_gsc_indexed', 0) or 0),
                 'gsc_pages_crawled_ni': int(st.session_state.get('c30_gsc_crawled_ni', 0) or 0),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
