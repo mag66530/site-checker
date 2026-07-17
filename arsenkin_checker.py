@@ -149,27 +149,93 @@ def _result_list(result):
     return []
 
 
+_ENGINE_Y = {'y', 'yandex', 'ya', 'yandex_index'}
+_ENGINE_G = {'g', 'google', 'goo', 'google_index'}
+
+
+def _engine_map(node):
+    """Данные по одной ПС → {url: bool}. Узел бывает {url: verdict} или
+    [{url, index}] или ['url', ...] (список проиндексированных)."""
+    out = {}
+    if isinstance(node, dict):
+        for url, v in node.items():
+            if 'http' in str(url):
+                out[str(url)] = _to_bool(v)
+    elif isinstance(node, list):
+        for item in node:
+            if isinstance(item, dict):
+                u = _row_field(item, ('url', 'query', 'page', 'address', 'link'))
+                b = _to_bool(_row_field(
+                    item, ('index', 'indexed', 'status', 'result', 'value',
+                           'in_index')))
+                if b is None:
+                    b = _to_bool(item)
+                if u is not None:
+                    out[str(u)] = b
+            elif isinstance(item, str) and 'http' in item:
+                out[item] = True          # список = проиндексированные URL
+    return out
+
+
+def _find_engine_nodes(result):
+    """Найти узлы с данными по ПС (ключи y/g) в ответе get."""
+    nodes = [result]
+    if isinstance(result, dict):
+        for k in ('data', 'result', 'results', 'report', 'response'):
+            if isinstance(result.get(k), dict):
+                nodes.append(result[k])
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        y = g = None
+        for k, v in node.items():
+            kl = str(k).lower()
+            if kl in _ENGINE_Y:
+                y = v
+            elif kl in _ENGINE_G:
+                g = v
+        if y is not None or g is not None:
+            return y, g
+    return None, None
+
+
 def parse_result(result, want_yandex=True, want_google=True) -> list:
-    """Нормализовать ответ get в список {url, yandex, google}."""
+    """Нормализовать ответ get в список {url, yandex, google}.
+
+    Поддерживает два формата: (1) сгруппировано по ПС - {y:{url:...}, g:{...}};
+    (2) построчно по URL - [{url, yandex, google}]."""
+    # Формат 1: по поисковым системам (как реально отдаёт Арсенкин).
+    y_node, g_node = _find_engine_nodes(result)
+    if y_node is not None or g_node is not None:
+        ymap = _engine_map(y_node) if (want_yandex and y_node is not None) else {}
+        gmap = _engine_map(g_node) if (want_google and g_node is not None) else {}
+        urls = list(dict.fromkeys(list(ymap.keys()) + list(gmap.keys())))
+        rows = [{'url': u,
+                 'yandex': ymap.get(u) if want_yandex else None,
+                 'google': gmap.get(u) if want_google else None} for u in urls]
+        if rows:
+            return rows
+    # Формат 2: построчно.
     rows = []
     for item in _result_list(result):
         if not isinstance(item, dict):
             continue
         url = _row_field(item, ('url', 'query', 'page', 'address', 'link'))
+        if url is None:
+            continue
         y = _to_bool(_row_field(
             item, ('yandex', 'y', 'yandex_index', 'yandex_indexed',
                    'index_yandex', 'ya'))) if want_yandex else None
         g = _to_bool(_row_field(
             item, ('google', 'g', 'google_index', 'google_indexed',
                    'index_google', 'goo'))) if want_google else None
-        rows.append({'url': str(url) if url is not None else '',
-                     'yandex': y, 'google': g})
+        rows.append({'url': str(url), 'yandex': y, 'google': g})
     return rows
 
 
 def run_indexation(token, urls, *, yandex=True, google=True, search_all=True,
-                   inurl=False, log=None, proxy_url=None, poll_sec=6,
-                   max_wait_sec=900) -> dict:
+                   inurl=False, log=None, proxy_url=None, poll_sec=3,
+                   max_wait_sec=300) -> dict:
     """Поставить задачу индексации, дождаться и вернуть результат.
 
     urls - список URL (или строка, разделённая переводами строк).
@@ -221,45 +287,41 @@ def run_indexation(token, urls, *, yandex=True, google=True, search_all=True,
                 'error': f'не нашёл task_id в ответе set: {str(set_json)[:300]}'}
     _log(f'Задача поставлена (id={task_id}), URL: {len(urls)}, жду результат…')
 
-    # 2) ждать готовности
+    # 2-3) Опрашиваем РЕЗУЛЬТАТ напрямую (get): статус check в доке не
+    # формализован, а get отдаёт данные сразу, как задача готова - так быстрее.
+    # Первый ответ пишем в лог (сверить формат). id шлём под несколькими именами
+    # (лишние игнорируются).
+    id_body = {'task_id': task_id, 'id': task_id, 'report_id': task_id}
     deadline = time.time() + max_wait_sec
-    result_json = None
+    rows, result_json, gj = [], None, None
+    diagged = False
+    polls = 0
     while time.time() < deadline:
-        time.sleep(max(2, poll_sec))
         try:
-            rc = _post(API_CHECK, token, {'task_id': task_id}, proxy_url)
-        except Exception as e:  # noqa: BLE001
-            _log(f'  check: сеть моргнула ({e}), повторяю…')
-            continue
-        if rc.status_code == 429:
-            time.sleep(10)
-            continue
-        try:
-            cj = rc.json()
+            rg = _post(API_GET, token, id_body, proxy_url)
+            if rg.status_code == 429:
+                time.sleep(8)
+                continue
+            gj = rg.json()
         except Exception:
+            time.sleep(poll_sec)
             continue
-        status = _extract_status(cj)
-        if status and any(m in status for m in DONE_MARKERS):
+        if not diagged:
+            diagged = True
+            _log(f'  [сырой ответ get] {str(gj)[:600]}')
+        rows = parse_result(gj, want_yandex=yandex, want_google=google)
+        if rows:
+            result_json = gj
             break
-        if status and any(m in status for m in WORK_MARKERS):
-            continue
-        # статус неизвестен - вдруг check сразу отдаёт результат
-        if _result_list(cj):
-            result_json = cj
-            break
-    # 3) забрать результат (если не пришёл вместе со статусом)
-    if result_json is None:
-        try:
-            rg = _post(API_GET, token, {'task_id': task_id}, proxy_url)
-            result_json = rg.json()
-        except Exception as e:  # noqa: BLE001
-            return {'available': False, 'error': f'get не отдал результат: {e}'}
+        polls += 1
+        if polls == 1 or polls % 6 == 0:
+            _log(f'  считается… ({int(polls * poll_sec)} c)')
+        time.sleep(poll_sec)
 
-    rows = parse_result(result_json, want_yandex=yandex, want_google=google)
     if not rows:
         return {'available': False,
-                'error': 'результат пуст или в неизвестном формате',
-                'raw_sample': str(result_json)[:1000]}
+                'error': f'результат не готов/пуст за {max_wait_sec} c',
+                'raw_sample': str(gj)[:1000]}
 
     ni_y = sum(1 for r in rows if yandex and r['yandex'] is False)
     ni_g = sum(1 for r in rows if google and r['google'] is False)
