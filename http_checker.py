@@ -718,6 +718,7 @@ async def check_one(
                 kp_result = {
                     'domain': kp_res.domain, 'city': kp_res.city,
                     'issues': kp_res.issues, 'has_issues': kp_res.has_issues,
+                    'ad_check': kp_res.ad_check,
                 }
         except Exception:
             kp_result = None
