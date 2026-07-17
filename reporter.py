@@ -2954,6 +2954,70 @@ def _build_home_dupes_sheet(wb, home_dupes):
     ws.column_dimensions['D'].width = 24
 
 
+def _build_arsenkin_sheet(wb, arsenkin):
+    """Лист «Индексация (Арсенкин)»: есть ли URL в индексе Яндекса и Google
+    (через API Арсенкина). Строится, только если проверка выполнялась."""
+    if not arsenkin or not arsenkin.get('available'):
+        return
+    rows = arsenkin.get('rows') or []
+    eng = arsenkin.get('engines') or {'yandex': True, 'google': True}
+    ws = wb.create_sheet('Индексация (Арсенкин)')
+    ws.sheet_view.showGridLines = False
+
+    ni = int(arsenkin.get('not_indexed', 0) or 0)
+    ws.cell(row=1, column=1, value='Проверено URL:').font = _font(bold=True)
+    ws.cell(row=1, column=2, value=arsenkin.get('checked', len(rows))).font = _font()
+    ws.cell(row=2, column=1, value='Не в индексе:').font = _font(bold=True)
+    c2 = ws.cell(row=2, column=2, value=ni)
+    c2.font = _font(bold=True, color=('C0392B' if ni else '006300'))
+    _det = []
+    if eng.get('yandex'):
+        _det.append(f'Яндекс: {arsenkin.get("not_indexed_yandex", 0)}')
+    if eng.get('google'):
+        _det.append(f'Google: {arsenkin.get("not_indexed_google", 0)}')
+    ws.cell(row=2, column=3, value='  '.join(_det)).font = _font(color='5B5853')
+
+    head_row = 4
+    for i, t in enumerate(('URL', 'В Яндексе', 'В Google'), 1):
+        cell = ws.cell(row=head_row, column=i, value=t)
+        cell.font = _font(bold=True)
+        cell.fill = _fill('ECEAE4')
+        cell.border = _border()
+        cell.alignment = _align('center' if i > 1 else 'left')
+
+    def _cell(row, col, flag, checked):
+        c = ws.cell(row=row, column=col)
+        c.border = _border()
+        c.alignment = _align('center')
+        if not checked:
+            c.value, c.font = '—', _font(color='8A8781')
+        elif flag is True:
+            c.value, c.font = 'Да', _font(bold=True, color='006300')
+        elif flag is False:
+            c.value, c.font = 'Нет', _font(bold=True, color='C0392B')
+            c.fill = _fill('FBE9E7')
+        else:
+            c.value, c.font = '?', _font(color='B9770E')
+
+    # не в индексе - вверх списка
+    def _rank(r):
+        bad = ((eng.get('yandex') and r.get('yandex') is False)
+               or (eng.get('google') and r.get('google') is False))
+        return 0 if bad else 1
+    r = head_row + 1
+    for row in sorted(rows, key=_rank):
+        cu = ws.cell(row=r, column=1, value=row.get('url', ''))
+        cu.font = _font()
+        cu.border = _border()
+        _cell(r, 2, row.get('yandex'), eng.get('yandex'))
+        _cell(r, 3, row.get('google'), eng.get('google'))
+        r += 1
+
+    ws.column_dimensions['A'].width = 70
+    ws.column_dimensions['B'].width = 12
+    ws.column_dimensions['C'].width = 12
+
+
 def _build_w3c_sheet(wb, w3c_check):
     """Лист валидации W3C (HTML/CSS) и скорости загрузки ресурсов по выборке
     страниц. Добавляется, только если проверка выполнялась."""
@@ -5456,7 +5520,7 @@ _SHEET_GROUPS = [
         'Индексация', 'Метаданные', 'Заголовки и мета',
         'Разметка', 'Безопасность', 'Ошибки JavaScript',
         'Валидация и скорость', 'Страница 404', '404 в индексе',
-        'Страницы в ГСК', 'Дубли главной',
+        'Страницы в ГСК', 'Дубли главной', 'Индексация (Арсенкин)',
         'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
     ]),
     ('Верстка', ['Вёрстка']),
@@ -5618,6 +5682,7 @@ def build_report(
     yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
     gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
     home_dupes: dict = None,       # дубли главной страницы - лист «Дубли главной»
+    arsenkin: dict = None,         # индексация URL через Арсенкин - лист «Индексация (Арсенкин)»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -5962,6 +6027,7 @@ def build_report(
     _build_w3c_sheet(wb, w3c_check)
     _build_gsc_pages_sheet(wb, gsc_pages)
     _build_home_dupes_sheet(wb, home_dupes)
+    _build_arsenkin_sheet(wb, arsenkin)
 
     # ─── Лист «Страница 404» (п.1.18) - если проверка выполнялась ──────
     _build_404_sheet(wb, p404_check)
