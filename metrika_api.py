@@ -363,6 +363,27 @@ def _load_pagetypes(project_id):
     return cfg
 
 
+def _main_lead_goal(project_id):
+    """Номер основной цели-лида из catalogs/goals-<pid>.json (цель с названием,
+    содержащим «основная цель на лид»). None - если конфига/цели нет (тогда
+    лиды считаем по любой цели). Так лиды = реальные обращения, а не все клики
+    (тел/мессенджеры), и конверсия осмысленная."""
+    f = Path(__file__).parent / 'catalogs' / f'goals-{project_id}.json'
+    if not f.exists():
+        return None
+    try:
+        import json as _json
+        goals = (_json.loads(f.read_text(encoding='utf-8')) or {}).get('цели') or []
+    except Exception:
+        return None
+    for g in goals:
+        if 'основная цель на лид' in str(g.get('название', '')).lower():
+            num = str(g.get('номер') or '').strip()
+            if num.isdigit():
+                return num
+    return None
+
+
 def _classify_path(path, cfg):
     """URL-путь → тип страницы (см. PAGE_TYPE_ORDER) или None (прочее)."""
     p = (path or '/').split('?')[0].split('#')[0]
@@ -438,11 +459,12 @@ def _agg_dim(counters, token, proxy_url, d1, d2, metric, dim, log,
     return out
 
 
-def _row_stats(counters, token, proxy_url, d1, d2, cfg, log):
+def _row_stats(counters, token, proxy_url, d1, d2, cfg, log, lead_metric):
     """Все показатели одной строки (один период) по всем счётчикам.
     Rate-метрики (отказы/глубина/время) усредняем ВЗВЕШЕННО по визитам
-    (суммировать проценты по чанкам нельзя). → dict или None."""
-    metrics = ('ym:s:visits,ym:s:sumGoalReachesAny,ym:s:bounceRate,'
+    (суммировать проценты по чанкам нельзя). lead_metric - метрика лидов
+    (основная цель проекта или любая цель). → dict или None."""
+    metrics = (f'ym:s:visits,{lead_metric},ym:s:bounceRate,'
                'ym:s:pageDepth,ym:s:avgVisitDurationSeconds')
     visits = leads = 0.0
     w_bounce = w_depth = w_dur = 0.0    # взвешенные суммы (× визиты чанка)
@@ -517,13 +539,16 @@ def fetch_traffic_comparison(project_id, token, proxy_url=None, counter=None,
         _log(f'⚠ Метрика-трафик: нет счётчиков для {project_id}')
         return None
     cfg = _load_pagetypes(project_id)
-    _log(f'Метрика-трафик: {len(counters)} счётчик(ов), день/месяц/год × 2')
+    gid = _main_lead_goal(project_id)
+    lead_metric = f'ym:s:goal{gid}reaches' if gid else 'ym:s:sumGoalReachesAny'
+    _log(f'Метрика-трафик: {len(counters)} счётчик(ов), день/месяц/год × 2; '
+         + (f'лиды по цели {gid}' if gid else 'лиды по любой цели'))
 
     rows = []
     for label, (c1, c2), (p1, p2) in _traffic_periods():
         for kind, (a, b) in (('текущий', (c1, c2)), ('прошлый', (p1, p2))):
             st = _row_stats(counters, token, proxy_url, a.isoformat(),
-                            b.isoformat(), cfg, _log)
+                            b.isoformat(), cfg, _log, lead_metric)
             if st is None:
                 continue
             rows.append({'year': a.year, 'period': label.capitalize(),

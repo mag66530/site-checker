@@ -22,6 +22,7 @@ scope sprav:all) требует активации партнёрского до
   3. Сверка с catalogs/<pid>-subdomains.csv (город на поддомен): у каждого
      поддомена должна быть орг под его городом.
 """
+import asyncio
 import base64
 import csv
 import datetime
@@ -176,23 +177,37 @@ def _org_card_from_html(html: str, permalink: str) -> dict:
     }
 
 
+# Параллелизм тяжёлых фаз (карточки кабинета + отзывы Карт). Каждая задача -
+# своя вкладка в общем контексте; семафор ограничивает одновременные.
+_CARD_CONCURRENCY = 6
+_REVIEW_CONCURRENCY = 6
+
+
 def fetch_orgs(state: dict, proxy_url: str = None, log=None):
-    """Через БРАУЗЕР (Playwright) с сессией: список организаций аккаунта с
-    городом/регионом. requests не годится - кабинет Справочника уводит
-    сессию в passport/auth/update (петля), браузер проходит её как при
-    обычном заходе. Возвращает (logged_in: bool, orgs: list|None)."""
-    from playwright.sync_api import sync_playwright
+    """Sync-обёртка над async-реализацией (карточки и отзывы тянем параллельно
+    - иначе сотни организаций у mpe идут ~20 мин). Возвращает
+    (logged_in: bool, orgs: dict|None). Работает в отдельном процессе runner'а,
+    где своего event-loop нет, поэтому asyncio.run безопасен."""
+    return asyncio.run(_afetch_orgs(state, proxy_url, log))
+
+
+async def _afetch_orgs(state: dict, proxy_url: str, log):
+    """Через БРАУЗЕР (async Playwright) с сессией: полный список организаций
+    аккаунта (все страницы + филиалы внутри сетей) с городом/регионом/профилем/
+    отзывами. requests не годится - кабинет уводит сессию в passport/auth/update
+    (петля), браузер проходит её как обычный заход."""
+    from playwright.async_api import async_playwright
     ctx_kw = {'user_agent': UA}
     if proxy_url:
         ctx_kw['proxy'] = {'server': proxy_url}
-    with sync_playwright() as pw:
-        br = pw.chromium.launch(headless=True)
+    async with async_playwright() as pw:
+        br = await pw.chromium.launch(headless=True)
         try:
-            ctx = br.new_context(storage_state=state, **ctx_kw)
-            page = ctx.new_page()
-            page.goto(f'{CABINET}/companies/?no_redirect=1&page=1',
-                      wait_until='domcontentloaded', timeout=60000)
-            page.wait_for_timeout(4000)
+            ctx = await br.new_context(storage_state=state, **ctx_kw)
+            page = await ctx.new_page()
+            await page.goto(f'{CABINET}/companies/?no_redirect=1&page=1',
+                            wait_until='domcontentloaded', timeout=60000)
+            await page.wait_for_timeout(4000)
             # Ушли на паспорт/авторизацию - сессия протухла.
             if 'passport' in page.url or 'auth' in page.url.split('?')[0]:
                 return False, None
@@ -203,10 +218,11 @@ def fetch_orgs(state: dict, proxy_url: str = None, log=None):
             empty = 0
             for pg in range(1, _MAX_LIST_PAGES + 1):
                 if pg > 1:
-                    page.goto(f'{CABINET}/companies/?no_redirect=1&page={pg}',
-                              wait_until='domcontentloaded', timeout=60000)
-                    page.wait_for_timeout(1600)
-                html = page.content()
+                    await page.goto(
+                        f'{CABINET}/companies/?no_redirect=1&page={pg}',
+                        wait_until='domcontentloaded', timeout=60000)
+                    await page.wait_for_timeout(1600)
+                html = await page.content()
                 pc = set(_RE_CHAIN_PERMALINK.findall(html))
                 pp = set(_RE_PLAIN_PERMALINK.findall(html))
                 pin = set(_RE_CHAIN_INNER.findall(html))
@@ -222,12 +238,12 @@ def fetch_orgs(state: dict, proxy_url: str = None, log=None):
                         break
             standalone = sorted(plain - chains)   # отдельные компании (не сети)
             inner_ids = sorted(inner)
-            # Филиалы, спрятанные внутри сетей: собираем permalink'и со страниц
-            # состава каждой сети (/sprav/chain/<inner>/branches). Без этого
-            # города в сетях выглядят «без карточки».
+            # Филиалы, спрятанные внутри сетей: permalink'и со страниц состава
+            # (/sprav/chain/<inner>/branches). Без этого города в сетях выглядят
+            # «без карточки».
             member_ids = set()
-            for inner in inner_ids:
-                member_ids |= _collect_chain_members(page, inner)
+            for iid in inner_ids:
+                member_ids |= await _acollect_chain_members(page, iid)
             member_ids -= chains         # сам permalink сети - не филиал
             member_ids -= set(standalone)
             if not (standalone or member_ids):
@@ -236,53 +252,49 @@ def fetch_orgs(state: dict, proxy_url: str = None, log=None):
                       + [(p, True) for p in sorted(member_ids)])
             if log:
                 log(f'Я.Бизнес: отдельных {len(standalone)}, сетей '
-                    f'{len(inner_ids)}, филиалов в сетях {len(member_ids)}')
-            orgs = []
-            for p, in_chain in _cards:
-                try:
-                    page.goto(f'{CABINET}/{p}/p/edit/main',
-                              wait_until='domcontentloaded', timeout=60000)
-                    page.wait_for_timeout(1500)
-                    card = _org_card_from_html(page.content(), p)
-                except Exception:
-                    card = {'permalink': p, 'city': None, 'region': None,
-                            'addr': None, 'profile': {}}
-                card['in_chain'] = in_chain
-                orgs.append(card)
-            # Отзывы (даты) по активным компаниям - публичная карточка Карт.
+                    f'{len(inner_ids)}, филиалов в сетях {len(member_ids)}; '
+                    f'тяну {len(_cards)} карточек (параллельно)…')
+            await page.close()
+            # КАРТОЧКИ - параллельно (город/регион/профиль).
+            csem = asyncio.Semaphore(_CARD_CONCURRENCY)
+            orgs = list(await asyncio.gather(
+                *[_acard(ctx, csem, p, ic) for p, ic in _cards]))
+            # ОТЗЫВЫ - параллельно, только по активным (с городом).
+            active = [o for o in orgs if o.get('city')]
+            rsem = asyncio.Semaphore(_REVIEW_CONCURRENCY)
+            rmap = dict(await asyncio.gather(
+                *[_areviews(ctx, rsem, o['permalink']) for o in active]))
             for o in orgs:
-                if o.get('city'):
-                    try:
-                        o['review_dates'] = _fetch_review_dates(page,
-                                                                o['permalink'])
-                    except Exception:
-                        o['review_dates'] = []
+                o['review_dates'] = rmap.get(o['permalink'], [])
+            if log:
+                log(f'Я.Бизнес: карточек {len(orgs)}, активных {len(active)}, '
+                    f'отзывы собраны')
             return True, {'chains': sorted(chains), 'companies': orgs}
         finally:
-            br.close()
+            await br.close()
 
 
-def _collect_chain_members(page, inner_id: str) -> set:
+async def _acollect_chain_members(page, inner_id: str) -> set:
     """Permalink'и филиалов внутри сети со страницы её состава
     (/sprav/chain/<inner_id>/branches). Список виртуализированный (react-window)
     - собираем ссылки, прокручивая, пока их число не перестанет расти."""
     try:
-        page.goto(f'{CABINET}/chain/{inner_id}/branches',
-                  wait_until='domcontentloaded', timeout=60000)
-        page.wait_for_timeout(3000)
+        await page.goto(f'{CABINET}/chain/{inner_id}/branches',
+                        wait_until='domcontentloaded', timeout=60000)
+        await page.wait_for_timeout(3000)
     except Exception:
         return set()
     perms, last, stable = set(), -1, 0
     for _ in range(50):
-        for a in page.query_selector_all('a[href*="/sprav/"]'):
-            m = re.search(r'/sprav/(\d{6,})', a.get_attribute('href') or '')
+        for a in await page.query_selector_all('a[href*="/sprav/"]'):
+            m = re.search(r'/sprav/(\d{6,})', await a.get_attribute('href') or '')
             if m:
                 perms.add(m.group(1))
         try:
-            page.mouse.wheel(0, 2500)
+            await page.mouse.wheel(0, 2500)
         except Exception:
             pass
-        page.wait_for_timeout(450)
+        await page.wait_for_timeout(450)
         stable = stable + 1 if len(perms) == last else 0
         last = len(perms)
         if stable >= 6:
@@ -290,31 +302,63 @@ def _collect_chain_members(page, inner_id: str) -> set:
     return perms
 
 
-def _fetch_review_dates(page, permalink: str) -> list:
-    """Даты отзывов организации с публичной страницы Карт
-    yandex.ru/maps/org/<permalink>/reviews/. Прокручиваем ленту, чтобы
-    подгрузить все, парсим `.business-review-view__date`. → ['YYYY-MM-DD', ...]"""
-    page.goto(f'{MAPS}/{permalink}/reviews/',
-              wait_until='networkidle', timeout=45000)
-    page.wait_for_timeout(2500)
-    prev = -1
-    for _ in range(10):
-        nodes = page.query_selector_all('.business-review-view__date')
-        if len(nodes) == prev:
-            break
-        prev = len(nodes)
-        if nodes:
+async def _acard(ctx, sem, permalink: str, in_chain: bool) -> dict:
+    """Карточка организации /p/edit/main → город/регион/профиль. Своя вкладка."""
+    async with sem:
+        page = await ctx.new_page()
+        try:
+            await page.goto(f'{CABINET}/{permalink}/p/edit/main',
+                            wait_until='domcontentloaded', timeout=60000)
+            await page.wait_for_timeout(1200)
+            card = _org_card_from_html(await page.content(), permalink)
+        except Exception:
+            card = {'permalink': permalink, 'city': None, 'region': None,
+                    'addr': None, 'profile': {}}
+        finally:
             try:
-                nodes[-1].scroll_into_view_if_needed(timeout=3000)
+                await page.close()
             except Exception:
                 pass
-        page.wait_for_timeout(1000)
-    dates = []
-    for n in page.query_selector_all('.business-review-view__date'):
-        d = _parse_review_date((n.inner_text() or '').strip())
-        if d:
-            dates.append(d)
-    return dates
+        card['in_chain'] = in_chain
+        return card
+
+
+async def _areviews(ctx, sem, permalink: str):
+    """Даты отзывов с публичной карточки Карт /maps/org/<perm>/reviews/.
+    Своя вкладка. → (permalink, ['YYYY-MM-DD', ...])."""
+    async with sem:
+        page = await ctx.new_page()
+        dates = []
+        try:
+            await page.goto(f'{MAPS}/{permalink}/reviews/',
+                            wait_until='networkidle', timeout=45000)
+            await page.wait_for_timeout(2000)
+            prev = -1
+            for _ in range(10):
+                nodes = await page.query_selector_all(
+                    '.business-review-view__date')
+                if len(nodes) == prev:
+                    break
+                prev = len(nodes)
+                if nodes:
+                    try:
+                        await nodes[-1].scroll_into_view_if_needed(timeout=3000)
+                    except Exception:
+                        pass
+                await page.wait_for_timeout(900)
+            for n in await page.query_selector_all(
+                    '.business-review-view__date'):
+                d = _parse_review_date((await n.inner_text() or '').strip())
+                if d:
+                    dates.append(d)
+        except Exception:
+            dates = []
+        finally:
+            try:
+                await page.close()
+            except Exception:
+                pass
+        return permalink, dates
 
 
 def _subdomains(project_id: str) -> list:
