@@ -73,20 +73,29 @@ def test_parse_result_respects_engine_selection():
     assert rows[0]['google'] is None       # Google не запрашивали
 
 
-def test_parse_result_grouped_by_engine():
-    """Реальный формат Арсенкина: результат сгруппирован по ПС (y/g), + resp."""
-    result = {
-        'y': {'https://a.ru/': 1, 'https://b.ru/': 0},
-        'g': {'https://a.ru/': 1, 'https://b.ru/': 1},
-        'resp': {'limits': 10},
+def test_parse_result_real_arsenkin_format():
+    """Реальный ответ Арсенкина: данные по URL в result.resp, а g/y - флаги ПС."""
+    real = {
+        'code': 'TASK_RESULT', 'task_id': 30660436,
+        'result': {
+            'g': 1, 'y': 1,
+            'resp': {
+                'https://stalmetural.ru/soglasie-na-obrabotku-personalnyh-dannyh/':
+                    {'yandex': 1, 'google': 1, 'yandex_doc': '...',
+                     'indexdate': '2026-02-19', 'google_doc': ''},
+                'https://stalmetural.ru/polzovatelskoe-soglashenie/':
+                    {'yandex': 1, 'google': 0, 'indexdate': '2026-03-13'},
+            },
+        },
+        'created_at': '2026-07-17 14:41:49', 'finished_at': None,
     }
-    rows = parse_result(result, want_yandex=True, want_google=True)
+    rows = parse_result(real, want_yandex=True, want_google=True)
     by_url = {r['url']: r for r in rows}
-    assert set(by_url) == {'https://a.ru/', 'https://b.ru/'}
-    assert by_url['https://a.ru/']['yandex'] is True
-    assert by_url['https://a.ru/']['google'] is True
-    assert by_url['https://b.ru/']['yandex'] is False
-    assert by_url['https://b.ru/']['google'] is True
+    assert len(rows) == 2
+    assert by_url['https://stalmetural.ru/soglasie-na-obrabotku-personalnyh-dannyh/'] \
+        == {'url': 'https://stalmetural.ru/soglasie-na-obrabotku-personalnyh-dannyh/',
+            'yandex': True, 'google': True}
+    assert by_url['https://stalmetural.ru/polzovatelskoe-soglashenie/']['google'] is False
 
 
 def test_parse_result_grouped_under_data_and_lists():

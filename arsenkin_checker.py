@@ -209,12 +209,50 @@ def _find_engine_nodes(result):
     return None, None
 
 
+def _find_url_map(obj):
+    """Найти вложенный словарь, ключи которого - URL. У Арсенкина данные по
+    страницам лежат в result.resp = {url: {yandex, google, indexdate, ...}}."""
+    if isinstance(obj, dict):
+        url_keys = [k for k in obj if 'http' in str(k)]
+        if url_keys and len(url_keys) >= max(1, len(obj) // 2):
+            return obj
+        for v in obj.values():
+            found = _find_url_map(v)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _find_url_map(v)
+            if found is not None:
+                return found
+    return None
+
+
 def parse_result(result, want_yandex=True, want_google=True) -> list:
     """Нормализовать ответ get в список {url, yandex, google}.
 
-    Поддерживает два формата: (1) сгруппировано по ПС - {y:{url:...}, g:{...}};
-    (2) построчно по URL - [{url, yandex, google}]."""
-    # Формат 1: по поисковым системам (как реально отдаёт Арсенкин).
+    Реальный формат Арсенкина: {code, task_id, result:{g, y, resp:{url:{yandex,
+    google, indexdate, ...}}}} - данные по URL лежат в result.resp. Плюс запасные
+    форматы: сгруппировано по ПС и построчно."""
+    # Основной формат Арсенкина: карта {url: {yandex, google, ...}} (result.resp).
+    umap = _find_url_map(result)
+    if umap:
+        rows = []
+        for url, v in umap.items():
+            if 'http' not in str(url):
+                continue
+            if isinstance(v, dict):
+                y = _to_bool(_row_field(v, ('yandex', 'y', 'yandex_index', 'ya'))) \
+                    if want_yandex else None
+                g = _to_bool(_row_field(v, ('google', 'g', 'google_index', 'goo'))) \
+                    if want_google else None
+            else:
+                b = _to_bool(v)
+                y, g = (b if want_yandex else None), (b if want_google else None)
+            rows.append({'url': str(url), 'yandex': y, 'google': g})
+        if rows:
+            return rows
+    # Запасной формат 1: сгруппировано по поисковым системам.
     y_node, g_node = _find_engine_nodes(result)
     if y_node is not None or g_node is not None:
         ymap = _engine_map(y_node) if (want_yandex and y_node is not None) else {}
@@ -302,8 +340,9 @@ def run_indexation(token, urls, *, yandex=True, google=True, search_all=True,
     # Первый ответ пишем в лог (сверить формат). id шлём под несколькими именами
     # (лишние игнорируются).
     id_body = {'task_id': task_id, 'id': task_id, 'report_id': task_id}
+    n_urls = len(urls)
     deadline = time.time() + max_wait_sec
-    rows, result_json, gj = [], None, None
+    rows, best_rows, result_json, gj = [], [], None, None
     logged_real = False
     polls = 0
     while time.time() < deadline:
@@ -326,13 +365,17 @@ def run_indexation(token, urls, *, yandex=True, google=True, search_all=True,
         if not _is_err:
             rows = parse_result(gj, want_yandex=yandex, want_google=google)
             if rows:
+                best_rows = rows                      # держим лучшее (не теряем)
                 result_json = gj
-                break
+                _finished = isinstance(gj, dict) and gj.get('finished_at')
+                if _finished or len(rows) >= n_urls:  # все URL/задача завершена
+                    break
         polls += 1
         if polls == 1 or polls % 6 == 0:
             _log(f'  считается… ({int(polls * poll_sec)} c)')
         time.sleep(poll_sec)
 
+    rows = best_rows
     if not rows:
         return {'available': False,
                 'error': f'результат не готов/не разобран за {max_wait_sec} c',
