@@ -2826,6 +2826,60 @@ def _build_images_sheet(wb, results):
 # ── Лист «Валидация и скорость» (п.1.16: W3C HTML/CSS + время ресурсов) ─
 
 
+def _build_gsc_pages_sheet(wb, gsc_pages):
+    """Лист «Страницы в ГСК»: проиндексировано / просканировано-не-индексировано /
+    сумма + Δ к прошлому снятию (пункт «Количество страниц в ГСК»)."""
+    if not gsc_pages or not gsc_pages.get('available'):
+        return
+    ws = wb.create_sheet('Страницы в ГСК')
+    d = gsc_pages.get('deltas') or {}
+
+    for i, t in enumerate(('Показатель', 'Значение', 'Δ к прошлому'), 1):
+        c = ws.cell(row=1, column=i, value=t)
+        c.font = _font(bold=True)
+        c.fill = _fill('ECEAE4')
+        c.border = _border()
+        c.alignment = _align('center' if i > 1 else 'left')
+
+    def _row(r, label, key):
+        c1 = ws.cell(row=r, column=1, value=label)
+        c1.font = _font()
+        c1.border = _border()
+        val = gsc_pages.get(key)
+        c2 = ws.cell(row=r, column=2, value=(val if val is not None else '—'))
+        c2.font = _font(bold=True)
+        c2.alignment = _align('center')
+        c2.border = _border()
+        dv = d.get(key)
+        c3 = ws.cell(row=r, column=3)
+        c3.border = _border()
+        c3.alignment = _align('center')
+        if dv is not None:
+            if dv > 0:
+                c3.value, _col = f'▲ +{dv:g}', '006300'
+            elif dv < 0:
+                c3.value, _col = f'▼ {dv:g}', 'C0392B'
+            else:
+                c3.value, _col = '= 0', '8A8781'
+            c3.font = _font(bold=True, color=_col)
+        else:
+            c3.value = '—'
+            c3.font = _font(color='8A8781')
+
+    _row(2, 'Проиндексировано', 'indexed')
+    _row(3, 'Просканировано, но пока не проиндексировано', 'crawled_not_indexed')
+    _row(4, 'Сумма', 'total')
+
+    note = 'Числа из отчёта GSC «Индексирование → Страницы».'
+    if gsc_pages.get('manual'):
+        note += ' Введены вручную.'
+    ws.cell(row=6, column=1, value=note).font = _font(italic=True, color='5B5853')
+
+    ws.column_dimensions['A'].width = 44
+    ws.column_dimensions['B'].width = 14
+    ws.column_dimensions['C'].width = 16
+
+
 def _build_w3c_sheet(wb, w3c_check):
     """Лист валидации W3C (HTML/CSS) и скорости загрузки ресурсов по выборке
     страниц. Добавляется, только если проверка выполнялась."""
@@ -5328,6 +5382,7 @@ _SHEET_GROUPS = [
         'Индексация', 'Метаданные', 'Заголовки и мета',
         'Разметка', 'Безопасность', 'Ошибки JavaScript',
         'Валидация и скорость', 'Страница 404', '404 в индексе',
+        'Страницы в ГСК',
         'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
     ]),
     ('Верстка', ['Вёрстка']),
@@ -5486,7 +5541,8 @@ def build_report(
     stress_check: dict = None,     # ошибки сервера: парсинг/нагрузка/дубли - лист «Нагрузка и парсинг»
     link_profile: dict = None,     # lite-профиль ссылок (Вебмастер) - лист «Ссылочный профиль»
     admin_settings: dict = None,   # функции настройки в админке (п.1.21) - лист «Настройки в админке»
-    yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес/GMB»
+    yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
+    gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -5829,6 +5885,7 @@ def build_report(
 
     # ─── Лист валидации W3C + скорости (п.1.16) - если выполнялась ──────
     _build_w3c_sheet(wb, w3c_check)
+    _build_gsc_pages_sheet(wb, gsc_pages)
 
     # ─── Лист «Страница 404» (п.1.18) - если проверка выполнялась ──────
     _build_404_sheet(wb, p404_check)

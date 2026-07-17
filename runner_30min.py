@@ -1144,28 +1144,33 @@ def run_check(pid, params, creds, log, progress):
             _mi = int(params.get('gsc_pages_indexed', 0) or 0)
             _mc = int(params.get('gsc_pages_crawled_ni', 0) or 0)
             if _mi or _mc:
-                # Ручной ввод чисел из GSC - самый надёжный путь, без браузера/сессии.
+                # Ручной ввод чисел из GSC - основной путь, без браузера/сессии.
                 try:
                     from gsc_pages_count import save_manual
                     _gsc_pages = save_manual(pid, _mi, _mc)
-                    log(f'Количество страниц в ГСК (ручной ввод): индексировано '
-                        f'{_gsc_pages.get("indexed")}, просканировано-не-индексировано '
-                        f'{_gsc_pages.get("crawled_not_indexed")}, сумма '
+                    log(f'Количество страниц в ГСК: индексировано {_mi}, '
+                        f'просканировано-не-индексировано {_mc}, сумма '
                         f'{_gsc_pages.get("total")} (Δ {_gsc_pages.get("deltas")})')
                 except Exception as _e:
-                    log(f'⚠ Количество страниц в ГСК (ручной ввод): {_e}')
-            else:
-                # Автомат браузером (нужна сессия Google - на облаке часто нет).
+                    log(f'⚠ Количество страниц в ГСК: {_e}')
+            elif params.get('gsc_pages_try_browser'):
+                # Явный опт-ин в браузерный автомат (нужна ЖИВАЯ сессия Google;
+                # на облаке она почти всегда мёртвая - поэтому по умолчанию ВЫКЛ,
+                # чтобы не пугать ошибкой «НЕ АВТОРИЗОВАН»).
                 _gsc_pages = _run_gsc_pages(
                     pid, params, log, session_b64=creds.get('autoclick_session'))
                 if _gsc_pages.get('error'):
-                    log(f'⚠ Количество страниц в ГСК: {_gsc_pages["error"]} '
-                        f'(проще вписать числа вручную на странице чек-листа)')
+                    log(f'⚠ Количество страниц в ГСК: {_gsc_pages["error"]}')
                 else:
                     log(f'Количество страниц в ГСК: индексировано '
                         f'{_gsc_pages.get("indexed")}, просканировано-не-индексировано '
                         f'{_gsc_pages.get("crawled_not_indexed")}, сумма '
                         f'{_gsc_pages.get("total")}')
+            else:
+                log('Количество страниц в ГСК: впиши 2 числа в полях под галочкой '
+                    '(«Проиндексировано» и «Просканировано, не проиндексировано» - '
+                    'их видно в GSC «Индексирование → Страницы»). Пусто - пропускаю, '
+                    'браузер на облаке не трогаю.')
 
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный
@@ -1434,7 +1439,8 @@ def run_check(pid, params, creds, log, progress):
             ps_filters=_ps_filters, search_check=_search_check,
             index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile,
-            admin_settings=_admin_settings, yabusiness=_yabusiness)
+            admin_settings=_admin_settings, yabusiness=_yabusiness,
+            gsc_pages=_gsc_pages)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
