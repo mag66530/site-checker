@@ -110,8 +110,19 @@ async def run(pid: str) -> int:
         ctx = await browser.new_context(
             user_agent=UA, locale='ru-RU', timezone_id='Europe/Moscow',
             viewport={'width': 1280, 'height': 1000})
+        # Маскировка headless-Chromium: Google блокирует вход как «небезопасный
+        # браузер», если видит признаки автоматизации. Прячем самые заметные.
         await ctx.add_init_script(
-            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
+            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+            "Object.defineProperty(navigator,'languages',"
+            "{get:()=>['ru-RU','ru','en-US','en']});"
+            "Object.defineProperty(navigator,'plugins',"
+            "{get:()=>[1,2,3,4,5]});"
+            "window.chrome={runtime:{}};"
+            "const _q=window.navigator.permissions&&window.navigator.permissions.query;"
+            "if(_q){window.navigator.permissions.query=(p)=>("
+            "p&&p.name==='notifications'?Promise.resolve({state:Notification.permission})"
+            ":_q(p));}")
         page = await ctx.new_page()
 
         async def snap():
@@ -207,6 +218,28 @@ async def run(pid: str) -> int:
                             await page.keyboard.press('Tab')
                         elif a == 'back':
                             await page.go_back()
+                        elif a == 'retry':
+                            # Google показал «Не удалось войти» - жмём его кнопку
+                            # «Повторить попытку»/«Попробовать снова», если есть;
+                            # иначе открываем вход заново с чистого адреса.
+                            clicked = False
+                            for _t in ('Повторить попытку', 'Попробовать снова',
+                                       'Try again', 'Retry'):
+                                try:
+                                    _b = page.get_by_text(_t, exact=False)
+                                    if await _b.count() > 0:
+                                        await _b.first.click()
+                                        clicked = True
+                                        break
+                                except Exception:
+                                    pass
+                            if not clicked:
+                                try:
+                                    await page.goto(
+                                        LOGIN_URL, wait_until='domcontentloaded',
+                                        timeout=45000)
+                                except Exception:
+                                    pass
                         # 'refresh' - просто пересъёмка ниже
                     except Exception:
                         pass
