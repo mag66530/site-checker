@@ -660,7 +660,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 # Версия набора дефолтов галочек «Что проверять». Поднимать при добавлении
 # нового пункта или смене дефолта, чтобы автовыбор применился и к уже
 # открытым (сохранённым) сессиям (см. init_session).
-_C30_CHECKS_DEFAULTS_VER = 7
+_C30_CHECKS_DEFAULTS_VER = 8
 
 
 def init_session():
@@ -689,6 +689,7 @@ def init_session():
         'c30_check_images': True,      # пункт 1.15 - изображения (alt/webp/вес)
         'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
         'c30_check_index_404': False,  # 404 среди страниц в индексе (Вебмастер) - тяжёлая, по запросу
+        'c30_check_yabusiness': False,  # Я.Бизнес: поддомен под свой регион (сессия)
         'c30_check_gsc_pages': False,  # количество страниц в ГСК по статусам - браузер, по запросу
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
@@ -1350,6 +1351,16 @@ if pid:
                          'аккаунте: берём проиндексированные страницы и '
                          'прозваниваем на 404. Работает на облаке, без браузера. '
                          'Нужен секрет gsc_service_account_<проект>.')
+        st.checkbox('Я.Бизнес: каждый поддомен под свой регион',
+                    key='c30_check_yabusiness',
+                    help='Тянет организации аккаунта из кабинета Яндекс.Справочника '
+                         '(город/регион каждой карточки) и сверяет с городами '
+                         'поддоменов: у каждого поддомена должна быть орг под его '
+                         'городом. Показывает поддомены БЕЗ организации. Работает '
+                         'на сессии Яндекса (та же, что 404-в-индексе/автокликеры: '
+                         '«Автокликеры» → «Экспорт сессии для облака»). Отдельный '
+                         'лист «Я.Бизнес и GMB». Партнёрский API Справочника - '
+                         'когда дадут доступ, перейдём на него.')
         st.checkbox('Количество страниц в ГСК (индексировано / не индексировано / сумма)',
                     key='c30_check_gsc_pages',
                     help='Снимает из отчёта Google Search Console «Индексирование '
@@ -1633,6 +1644,7 @@ if pid:
         bool(st.session_state.get('c30_check_admin_product_crud', False)),
         bool(st.session_state.get('c30_check_admin_tech_crud', False)),
         bool(st.session_state.get('c30_check_admin_counters', False)),
+        bool(st.session_state.get('c30_check_yabusiness', False)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1690,6 +1702,7 @@ if pid:
                 'check_images': st.session_state.get('c30_check_images', True),
                 'check_links': st.session_state.get('c30_check_links', False),
                 'check_index_404': st.session_state.get('c30_check_index_404', False),
+                'check_yabusiness': st.session_state.get('c30_check_yabusiness', False),
                 'check_gsc_pages': st.session_state.get('c30_check_gsc_pages', False),
                 'gsc_pages_indexed': int(st.session_state.get('c30_gsc_indexed', 0) or 0),
                 'gsc_pages_crawled_ni': int(st.session_state.get('c30_gsc_crawled_ni', 0) or 0),
