@@ -5333,6 +5333,145 @@ def _build_kp_sheet(wb, results):
         row += 1
 
 
+# ── Лист «Замена рекл. номера» (браузерная проверка, уровень 2) ────
+
+
+_CT_VERDICT = {
+    'replaced_ok':  ('✅ работает - номер подменился на рекламный', 'ok',  False),
+    'not_replaced': ('❌ НЕ работает - остался прежний номер',       'err', True),
+    'no_element':   ('⚠ не проверено - телефон (.ct_phone) не найден', 'warn', False),
+    'error':        ('⚠ не проверено - ошибка загрузки',            'warn', False),
+}
+
+
+def _build_calltracking_sheet(wb, calltracking_check):
+    """Лист браузерной проверки замены рекламного номера: открывали главную
+    города с рекламной меткой (?utm_source=yandex) и смотрели, подменился ли
+    номер на рекламный из КП. Добавляется, только если проверка выполнялась."""
+    if not calltracking_check:
+        return
+    rows = calltracking_check.get('results') or []
+    ok = sum(1 for r in rows if r.get('status') == 'replaced_ok')
+    bad = sum(1 for r in rows if r.get('status') == 'not_replaced')
+
+    ws = wb.create_sheet('Замена рекл. номера')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if bad else C.ok
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 22   # Город
+    ws.column_dimensions['C'].width = 10   # Открыть
+    ws.column_dimensions['D'].width = 22   # Показал сайт (реклама)
+    ws.column_dimensions['E'].width = 18   # Ожидался (КП)
+    ws.column_dimensions['F'].width = 48   # Вердикт
+
+    ws.merge_cells('B2:F2')
+    c = ws['B2']
+    c.value = 'Замена рекламного номера - проверка в браузере'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 24
+
+    ws.merge_cells('B3:F3')
+    c = ws['B3']
+    c.value = ('Открываем главную каждого города в браузере с рекламной меткой '
+               '(?utm_source=yandex - источник «Яндекс.Директ»), даём отработать '
+               'коллтрекингу и смотрим, подменился ли номер в шапке на рекламный '
+               'из КП (phone_ad). ✅ - подмена работает; ❌ - номер не '
+               'подменился (реклама не отслеживается). Это end-to-end проверка '
+               '(JS реально выполняется), в отличие от статической сверки '
+               'конфига на листе «Контакты по городам».')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 44
+
+    if not calltracking_check.get('available', True) or not rows:
+        ws.merge_cells('B5:F5')
+        c = ws['B5']
+        c.value = (calltracking_check.get('note')
+                   or 'Проверка не выполнялась или городов с рекламным номером '
+                      'в КП не нашлось.')
+        c.font = _font(size=10, color=C.text_muted)
+        c.alignment = _align(wrap=True)
+        return
+
+    # Плитки сводки
+    tiles = [('Проверено городов', len(rows), C.accent, C.accent_soft),
+             ('Подмена работает', ok, C.ok if ok else C.text_muted,
+              C.ok_soft if ok else C.surface),
+             ('НЕ работает', bad, C.err if bad else C.ok,
+              C.err_soft if bad else C.ok_soft)]
+    col = 2
+    for label, value, color, bg in tiles:
+        vc = ws.cell(row=5, column=col, value=value)
+        vc.font = _font(size=22, bold=True, color=color)
+        vc.fill = _fill(bg); vc.alignment = _align(horizontal='center')
+        vc.border = _border(color=C.border_light)
+        lc = ws.cell(row=6, column=col, value=label)
+        lc.font = _font(size=9, color=C.text_muted)
+        lc.fill = _fill(bg); lc.alignment = _align(horizontal='center')
+        lc.border = _border(color=C.border_light)
+        col += 1
+    ws.row_dimensions[5].height = 30
+
+    # Сначала «не работает», потом остальные; внутри - по городу.
+    order = {'not_replaced': 0, 'no_element': 1, 'error': 2, 'replaced_ok': 3}
+    rows = sorted(rows, key=lambda r: (order.get(r.get('status'), 9),
+                                       r.get('city') or ''))
+
+    hdr_row = 8
+    for ci, h in enumerate(['Город', 'Открыть', 'Показал сайт (реклама)',
+                            'Ожидался (КП)', 'Вердикт'], start=2):
+        cell = ws.cell(row=hdr_row, column=ci, value=h)
+        cell.font = _font(size=10, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align(horizontal='center' if ci > 3 else 'left')
+        cell.border = _border()
+    ws.row_dimensions[hdr_row].height = 24
+    ws.freeze_panes = f'B{hdr_row + 1}'
+
+    def _fmt_num(n):
+        n = re.sub(r'\D', '', str(n or ''))
+        if len(n) == 10:
+            return f'{n[:3]}-{n[3:6]}-{n[6:8]}-{n[8:]}'
+        return n or '—'
+
+    row = hdr_row + 1
+    for r in rows:
+        label, color_key, _is_bug = _CT_VERDICT.get(
+            r.get('status'), (r.get('status', ''), 'text_muted', False))
+        color = getattr(C, color_key, C.text_muted)
+
+        cc = ws.cell(row=row, column=2, value=r.get('city') or '')
+        cc.font = _font(size=10); cc.alignment = _align(indent=1)
+        cc.border = _border(color=C.border_light)
+
+        uc = ws.cell(row=row, column=3, value='открыть')
+        uc.hyperlink = r.get('url')
+        uc.font = _font(size=10, color=C.accent, underline='single')
+        uc.alignment = _align(horizontal='center')
+        uc.border = _border(color=C.border_light)
+
+        sc = ws.cell(row=row, column=4,
+                     value=', '.join(_fmt_num(n) for n in (r.get('shown') or []))
+                     or '—')
+        sc.font = _font(size=10, color=C.text_soft)
+        sc.alignment = _align(horizontal='center')
+        sc.border = _border(color=C.border_light)
+
+        kc = ws.cell(row=row, column=5, value=_fmt_num(r.get('kp')))
+        kc.font = _font(size=10, color=C.text_soft)
+        kc.alignment = _align(horizontal='center')
+        kc.border = _border(color=C.border_light)
+
+        vc = ws.cell(row=row, column=6, value=label)
+        vc.font = _font(size=10, bold=(color_key != 'text_muted'), color=color)
+        if color_key in ('ok', 'err'):
+            vc.fill = _fill(C.ok_soft if color_key == 'ok' else C.err_soft)
+        vc.alignment = _align(wrap=True, indent=1)
+        vc.border = _border(color=C.border_light)
+        ws.row_dimensions[row].height = 20
+        row += 1
+
+
 # Страна по доменной зоне URL (для листа «404 из Метрики»).
 _TLD_COUNTRY = {
     'ru': 'Россия', 'kz': 'Казахстан', 'by': 'Беларусь', 'kg': 'Кыргызстан',
@@ -5830,7 +5969,7 @@ _SHEET_GROUPS = [
         'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
     ]),
     ('Верстка', ['Вёрстка']),
-    ('КП', ['Контакты по городам', 'Регион и СНГ']),
+    ('КП', ['Контакты по городам', 'Замена рекл. номера', 'Регион и СНГ']),
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
@@ -5978,6 +6117,7 @@ def build_report(
     meta_summary: dict = None,     # дубли мета/URL (п.1.8) - в лист «Метаданные»
     filters_test: dict = None,     # итоги фильтр-теста - секция на листе «Вёрстка»
     console_check: dict = None,    # ошибки JS в консоли (п.1.14) - лист «Ошибки JavaScript»
+    calltracking_check: dict = None,  # браузерная проверка замены рекл. номера - лист «Замена рекл. номера»
     w3c_check: dict = None,        # валидация W3C + скорость (п.1.16) - лист «Валидация и скорость»
     p404_check: dict = None,       # страница 404 (п.1.18) - лист «Страница 404»
     ps_filters: dict = None,       # фильтры ПС (п.1.19) - лист «Фильтры ПС»
@@ -6363,6 +6503,7 @@ def build_report(
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
+    _build_calltracking_sheet(wb, calltracking_check)
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 2: Все детали

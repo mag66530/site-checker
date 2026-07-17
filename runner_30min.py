@@ -443,6 +443,47 @@ def _run_console_check(pid, urls, log):
                 'note': f'результат проверки консоли не прочитан: {e}'}
 
 
+def _run_calltracking_browser(pid, hosts, log):
+    """Браузерная проверка замены рекламного номера (уровень 2). Отдельный
+    процесс calltracking_run.py (Playwright): открывает главную города с
+    рекламной меткой и проверяет, подменился ли номер на рекламный из КП.
+    Возвращает dict для листа «Замена рекл. номера»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    (root / 'cache').mkdir(exist_ok=True)
+    _hosts_file = root / 'cache' / f'ct_hosts_{pid}.json'
+    _res_file = root / 'cache' / f'calltracking_{pid}.json'
+    try:
+        _hosts_file.write_text(json.dumps(list(hosts), ensure_ascii=False),
+                               encoding='utf-8')
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    args = [_sys.executable, 'calltracking_run.py', '--project', pid,
+            '--hosts-file', str(_hosts_file)]
+    log(f'Замена рекл. номера: {len(hosts)} город(ов), запускаю браузер…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [рекл.номер] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        log(f'⚠ Замена рекл. номера: {e}')
+        return {'available': True, 'results': [], 'note': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'results': [],
+                'note': f'результат проверки замены номера не прочитан: {e}'}
+
+
 def _run_admin_settings(pid, params, creds, log):
     """Проверка «работают функции настройки» в админке (доп. чек-лист).
     Отдельный процесс admin_settings_run.py (Playwright): креды уходят через
@@ -1099,6 +1140,18 @@ def run_check(pid, params, creds, log, progress):
             if _console_urls:
                 _console_check = _run_console_check(pid, _console_urls, log)
 
+        # ── Замена рекламного номера (уровень 2, браузер) - по галочке ──
+        # Открываем главную каждого города прогона с рекламной меткой и
+        # проверяем, подменяется ли номер на рекламный из КП.
+        _calltracking_check = None
+        if params.get('check_calltracking'):
+            _ct_hosts = list(dict.fromkeys(
+                r.subdomain for r in results
+                if r.is_ok and r.type_code == 'main' and r.subdomain))
+            if _ct_hosts:
+                _calltracking_check = _run_calltracking_browser(
+                    pid, _ct_hosts, log)
+
         # ── Валидация W3C + скорость (1.16) и сжатие/кеш статики (1.17) ──
         # Обе по выборке страниц (главная/категория/товар); ресурсы качаем
         # один раз и делим между проверками. Внешние W3C-сервисы медленные,
@@ -1613,6 +1666,7 @@ def run_check(pid, params, creds, log, progress):
             service_issues=_service_issues, autoclick=_autoclick,
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,
+            calltracking_check=_calltracking_check,
             w3c_check=_w3c_check, p404_check=_p404_check,
             ps_filters=_ps_filters, search_check=_search_check,
             index_404_check=_index_404,
