@@ -2880,6 +2880,80 @@ def _build_gsc_pages_sheet(wb, gsc_pages):
     ws.column_dimensions['C'].width = 16
 
 
+_HOME_DUPES_VERDICT = {
+    'main': ('✔ это главная', '006300'),
+    'redirect': ('✔ склеено (редирект)', '006300'),
+    'canonical': ('✔ склеено (canonical)', '006300'),
+    'duplicate': ('✖ ДУБЛЬ', 'C0392B'),
+    'absent': ('— адреса нет', '8A8781'),
+    'error': ('⚠ недоступно', 'B9770E'),
+}
+
+
+def _build_home_dupes_sheet(wb, home_dupes):
+    """Лист «Дубли главной»: одна и та же главная не должна открываться по разным
+    адресам с кодом 200 (www/без, http/https, слэши, index.php, ?параметр).
+    Строится, только если проверка выполнялась."""
+    if not home_dupes or not home_dupes.get('available'):
+        return
+    variants = home_dupes.get('variants') or []
+    ws = wb.create_sheet('Дубли главной')
+    ws.sheet_view.showGridLines = False
+
+    dupes = int(home_dupes.get('dupes', 0) or 0)
+    c = ws.cell(row=1, column=1, value='Каноническая главная:')
+    c.font = _font(bold=True)
+    ws.cell(row=1, column=2, value=home_dupes.get('home', '—')).font = _font()
+    c = ws.cell(row=2, column=1, value='Реальных дублей:')
+    c.font = _font(bold=True)
+    c2 = ws.cell(row=2, column=2, value=dupes)
+    c2.font = _font(bold=True, color=('C0392B' if dupes else '006300'))
+
+    head_row = 4
+    for i, t in enumerate(('Адрес', 'Ответ', 'Что происходит', 'Вердикт'), 1):
+        cell = ws.cell(row=head_row, column=i, value=t)
+        cell.font = _font(bold=True)
+        cell.fill = _fill('ECEAE4')
+        cell.border = _border()
+        cell.alignment = _align('center' if i > 1 else 'left')
+
+    # дубли - вверх списка, дальше по осмысленному порядку
+    order = {'duplicate': 0, 'error': 1, 'canonical': 2, 'main': 3,
+             'redirect': 4, 'absent': 5}
+    rows = sorted(variants, key=lambda v: order.get(v.get('verdict'), 9))
+    r = head_row + 1
+    for v in rows:
+        verdict = v.get('verdict', 'error')
+        label, color = _HOME_DUPES_VERDICT.get(verdict, ('?', C.text))
+        ca = ws.cell(row=r, column=1, value=v.get('url', ''))
+        ca.font = _font()
+        ca.border = _border()
+        cs = ws.cell(row=r, column=2, value=str(v.get('status', '')))
+        cs.font = _font()
+        cs.border = _border()
+        cs.alignment = _align('center')
+        cn = ws.cell(row=r, column=3, value=v.get('note', ''))
+        cn.font = _font()
+        cn.border = _border()
+        cv = ws.cell(row=r, column=4, value=label)
+        cv.font = _font(bold=True, color=color)
+        cv.border = _border()
+        if verdict == 'duplicate':
+            for col in range(1, 5):
+                ws.cell(row=r, column=col).fill = _fill('FBE9E7')
+        r += 1
+
+    note = ('Дубль = главная открывается по этому адресу с кодом 200, а поисковик '
+            'не склеивает его с главной (нет редиректа и canonical не на главную). '
+            'Лечится 301-редиректом на главную или тегом canonical.')
+    ws.cell(row=r + 1, column=1, value=note).font = _font(italic=True, color='5B5853')
+
+    ws.column_dimensions['A'].width = 48
+    ws.column_dimensions['B'].width = 9
+    ws.column_dimensions['C'].width = 40
+    ws.column_dimensions['D'].width = 24
+
+
 def _build_w3c_sheet(wb, w3c_check):
     """Лист валидации W3C (HTML/CSS) и скорости загрузки ресурсов по выборке
     страниц. Добавляется, только если проверка выполнялась."""
@@ -5382,7 +5456,7 @@ _SHEET_GROUPS = [
         'Индексация', 'Метаданные', 'Заголовки и мета',
         'Разметка', 'Безопасность', 'Ошибки JavaScript',
         'Валидация и скорость', 'Страница 404', '404 в индексе',
-        'Страницы в ГСК',
+        'Страницы в ГСК', 'Дубли главной',
         'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
     ]),
     ('Верстка', ['Вёрстка']),
@@ -5543,6 +5617,7 @@ def build_report(
     admin_settings: dict = None,   # функции настройки в админке (п.1.21) - лист «Настройки в админке»
     yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
     gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
+    home_dupes: dict = None,       # дубли главной страницы - лист «Дубли главной»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -5886,6 +5961,7 @@ def build_report(
     # ─── Лист валидации W3C + скорости (п.1.16) - если выполнялась ──────
     _build_w3c_sheet(wb, w3c_check)
     _build_gsc_pages_sheet(wb, gsc_pages)
+    _build_home_dupes_sheet(wb, home_dupes)
 
     # ─── Лист «Страница 404» (п.1.18) - если проверка выполнялась ──────
     _build_404_sheet(wb, p404_check)
