@@ -225,8 +225,7 @@ if _helper_running or _phase in ('start', 'login', 'error'):
         else:
             st.warning('Процесс входа завершился, а сессия не сохранилась. '
                        'Скорее всего вышло время (15 мин) - начни заново.')
-        if st.button('🔁 Войти заново', type='primary',
-                     use_container_width=True):
+        if st.button('🔁 Войти заново', use_container_width=True):
             _reset(pid)
             _launch(pid)
             st.rerun()
@@ -271,6 +270,11 @@ if _helper_running or _phase in ('start', 'login', 'error'):
         _write_action(pid, 'back')
         st.rerun()
 
+    if st.button('🔁 Повторить попытку (если Google написал «не удалось войти»)',
+                 use_container_width=True):
+        _write_action(pid, 'retry')
+        st.rerun()
+
     st.caption('Скрин обновляется сам каждые 2 сек. Печатай спокойно - поле '
                'ввода не сбрасывается. «Далее» в Google жми кнопкой «↵ Далее».')
 
@@ -306,6 +310,6 @@ st.markdown(
     '3. Как войдём в Search Console - сессия сохранится, страница это покажет.\n'
     '4. Дальше запускаешь «Количество страниц в ГСК» в чек-листе - всё само.')
 
-if st.button('▶ Начать вход', type='primary', use_container_width=True):
+if st.button('▶ Начать вход', use_container_width=True):
     _launch(pid)
     st.rerun()
