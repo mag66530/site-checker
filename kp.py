@@ -248,6 +248,10 @@ class KPCheckResult:
     city: str = ''
     matched_kp: bool = False           # нашли строку КП для домена?
     issues: list[dict] = field(default_factory=list)   # [{field, status, comment}]
+    # Статическая сверка рекламного подменного номера (коллтрекинг ↔ phone_ad):
+    # {status, comment, configured, kp} - показывается в секции «Замена рекл.
+    # номера» листа «Аналитика», не в контактах.
+    ad_check: dict = None
 
     @property
     def has_issues(self) -> bool:
@@ -462,6 +466,17 @@ def check_against_kp(html: str, domain: str, kp: dict[str, KPRow]) -> KPCheckRes
             'comment': f'На сайте номер, которого нет в КП проекта: '
                        f'{", ".join(_fmt(p) for p in site["phones"])}.',
         })
+
+    # ── Рекламный номер (подмена коллтрекингом), п. «замена рекл. номера» ──
+    # Статически (по HTML) сверяем рекламный подменный номер в конфиге
+    # коллтрекинга (Sipuni) с phone_ad города из КП. Результат кладём в
+    # отдельное поле ad_check (секция «Замена рекл. номера» в «Аналитике»),
+    # а НЕ в контакты - чтобы не смешивать с телефон/почта/адрес.
+    try:
+        from calltracking_checker import check_ad_number
+        res.ad_check = check_ad_number(html, row.phone_ad)
+    except Exception:
+        res.ad_check = None
 
     # ── Почта ──
     # Сверяем, только если в КП реально e-mail. Иногда в поле почты стоит
