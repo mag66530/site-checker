@@ -94,11 +94,12 @@ def _short(src: str) -> str:
         return src
 
 
-# ── Картинка категории/раздела (уникальность, пункт чек-листа) ─────
-# «Главная» картинка страницы категории: og:image, иначе первая контентная
-# <img> после </h1>. Логотипы/иконки пропускаем (не показатель), заглушки
-# (no-photo и т.п.) возвращаем с пометкой - заглушка вместо своей картинки
-# сама по себе находка. Сравнение между категориями - в runner.
+# ── «Главная» картинка страницы (уникальность, пункт чек-листа) ────
+# og:image, иначе первая контентная <img> после </h1>. Одинаково устроено
+# и для категории/раздела, и для карточки товара. Логотипы/иконки пропускаем
+# (не показатель), заглушки (no-photo и т.п.) возвращаем с пометкой - заглушка
+# вместо своей картинки сама по себе находка. Сравнение между страницами
+# (категория с категорией, товар с товаром) - в runner.
 _RE_META_TAG = re.compile(r'<meta\b[^>]*>', re.I)
 _RE_OG_IMAGE_PROP = re.compile(r'property\s*=\s*["\']og:image["\']', re.I)
 _RE_CONTENT_ATTR = re.compile(r'content\s*=\s*["\']([^"\']+)["\']', re.I)
@@ -120,9 +121,10 @@ def _img_key(src: str, base_url: str = '') -> str:
     return _RE_RESIZE_CACHE.sub(r'/\1/', path).lower()
 
 
-def category_image(html, base_url: str = '') -> dict:
-    """«Главная» картинка страницы категории: og:image, иначе первая
-    контентная <img> после </h1>. None - не распознана."""
+def page_main_image(html, base_url: str = '') -> dict:
+    """«Главная» картинка страницы: og:image, иначе первая контентная <img>
+    после </h1>. Подходит и категории, и карточке товара. None - не
+    распознана. Возвращает {key, name, source, placeholder}."""
     html = _RE_HTML_COMMENT.sub(' ', html or '')
     for tag in _RE_META_TAG.findall(html):
         if not _RE_OG_IMAGE_PROP.search(tag):
@@ -155,6 +157,12 @@ def category_image(html, base_url: str = '') -> dict:
     return None
 
 
+# Картинка категории и картинка товара распознаются одинаково - имена-обёртки
+# для читаемости вызова (http_checker кладёт результат в cat_img/prod_img).
+category_image = page_main_image
+product_image = page_main_image
+
+
 def category_image_dups(cats) -> dict:
     """cats: [(subdomain, url, cat_img|None)] -> {(subdomain, key): [urls]},
     где одна картинка стоит на >=2 категориях ОДНОГО поддомена (на разных
@@ -165,6 +173,35 @@ def category_image_dups(cats) -> dict:
         if ci and ci.get('key') and not ci.get('placeholder'):
             groups.setdefault((sub, ci['key']), []).append(url)
     return {k: v for k, v in groups.items() if len(v) >= 2}
+
+
+def product_slug(url: str) -> str:
+    """Идентификатор карточки товара - последний сегмент пути. Один и тот же
+    товар, доступный по нескольким категорийным адресам
+    (/catalog/sladosti/malina/ и /catalog/podarki/malina/), имеет ОДИН slug
+    (malina); разные товары - разные slug'и. По нему отличаем «тот же товар в
+    другой категории» (норма CMS) от «другой товар с тем же фото» (дубль)."""
+    path = (urlsplit(url or '').path or '').rstrip('/')
+    return path.rsplit('/', 1)[-1].lower()
+
+
+def product_image_dups(prods) -> dict:
+    """prods: [(subdomain, url, prod_img|None)] -> {(subdomain, key): [urls]},
+    где одно фото стоит у >=2 РАЗНЫХ товаров ОДНОГО поддомена.
+
+    Тонкость чек-листа (см. алгоритм поиска дублей): один и тот же товар,
+    выведенный в несколько категорий, ссылается на одно фото - это штатная
+    работа CMS, а не дубль (таким карточкам нужен rel=canonical - отдельная
+    проверка). Такие адреса имеют одинаковый slug, поэтому дублем считаем
+    картинку, которую делят >=2 РАЗНЫХ slug'а. Города-поддомены зеркалят
+    каталог - сравниваем в пределах одного поддомена. Заглушки (no-photo) в
+    дубли не берём - у них своё предупреждение."""
+    groups = {}
+    for sub, url, pi in prods:
+        if pi and pi.get('key') and not pi.get('placeholder'):
+            groups.setdefault((sub, pi['key']), []).append(url)
+    return {k: urls for k, urls in groups.items()
+            if len({product_slug(u) for u in urls}) >= 2}
 
 
 def imgs_no_alt(html: str) -> list:

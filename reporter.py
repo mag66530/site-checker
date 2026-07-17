@@ -2708,7 +2708,10 @@ def _build_images_sheet(wb, results):
                '(6) Уникальные картинки категорий - «главная» картинка '
                'категории (og:image / первая после h1) не повторяется на '
                'других категориях того же поддомена и не заглушка. '
-               'Вес берётся по Content-Length.')
+               '(7) Уникальные фото товаров - изображения товаров в разных '
+               'категориях не дублируются: одно фото не стоит у разных '
+               'товаров поддомена (один товар в нескольких категориях - '
+               'норма, ему нужен rel=canonical). Вес берётся по Content-Length.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
@@ -2732,6 +2735,16 @@ def _build_images_sheet(wb, results):
                     f'(на {im["cat_dup"]["n"]} категориях)')
         if im.get('cat_img'):
             return f'заглушка: {im["cat_img"]["name"]}'
+        return ''
+
+    def _prod_extra(r):
+        """Контекст находки по фото товара: какое фото и у скольких товаров."""
+        im = getattr(r, 'images', None) or {}
+        if im.get('prod_dup'):
+            return (f'та же картинка: {im["prod_dup"]["name"]} '
+                    f'(у {im["prod_dup"]["n"]} товаров)')
+        if im.get('prod_img'):
+            return f'заглушка: {im["prod_img"]["name"]}'
         return ''
 
     def _img_extra(r):
@@ -2817,6 +2830,40 @@ def _build_images_sheet(wb, results):
             c = ws.cell(row=row, column=2)
             c.value = ('· Картинка категории (og:image / первая после h1) '
                        'не распознана ни на одной категории - пропуск.')
+            c.font = _font(size=10, color=C.text_muted)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 22
+            row += 2
+
+    # ── Уникальные фото товаров (изображения товаров не дублируются) ──
+    # Секция появляется, когда в прогоне были карточки товаров. Дубль - одно
+    # фото у РАЗНЫХ товаров; один товар в нескольких категориях (тот же slug)
+    # дублем не считается (это норма CMS, для него - rel=canonical).
+    prods = [r for r in checked if getattr(r, 'type_code', '') == 'product']
+    if prods:
+        prod_bad = [r for r in prods if r.images.get('prod_warnings')]
+        recognized_p = sum(1 for r in prods if r.images.get('prod_img'))
+        _meta_section_title(
+            ws, row,
+            f'Картинки товаров - уникальность  ({len(prod_bad)})',
+            C.warn if prod_bad else C.ok)
+        row += 1
+        if prod_bad:
+            row = _render_issue_groups(
+                ws, row, _issue_groups(prod_bad, 'images', 'prod_warnings'),
+                C.warn, extra=_prod_extra)
+        elif recognized_p:
+            _meta_ok_line(ws, row,
+                          f'✅ У каждого товара своё фото, дублей и заглушек '
+                          f'нет (товаров: {len(prods)}, фото распознано у '
+                          f'{recognized_p}).')
+            row += 2
+        else:
+            ws.merge_cells(start_row=row, start_column=2,
+                           end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = ('· Фото товара (og:image / первое после h1) не '
+                       'распознано ни на одной карточке - пропуск.')
             c.font = _font(size=10, color=C.text_muted)
             c.alignment = _align(indent=1)
             ws.row_dimensions[row].height = 22

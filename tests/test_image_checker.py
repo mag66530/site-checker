@@ -1,12 +1,14 @@
-"""Тесты картинки категории (уникальность, п.1.15): распознавание
-og:image / первой картинки после h1, нормализация resize_cache,
-заглушки, поиск дублей между категориями одного поддомена."""
+"""Тесты «главной» картинки страницы (уникальность, п.1.15): распознавание
+og:image / первой картинки после h1, нормализация resize_cache, заглушки,
+поиск дублей между категориями одного поддомена и между товарами (с отсевом
+«тот же товар в другой категории» по slug)."""
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from image_checker import category_image, category_image_dups, _img_key
+from image_checker import (category_image, category_image_dups, _img_key,
+                           product_image, product_image_dups, product_slug)
 
 
 BASE = 'https://x.ru/catalog/truby/'
@@ -91,6 +93,72 @@ def test_placeholders_not_counted_as_dups():
     print('✓ заглушки в дубли не считаются (у них своё предупреждение)')
 
 
+# ── Фото товаров (изображения товаров в разных категориях не дублируются) ──
+
+PBASE = 'https://x.ru/catalog/sladosti/malina/'
+
+
+def test_product_image_same_extractor_as_category():
+    html = ('<meta property="og:image" content="/upload/iblock/ab/malina.jpg">'
+            '<h1>Малиновое варенье</h1>')
+    pi = product_image(html, PBASE)
+    assert pi and pi['source'] == 'og:image'
+    assert pi['key'] == '/upload/iblock/ab/malina.jpg'
+    assert not pi['placeholder']
+    print('✓ фото товара распознаётся тем же движком, что и картинка категории')
+
+
+def test_product_slug_last_segment():
+    assert product_slug('/catalog/sladosti/malina/') == 'malina'
+    assert product_slug('/catalog/podarki/malina/') == 'malina'
+    assert product_slug('https://x.ru/karbid-bora-f80/') == 'karbid-bora-f80'
+    assert product_slug('/catalog/armatura/2938017-armatura-10-mm/') \
+        == '2938017-armatura-10-mm'
+    print('✓ slug товара - последний сегмент пути')
+
+
+def test_same_product_different_categories_not_dup():
+    """«Малиновое варенье» в «Сладостях» и «Подарках» - один товар (тот же
+    slug), одно фото. Это норма CMS, не дубль (скриншот из ТЗ)."""
+    img = {'key': '/upload/iblock/ab/malina.jpg', 'name': 'malina.jpg',
+           'source': 'og:image', 'placeholder': False}
+    prods = [
+        ('msk', 'https://msk.x.ru/catalog/sladosti/malina/', img),
+        ('msk', 'https://msk.x.ru/catalog/podarki/malina/', img),
+    ]
+    assert product_image_dups(prods) == {}
+    print('✓ один товар в разных категориях (тот же slug) - не дубль')
+
+
+def test_different_products_same_photo_is_dup():
+    """Разные товары (разные slug'и) с одним фото - реальный дубль."""
+    img = {'key': '/upload/iblock/ab/stock.jpg', 'name': 'stock.jpg',
+           'source': 'og:image', 'placeholder': False}
+    other = {'key': '/upload/iblock/cd/own.jpg', 'name': 'own.jpg',
+             'source': 'og:image', 'placeholder': False}
+    prods = [
+        ('msk', 'https://msk.x.ru/catalog/c/malina/', img),
+        ('msk', 'https://msk.x.ru/catalog/c/klubnika/', img),   # др. товар
+        ('spb', 'https://spb.x.ru/catalog/c/malina/', img),     # зеркало
+        ('msk', 'https://msk.x.ru/catalog/c/vishnya/', other),  # своё фото
+    ]
+    dups = product_image_dups(prods)
+    assert list(dups) == [('msk', '/upload/iblock/ab/stock.jpg')]
+    assert sorted(dups[('msk', '/upload/iblock/ab/stock.jpg')]) == [
+        'https://msk.x.ru/catalog/c/klubnika/',
+        'https://msk.x.ru/catalog/c/malina/']
+    print('✓ разные товары с одним фото - дубль; зеркало города и своё фото ок')
+
+
+def test_product_placeholder_not_counted_as_dup():
+    plh = {'key': '/img/no-photo.png', 'name': 'no-photo.png',
+           'source': 'после h1', 'placeholder': True}
+    prods = [('msk', 'https://msk.x.ru/catalog/c/a/', plh),
+             ('msk', 'https://msk.x.ru/catalog/c/b/', plh)]
+    assert product_image_dups(prods) == {}
+    print('✓ заглушки товаров в дубли не считаются (у них своё предупреждение)')
+
+
 if __name__ == '__main__':
     test_og_image_wins()
     test_og_image_logo_falls_back_to_content()
@@ -100,4 +168,9 @@ if __name__ == '__main__':
     test_resize_cache_collapsed()
     test_dups_same_subdomain_only()
     test_placeholders_not_counted_as_dups()
-    print('Все тесты картинок категорий пройдены.')
+    test_product_image_same_extractor_as_category()
+    test_product_slug_last_segment()
+    test_same_product_different_categories_not_dup()
+    test_different_products_same_photo_is_dup()
+    test_product_placeholder_not_counted_as_dup()
+    print('Все тесты картинок категорий и товаров пройдены.')

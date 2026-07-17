@@ -919,11 +919,15 @@ async def check_one(
             if get_image_infos is not None:
                 _img_infos = await get_image_infos(a['body_text'], _base)
             images = _check_images(a['body_text'], _base, _img_infos)
-            # Картинка категории (og:image / первая после h1) - для
-            # проверки уникальности между категориями (пост-проход runner).
+            # «Главная» картинка (og:image / первая после h1) - для проверки
+            # уникальности между однотипными страницами (пост-проход runner):
+            # категории сравниваем с категориями, товары - с товарами.
             if images is not None and task.type_code == 'category':
                 from image_checker import category_image
                 images['cat_img'] = category_image(a['body_text'], _base)
+            elif images is not None and task.type_code == 'product':
+                from image_checker import product_image
+                images['prod_img'] = product_image(a['body_text'], _base)
         except Exception:
             images = None
 
