@@ -1768,7 +1768,11 @@ if pid:
                 'metrika_counter': _secret_pid('metrika_counter', pid),
                 # Сессия для облачного автокликера (base64 storage_state).
                 # По-проектная: autoclick_session_<pid> (+ общий фоллбэк).
-                'autoclick_session': _secret_pid('autoclick_session', pid),
+                # Общая сессия Яндекса (автокликеры / 404-в-индексе / Я.Бизнес).
+                # Новое имя yandex_session_<pid>; старое autoclick_session_<pid>
+                # - fallback (не ломаем существующие секреты).
+                'autoclick_session': (_secret_pid('yandex_session', pid)
+                                      or _secret_pid('autoclick_session', pid)),
                 'webmaster_keys_hint': _wm_hint,
                 'secret_keys_hint': _sk_hint,
                 # Креды админки (п.1.21): из полей UI; пустые значения не шлём
