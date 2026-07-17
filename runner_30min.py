@@ -1273,6 +1273,37 @@ def run_check(pid, params, creds, log, progress):
             except Exception as _e:
                 log(f'⚠ Дубли главной: {_e}')
 
+        # ── Индексация URL через Арсенкин (чек-лист «Дополнительно») ──
+        # API Арсенкина (без браузера). Токен и URL-ы приходят из полей чек-листа
+        # (не из Secrets). Может идти минуты - гоним в конце прогона.
+        _arsenkin = None
+        if params.get('check_arsenkin'):
+            _tok = (params.get('arsenkin_token') or '').strip()
+            _urls_raw = params.get('arsenkin_urls') or ''
+            if not _tok:
+                log('⚠ Индексация (Арсенкин): не введён API-токен - пропускаю.')
+            else:
+                try:
+                    from arsenkin_checker import run_indexation
+                    log('Индексация (Арсенкин): ставлю задачу…')
+                    _arsenkin = run_indexation(
+                        _tok, _urls_raw,
+                        yandex=params.get('arsenkin_yandex', True),
+                        google=params.get('arsenkin_google', True),
+                        search_all=params.get('arsenkin_search_all', True),
+                        inurl=params.get('arsenkin_inurl', False),
+                        log=lambda m: log(f'  {m}'), proxy_url=proxy_url)
+                    if not _arsenkin.get('available'):
+                        log(f'⚠ Индексация (Арсенкин): {_arsenkin.get("error")}')
+                        if _arsenkin.get('raw_sample'):
+                            log(f'  [сырой ответ] {_arsenkin["raw_sample"][:500]}')
+                    else:
+                        log(f'Индексация (Арсенкин): проверено '
+                            f'{_arsenkin.get("checked")}, не в индексе '
+                            f'{_arsenkin.get("not_indexed")}')
+                except Exception as _e:
+                    log(f'⚠ Индексация (Арсенкин): {_e}')
+
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный
         # из прогона, а если фильтров в выборке нет - из базы каталога.
@@ -1537,7 +1568,8 @@ def run_check(pid, params, creds, log, progress):
             index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile,
             admin_settings=_admin_settings, yabusiness=_yabusiness,
-            gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic)
+            gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic,
+            arsenkin=_arsenkin)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
