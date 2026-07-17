@@ -29,6 +29,7 @@ import argparse
 import asyncio
 import base64
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -38,10 +39,39 @@ sys.path.insert(0, str(ROOT))
 
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+# Firefox: у Google проверка «небезопасный браузер» заточена под Chromium-
+# автоматизацию, обычный Firefox её проходит куда чаще (так и делает click-post).
+FF_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) '
+         'Gecko/20100101 Firefox/133.0')
 
 LOGIN_URL = 'https://accounts.google.com/signin/v2/identifier?hl=ru'
 SESSION_MAX_SEC = 900          # держим сессию входа до 15 минут
 STEP_WAIT_SEC = 180            # ждём ввод человека на каждом шаге до 3 минут
+
+
+def _start_xvfb():
+    """Поднять виртуальный экран (Xvfb) для headful-браузера. Google не пускает
+    headless-браузер («небезопасный»), а с настоящим экраном (headful) проходит
+    заметно чаще. Возвращает Popen (чтобы потом закрыть) или None, если экран уже
+    есть / пакет xvfb не установлен - тогда останемся в headless."""
+    import shutil
+    import subprocess
+    if os.environ.get('DISPLAY'):
+        return None                       # экран уже есть (локально)
+    if not shutil.which('Xvfb'):
+        return None                       # пакета нет - fallback в headless
+    disp = ':99'
+    if os.path.exists('/tmp/.X99-lock'):
+        os.environ['DISPLAY'] = disp      # экран с прошлого запуска - переиспользуем
+        return None
+    try:
+        proc = subprocess.Popen(
+            ['Xvfb', disp, '-screen', '0', '1360x1020x24', '-nolisten', 'tcp'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.environ['DISPLAY'] = disp
+        return proc
+    except Exception:
+        return None
 
 
 def _dir(pid: str) -> Path:
@@ -84,45 +114,59 @@ async def run(pid: str) -> int:
 
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
-        # доустановка Chromium при необходимости (как в autoclick_browser)
+        # Firefox, а не Chromium: проверка Google «небезопасный браузер» заточена
+        # под Chromium-автоматизацию; обычный Firefox её проходит чаще (так делает
+        # click-post у Насти). Доустанавливаем при необходимости.
         try:
-            _path = p.chromium.executable_path
+            _path = p.firefox.executable_path
         except Exception:
             _path = None
         if not _path or not Path(_path).exists():
-            status('start', msg='Ставлю браузер (~1 мин)…')
+            status('start', msg='Ставлю браузер Firefox (~1 мин)…')
             import subprocess
             try:
-                subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'],
+                subprocess.run([sys.executable, '-m', 'playwright', 'install', 'firefox'],
                                check=True, capture_output=True, text=True, timeout=900)
             except Exception as e:
                 status('error', msg=f'браузер не готов: {str(e)[:200]}')
                 return 1
 
+        # Виртуальный экран → браузер с настоящим экраном (headful) для верности.
+        xvfb = _start_xvfb()
+        headful = bool(os.environ.get('DISPLAY'))
+        if headful:
+            await asyncio.sleep(1.2)      # дать Xvfb подняться
+            status('start', msg='Открываю браузер с экраном…')
+        # Прячем автоматизацию через настройки Firefox (navigator.webdriver и UA).
+        _prefs = {
+            'dom.webdriver.enabled': False,
+            'general.useragent.override': FF_UA,
+            'intl.accept_languages': 'ru-RU, ru, en-US, en',
+            'privacy.resistFingerprinting': False,
+        }
         try:
-            browser = await p.chromium.launch(headless=True, args=[
-                '--no-sandbox', '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled'])
+            browser = await p.firefox.launch(headless=not headful,
+                                             firefox_user_prefs=_prefs)
         except Exception as e:
-            status('error', msg=f'не запустился браузер: {str(e)[:200]}')
-            return 1
+            # headful не поднялся - пробуем headless, чтобы хоть что-то показать
+            try:
+                browser = await p.firefox.launch(headless=True,
+                                                 firefox_user_prefs=_prefs)
+                headful = False
+            except Exception:
+                status('error', msg=f'не запустился браузер: {str(e)[:200]}')
+                if xvfb:
+                    try:
+                        xvfb.terminate()
+                    except Exception:
+                        pass
+                return 1
 
         ctx = await browser.new_context(
-            user_agent=UA, locale='ru-RU', timezone_id='Europe/Moscow',
+            user_agent=FF_UA, locale='ru-RU', timezone_id='Europe/Moscow',
             viewport={'width': 1280, 'height': 1000})
-        # Маскировка headless-Chromium: Google блокирует вход как «небезопасный
-        # браузер», если видит признаки автоматизации. Прячем самые заметные.
         await ctx.add_init_script(
-            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-            "Object.defineProperty(navigator,'languages',"
-            "{get:()=>['ru-RU','ru','en-US','en']});"
-            "Object.defineProperty(navigator,'plugins',"
-            "{get:()=>[1,2,3,4,5]});"
-            "window.chrome={runtime:{}};"
-            "const _q=window.navigator.permissions&&window.navigator.permissions.query;"
-            "if(_q){window.navigator.permissions.query=(p)=>("
-            "p&&p.name==='notifications'?Promise.resolve({state:Notification.permission})"
-            ":_q(p));}")
+            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
         page = await ctx.new_page()
 
         async def snap():
@@ -256,6 +300,11 @@ async def run(pid: str) -> int:
 
         try:
             await browser.close()
+        except Exception:
+            pass
+    if xvfb:
+        try:
+            xvfb.terminate()
         except Exception:
             pass
     return 0

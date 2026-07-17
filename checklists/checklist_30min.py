@@ -691,6 +691,7 @@ def init_session():
         'c30_check_index_404': False,  # 404 среди страниц в индексе (Вебмастер) - тяжёлая, по запросу
         'c30_check_yabusiness': False,  # Я.Бизнес: поддомен под свой регион (сессия)
         'c30_check_gsc_pages': False,  # количество страниц в ГСК по статусам - браузер, по запросу
+        'c30_check_home_dupes': False,  # дубли главной страницы (HTTP, без браузера)
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
         'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
@@ -1376,6 +1377,15 @@ if pid:
                        'вкладке «🔐 Вход в Google» (вводишь по скриншотам то, что '
                        'просит Google) — сессия сохранится, и эта проверка возьмёт '
                        'числа сама. Пока входа нет, пункт пропустится с пометкой.')
+        st.checkbox('Проверка дублей главной страницы',
+                    key='c30_check_home_dupes',
+                    help='Проверяет, не открывается ли главная по разным адресам с '
+                         'кодом 200 (с www и без, http/https, со слэшем и без, '
+                         '/index.php, /index.html, двойной слэш, ?параметр) — как '
+                         'coolakov.ru и be1.ru/dubli-stranic, но точнее: смотрит '
+                         'редирект и тег canonical. Редирект на главную или '
+                         'canonical → главная = склеено (ок); 200 без этого = дубль. '
+                         'Быстро, без браузера. Отдельный лист «Дубли главной».')
         st.checkbox('Проверять фильтрацию товаров (браузер)',
                     key='c30_check_filter_fn',
                     help='Открывает категорию в браузере и применяет фильтр по '
@@ -1696,6 +1706,7 @@ if pid:
                 'check_index_404': st.session_state.get('c30_check_index_404', False),
                 'check_yabusiness': st.session_state.get('c30_check_yabusiness', False),
                 'check_gsc_pages': st.session_state.get('c30_check_gsc_pages', False),
+                'check_home_dupes': st.session_state.get('c30_check_home_dupes', False),
                 'gsc_pages_indexed': int(st.session_state.get('c30_gsc_indexed', 0) or 0),
                 'gsc_pages_crawled_ni': int(st.session_state.get('c30_gsc_crawled_ni', 0) or 0),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),

@@ -64,6 +64,18 @@ st.markdown(
     .stButton > button[kind="secondary"]:hover, .stDownloadButton > button:hover {
         background: rgba(26,26,26,.05);
     }
+    /* Кнопки отправки формы (st.form_submit_button): без этих правил текст
+       невидим - тёмный на тёмном фоне. Приводим к обычному светлому виду. */
+    [data-testid="stFormSubmitButton"] > button {
+        background: transparent !important; color: #1A1A1A !important;
+        border: 1px solid rgba(26,26,26,.18) !important;
+        font-family: 'Hanken Grotesk', sans-serif; font-weight: 600;
+        border-radius: 10px; padding: 0.6rem 1.1rem;
+    }
+    [data-testid="stFormSubmitButton"] > button:hover {
+        background: rgba(26,26,26,.05) !important;
+    }
+    [data-testid="stFormSubmitButton"] > button * { color: #1A1A1A !important; }
 
     /* Поля, список, редактор */
     [data-baseweb="select"] > div, .stTextArea textarea, .stTextInput input {

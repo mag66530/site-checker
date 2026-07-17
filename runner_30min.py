@@ -1235,6 +1235,28 @@ def run_check(pid, params, creds, log, progress):
                         f'{_gsc_pages.get("crawled_not_indexed")}, сумма '
                         f'{_gsc_pages.get("total")}')
 
+        # ── Дубли главной страницы (чек-лист) ──
+        # Быстрая HTTP-проверка (без браузера): главная не должна открываться по
+        # разным адресам с кодом 200 (www/без, http/https, слэши, index.php, ?).
+        _home_dupes = None
+        if params.get('check_home_dupes'):
+            try:
+                from home_dupes_checker import check_home_dupes
+                import asyncio as _asyncio
+                _dom = cfg.get('root_domain') or (
+                    _main.host if _main else None)
+                log('Дубли главной: проверяю варианты адресов…')
+                _home_dupes = _asyncio.run(check_home_dupes(
+                    _dom, proxy_url=proxy_url, log=lambda m: log(f'  {m}')))
+                if _home_dupes.get('available'):
+                    _nd = _home_dupes.get('dupes', 0)
+                    log(f'Дубли главной: реальных дублей {_nd} '
+                        f'(проверено {_home_dupes.get("checked", 0)} адресов)')
+                else:
+                    log(f'⚠ Дубли главной: {_home_dupes.get("error")}')
+            except Exception as _e:
+                log(f'⚠ Дубли главной: {_e}')
+
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный
         # из прогона, а если фильтров в выборке нет - из базы каталога.
@@ -1499,7 +1521,7 @@ def run_check(pid, params, creds, log, progress):
             index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile,
             admin_settings=_admin_settings, yabusiness=_yabusiness,
-            gsc_pages=_gsc_pages)
+            gsc_pages=_gsc_pages, home_dupes=_home_dupes)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
