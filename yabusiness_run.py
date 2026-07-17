@@ -33,7 +33,8 @@ def main():
     args = ap.parse_args()
 
     b64 = os.environ.get('YABUSINESS_SESSION') if args.from_env else None
-    res = run(args.project, session_b64=b64, log=print)
+    proxy = os.environ.get('YABUSINESS_PROXY') or None
+    res = run(args.project, session_b64=b64, proxy_url=proxy, log=print)
 
     if not res.get('available'):
         print('✗', res.get('note'))

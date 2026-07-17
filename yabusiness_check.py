@@ -61,65 +61,98 @@ def cookies_from_storage_state(b64: str) -> dict:
     return out
 
 
-def load_session_cookies(project_id: str, b64: str = None) -> dict:
-    """Куки Яндекса: из переданного b64 (секрет autoclick_session_<pid>) или
-    из cache/autoclick_session_<pid>.b64. {} если сессии нет."""
+def _storage_state(b64: str) -> dict:
+    """Из base64 - storage_state для Playwright (только куки Яндекса,
+    нормализованный sameSite). {} если не разобрать."""
+    try:
+        data = json.loads(base64.b64decode(b64).decode('utf-8'))
+    except Exception:
+        return {}
+    cks = []
+    for c in data.get('cookies', []):
+        dom = (c.get('domain') or '').lower()
+        if not any(dom.endswith(d) or dom == d for d in _YANDEX_COOKIE_DOMAINS):
+            continue
+        c = dict(c)
+        if c.get('sameSite') not in ('Strict', 'Lax', 'None'):
+            c['sameSite'] = 'Lax'
+        cks.append(c)
+    return {'cookies': cks, 'origins': []}
+
+
+def load_session_state(project_id: str, b64: str = None) -> dict:
+    """storage_state Яндекса: из b64 (секрет autoclick_session_<pid>) или
+    cache/autoclick_session_<pid>.b64. {} если сессии нет."""
     if b64:
-        return cookies_from_storage_state(b64)
+        return _storage_state(b64)
     f = BASE / 'cache' / f'autoclick_session_{project_id}.b64'
     if f.is_file():
-        return cookies_from_storage_state(f.read_text(encoding='utf-8').strip())
+        return _storage_state(f.read_text(encoding='utf-8').strip())
     return {}
 
 
-def _session(cookies: dict, proxy_url: str = None):
-    s = requests.Session()
-    s.headers.update({'User-Agent': UA, 'Accept-Language': 'ru'})
-    s.cookies.update(cookies or {})
-    if proxy_url:
-        s.proxies.update({'http': proxy_url, 'https': proxy_url})
-    return s
+# Совместимость: некоторые тесты берут только куки-dict.
+def load_session_cookies(project_id: str, b64: str = None) -> dict:
+    st = load_session_state(project_id, b64)
+    return {c['name']: c['value'] for c in st.get('cookies', [])}
 
 
-def _is_logged_in(s) -> bool:
-    """Сессия жива и это нужный аккаунт (в куках есть yandex_login)."""
-    return bool(s.cookies.get('yandex_login') or s.cookies.get('Session_id'))
-
-
-def fetch_org_permalinks(s) -> list:
-    """Все permalink/chain_permalink аккаунта из SSR страницы списка."""
-    try:
-        html = s.get(f'{CABINET}/companies/?no_redirect=1', timeout=30).text
-    except Exception:
-        return []
-    return sorted(set(re.findall(r'"(?:chain_)?permalink"\s*:\s*(\d{6,})', html)))
-
-
+_RE_PERMALINK = re.compile(r'"(?:chain_)?permalink"\s*:\s*(\d{6,})')
 _RE_REGION = re.compile(r'"region_code"\s*:\s*"([^"]+)"')
 _RE_LOCALITY = re.compile(
     r'"kind"\s*:\s*"locality"[^}]*?"name"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"')
 _RE_ADDR = re.compile(r'"formatted"\s*:\s*\{\s*"value"\s*:\s*"([^"]{3,120})"')
-_RE_ORGNAME = re.compile(r'"company"[^{]*\{[^}]*?"name"[^}]*?"value"\s*:\s*"([^"]{2,80})"')
 
 
-def fetch_org_card(s, permalink: str) -> dict:
-    """Карточка организации: город (locality), region_code, адрес, имя.
-    Для «сети» город/адрес = None (группа без единого города)."""
-    try:
-        html = s.get(f'{CABINET}/{permalink}/p/edit/main', timeout=30).text
-    except Exception:
-        html = ''
+def _org_card_from_html(html: str, permalink: str) -> dict:
     m_city = _RE_LOCALITY.search(html)
     m_reg = _RE_REGION.search(html)
     m_addr = _RE_ADDR.search(html)
-    m_name = _RE_ORGNAME.search(html)
     return {
         'permalink': permalink,
         'city': m_city.group(1) if m_city else None,
         'region': m_reg.group(1) if m_reg else None,
         'addr': m_addr.group(1) if m_addr else None,
-        'name': m_name.group(1) if m_name else None,
     }
+
+
+def fetch_orgs(state: dict, proxy_url: str = None, log=None):
+    """Через БРАУЗЕР (Playwright) с сессией: список организаций аккаунта с
+    городом/регионом. requests не годится - кабинет Справочника уводит
+    сессию в passport/auth/update (петля), браузер проходит её как при
+    обычном заходе. Возвращает (logged_in: bool, orgs: list|None)."""
+    from playwright.sync_api import sync_playwright
+    ctx_kw = {'user_agent': UA}
+    if proxy_url:
+        ctx_kw['proxy'] = {'server': proxy_url}
+    with sync_playwright() as pw:
+        br = pw.chromium.launch(headless=True)
+        try:
+            ctx = br.new_context(storage_state=state, **ctx_kw)
+            page = ctx.new_page()
+            page.goto(f'{CABINET}/companies/?no_redirect=1',
+                      wait_until='domcontentloaded', timeout=60000)
+            page.wait_for_timeout(4000)
+            # Ушли на паспорт/авторизацию - сессия протухла.
+            if 'passport' in page.url or 'auth' in page.url.split('?')[0]:
+                return False, None
+            html = page.content()
+            perms = sorted(set(_RE_PERMALINK.findall(html)))
+            if not perms:
+                return True, []
+            orgs = []
+            for p in perms:
+                try:
+                    page.goto(f'{CABINET}/{p}/p/edit/main',
+                              wait_until='domcontentloaded', timeout=60000)
+                    page.wait_for_timeout(1500)
+                    orgs.append(_org_card_from_html(page.content(), p))
+                except Exception:
+                    orgs.append({'permalink': p, 'city': None,
+                                 'region': None, 'addr': None})
+            return True, orgs
+        finally:
+            br.close()
 
 
 def _subdomains(project_id: str) -> list:
@@ -176,24 +209,24 @@ def run(project_id: str, session_b64: str = None, proxy_url: str = None,
     def _log(m):
         if log:
             log(m)
-    if requests is None:
-        return {'available': False, 'note': 'requests не установлен'}
-    cookies = load_session_cookies(project_id, session_b64)
-    if not cookies:
+    state = load_session_state(project_id, session_b64)
+    if not state.get('cookies'):
         return {'available': False,
                 'note': 'Нет сессии Яндекса (autoclick_session_<pid>). '
                         'Экспортируйте сессию, как для автокликеров.'}
-    s = _session(cookies, proxy_url)
-    if not _is_logged_in(s):
+    try:
+        logged_in, orgs = fetch_orgs(state, proxy_url=proxy_url, log=log)
+    except Exception as e:
+        return {'available': False, 'note': f'Я.Бизнес: {e}'}
+    if not logged_in:
         return {'available': False,
-                'note': 'Сессия Яндекса без Session_id/yandex_login.'}
-    perms = fetch_org_permalinks(s)
-    if not perms:
+                'note': 'Сессия Яндекса протухла (увело на passport) - '
+                        'переэкспортируйте сессию.'}
+    if orgs is None or len(orgs) == 0:
         return {'available': False,
-                'note': 'Список организаций не получен - сессия протухла '
-                        'или аккаунт без организаций в Я.Бизнесе.'}
-    _log(f'Я.Бизнес: организаций/сетей в аккаунте {len(perms)}')
-    orgs = [fetch_org_card(s, p) for p in perms]
+                'note': 'Организаций в Я.Бизнесе аккаунта не найдено '
+                        '(или сессия не под тем аккаунтом).'}
+    _log(f'Я.Бизнес: организаций/сетей в аккаунте {len(orgs)}')
     res = check_subdomain_regions(orgs, project_id)
     res['available'] = True
     _log(f'Я.Бизнес: активных карточек {res["active_orgs"]}, '
