@@ -133,6 +133,45 @@ def _load_cities(project: str):
     return out
 
 
+def _read_logi(path: str):
+    """(шапка, [строки]) листа «Логи», или (None, []) если листа/файла нет."""
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(path)
+        if 'Логи' not in wb.sheetnames:
+            wb.close()
+            return None, []
+        ws = wb['Логи']
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+        return (rows[0], list(rows[1:])) if rows else (None, [])
+    except Exception:  # noqa: BLE001
+        return None, []
+
+
+def _row_city(hdr, row) -> str:
+    try:
+        return str(row[list(hdr).index('Город')] or '').strip()
+    except Exception:  # noqa: BLE001
+        return ''
+
+
+def _rewrite_logi(path: str, hdr, rows) -> None:
+    """Заменить строки листа «Логи» на переданные (шапку сохранить); другие листы
+    («Сводка»/«Цели») не трогаем."""
+    from openpyxl import load_workbook
+    wb = load_workbook(path)
+    if 'Логи' not in wb.sheetnames:
+        wb.close()
+        return
+    ws = wb['Логи']
+    if ws.max_row >= 2:
+        ws.delete_rows(2, ws.max_row - 1)
+    for r in rows:
+        ws.append(r)
+    wb.save(path)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description='Прогон проверки форм для проекта.')
     ap.add_argument('--project', required=True, choices=list(PROJECT_NAMES),
@@ -278,6 +317,14 @@ def main() -> int:
         from form_tester.stop_signal import make_stop_check
         stop = make_stop_check()
 
+        # Страховка мультигорода: сразу после прогона КАЖДОГО города снимаем его
+        # строки из «Логи» (пока следующий город их не затронул) и в конце
+        # пересобираем лог из всех снимков. Так формы всех городов гарантированно
+        # попадают в отчёт, даже если движок в мультигороде теряет часть строк.
+        _мультигород = len([c for c in run_cities if c and c[0]]) > 1
+        _снимки: list[tuple[str, list]] = []
+        _логи_шапка = None
+
         for i, (city, city_url, city_mail) in enumerate(run_cities):
             if stop():
                 _stamp('⛔ Остановлено')
@@ -305,6 +352,27 @@ def main() -> int:
                 лимит_проба=a.rate_limit_probe,
                 проверять_цели=a.check_goals,
             )
+
+            # Снимок строк этого города сразу после его прогона.
+            if _мультигород and city:
+                _h, _rows = _read_logi('log_forms.xlsx')
+                if _h is not None:
+                    _логи_шапка = _h
+                    _мои = [r for r in _rows
+                            if _row_city(_h, r).lower() == city.strip().lower()]
+                    _снимки.append((city, _мои))
+
+        # Пересобираем «Логи» из снимков всех городов (формы каждого - со своим
+        # городом), пока не начались общие блоки (cookie/вёрстка/админка).
+        if _мультигород and _логи_шапка is not None:
+            try:
+                _все = [r for _c, rs in _снимки for r in rs]
+                _rewrite_logi('log_forms.xlsx', _логи_шапка, _все)
+                _городов = len([1 for _c, rs in _снимки if rs])
+                _stamp(f'🧩 Формы всех городов собраны в отчёт: {len(_все)} строк '
+                       f'по {_городов} город(ам).')
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠️ Не удалось пересобрать лог по городам: {e}')
 
         # ── Пункт 2.12: cookie-уведомление + ссылка на политику + живочат ──
         # ВАЖНО: пишем строки 2.12 в лог ПЕРВЫМИ (до проверок админки) - они
@@ -397,6 +465,15 @@ def main() -> int:
                 )
             except Exception as e:  # noqa: BLE001
                 _stamp(f'⚠️ Проверка письма о заказе не выполнена: {e}')
+
+        # После пересборки «Логи» по городам «Сводку» тоже освежаем из полного
+        # лога (иначе она осталась бы от последнего города).
+        if _мультигород:
+            try:
+                from test_all import write_summary_sheet
+                write_summary_sheet('log_forms.xlsx')
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠️ Сводку по городам обновить не удалось: {e}')
 
         # ── Читаемость: сводим строки одной формы в одну (1 форма = 1 строка) ──
         # Все проверки формы (Состав/Стилизация/Списки/Чекбоксы/Enter/Двойная/
