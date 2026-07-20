@@ -4077,13 +4077,10 @@ def _collect_anomaly_rows(wm_metrics, link_profile):
                 'severity': 'critical',
                 'text': f'{h["recent_spam_count"]} новых спам-доноров за ~30 дн. '
                         f'- негативное SEO? (детали - лист «Ссылочный профиль»)'})
+        # Обвал ссылочной массы - это про ПОТЕРЮ доноров, не про мусор; ему
+        # место на листе «Ссылочный профиль», в аномалии не тащим (иначе
+        # десятки строк на каждом прогоне). Всплеск (возможный спам) - тащим.
         hist = h.get('history') or {}
-        if hist.get('dropped'):
-            rows.append({
-                'host': host, 'metric': 'Ссылочная масса',
-                'before': hist.get('peak'), 'after': hist.get('latest'),
-                'delta_pct': -(hist.get('drop_pct') or 0), 'severity': 'possible',
-                'text': f'обвал ссылок −{hist.get("drop_pct")}% от пика - потеря доноров'})
         if hist.get('spiked'):
             rows.append({
                 'host': host, 'metric': 'Рост ссылок',

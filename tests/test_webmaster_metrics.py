@@ -11,22 +11,35 @@ import webmaster_metrics as WM
 from webmaster_metrics import analyze_crawl, analyze_summary, append_baseline
 
 
+def _p(vals):
+    return [{'date': f'2026-{i + 1:02d}-01', 'value': v} for i, v in enumerate(vals)]
+
+
 def test_crawl_2xx_drop():
-    ind = {'HTTP_2XX': [{'date': '2026-05-01', 'value': 1000},
-                        {'date': '2026-06-01', 'value': 980},
-                        {'date': '2026-07-01', 'value': 700}]}
+    # Устойчивая просадка от недавнего фона (нужно >=4 точек).
+    ind = {'HTTP_2XX': _p([1000, 1000, 1000, 700])}
     an = analyze_crawl(ind)
     assert any(a['metric'] == 'Обход: страницы 2xx' and a['delta_pct'] == -30
                for a in an), an
-    print('✓ обход: просадка 2xx (−30%) - аномалия')
+    print('✓ обход: устойчивая просадка 2xx (−30% от фона) - аномалия')
+
+
+def test_crawl_2xx_early_peak_not_flagged():
+    # Старый разовый пик 538, дальше стабильно 6 - это НЕ просадка (норма).
+    ind = {'HTTP_2XX': _p([538, 6, 6, 6])}
+    assert not any(a['metric'] == 'Обход: страницы 2xx' for a in analyze_crawl(ind))
+    print('✓ обход: старый разовый пик не даёт мнимой −99% просадки')
+
+
+def test_crawl_2xx_incomplete_last_not_flagged():
+    # Последняя точка - неполный текущий период (6 << 538) - откидываем.
+    ind = {'HTTP_2XX': _p([500, 520, 538, 6])}
+    assert not any(a['metric'] == 'Обход: страницы 2xx' for a in analyze_crawl(ind))
+    print('✓ обход: неполный последний период не даёт мнимой просадки')
 
 
 def test_crawl_4xx_5xx_spike():
-    ind = {'HTTP_4XX': [{'date': '2026-05-01', 'value': 2},
-                        {'date': '2026-06-01', 'value': 3},
-                        {'date': '2026-07-01', 'value': 50}],
-           'HTTP_5XX': [{'date': '2026-06-01', 'value': 0},
-                        {'date': '2026-07-01', 'value': 12}]}
+    ind = {'HTTP_4XX': _p([2, 3, 50]), 'HTTP_5XX': _p([0, 12])}
     an = analyze_crawl(ind)
     mets = {a['metric']: a['severity'] for a in an}
     assert mets.get('Обход: ошибки 404 (4xx)') == 'critical'
@@ -34,10 +47,15 @@ def test_crawl_4xx_5xx_spike():
     print('✓ обход: всплеск 4xx/5xx - аномалии (5xx = фатально)')
 
 
+def test_crawl_small_4xx_not_flagged():
+    # Пара 404 (1→5) - норма, floor=10 гасит мелочь.
+    assert not any(a['metric'] == 'Обход: ошибки 404 (4xx)'
+                   for a in analyze_crawl({'HTTP_4XX': _p([1, 2, 5])}))
+    print('✓ обход: мелкий рост 404 (до 10) не аномалия')
+
+
 def test_crawl_stable_no_anomaly():
-    ind = {'HTTP_2XX': [{'date': '2026-06-01', 'value': 500},
-                        {'date': '2026-07-01', 'value': 505}],
-           'HTTP_4XX': [{'date': '2026-07-01', 'value': 1}]}
+    ind = {'HTTP_2XX': _p([500, 505, 500, 505]), 'HTTP_4XX': _p([1])}
     assert analyze_crawl(ind) == []
     print('✓ обход стабилен - аномалий нет')
 
@@ -47,10 +65,11 @@ def test_summary_problems_no_baseline():
             'site_problems': {'FATAL': 1, 'CRITICAL': 2, 'POSSIBLE_PROBLEM': 5}}
     an, snap = analyze_summary(summ)          # без эталона
     mets = [a['metric'] for a in an]
-    assert 'Фатальные проблемы' in mets and 'Критические проблемы' in mets
+    assert 'Фатальные проблемы' in mets           # фатальные - тащим
+    assert 'Критические проблемы' not in mets     # критические - шум, не тащим
     assert 'Страницы в поиске' not in mets and 'ИКС (SQI)' not in mets
     assert snap['searchable'] == 800 and snap['sqi'] == 120
-    print('✓ summary: фатал/крит без эталона; страницы/ИКС - только с эталоном')
+    print('✓ summary: только фатальные (крит - шум); страницы/ИКС - с эталоном')
 
 
 def test_summary_pages_and_sqi_drop():
@@ -93,7 +112,10 @@ def test_append_baseline_returns_prior_medians():
 
 if __name__ == '__main__':
     test_crawl_2xx_drop()
+    test_crawl_2xx_early_peak_not_flagged()
+    test_crawl_2xx_incomplete_last_not_flagged()
     test_crawl_4xx_5xx_spike()
+    test_crawl_small_4xx_not_flagged()
     test_crawl_stable_no_anomaly()
     test_summary_problems_no_baseline()
     test_summary_pages_and_sqi_drop()

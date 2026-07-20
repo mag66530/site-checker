@@ -80,32 +80,74 @@ def _median(vals):
     return s[len(s) // 2] if len(s) % 2 else (s[len(s) // 2 - 1] + s[len(s) // 2]) / 2
 
 
+def _vals(points):
+    """Значения ряда, отсортированные по дате."""
+    pts = []
+    for p in points or []:
+        try:
+            pts.append((str(p.get('date', '')), int(p.get('value', 0))))
+        except (TypeError, ValueError):
+            continue
+    pts.sort(key=lambda x: x[0])
+    return [v for _, v in pts]
+
+
+def _recent_drop(vals):
+    """(база, последнее, %просадки) при УСТОЙЧИВОЙ просадке последней точки от
+    НЕДАВНЕГО фона, иначе None. Гасит два источника ложных тревог:
+      • старый разовый пик обхода задирает базу - берём МЕДИАНУ недавних
+        точек, а не all-time peak (иначе «стабильно 6 после старого 500» =
+        мнимая −99%);
+      • недобор текущего (неполного) периода - если последняя точка < 20%
+        предыдущей, считаем её неполной и отбрасываем.
+    Нужно >=4 точек, иначе фон недостоверен."""
+    if len(vals) < 4:
+        return None
+    v = vals[:]
+    if v[-1] < 0.2 * (v[-2] or 1):
+        v = v[:-1]                       # неполный текущий период - откинуть
+    if len(v) < 3:
+        return None
+    latest = v[-1]
+    base = _median(v[:-1])
+    if not base:
+        return None
+    drop = round((base - latest) / base * 100)
+    if drop >= CRAWL_DROP_PCT and base - latest >= MIN_ABS:
+        return int(base), latest, drop
+    return None
+
+
 def analyze_crawl(indicators):
     """Аномалии обхода из /indexing/history. Возвращает список
     {metric, before, after, delta_pct, severity, text}."""
     ind = indicators or {}
     out = []
-    # 2xx - просадка (роботу доступно меньше страниц).
-    s2 = _series(ind.get('HTTP_2XX'))
-    if s2['points'] >= 2 and s2['peak']:
-        drop = round((s2['peak'] - s2['latest']) / s2['peak'] * 100)
-        if drop >= CRAWL_DROP_PCT and s2['peak'] - s2['latest'] >= MIN_ABS:
-            out.append({'metric': 'Обход: страницы 2xx',
-                        'before': s2['peak'], 'after': s2['latest'],
-                        'delta_pct': -drop, 'severity': 'critical',
-                        'text': f'роботу доступно меньше страниц: было {s2["peak"]}, '
-                                f'стало {s2["latest"]} (−{drop}%) - часть страниц '
-                                f'выпала из обхода'})
-    # 4xx / 5xx - всплеск относительно фона.
-    for code, label, sev in (('HTTP_4XX', 'Обход: ошибки 404 (4xx)', 'critical'),
-                             ('HTTP_5XX', 'Обход: ошибки сервера (5xx)', 'fatal')):
-        s = _series(ind.get(code))
-        base = s['baseline'] or 0
-        if (s['points'] >= 1 and s['latest'] and s['latest'] >= MIN_ABS
-                and s['latest'] >= max(CRAWL_SPIKE_FACTOR * base, MIN_ABS)):
-            out.append({'metric': label, 'before': int(base), 'after': s['latest'],
-                        'delta_pct': None, 'severity': sev,
-                        'text': f'всплеск: было ~{int(base)}, стало {s["latest"]} - '
+    # 2xx - устойчивая просадка от НЕДАВНЕГО фона (не от старого пика и не
+    # из-за неполного последнего периода).
+    d = _recent_drop(_vals(ind.get('HTTP_2XX')))
+    if d:
+        base, latest, drop = d
+        out.append({'metric': 'Обход: страницы 2xx',
+                    'before': base, 'after': latest, 'delta_pct': -drop,
+                    'severity': 'critical',
+                    'text': f'роботу доступно меньше страниц: обычно ~{base}, '
+                            f'стало {latest} (−{drop}%) - часть страниц выпала '
+                            f'из обхода'})
+    # 4xx / 5xx - всплеск относительно недавнего фона; floor гасит мелочь
+    # (пара 404 - норма, а не аномалия).
+    for code, label, sev, floor in (
+            ('HTTP_4XX', 'Обход: ошибки 404 (4xx)', 'critical', 10),
+            ('HTTP_5XX', 'Обход: ошибки сервера (5xx)', 'fatal', 5)):
+        vals = _vals(ind.get(code))
+        if not vals:
+            continue
+        latest = vals[-1]
+        base = _median(vals[:-1]) if len(vals) >= 2 else 0
+        if latest >= floor and latest >= max(CRAWL_SPIKE_FACTOR * (base or 0), floor):
+            out.append({'metric': label, 'before': int(base or 0),
+                        'after': latest, 'delta_pct': None, 'severity': sev,
+                        'text': f'всплеск: было ~{int(base or 0)}, стало {latest} - '
                                 f'{"сервер отдаёт ошибки роботу" if code == "HTTP_5XX" else "рост 404, страницы недоступны"}'})
     return out
 
@@ -119,17 +161,16 @@ def analyze_summary(summary, base_searchable=None, base_sqi=None):
     excluded = summary.get('excluded_pages_count')
     problems = summary.get('site_problems') or {}
     out = []
+    # Только ФАТАЛЬНЫЕ проблемы (сервер/безопасность, исключают страницы) -
+    # это редко и серьёзно. Критические (SSL/битые ссылки) есть почти у всех
+    # по 1-2 - это не «аномалия», а текущее состояние, оно на «Ошибках
+    # сервисов»; в аномалии их не тащим (иначе шум на каждый хост).
     fatal = int(problems.get('FATAL', 0) or 0)
-    crit = int(problems.get('CRITICAL', 0) or 0)
+    crit = int(problems.get('CRITICAL', 0) or 0)   # в снимок (не в аномалии)
     if fatal:
         out.append({'metric': 'Фатальные проблемы', 'before': None, 'after': fatal,
                     'delta_pct': None, 'severity': 'fatal',
                     'text': f'фатальных проблем сайта: {fatal} (детали - лист '
-                            f'«Ошибки сервисов»)'})
-    if crit:
-        out.append({'metric': 'Критические проблемы', 'before': None, 'after': crit,
-                    'delta_pct': None, 'severity': 'critical',
-                    'text': f'критических проблем сайта: {crit} (детали - лист '
                             f'«Ошибки сервисов»)'})
     # Страницы в поиске - падение от эталона.
     if (base_searchable and isinstance(searchable, int)
