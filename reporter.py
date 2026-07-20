@@ -4233,7 +4233,7 @@ def _build_yabusiness_sheet(wb, yabusiness):
 
 
 _TRAFFIC_COLS = [
-    ('Год', 8), ('Период', 10), ('Срез', 9),
+    ('Год', 8), ('Срез', 11),
     ('Итого по каналам', 15), ('Прямые заходы', 13), ('Яндекс', 10),
     ('Google', 10), ('Лиды', 8), ('Конверсия, %', 12), ('Отказы, %', 10),
     ('Глубина', 9), ('Время на сайте', 13),
@@ -4284,7 +4284,9 @@ def _build_traffic_sheet(wb, traffic):
 
     ws.merge_cells(start_row=3, start_column=2, end_row=3, end_column=last_col)
     c = ws.cell(row=3, column=2, value=(
-        f'Все счётчики проекта ({traffic.get("counters", 0)} шт), Яндекс.Метрика. '
+        f'Источник: Яндекс.Метрика, СУММА по ВСЕМ счётчикам проекта '
+        f'({traffic.get("counters", 0)} шт) - все домены и поддомены вместе, '
+        'один итог на проект (не по одному сайту). '
         'День = сегодня / вчера, Месяц = с 1-го числа до сегодня / тот же '
         'отрезок прошлого месяца, Год = с 1 января / прошлый год до той же даты. '
         'Яндекс и Google - весь трафик источника (органика + реклама ПС). Лиды - '
@@ -4377,10 +4379,9 @@ def _build_traffic_sheet(wb, traffic):
             is_cur = r['kind'] == 'текущий'
             base = C.text if is_cur else C.text_muted
             _put(row, 0, r.get('year'), color=base)
-            _put(row, 1, period, color=base)
-            _put(row, 2, _srez(period, r), color=base)   # дата/месяц/год
+            _put(row, 1, _srez(period, r), color=base)   # дата/месяц/год
             for j, val in enumerate(_disp(r)):
-                _put(row, 3 + j, val, color=base, bold=(j == 0 and is_cur))
+                _put(row, 2 + j, val, color=base, bold=(j == 0 and is_cur))
             ws.row_dimensions[row].height = 16
             row += 1
 
@@ -4388,12 +4389,11 @@ def _build_traffic_sheet(wb, traffic):
         # Отказы (индекс 6 в _nums) - рост плохой, красим наоборот.
         if cur and prev:
             _put(row, 0, '', color=C.text_muted)
-            _put(row, 1, '', color=C.text_muted)
-            _put(row, 2, 'Δ, %', color=C.text, bold=True)
+            _put(row, 1, 'Δ, %', color=C.text, bold=True)
             cn, pn = _nums(cur), _nums(prev)
             for j in range(len(cn)):
                 txt, clr = _delta(cn[j], pn[j], invert=(j == 6))
-                _put(row, 3 + j, txt, color=clr, bold=True)
+                _put(row, 2 + j, txt, color=clr, bold=True)
             ws.row_dimensions[row].height = 16
             row += 1
         row += 1   # пустая строка-разделитель между блоками
