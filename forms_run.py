@@ -538,13 +538,14 @@ def main() -> int:
                 _отчёт = work / 'log_forms.xlsx'
                 _города = [c for c, _u, _m in run_cities if c]
                 import datetime as _dt
-                _сейчас = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5)))
-                _когда = _сейчас.strftime('%d.%m.%Y %H:%M')
-                _имя = f'Form-{a.project}-{_сейчас.strftime("%d.%m.%Y")}.xlsx'
-                _текст = (f'📨 <b>Проверка форм</b> · {escape_html(name)}\n'
-                          f'{_когда} (Екб)\n'
-                          + (f'Города: {escape_html(", ".join(_города))}\n' if _города else '')
-                          + 'Результаты по каждой форме - в приложенном отчёте.')
+                _дата = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y')
+                _имя = f'Form-{a.project}-{_дата}.xlsx'
+                _бренд = name.split(' - ')[0].strip()
+                _части = [f'Проверка форм {escape_html(_бренд)}']
+                if _города:
+                    _части.append(f'Города: {escape_html(", ".join(_города))}')
+                _части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')
+                _текст = '\n\n'.join(_части)
                 _res = tn.send_report_from_env(
                     project_name=name, summary_text=_текст,
                     report_file=_отчёт if _отчёт.is_file() else None,

@@ -86,12 +86,12 @@ def _метка(pid: str) -> str:
 
 
 def _сводка_для_telegram(base: str, результаты: list) -> str:
-    """HTML-текст сводки по целям для Telegram (подпись к вложению).
+    """Текст сводки по целям для Telegram (подпись к вложению).
     Считает по каждому сайту: подтверждено (зелёные) / проблемы (к разработчикам)
     / всего целей - через ту же классификацию, что и в Excel-отчёте."""
     import goals_tester as gt
     from telegram_notify import escape_html
-    имя = _ИМЕНА.get(base, base.upper())
+    бренд = _ИМЕНА.get(base, base.upper()).split(' - ')[0].strip()
     строки, вс_ok, вс_проб, вс_целей = [], 0, 0, 0
     for pid, каталог, прогон, метка in результаты:
         try:
@@ -106,15 +106,13 @@ def _сводка_для_telegram(base: str, результаты: list) -> str:
         вс_целей += всего
         строки.append(f'• {escape_html(метка)}: ✅ {ok}/{всего}'
                       + (f' · ❗ проблем {проб}' if проб else ''))
-    import datetime as _dt
-    when = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y %H:%M')
-    head = (f'🎯 <b>Проверка целей</b> · {escape_html(имя)}\n'
-            f'{when} (Екб)\n'
-            f'Сайтов: {len(результаты)} · целей: {вс_целей}\n'
+    итог = (f'Сайтов: {len(результаты)} · целей: {вс_целей}\n'
             f'✅ Подтверждено: {вс_ok}   ❗ Проблемы: {вс_проб}')
-    body = ('\n\n' + '\n'.join(строки)) if строки else ''
-    tail = '\n\nПодробности по каждой цели - в приложенном отчёте.'
-    return head + body + tail
+    части = [f'Проверка целей {escape_html(бренд)}', итог]
+    if строки:
+        части.append('\n'.join(строки))
+    части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')
+    return '\n\n'.join(части)
 
 
 def main() -> int:
