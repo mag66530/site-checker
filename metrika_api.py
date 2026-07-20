@@ -464,26 +464,38 @@ def _row_stats(counters, token, proxy_url, d1, d2, cfg, log, lead_metric):
     Rate-метрики (отказы/глубина/время) усредняем ВЗВЕШЕННО по визитам
     (суммировать проценты по чанкам нельзя). lead_metric - метрика лидов
     (основная цель проекта или любая цель). → dict или None."""
-    metrics = (f'ym:s:visits,{lead_metric},ym:s:bounceRate,'
-               'ym:s:pageDepth,ym:s:avgVisitDurationSeconds')
+    # Поведение считаем ОТДЕЛЬНО от лидов. lead_metric - это цель конкретного
+    # счётчика (основная цель-лид есть только на главном счётчике, у остальных
+    # её нет). Если сунуть её в общий запрос, Метрика вернёт 400 на весь чанк
+    # без этой цели → потеряем визиты/отказы и получим кривой (завышенный)
+    # процент отказов. Поэтому визиты/отказы/глубина/время - запрос БЕЗ цели
+    # (валиден на всех счётчиках), лиды - свой запрос, устойчивый к ошибке.
+    beh = ('ym:s:visits,ym:s:bounceRate,ym:s:pageDepth,'
+           'ym:s:avgVisitDurationSeconds')
     visits = leads = 0.0
     w_bounce = w_depth = w_dur = 0.0    # взвешенные суммы (× визиты чанка)
     ok = False
     for i in range(0, len(counters), _CHUNK):
         ids = ','.join(counters[i:i + _CHUNK])
         payload = _metrika_json(ids, token, proxy_url, d1, d2,
-                                {'metrics': metrics}, log)
-        if not payload:
-            continue
-        ok = True
-        t = payload.get('totals') or []
-        g = lambda idx: float(t[idx]) if len(t) > idx and t[idx] is not None else 0.0
-        cv = g(0)
-        visits += cv
-        leads += g(1)
-        w_bounce += g(2) * cv
-        w_depth += g(3) * cv
-        w_dur += g(4) * cv
+                                {'metrics': beh}, log)
+        if payload:
+            ok = True
+            t = payload.get('totals') or []
+            g = lambda idx: (float(t[idx]) if len(t) > idx and t[idx] is not None
+                             else 0.0)
+            cv = g(0)
+            visits += cv
+            w_bounce += g(1) * cv
+            w_depth += g(2) * cv
+            w_dur += g(3) * cv
+        # Лиды - отдельным запросом (цель может быть не на всех счётчиках).
+        pl = _metrika_json(ids, token, proxy_url, d1, d2,
+                           {'metrics': lead_metric}, log)
+        if pl:
+            lt = pl.get('totals') or []
+            if lt and lt[0] is not None:
+                leads += float(lt[0])
     if not ok:
         return None
     v = visits or 1.0
