@@ -3866,6 +3866,7 @@ def _lp_rank(h):
     else:
         grp = 4
     return (grp, -(hist.get('drop_pct') or 0),
+            -(h.get('recent_spam_count') or 0),
             -(h.get('spam_count') or 0), h.get('host') or '')
 
 
@@ -3882,6 +3883,7 @@ def _build_link_profile_sheet(wb, link_profile):
     n_warn = sum(1 for h in hosts if h.get('warnings'))
     n_empty = sum(1 for h in hosts
                   if h.get('infos') and not h.get('warnings'))
+    n_recent = sum(1 for h in hosts if h.get('recent_spam_count'))
 
     ws = wb.create_sheet('Ссылочный профиль')
     ws.sheet_view.showGridLines = False
@@ -3903,7 +3905,9 @@ def _build_link_profile_sheet(wb, link_profile):
                'Смотрим: объём (всего внешних ссылок и доноров), динамику '
                '(резкий обвал = потеря ссылок; резкий всплеск = возможный '
                'спам/накрутка) и подозрительных доноров (мусорные зоны, '
-               'gambling/adult). Таблица отсортирована: самые проблемные '
+               'gambling/adult), в т.ч. ВНЕЗАПНЫХ - появившихся за последние '
+               '~30 дней (по discovery_date Яндекса) - это сигнал негативного '
+               'SEO / закупки мусорных ссылок. Таблица отсортирована: самые проблемные '
                'хосты сверху. Глубокий аудит (Ahrefs/Majestic) - платный, '
                'здесь его нет. У Google API беклинков нет - внизу ссылка '
                'на ручную сверку в GSC.')
@@ -3932,7 +3936,8 @@ def _build_link_profile_sheet(wb, link_profile):
     ws.merge_cells('B5:H5')
     c = ws['B5']
     c.value = (f'Хостов: {len(hosts)} · обвал массы: {n_drop} · '
-               f'спам/всплеск: {n_spam} · прочие предупреждения: '
+               f'спам/всплеск: {n_spam} · внезапные мусорные доноры: {n_recent} · '
+               f'прочие предупреждения: '
                f'{max(n_warn - n_drop - n_spam, 0)} · без профиля: {n_empty} · '
                f'в норме: {len(hosts) - n_warn - n_empty}')
     c.font = _font(size=10, bold=True,
@@ -4036,6 +4041,184 @@ def _build_link_profile_sheet(wb, link_profile):
     c.hyperlink = (link_profile.get('gsc_links_url')
                    or 'https://search.google.com/search-console/links')
     c.alignment = _align(indent=1)
+
+
+# ── Секция «Аномалии» (низ листа «Аналитика») ─────────────────────
+# Сводит в одном месте резкие отклонения: аномалии Вебмастера (обход,
+# проблемы, страницы/ИКС - Блок B) + внезапные мусорные доноры и скачки
+# ссылочной массы (Блок A, детали - на листе «Ссылочный профиль»).
+
+_ANOM_SEV = {'fatal': (0, '🔴 фатально'), 'critical': (1, '🔴 критично'),
+             'possible': (2, '⚠ возможно'), 'info': (3, 'инфо')}
+
+
+def _fmt_ba(before, after):
+    """«было → сейчас» для колонки динамики."""
+    b = '—' if before is None else str(before)
+    a = '—' if after is None else str(after)
+    return f'{b} → {a}' if before is not None else a
+
+
+def _collect_anomaly_rows(wm_metrics, link_profile):
+    """Плоский список аномалий из Вебмастера (wm_metrics) и ссылочного
+    профиля (link_profile): [{host, metric, before, after, delta_pct,
+    severity, text}]."""
+    rows = []
+    for h in (wm_metrics or {}).get('hosts') or []:
+        for a in h.get('anomalies') or []:
+            rows.append({**a, 'host': h.get('host', '')})
+    # Ссылочный профиль → аномалии (детали на своём листе).
+    for h in (link_profile or {}).get('hosts') or []:
+        host = h.get('host', '')
+        if h.get('recent_spam_count'):
+            rows.append({
+                'host': host, 'metric': 'Внезапные мусорные доноры',
+                'before': None, 'after': h['recent_spam_count'], 'delta_pct': None,
+                'severity': 'critical',
+                'text': f'{h["recent_spam_count"]} новых спам-доноров за ~30 дн. '
+                        f'- негативное SEO? (детали - лист «Ссылочный профиль»)'})
+        hist = h.get('history') or {}
+        if hist.get('dropped'):
+            rows.append({
+                'host': host, 'metric': 'Ссылочная масса',
+                'before': hist.get('peak'), 'after': hist.get('latest'),
+                'delta_pct': -(hist.get('drop_pct') or 0), 'severity': 'possible',
+                'text': f'обвал ссылок −{hist.get("drop_pct")}% от пика - потеря доноров'})
+        if hist.get('spiked'):
+            rows.append({
+                'host': host, 'metric': 'Рост ссылок',
+                'before': hist.get('first'), 'after': hist.get('latest'),
+                'delta_pct': None, 'severity': 'possible',
+                'text': f'резкий рост ×{hist.get("spike_factor")} - проверить на спам/накрутку'})
+    rows.sort(key=lambda r: (_ANOM_SEV.get(r.get('severity'), (9,))[0],
+                             r.get('host', '')))
+    return rows
+
+
+def _render_wm_anomalies(ws, start_row, wm_metrics, link_profile):
+    """Часть A секции «Аномалии»: Вебмастер (обход/проблемы/страницы/ИКС) +
+    внезапные мусорные доноры. Пишет с start_row, возвращает следующую строку."""
+    row = start_row
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+    h = ws.cell(row=row, column=2, value='A. Вебмастер и ссылочный профиль')
+    h.font = _font(size=12, bold=True, color='FFFFFF')
+    h.fill = _fill(C.text_soft)
+    h.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 20
+    row += 1
+
+    if not wm_metrics.get('available'):
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        c = ws.cell(row=row, column=2,
+                    value=f'⚪ {wm_metrics.get("note", "Проверка не выполнялась.")}')
+        c.font = _font(size=10, color=C.text_muted)
+        c.alignment = _align(indent=1, wrap=True)
+        return row + 2
+
+    rows = _collect_anomaly_rows(wm_metrics, link_profile)
+    n_red = sum(1 for r in rows if r.get('severity') in ('fatal', 'critical'))
+    n_warn = sum(1 for r in rows if r.get('severity') == 'possible')
+
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+    c = ws.cell(row=row, column=2)
+    if rows:
+        c.value = (f'⚠ Аномалий: {len(rows)} · фатально/критично: {n_red} · '
+                   f'возможных: {n_warn}. Проверьте по каждому.')
+        c.font = _font(size=11, bold=True, color=C.err if n_red else C.warn)
+    else:
+        _hosts = len(wm_metrics.get('hosts') or [])
+        c.value = (f'✅ Аномалий Вебмастера/ссылок нет (проверено хостов: '
+                   f'{_hosts}). Обход, проблемы, страницы/ИКС и доноры - в норме.')
+        c.font = _font(size=11, bold=True, color=C.ok)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 22
+    row += 1
+    if not rows:
+        return row + 1
+
+    hdr_row = row
+    for col, title in (('B', 'Хост'), ('C', 'Метрика'),
+                       ('D', 'Было → сейчас'), ('E', 'Отклонение'),
+                       ('F', 'Что случилось')):
+        cell = ws[f'{col}{hdr_row}']
+        cell.value = title
+        cell.font = _font(size=10, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align(horizontal='center' if col in 'DE' else 'left',
+                                indent=0 if col in 'DE' else 1)
+        cell.border = _border()
+    ws.row_dimensions[hdr_row].height = 22
+    row += 1
+
+    for r in rows:
+        red = r.get('severity') in ('fatal', 'critical')
+        color = C.err if red else C.warn
+        sev_label = _ANOM_SEV.get(r.get('severity'), (9, ''))[1]
+        dpct = (f'−{abs(r["delta_pct"])}%' if r.get('delta_pct') else
+                (sev_label.split(' ', 1)[-1] if sev_label else '-'))
+        vals = [
+            ('B', r.get('host', ''), _font(size=10), _align(indent=1)),
+            ('C', r.get('metric', ''), _font(size=10, bold=True, color=color),
+             _align(indent=1)),
+            ('D', _fmt_ba(r.get('before'), r.get('after')),
+             _font(size=10, color=C.text_soft), _align(horizontal='center')),
+            ('E', dpct, _font(size=10, bold=red, color=color),
+             _align(horizontal='center')),
+            ('F', r.get('text', ''), _font(size=10, color=C.text), _align(wrap=True, indent=1)),
+        ]
+        for col, val, fnt, algn in vals:
+            cell = ws[f'{col}{row}']
+            cell.value = val
+            cell.font = fnt
+            cell.alignment = algn
+            cell.border = _border(color=C.border_light)
+            if red and col in 'CE':
+                cell.fill = _fill(C.err_soft)
+        ws.row_dimensions[row].height = 20
+        row += 1
+    return row + 1
+
+
+def _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies):
+    """Единый лист «Аномалии» (в конце группы «Аналитика»): (A) Вебмастер
+    (обход/проблемы/страницы/ИКС) + внезапные мусорные доноры; (B) ГСК-запросы
+    и Метрика-рефералы. Строится, если выполнялась хотя бы одна часть."""
+    has_wm = bool(wm_metrics)
+    _a = anomalies or {}
+    has_q = bool(_a.get('gsc') or _a.get('metrika'))
+    if not has_wm and not has_q:
+        return
+    ws = wb.create_sheet('Аномалии')
+    ws.sheet_view.showGridLines = False
+    for col, w in (('A', 3), ('B', 26), ('C', 24), ('D', 22), ('E', 12),
+                   ('F', 60), ('G', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:F2')
+    c = ws['B2']
+    c.value = 'Аномалии'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:F3')
+    c = ws['B3']
+    c.value = ('Резкие отклонения «от себя-прошлого» - часто видны раньше, чем '
+               'просядут позиции и трафик. A - Вебмастер (всплеск ошибок обхода '
+               '4xx/5xx, просадка страниц, фатальные/критические проблемы, '
+               'падение страниц в поиске/ИКС) и ссылочный профиль (внезапные '
+               'мусорные доноры, скачки массы). B - всплеск мусорных/иноязычных '
+               'запросов в ГСК и переходов со спам-сайтов в Метрике. Пусто - '
+               'аномалий нет (норма).')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+    if has_wm:
+        row = _render_wm_anomalies(ws, row, wm_metrics, link_profile)
+    if has_q:
+        _render_query_anomalies(ws, row, anomalies)
 
 
 # ── Лист «Настройки в админке» (доп. чек-лист: функции настройки) ──
@@ -4508,36 +4691,25 @@ def _build_review_priority_sheet(wb, rp):
         row += 1
 
 
-def _build_anomalies_sheet(wb, anomalies):
-    """Лист «Аномалии»: (1) ГСК - всплеск показов по мусорным/иноязычным
-    запросам + ручная сверка доноров; (2) Метрика - переходы с мусорных сайтов
-    (спам-домены-рефереры + всплеск). Добавляется, только если хоть одна
-    из проверок выполнялась."""
-    if not anomalies:
-        return
-    gsc = anomalies.get('gsc') or {}
-    mtr = anomalies.get('metrika') or {}
+def _render_query_anomalies(ws, start_row, anomalies):
+    """Часть B секции «Аномалии»: ГСК - всплеск показов по мусорным/иноязычным
+    запросам; Метрика - переходы со спам-сайтов (спам-домены-рефереры +
+    всплеск). Пишет с start_row в переданный лист."""
+    _a = anomalies or {}
+    gsc = _a.get('gsc') or {}
+    mtr = _a.get('metrika') or {}
     if not gsc and not mtr:
-        return
+        return start_row
 
-    def _bad(d):
-        return bool(d.get('available') and (d.get('spiked')
-                    or d.get('spam_queries_count') or d.get('spam_domains_count')))
-
-    problem = _bad(gsc) or _bad(mtr)
-    ws = wb.create_sheet('Аномалии')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if problem else C.ok
-    for col, w in (('A', 3), ('B', 34), ('C', 22), ('D', 40), ('E', 3)):
-        ws.column_dimensions[col].width = w
-
-    ws.merge_cells('B2:D2')
-    c = ws['B2']
-    c.value = 'Аномалии: запросы (ГСК) и переходы (Метрика)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    row = [4]
+    row = [start_row]
+    ws.merge_cells(start_row=row[0], start_column=2, end_row=row[0], end_column=6)
+    _bh = ws.cell(row=row[0], column=2,
+                  value='B. Запросы (ГСК) и переходы (Метрика)')
+    _bh.font = _font(size=12, bold=True, color='FFFFFF')
+    _bh.fill = _fill(C.text_soft)
+    _bh.alignment = _align(indent=1)
+    ws.row_dimensions[row[0]].height = 20
+    row[0] += 1
 
     def _hdr(text, color=C.text):
         ws.merge_cells(start_row=row[0], start_column=2, end_row=row[0],
@@ -4615,6 +4787,7 @@ def _build_anomalies_sheet(wb, anomalies):
             ws.cell(row=row[0], column=3, value=f'{d.get("visits")} переходов'
                     ).font = _font(size=9, color=C.text_soft)
             row[0] += 1
+    return row[0]
 
 
 def _build_admin_settings_sheet(wb, admin_settings):
@@ -6228,9 +6401,9 @@ _SHEET_GROUPS = [
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
-        '404 из Метрики', 'Динамика трафика', 'Отзывы (докупка)', 'Аномалии',
+        '404 из Метрики', 'Динамика трафика', 'Отзывы (докупка)',
         'Уведомления', 'Ошибки сервисов', 'Автокликер', 'Ссылочный профиль',
-        'Замена рекл. номера',
+        'Замена рекл. номера', 'Аномалии',
     ]),
     ('Контент', ['Изображения']),
 ]
@@ -6381,6 +6554,7 @@ def build_report(
     index_404_check: dict = None,  # 404 среди страниц в индексе - лист «404 в индексе»
     stress_check: dict = None,     # ошибки сервера: парсинг/нагрузка/дубли - лист «Нагрузка и парсинг»
     link_profile: dict = None,     # lite-профиль ссылок (Вебмастер) - лист «Ссылочный профиль»
+    wm_metrics: dict = None,       # аномалии Вебмастера (Блок B) - секция «Аномалии» внизу «Аналитики»
     admin_settings: dict = None,   # функции настройки в админке (п.1.21) - лист «Настройки в админке»
     yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
     gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
@@ -6749,6 +6923,7 @@ def build_report(
 
     # ─── Лист «Ссылочный профиль» - если lite-проверка выполнялась ─────
     _build_link_profile_sheet(wb, link_profile)
+    _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies)
 
     # ─── Лист «Настройки в админке» - если проверка выполнялась ────────
     _build_admin_settings_sheet(wb, admin_settings)
@@ -6761,9 +6936,6 @@ def build_report(
 
     # ─── Лист «Отзывы (докупка)» - приоритет докупки отзывов ───────────
     _build_review_priority_sheet(wb, review_priority)
-
-    # ─── Лист «Аномалии» - ГСК-запросы + Метрика-рефералы ──────────────
-    _build_anomalies_sheet(wb, anomalies)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

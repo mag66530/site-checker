@@ -6,9 +6,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from datetime import date
+
 from link_profile import (
     looks_spam_host, analyze_samples, analyze_history, build_host_profile,
-    _host_of, DROP_PCT, SPIKE_FACTOR,
+    _host_of, _recent_cutoff, DROP_PCT, SPIKE_FACTOR, RECENT_DAYS,
 )
 
 
@@ -100,6 +102,65 @@ def test_history_ignores_tiny_moves():
     print('✓ history: мелкие абсолютные сдвиги не шумят')
 
 
+# ── Внезапные мусорные доноры (пункт «нет аномалий») ──
+
+def test_recent_cutoff():
+    assert _recent_cutoff(30, today=date(2026, 7, 20)) == '2026-06-20'
+    print('✓ граница новизны = сегодня минус N дней')
+
+
+def test_analyze_samples_recent_donors():
+    """Внезапные доноры - по discovery_date не старше cutoff."""
+    links = [
+        {'source_url': 'https://old-casino.xyz/',   # старый спам - НЕ внезапный
+         'discovery_date': '2025-01-10T00:00:00.000Z'},
+        {'source_url': 'https://new-casino.top/',   # новый спам - внезапный
+         'discovery_date': '2026-07-01T00:00:00.000Z'},
+        {'source_url': 'https://good.ru/',          # новый чистый донор
+         'discovery_date': '2026-07-05'},
+    ]
+    s = analyze_samples(500, links, recent_cutoff='2026-06-20')
+    assert set(s['recent_hosts']) == {'new-casino.top', 'good.ru'}
+    assert s['recent_spam_hosts'] == ['new-casino.top']
+    # старый спам всё равно в общем списке спам-доноров
+    assert set(s['spam_hosts']) == {'old-casino.xyz', 'new-casino.top'}
+    print('✓ внезапные доноры по discovery_date; старый спам не «внезапный»')
+
+
+def test_recent_by_earliest_link():
+    """Донор «новый», только если его САМАЯ РАННЯЯ ссылка недавняя."""
+    links = [
+        {'source_url': 'https://casino.top/a', 'discovery_date': '2024-01-01'},
+        {'source_url': 'https://casino.top/b', 'discovery_date': '2026-07-01'},
+    ]
+    s = analyze_samples(10, links, recent_cutoff='2026-06-20')
+    assert s['recent_hosts'] == []       # первая ссылка старая - донор не новый
+    print('✓ донор внезапный только если его самая ранняя ссылка недавняя')
+
+
+def test_no_cutoff_no_recent():
+    links = [{'source_url': 'https://casino.top/', 'discovery_date': '2026-07-01'}]
+    s = analyze_samples(10, links)       # без cutoff
+    assert s['recent_hosts'] == [] and s['recent_spam_hosts'] == []
+    print('✓ без cutoff новизна не считается (обратная совместимость)')
+
+
+def test_build_host_profile_sudden_spam():
+    samples = {'count': 800, 'links': [
+        {'source_url': 'https://spam-loan.xyz/', 'discovery_date': '2026-07-10'},
+        {'source_url': 'https://porn-site.top/', 'discovery_date': '2026-07-12'},
+        {'source_url': 'https://normal.ru/', 'discovery_date': '2020-01-01'},
+    ]}
+    prof = build_host_profile('x.ru', 'https://wm/', samples,
+                              {'indicators': {'LINKS_TOTAL_COUNT': []}},
+                              recent_cutoff='2026-06-20')
+    txt = ' | '.join(prof['warnings'])
+    assert 'ВНЕЗАПНЫЕ' in txt
+    assert prof['recent_spam_count'] == 2
+    assert prof['recent_new_count'] == 2
+    print('✓ профиль: внезапные мусорные доноры отдельным предупреждением')
+
+
 def test_build_host_profile_no_profile():
     prof = build_host_profile('young.ru', 'https://wm/', {'count': 0, 'links': []},
                               {'indicators': {'LINKS_TOTAL_COUNT': []}})
@@ -136,6 +197,11 @@ if __name__ == '__main__':
     test_history_drop_flagged()
     test_history_spike_flagged()
     test_history_ignores_tiny_moves()
+    test_recent_cutoff()
+    test_analyze_samples_recent_donors()
+    test_recent_by_earliest_link()
+    test_no_cutoff_no_recent()
+    test_build_host_profile_sudden_spam()
     test_build_host_profile_no_profile()
     test_build_host_profile_warnings()
     print('Все тесты link_profile пройдены.')

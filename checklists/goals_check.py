@@ -160,7 +160,14 @@ with _left:
         _lbl = f'{label}  ·  целей {_n}' + ('' if _ok else '  ·  домен уточняется')
         if st.checkbox(_lbl, key=_ck(p), disabled=not _ok) and _ok:
             _selected.append(p)
-st.caption(f'Выбрано сайтов: **{len(_selected)} / {len(_доступные)}**.')
+_n_sel = len(_selected)
+if _n_sel:
+    _lo_est, _hi_est = 3 + 5 * _n_sel, 5 + 10 * _n_sel
+    _time_hint = (f' Ориентировочно ~{_lo_est}-{_hi_est} мин '
+                  '(≈5-10 мин на сайт + сквозной заказ в начале).')
+else:
+    _time_hint = ''
+st.caption(f'Выбрано сайтов: **{_n_sel} / {len(_доступные)}**.{_time_hint}')
 
 # Рабочие файлы (лог/PID общего прогона) держим под базовым проектом.
 WORK = ROOT / 'cache' / 'goals' / _base
@@ -335,8 +342,24 @@ if _running:
     else:
         st.progress(0.02, text='Запуск браузера…')
     st.markdown(f'**Статус:** ⏳ идёт проверка… {_run_mmss} (страница обновляется сама)')
-    st.caption('Один сайт - около 3-5 минут, все сразу - до 20 минут. Можно уйти '
-               'на другие вкладки - прогон не прервётся.')
+    # Реальная оценка зависит от числа сайтов и тяжести проекта: ~5-10 мин на
+    # сайт (у МПЭ ~55 целей на страну = ближе к 10) + сквозной заказ в начале
+    # (~3-5 мин, один раз). Число сайтов берём из лога (СТРАНА i/N - надёжнее
+    # всего), иначе из набора этого прогона.
+    _n_sites = None
+    if _sm:
+        _n_sites = int(_sm[-1][1])
+    elif st.session_state.get('goals_selected'):
+        _n_sites = len(st.session_state['goals_selected'])
+    elif _selected:
+        _n_sites = len(_selected)
+    if _n_sites:
+        _lo, _hi = 3 + 5 * _n_sites, 5 + 10 * _n_sites
+        _est = (f'Ориентир для {_n_sites} сайт(ов): ~{_lo}-{_hi} мин '
+                '(≈5-10 мин на сайт + сквозной заказ в начале).')
+    else:
+        _est = 'Ориентир: ≈5-10 мин на сайт + сквозной заказ в начале.'
+    st.caption(_est + ' Можно уйти на другие вкладки - прогон не прервётся.')
 elif 'ПРОВЕРКА ЦЕЛЕЙ ЗАВЕРШЕНА' in log_txt:
     st.progress(1.0, text=f'Готово · целей поймано: {_goals_hit}')
     # Итоговое время = последняя запись лога (финиш) минус старт прогона.
