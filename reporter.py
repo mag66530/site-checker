@@ -3866,6 +3866,7 @@ def _lp_rank(h):
     else:
         grp = 4
     return (grp, -(hist.get('drop_pct') or 0),
+            -(h.get('recent_spam_count') or 0),
             -(h.get('spam_count') or 0), h.get('host') or '')
 
 
@@ -3882,6 +3883,7 @@ def _build_link_profile_sheet(wb, link_profile):
     n_warn = sum(1 for h in hosts if h.get('warnings'))
     n_empty = sum(1 for h in hosts
                   if h.get('infos') and not h.get('warnings'))
+    n_recent = sum(1 for h in hosts if h.get('recent_spam_count'))
 
     ws = wb.create_sheet('Ссылочный профиль')
     ws.sheet_view.showGridLines = False
@@ -3903,7 +3905,9 @@ def _build_link_profile_sheet(wb, link_profile):
                'Смотрим: объём (всего внешних ссылок и доноров), динамику '
                '(резкий обвал = потеря ссылок; резкий всплеск = возможный '
                'спам/накрутка) и подозрительных доноров (мусорные зоны, '
-               'gambling/adult). Таблица отсортирована: самые проблемные '
+               'gambling/adult), в т.ч. ВНЕЗАПНЫХ - появившихся за последние '
+               '~30 дней (по discovery_date Яндекса) - это сигнал негативного '
+               'SEO / закупки мусорных ссылок. Таблица отсортирована: самые проблемные '
                'хосты сверху. Глубокий аудит (Ahrefs/Majestic) - платный, '
                'здесь его нет. У Google API беклинков нет - внизу ссылка '
                'на ручную сверку в GSC.')
@@ -3932,7 +3936,8 @@ def _build_link_profile_sheet(wb, link_profile):
     ws.merge_cells('B5:H5')
     c = ws['B5']
     c.value = (f'Хостов: {len(hosts)} · обвал массы: {n_drop} · '
-               f'спам/всплеск: {n_spam} · прочие предупреждения: '
+               f'спам/всплеск: {n_spam} · внезапные мусорные доноры: {n_recent} · '
+               f'прочие предупреждения: '
                f'{max(n_warn - n_drop - n_spam, 0)} · без профиля: {n_empty} · '
                f'в норме: {len(hosts) - n_warn - n_empty}')
     c.font = _font(size=10, bold=True,
