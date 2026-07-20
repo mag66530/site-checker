@@ -1,12 +1,12 @@
 """
-variables_run.py - фоновый прогон проверки «главных переменных» (пункт 1.4).
+variables_run.py - фоновый прогон «Проверки КП» (пункт 1.4).
 
 Для каждого поддомена из «Карты присутствия» (catalogs/{proj}-kp.csv) качает
 главную страницу и сверяет с КП:
   • город / страна - нет ли чужого (region_checker);
   • телефоны (поиск/реклама/общий) - номер на сайте входит в набор КП города;
   • почта, адрес, Telegram, WhatsApp - совпадают с КП.
-Результат пишется в cache/variables/<proj>/variables.xlsx (лист «Переменные» +
+Результат пишется в cache/variables/<proj>/variables.xlsx (лист «Проверка КП» +
 лист «Расхождения»). Прогресс идёт в stdout, откуда его читает вкладка.
 
 Запуск:
@@ -335,7 +335,7 @@ def main() -> int:
         kp, [SimpleNamespace(host=d, city=row.city, country=row.country)
              for d, row in kp.items()])
 
-    _stamp(f'ПРОВЕРКА ПЕРЕМЕННЫХ (1.4) - {PROJECT_NAMES[a.project]} - '
+    _stamp(f'ПРОВЕРКА КП (1.4) - {PROJECT_NAMES[a.project]} - '
            f'поддоменов: {len(domains)}')
 
     html_map = fetch_all(domains, proxy, _stamp)
@@ -414,7 +414,7 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
     # Лист-подсказка «Как читать результат» - первым (перед данными). Просьба заказчика.
     _написать_легенду(wb.active)
     wb.active.title = "Как читать результат"
-    ws = wb.create_sheet("Переменные")
+    ws = wb.create_sheet("Проверка КП")
     hdr_fill = PatternFill("solid", fgColor="EEF3FB")
     # Порядок по просьбе заказчика: Страна(КП), затем Город(КП) со ссылкой на
     # домен/поддомен, дальше проверяемые переменные.

@@ -1,10 +1,10 @@
 """
-Страница «Главные переменные» - проверка вывода данных поддоменов по «Карте
+Страница «Проверка КП» - проверка вывода данных поддоменов по «Карте
 присутствия» (пункт 1.4 чек-листа).
 
 Для выбранного проекта фоново качает главные страницы поддоменов и сверяет с КП
 (catalogs/{proj}-kp.csv): город/страна, телефоны (поиск/реклама/общий), почта,
-адрес, Telegram, WhatsApp. Результат - Excel «Переменные» + «Расхождения».
+адрес, Telegram, WhatsApp. Результат - Excel «Проверка КП» + «Расхождения».
 Сделана по образцу страницы «Проверка форм» (фоновый процесс variables_run.py).
 """
 import importlib.util
@@ -162,7 +162,7 @@ st.markdown(
     [data-testid="stDownloadButton"] button * { color:#FFF !important; }
     </style>""", unsafe_allow_html=True)
 
-st.title('🗺️ Главные переменные (Карта присутствия)')
+st.title('🗺️ Проверка КП (Карта присутствия)')
 st.caption('Пункт 1.4: сверяем данные на поддоменах с «Картой присутствия» (КП) - '
            'город, страна, телефоны (поиск/реклама/общий), почта, адрес, Telegram, '
            'WhatsApp. Скачивает главные страницы и сравнивает с catalogs/*-kp.csv.')
@@ -171,7 +171,7 @@ pid_key = st.selectbox('Проект', list(PROJECTS.keys()),
                        format_func=lambda k: PROJECTS[k], index=None,
                        placeholder='- выберите проект -')
 if not pid_key:
-    st.info('Выберите проект, чтобы запустить проверку переменных.')
+    st.info('Выберите проект, чтобы запустить проверку КП.')
     st.stop()
 
 _cities = _load_kp_cities(pid_key)
@@ -346,9 +346,9 @@ else:
     if xlsx.exists():
         _date = datetime.fromtimestamp(xlsx.stat().st_mtime).strftime('%d.%m.%Y')
         st.download_button(
-            f'⬇ Скачать «Переменные {pid_key.capitalize()}-{_date}.xlsx»',
+            f'⬇ Скачать «Проверка КП {pid_key.capitalize()}-{_date}.xlsx»',
             data=xlsx.read_bytes(),
-            file_name=f'Переменные-{pid_key.capitalize()}-{_date}.xlsx',
+            file_name=f'Проверка-КП-{pid_key.capitalize()}-{_date}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             use_container_width=True)
         # быстрый предпросмотр
