@@ -597,7 +597,7 @@ def _fmt(norm10: str) -> str:
     return f'+7 ({norm10[:3]}) {norm10[3:6]}-{norm10[6:8]}-{norm10[8:]}'
 
 
-# ── Пункт 1.4: сверка «главных переменных» поддомена с КП (для вкладки) ──
+# ── Пункт 1.4: «Проверка КП» - сверка контактов поддомена с КП (для вкладки) ──
 
 
 def _site_address_full(html: str) -> str:
@@ -677,8 +677,18 @@ def check_variables(html: str, domain: str) -> dict:
                        ("Тел. общий", row.phone_common)):
         _exps = phones_in_cell(val)         # первый = текущий номер (не «стар.»)
         exp = _exps[0] if _exps else ''
+        raw = str(val).strip() if val is not None else ""
         if not exp:
-            add(label, "—", site_ph_fmt, "na", "нет в КП")
+            # Пусто в КП - проверять нечего («—»). Но если в ячейке ЕСТЬ значение,
+            # а телефон из него не разобрался (опечатка/мусор, напр. «2»), это
+            # ошибка КП, а не «нет номера»: показываем ✗ и в примечании - что́ в
+            # КП. Иначе правка номера в КП молча проходила мимо проверки (ловилась
+            # только у почты, там сверяется сырое значение).
+            if raw and raw not in ("—", "-"):
+                add(label, raw, site_ph_fmt, "bug",
+                    f"в КП значение «{raw}» не распознано как телефон - проверьте КП")
+            else:
+                add(label, "—", site_ph_fmt, "na", "нет в КП")
         elif exp in site_phones:
             add(label, _fmt(exp), _fmt(exp), "ok", "виден на сайте")
         elif site_phones & kp_phones:
@@ -708,6 +718,14 @@ def check_variables(html: str, domain: str) -> dict:
     haystack = site.get("full_text") or site.get("address") or ""
     if not row.address:
         add("Адрес", "—", "", "na", "нет в КП")
+    elif not re.search(r'[а-яё]', _norm_addr(row.address)):
+        # В КП адрес без названия улицы (только цифры/мусор, напр. «2»): сверять
+        # не с чем. «Мягкое» сравнение по одному числу давало ложное ✓ (число
+        # находилось где-то на странице). Помечаем как ошибку КП, чтобы правка
+        # адреса в КП не прошла мимо проверки.
+        _site_addr = _site_address_full(html) or (site.get("address") or "").strip()
+        add("Адрес", row.address, _site_addr or "—", "bug",
+            "в КП адрес не распознан (нет названия улицы) - проверьте КП")
     elif address_match(haystack, row.address):
         add("Адрес", row.address,
             _addr_on_page(haystack, row.address) or "совпадает с КП", "ok")
