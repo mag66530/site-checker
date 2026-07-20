@@ -234,19 +234,38 @@ def _регион_статусы(html, host, ctx):
     """Город/страна через region_checker → (город_dict, страна_dict) в формате
     check_variables-поля {field, expected, found, status, note}."""
     import region_checker as rc
-    город = {"field": "Город", "expected": ctx.host_city.get(host, "—"),
+    свой = ctx.host_city.get(host, "")
+    город = {"field": "Город", "expected": свой or "—",
              "found": "—", "status": "na", "note": ""}
     страна = {"field": "Страна", "expected": ctx.host_country.get(host, "—"),
               "found": "—", "status": "na", "note": ""}
-    try:
-        rv = rc.check_region_vars(html, host, ctx)
-        if rv is not None:
-            iss = rv.get("issues", [])
-            город.update(found=("чужой город" if iss else "свой"),
-                         status=("bug" if iss else "ok"),
-                         note=(iss[0].get("пояснение", "") if iss else ""))
-    except Exception:  # noqa: BLE001
-        pass
+    # Город: СТРОГО - город из КП должен быть выведен на странице (шапка/H1/
+    # title/текст). Нет = ✗ (переменная не подставилась / другой город). Плюс
+    # ловим ЧУЖОЙ город проекта (затесался номер/город другого поддомена).
+    if свой:
+        try:
+            zones = rc.извлечь_зоны(html)
+            hay = " ".join([zones.get("title", ""), zones.get("h1", ""),
+                            zones.get("description", ""),
+                            (zones.get("текст", "") or "")[:8000]])
+            rx = ctx.city_regex.get(свой)
+            found_self = bool(rx and rc._city_match_propernoun(rx, hay))
+            rv = rc.check_region_vars(html, host, ctx)
+            foreign = ([i for i in (rv.get("issues") or [])
+                        if i.get("тип") == "город"] if rv else [])
+            if found_self and not foreign:
+                город.update(found="есть на странице", status="ok",
+                             note="город из КП выведен на странице")
+            elif not found_self:
+                город.update(found="не найден на странице", status="bug",
+                             note=f"города «{свой}» из КП нет на странице "
+                             "(title/H1/текст) - переменная не подставилась "
+                             "или выведен другой город")
+            else:
+                город.update(found="есть чужой город", status="bug",
+                             note=foreign[0].get("пояснение", ""))
+        except Exception:  # noqa: BLE001
+            pass
     try:
         cm = rc.check_cis_mentions(html, host, ctx)
         if cm is None:

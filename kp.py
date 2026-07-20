@@ -742,46 +742,48 @@ def check_variables(html: str, domain: str) -> dict:
             add("Адрес", row.address, "—", "warn",
                 "адрес на сайте не найден - проверьте вручную")
 
-    # Мессенджеры (Telegram / WhatsApp) проверяем по НАЛИЧИЮ канала, а НЕ по
-    # совпадению номера/аккаунта. На сайте это кнопки «Написать в Telegram» /
-    # «Чат в WhatsApp»: номер/аккаунт скрыт в ссылке и обычно ОБЩИЙ на всю сеть
-    # (у АПС Telegram везде один - aviapromstal_ekb, WhatsApp - номер менеджера).
-    # Сверять их по городам с КП = сплошной шум (десятки ложных «не из КП»).
+    # Telegram: СТРОГО сверяем аккаунт из КП с аккаунтом на сайте (по просьбе
+    # заказчика). Аккаунт в ссылке t.me/<username> нормализуем к username.
     exp_tg = row.telegram_norm()
     site_tg = set(site.get("telegram", []))
-    if site_tg:
-        add("Telegram", ("@" + exp_tg) if exp_tg else "—",
-            "есть: " + ", ".join("@" + t for t in sorted(site_tg)[:2]), "ok",
-            "ссылка на Telegram на сайте есть (аккаунт обычно общий - не сверяем)")
-    elif exp_tg:
+    if not exp_tg:
+        add("Telegram", "—",
+            ("есть: " + ", ".join("@" + t for t in sorted(site_tg)[:2]))
+            if site_tg else "—", "na", "нет в КП")
+    elif exp_tg in site_tg:
+        add("Telegram", "@" + exp_tg, "@" + exp_tg, "ok", "совпадает с КП")
+    elif site_tg:
+        add("Telegram", "@" + exp_tg,
+            "есть другой: " + ", ".join("@" + t for t in sorted(site_tg)[:2]),
+            "bug", "аккаунт Telegram на сайте не совпадает с КП")
+    else:
         add("Telegram", "@" + exp_tg, "—", "warn",
             "на сайте нет ссылки на Telegram (в КП аккаунт указан)")
-    else:
-        add("Telegram", "—", "—", "na", "нет в КП и на сайте")
 
-    # WhatsApp (по просьбе заказчика):
-    #   • кнопки нет вовсе → прочерк (—), это не ошибка;
-    #   • кнопка есть и ссылка ведёт в WhatsApp (wa.me/api.whatsapp) → ✓;
-    #   • кнопка «Чат в WhatsApp» есть, но ссылка НЕ ведёт в WhatsApp (битая) →
-    #     ✗ «при переходе ошибка» (точный код 404 уточняет проверка в variables_run).
+    # WhatsApp: СТРОГО сверяем номер из КП с номером в ссылке на сайте. Номер в
+    # wa.me/<number> нормализуем к 10 цифрам. Если кнопка есть, но номер в
+    # ссылке не извлечь - сверить нельзя (предупреждение).
     exp_wa = row.whatsapp_norm()
     site_wa = set(site.get("whatsapp", []))
-    wa_links = site.get("whatsapp_urls", [])            # рабочие chat-ссылки
     wa_anchor = site.get("whatsapp_anchor_urls", [])    # <a> с текстом «вотсап»
-    if wa_links or site_wa:
-        _найд = "кнопка WhatsApp есть"
-        if site_wa:
-            _найд += " (" + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]) + ")"
-        add("WhatsApp", _fmt(exp_wa) if exp_wa else "—", _найд, "ok",
-            "кнопка WhatsApp на сайте есть; номер скрыт в ссылке и обычно общий - не сверяем")
+    if not exp_wa:
+        add("WhatsApp", "—",
+            ("есть: " + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]))
+            if site_wa else "—", "na", "нет в КП")
+    elif exp_wa in site_wa:
+        add("WhatsApp", _fmt(exp_wa), _fmt(exp_wa), "ok", "совпадает с КП")
+    elif site_wa:
+        add("WhatsApp", _fmt(exp_wa),
+            "есть другой: " + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]),
+            "bug", "номер WhatsApp на сайте не совпадает с КП")
     elif wa_anchor:
-        add("WhatsApp", _fmt(exp_wa) if exp_wa else "—",
-            "кнопка есть, но ссылка не ведёт в WhatsApp", "bug",
-            "кнопка «Чат в WhatsApp» есть, но при переходе ошибка "
-            "(ссылка не ведёт в WhatsApp)")
+        add("WhatsApp", _fmt(exp_wa),
+            "кнопка есть, номер в ссылке не виден", "warn",
+            "кнопка WhatsApp есть, но номер скрыт в ссылке - сверить вручную")
         fields[-1]["check_url"] = wa_anchor[0]
     else:
-        add("WhatsApp", "—", "—", "na", "кнопки WhatsApp на сайте нет")
+        add("WhatsApp", _fmt(exp_wa), "—", "warn",
+            "на сайте нет WhatsApp (в КП номер указан)")
 
     return out
 
