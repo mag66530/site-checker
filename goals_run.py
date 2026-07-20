@@ -79,42 +79,33 @@ _МЕТКИ = {'': 'РФ', 'uz': 'УЗ', 'az': 'АЗ', 'az2': 'АЗ-перево
 
 _ИМЕНА = {'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром', 'mpe': 'МПЭ - Мепэн'}
 
+_СТРАНЫ = {'': 'Россия', 'uz': 'Узбекистан', 'az': 'Азербайджан',
+           'az2': 'Азербайджан (перевод)', 'am': 'Армения', 'kg': 'Кыргызстан',
+           'kz': 'Казахстан', 'rb': 'Беларусь'}
+
 
 def _метка(pid: str) -> str:
     suf = pid.split('-', 1)[1] if '-' in pid else ''
     return _МЕТКИ.get(suf, suf.upper() or 'РФ')
 
 
+def _страна(pid: str) -> str:
+    """Полное название страны сайта (для подписи «Проверено: …» в Telegram)."""
+    suf = pid.split('-', 1)[1] if '-' in pid else ''
+    return _СТРАНЫ.get(suf, suf.upper() or 'Россия')
+
+
 def _сводка_для_telegram(base: str, результаты: list) -> str:
-    """HTML-текст сводки по целям для Telegram (подпись к вложению).
-    Считает по каждому сайту: подтверждено (зелёные) / проблемы (к разработчикам)
-    / всего целей - через ту же классификацию, что и в Excel-отчёте."""
-    import goals_tester as gt
+    """Короткая подпись к отчёту целей для Telegram: бренд + список проверенных
+    стран (детали по целям - в самом xlsx)."""
     from telegram_notify import escape_html
-    имя = _ИМЕНА.get(base, base.upper())
-    строки, вс_ok, вс_проб, вс_целей = [], 0, 0, 0
-    for pid, каталог, прогон, метка in результаты:
-        try:
-            c = gt._классифицировать(pid, каталог, прогон)['счёт']
-        except Exception:
-            continue
-        ok = c.get('ok', 0) + c.get('ok_forms', 0)
-        проб = c.get('no_code', 0) + c.get('bad', 0)
-        всего = ok + проб + sum(c.get(k, 0) for k in ('special', 'manual', 'forms', 'info'))
-        вс_ok += ok
-        вс_проб += проб
-        вс_целей += всего
-        строки.append(f'• {escape_html(метка)}: ✅ {ok}/{всего}'
-                      + (f' · ❗ проблем {проб}' if проб else ''))
-    import datetime as _dt
-    when = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y %H:%M')
-    head = (f'🎯 <b>Проверка целей</b> · {escape_html(имя)}\n'
-            f'{when} (Екб)\n'
-            f'Сайтов: {len(результаты)} · целей: {вс_целей}\n'
-            f'✅ Подтверждено: {вс_ok}   ❗ Проблемы: {вс_проб}')
-    body = ('\n\n' + '\n'.join(строки)) if строки else ''
-    tail = '\n\nПодробности по каждой цели - в приложенном отчёте.'
-    return head + body + tail
+    бренд = _ИМЕНА.get(base, base.upper()).split(' - ')[0].strip()
+    страны = [_страна(pid) for pid, _к, _п, _м in результаты]
+    части = [f'Проверка целей {escape_html(бренд)}']
+    if страны:
+        части.append(f'Проверено: {escape_html(", ".join(страны))}')
+    части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')
+    return '\n\n'.join(части)
 
 
 def main() -> int:
@@ -207,10 +198,13 @@ def main() -> int:
         # их проставляет страница из секретов). Без настроенного TG - тихо пропуск.
         try:
             import telegram_notify as tn
+            import datetime as _dt
             текст = _сводка_для_telegram(base, результаты)
+            _дата = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y')
             res = tn.send_report_from_env(
                 project_name=_ИМЕНА.get(base, base.upper()),
                 summary_text=текст, report_file=out if out.is_file() else None,
+                report_filename=f'Goals-{base}-{_дата}.xlsx',
                 log=lambda lvl, msg: _stamp(msg))
             if not res.get('skipped'):
                 _stamp(f'✓ Telegram: отправлено {res.get("sent", 0)}, '
