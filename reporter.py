@@ -4095,67 +4095,49 @@ def _collect_anomaly_rows(wm_metrics, link_profile):
     return rows
 
 
-def _build_anomalies_sheet(wb, wm_metrics, link_profile):
-    """Секция «Аномалии» (уходит в конец листа «Аналитика»): резкие
-    отклонения Вебмастера и ссылочного профиля в одной таблице. Строится,
-    если Блок B выполнялся (wm_metrics передан)."""
-    if not wm_metrics:
-        return
-    ws = wb.create_sheet('Аномалии')
-    ws.sheet_view.showGridLines = False
-    for col, w in (('A', 3), ('B', 24), ('C', 24), ('D', 20), ('E', 12),
-                   ('F', 62), ('G', 3)):
-        ws.column_dimensions[col].width = w
-
-    ws.merge_cells('B2:F2')
-    c = ws['B2']
-    c.value = 'Аномалии Вебмастера и ссылочного профиля'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:F3')
-    c = ws['B3']
-    c.value = ('Резкие отклонения «от себя-прошлого» - Вебмастер часто сигналит '
-               'раньше, чем просядут позиции и трафик. Смотрим: обход (всплеск '
-               '4xx/5xx, просадка доступных страниц - история Яндекса), проблемы '
-               'сайта (фатальные/критические), страницы в поиске и ИКС (падение '
-               'от эталона прошлых прогонов), а также внезапные мусорные доноры и '
-               'скачки ссылочной массы. Пороги: −15% для страниц, всплеск ×2 для '
-               'ошибок обхода. Пусто - аномалий нет (это норма).')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
+def _render_wm_anomalies(ws, start_row, wm_metrics, link_profile):
+    """Часть A секции «Аномалии»: Вебмастер (обход/проблемы/страницы/ИКС) +
+    внезапные мусорные доноры. Пишет с start_row, возвращает следующую строку."""
+    row = start_row
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+    h = ws.cell(row=row, column=2, value='A. Вебмастер и ссылочный профиль')
+    h.font = _font(size=12, bold=True, color='FFFFFF')
+    h.fill = _fill(C.text_soft)
+    h.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 20
+    row += 1
 
     if not wm_metrics.get('available'):
-        ws.merge_cells('B5:F5')
-        c = ws['B5']
-        c.value = f'⚪ {wm_metrics.get("note", "Проверка не выполнялась.")}'
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        c = ws.cell(row=row, column=2,
+                    value=f'⚪ {wm_metrics.get("note", "Проверка не выполнялась.")}')
         c.font = _font(size=10, color=C.text_muted)
         c.alignment = _align(indent=1, wrap=True)
-        return
+        return row + 2
 
     rows = _collect_anomaly_rows(wm_metrics, link_profile)
     n_red = sum(1 for r in rows if r.get('severity') in ('fatal', 'critical'))
     n_warn = sum(1 for r in rows if r.get('severity') == 'possible')
 
-    ws.merge_cells('B5:F5')
-    c = ws['B5']
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+    c = ws.cell(row=row, column=2)
     if rows:
         c.value = (f'⚠ Аномалий: {len(rows)} · фатально/критично: {n_red} · '
                    f'возможных: {n_warn}. Проверьте по каждому.')
         c.font = _font(size=11, bold=True, color=C.err if n_red else C.warn)
     else:
         _hosts = len(wm_metrics.get('hosts') or [])
-        c.value = (f'✅ Аномалий не обнаружено (проверено хостов: {_hosts}). '
-                   f'Обход, проблемы, страницы/ИКС и доноры - в норме.')
+        c.value = (f'✅ Аномалий Вебмастера/ссылок нет (проверено хостов: '
+                   f'{_hosts}). Обход, проблемы, страницы/ИКС и доноры - в норме.')
         c.font = _font(size=11, bold=True, color=C.ok)
     c.fill = _fill(C.surface)
     c.alignment = _align(indent=1)
-    ws.row_dimensions[5].height = 24
+    ws.row_dimensions[row].height = 22
+    row += 1
     if not rows:
-        return
+        return row + 1
 
-    hdr_row = 7
+    hdr_row = row
     for col, title in (('B', 'Хост'), ('C', 'Метрика'),
                        ('D', 'Было → сейчас'), ('E', 'Отклонение'),
                        ('F', 'Что случилось')):
@@ -4167,9 +4149,8 @@ def _build_anomalies_sheet(wb, wm_metrics, link_profile):
                                 indent=0 if col in 'DE' else 1)
         cell.border = _border()
     ws.row_dimensions[hdr_row].height = 22
-    ws.freeze_panes = f'A{hdr_row + 1}'
+    row += 1
 
-    row = hdr_row + 1
     for r in rows:
         red = r.get('severity') in ('fatal', 'critical')
         color = C.err if red else C.warn
@@ -4196,6 +4177,48 @@ def _build_anomalies_sheet(wb, wm_metrics, link_profile):
                 cell.fill = _fill(C.err_soft)
         ws.row_dimensions[row].height = 20
         row += 1
+    return row + 1
+
+
+def _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies):
+    """Единый лист «Аномалии» (в конце группы «Аналитика»): (A) Вебмастер
+    (обход/проблемы/страницы/ИКС) + внезапные мусорные доноры; (B) ГСК-запросы
+    и Метрика-рефералы. Строится, если выполнялась хотя бы одна часть."""
+    has_wm = bool(wm_metrics)
+    _a = anomalies or {}
+    has_q = bool(_a.get('gsc') or _a.get('metrika'))
+    if not has_wm and not has_q:
+        return
+    ws = wb.create_sheet('Аномалии')
+    ws.sheet_view.showGridLines = False
+    for col, w in (('A', 3), ('B', 26), ('C', 24), ('D', 22), ('E', 12),
+                   ('F', 60), ('G', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:F2')
+    c = ws['B2']
+    c.value = 'Аномалии'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:F3')
+    c = ws['B3']
+    c.value = ('Резкие отклонения «от себя-прошлого» - часто видны раньше, чем '
+               'просядут позиции и трафик. A - Вебмастер (всплеск ошибок обхода '
+               '4xx/5xx, просадка страниц, фатальные/критические проблемы, '
+               'падение страниц в поиске/ИКС) и ссылочный профиль (внезапные '
+               'мусорные доноры, скачки массы). B - всплеск мусорных/иноязычных '
+               'запросов в ГСК и переходов со спам-сайтов в Метрике. Пусто - '
+               'аномалий нет (норма).')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 56
+
+    row = 5
+    if has_wm:
+        row = _render_wm_anomalies(ws, row, wm_metrics, link_profile)
+    if has_q:
+        _render_query_anomalies(ws, row, anomalies)
 
 
 # ── Лист «Настройки в админке» (доп. чек-лист: функции настройки) ──
@@ -4668,36 +4691,25 @@ def _build_review_priority_sheet(wb, rp):
         row += 1
 
 
-def _build_anomalies_sheet(wb, anomalies):
-    """Лист «Аномалии»: (1) ГСК - всплеск показов по мусорным/иноязычным
-    запросам + ручная сверка доноров; (2) Метрика - переходы с мусорных сайтов
-    (спам-домены-рефереры + всплеск). Добавляется, только если хоть одна
-    из проверок выполнялась."""
-    if not anomalies:
-        return
-    gsc = anomalies.get('gsc') or {}
-    mtr = anomalies.get('metrika') or {}
+def _render_query_anomalies(ws, start_row, anomalies):
+    """Часть B секции «Аномалии»: ГСК - всплеск показов по мусорным/иноязычным
+    запросам; Метрика - переходы со спам-сайтов (спам-домены-рефереры +
+    всплеск). Пишет с start_row в переданный лист."""
+    _a = anomalies or {}
+    gsc = _a.get('gsc') or {}
+    mtr = _a.get('metrika') or {}
     if not gsc and not mtr:
-        return
+        return start_row
 
-    def _bad(d):
-        return bool(d.get('available') and (d.get('spiked')
-                    or d.get('spam_queries_count') or d.get('spam_domains_count')))
-
-    problem = _bad(gsc) or _bad(mtr)
-    ws = wb.create_sheet('Аномалии')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if problem else C.ok
-    for col, w in (('A', 3), ('B', 34), ('C', 22), ('D', 40), ('E', 3)):
-        ws.column_dimensions[col].width = w
-
-    ws.merge_cells('B2:D2')
-    c = ws['B2']
-    c.value = 'Аномалии: запросы (ГСК) и переходы (Метрика)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    row = [4]
+    row = [start_row]
+    ws.merge_cells(start_row=row[0], start_column=2, end_row=row[0], end_column=6)
+    _bh = ws.cell(row=row[0], column=2,
+                  value='B. Запросы (ГСК) и переходы (Метрика)')
+    _bh.font = _font(size=12, bold=True, color='FFFFFF')
+    _bh.fill = _fill(C.text_soft)
+    _bh.alignment = _align(indent=1)
+    ws.row_dimensions[row[0]].height = 20
+    row[0] += 1
 
     def _hdr(text, color=C.text):
         ws.merge_cells(start_row=row[0], start_column=2, end_row=row[0],
@@ -4775,6 +4787,7 @@ def _build_anomalies_sheet(wb, anomalies):
             ws.cell(row=row[0], column=3, value=f'{d.get("visits")} переходов'
                     ).font = _font(size=9, color=C.text_soft)
             row[0] += 1
+    return row[0]
 
 
 def _build_admin_settings_sheet(wb, admin_settings):
@@ -6388,7 +6401,7 @@ _SHEET_GROUPS = [
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
-        '404 из Метрики', 'Динамика трафика', 'Отзывы (докупка)', 'Аномалии',
+        '404 из Метрики', 'Динамика трафика', 'Отзывы (докупка)',
         'Уведомления', 'Ошибки сервисов', 'Автокликер', 'Ссылочный профиль',
         'Замена рекл. номера', 'Аномалии',
     ]),
@@ -6910,7 +6923,7 @@ def build_report(
 
     # ─── Лист «Ссылочный профиль» - если lite-проверка выполнялась ─────
     _build_link_profile_sheet(wb, link_profile)
-    _build_anomalies_sheet(wb, wm_metrics, link_profile)
+    _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies)
 
     # ─── Лист «Настройки в админке» - если проверка выполнялась ────────
     _build_admin_settings_sheet(wb, admin_settings)
@@ -6923,9 +6936,6 @@ def build_report(
 
     # ─── Лист «Отзывы (докупка)» - приоритет докупки отзывов ───────────
     _build_review_priority_sheet(wb, review_priority)
-
-    # ─── Лист «Аномалии» - ГСК-запросы + Метрика-рефералы ──────────────
-    _build_anomalies_sheet(wb, anomalies)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
