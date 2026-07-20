@@ -451,6 +451,30 @@ def main() -> int:
 
     if rc == 0:
         _stamp(f'Лог сохранён: {work / "log_forms.xlsx"}')
+        # Telegram: отчёт по формам получателям проекта (креды - в окружении, их
+        # проставляет страница из секретов). НЕ шлём, когда формы гоняются ВНУТРИ
+        # «Проверки целей» (--check-goals): там свой сводный отчёт по целям.
+        if not a.check_goals:
+            try:
+                import telegram_notify as tn
+                from telegram_notify import escape_html
+                _отчёт = work / 'log_forms.xlsx'
+                _города = [c for c, _u, _m in run_cities if c]
+                import datetime as _dt
+                _когда = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y %H:%M')
+                _текст = (f'📨 <b>Проверка форм</b> · {escape_html(name)}\n'
+                          f'{_когда} (Екб)\n'
+                          + (f'Города: {escape_html(", ".join(_города))}\n' if _города else '')
+                          + 'Результаты по каждой форме - в приложенном отчёте.')
+                _res = tn.send_report_from_env(
+                    project_name=name, summary_text=_текст,
+                    report_file=_отчёт if _отчёт.is_file() else None,
+                    log=lambda lvl, msg: _stamp(msg))
+                if not _res.get('skipped'):
+                    _stamp(f'✓ Telegram: отправлено {_res.get("sent", 0)}, '
+                           f'не доставлено {_res.get("failed", 0)}')
+            except Exception as e:  # noqa: BLE001
+                _stamp(f'⚠ Telegram-отправка не удалась ({e}) - отчёт всё равно готов.')
         _stamp('✅ ВСЁ ГОТОВО')
     return rc
 
