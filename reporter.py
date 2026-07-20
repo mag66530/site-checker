@@ -4508,6 +4508,115 @@ def _build_review_priority_sheet(wb, rp):
         row += 1
 
 
+def _build_anomalies_sheet(wb, anomalies):
+    """Лист «Аномалии»: (1) ГСК - всплеск показов по мусорным/иноязычным
+    запросам + ручная сверка доноров; (2) Метрика - переходы с мусорных сайтов
+    (спам-домены-рефереры + всплеск). Добавляется, только если хоть одна
+    из проверок выполнялась."""
+    if not anomalies:
+        return
+    gsc = anomalies.get('gsc') or {}
+    mtr = anomalies.get('metrika') or {}
+    if not gsc and not mtr:
+        return
+
+    def _bad(d):
+        return bool(d.get('available') and (d.get('spiked')
+                    or d.get('spam_queries_count') or d.get('spam_domains_count')))
+
+    problem = _bad(gsc) or _bad(mtr)
+    ws = wb.create_sheet('Аномалии')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if problem else C.ok
+    for col, w in (('A', 3), ('B', 34), ('C', 22), ('D', 40), ('E', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:D2')
+    c = ws['B2']
+    c.value = 'Аномалии: запросы (ГСК) и переходы (Метрика)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    row = [4]
+
+    def _hdr(text, color=C.text):
+        ws.merge_cells(start_row=row[0], start_column=2, end_row=row[0],
+                       end_column=4)
+        h = ws.cell(row=row[0], column=2, value=text)
+        h.font = _font(size=12, bold=True, color='FFFFFF')
+        h.fill = _fill(color)
+        h.alignment = _align(indent=1)
+        ws.row_dimensions[row[0]].height = 20
+        row[0] += 1
+
+    def _line(label, value, color=C.text_soft):
+        ws.cell(row=row[0], column=2, value=label).font = _font(
+            size=10, color=C.text_soft)
+        cc = ws.cell(row=row[0], column=3, value=value)
+        cc.font = _font(size=10, color=color)
+        row[0] += 1
+
+    # ── ГСК ──
+    _hdr('Google Search Console - аномалии запросов', C.text_soft)
+    if not gsc.get('available'):
+        _line('Статус', gsc.get('note', 'не выполнялось'), C.text_muted)
+    else:
+        bad = gsc.get('spiked') or gsc.get('spam_queries_count')
+        _line('Вердикт', 'ЕСТЬ аномалии' if bad else 'аномалий нет',
+              C.err if bad else C.ok)
+        _line('Период', f'{gsc.get("cur_period")} vs {gsc.get("prev_period")}')
+        _line('Показы (тек / пред)',
+              f'{gsc.get("total_impr_cur")} / {gsc.get("total_impr_prev")}'
+              + (f'  ·  ×{gsc.get("impr_spike")}' if gsc.get('impr_spike') else ''),
+              C.err if gsc.get('spiked') else C.text)
+        _line('Мусорные/иноязыч. запросы',
+              f'{gsc.get("spam_queries_count", 0)} (показов '
+              f'{gsc.get("spam_impr_cur", 0)}, было {gsc.get("spam_impr_prev", 0)})',
+              C.err if gsc.get('spam_queries_count') else C.text)
+        for q in (gsc.get('spam_queries') or [])[:12]:
+            ws.cell(row=row[0], column=2, value='  ' + (q.get('query') or '')
+                    ).font = _font(size=9, color=C.err)
+            ws.cell(row=row[0], column=3, value=f'{q.get("impressions")} показов'
+                    ).font = _font(size=9, color=C.text_soft)
+            row[0] += 1
+        # Доноры GSC - API не отдаёт, ручная сверка.
+        lc = ws.cell(row=row[0], column=2,
+                     value='Мусорные доноры (раздел Links) - API не отдаёт, '
+                           'проверить вручную →')
+        lc.font = _font(size=9, italic=True, color=C.text_muted)
+        link = ws.cell(row=row[0], column=3, value='GSC → Ссылки')
+        link.font = _font(size=9, color=C.accent, underline='single')
+        link.hyperlink = gsc.get('gsc_links_url',
+                                 'https://search.google.com/search-console/links')
+        row[0] += 1
+    row[0] += 1
+
+    # ── Метрика ──
+    _hdr('Метрика - переходы с мусорных сайтов', C.text_soft)
+    if not mtr.get('available'):
+        _line('Статус', mtr.get('note', 'не выполнялось'), C.text_muted)
+    else:
+        bad = mtr.get('spiked') or mtr.get('spam_domains_count')
+        _line('Вердикт', 'ЕСТЬ аномалии' if bad else 'аномалий нет',
+              C.err if bad else C.ok)
+        _line('Период', f'{mtr.get("cur_period")} vs {mtr.get("prev_period")}')
+        _line('Переходы-рефералы (тек / пред)',
+              f'{mtr.get("total_cur")} / {mtr.get("total_prev")}'
+              + (f'  ·  ×{mtr.get("referral_spike")}'
+                 if mtr.get('referral_spike') else ''),
+              C.err if mtr.get('spiked') else C.text)
+        _line('Спам-домены-рефереры',
+              f'{mtr.get("spam_domains_count", 0)} (переходов '
+              f'{mtr.get("spam_cur", 0)}, было {mtr.get("spam_prev", 0)})',
+              C.err if mtr.get('spam_domains_count') else C.text)
+        for d in (mtr.get('spam_domains') or [])[:15]:
+            ws.cell(row=row[0], column=2, value='  ' + (d.get('domain') or '')
+                    ).font = _font(size=9, color=C.err)
+            ws.cell(row=row[0], column=3, value=f'{d.get("visits")} переходов'
+                    ).font = _font(size=9, color=C.text_soft)
+            row[0] += 1
+
+
 def _build_admin_settings_sheet(wb, admin_settings):
     """Лист «Настройки в админке»: работают ли функции настройки поддоменов/
     категорий/товаров/тех.страниц (браузерная проверка + round-trip
@@ -6119,7 +6228,7 @@ _SHEET_GROUPS = [
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
-        '404 из Метрики', 'Динамика трафика', 'Отзывы (докупка)',
+        '404 из Метрики', 'Динамика трафика', 'Отзывы (докупка)', 'Аномалии',
         'Уведомления', 'Ошибки сервисов', 'Автокликер', 'Ссылочный профиль',
         'Замена рекл. номера',
     ]),
@@ -6279,6 +6388,7 @@ def build_report(
     traffic: dict = None,          # сравнение трафика день/месяц/год - лист «Динамика трафика»
     arsenkin: dict = None,         # индексация URL через Арсенкин - лист «Индексация (Арсенкин)»
     review_priority: dict = None,  # приоритет докупки отзывов - лист «Отзывы (докупка)»
+    anomalies: dict = None,        # аномалии ГСК/Метрика - лист «Аномалии»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -6651,6 +6761,9 @@ def build_report(
 
     # ─── Лист «Отзывы (докупка)» - приоритет докупки отзывов ───────────
     _build_review_priority_sheet(wb, review_priority)
+
+    # ─── Лист «Аномалии» - ГСК-запросы + Метрика-рефералы ──────────────
+    _build_anomalies_sheet(wb, anomalies)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)

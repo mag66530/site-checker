@@ -145,6 +145,101 @@ def list_indexed_urls(project_id: str, sa_info: dict, *, days: int = DEFAULT_DAY
     return urls
 
 
+# ── Аномалии запросов (негативное SEO / спам-запросы) ────────────────────────
+import re as _re
+
+_FOREIGN_SCRIPT = _re.compile(
+    r'[؀-ۿ一-鿿぀-ヿ가-힯฀-๿]')
+
+
+def looks_spam_query(q: str) -> bool:
+    """Запрос похож на спам/накрутку: спам-слова ИЛИ иноязычный скрипт
+    (арабица/CJK/кана/хангыль/тай - для РУ-сайта это чужие мусорные запросы)."""
+    from link_profile import _SPAM_WORDS
+    ql = (q or '').lower()
+    if any(w in ql for w in _SPAM_WORDS):
+        return True
+    return bool(_FOREIGN_SCRIPT.search(q or ''))
+
+
+def _sa_query_map(session, endpoint, start, end):
+    """{query: impressions} за период (dimension=query, метрика impressions)."""
+    out = {}
+    start_row = 0
+    while start_row < _HARD_CAP:
+        body = {'startDate': start.isoformat(), 'endDate': end.isoformat(),
+                'dimensions': ['query'], 'rowLimit': _PAGE_ROWS,
+                'startRow': start_row}
+        r = session.post(endpoint, json=body, timeout=120)
+        if r.status_code != 200:
+            raise RuntimeError(_api_error(r, endpoint))
+        rows = (r.json() or {}).get('rows', []) or []
+        if not rows:
+            break
+        for row in rows:
+            keys = row.get('keys') or []
+            if keys:
+                out[keys[0]] = out.get(keys[0], 0) + float(row.get('impressions', 0))
+        if len(rows) < _PAGE_ROWS:
+            break
+        start_row += _PAGE_ROWS
+    return out
+
+
+def query_anomaly(project_id: str, sa_info: dict, *, days: int = 14,
+                  cfg: dict | None = None, log=None) -> dict | None:
+    """«Нет аномалий в ГСК»: всплеск показов по мусорным/иноязычным запросам
+    (негативное SEO). Search Analytics dim=query за последние `days` дней vs
+    предыдущие `days`. → dict для листа «Аномалии» или {'available': False}."""
+    def _log(m):
+        if log:
+            try:
+                log('info', m)
+            except TypeError:
+                log(m)
+
+    cfg = cfg or load_project_config(project_id) or {}
+    site_url = resolve_site_url(project_id, cfg)
+    if not site_url:
+        return {'available': False, 'note': 'не определён GSC-ресурс проекта'}
+    try:
+        session = _authed_session(sa_info)
+        endpoint = f"{SC_BASE}/sites/{quote(site_url, safe='')}/searchAnalytics/query"
+        end = datetime.date.today()
+        cur1, cur2 = end - datetime.timedelta(days=days), end
+        prev1, prev2 = (end - datetime.timedelta(days=2 * days),
+                        end - datetime.timedelta(days=days + 1))
+        _log(f'GSC-аномалии: {site_url}, {cur1}…{cur2} vs {prev1}…{prev2}')
+        cur = _sa_query_map(session, endpoint, cur1, cur2)
+        prev = _sa_query_map(session, endpoint, prev1, prev2)
+    except Exception as e:
+        return {'available': False, 'note': f'GSC-аномалии: {e}'}
+
+    cur_spam = {q: v for q, v in cur.items() if looks_spam_query(q)}
+    prev_spam = {q: v for q, v in prev.items() if looks_spam_query(q)}
+    total_cur, total_prev = sum(cur.values()), sum(prev.values())
+    spam_cur, spam_prev = sum(cur_spam.values()), sum(prev_spam.values())
+    spike = round(total_cur / total_prev, 1) if total_prev else None
+    spam_spike = round(spam_cur / spam_prev, 1) if spam_prev else None
+    top = sorted(cur_spam.items(), key=lambda kv: -kv[1])[:20]
+    return {
+        'available': True, 'site_url': site_url, 'window_days': days,
+        'cur_period': f'{cur1.isoformat()}…{cur2.isoformat()}',
+        'prev_period': f'{prev1.isoformat()}…{prev2.isoformat()}',
+        'total_impr_cur': int(round(total_cur)),
+        'total_impr_prev': int(round(total_prev)),
+        'spam_impr_cur': int(round(spam_cur)),
+        'spam_impr_prev': int(round(spam_prev)),
+        'impr_spike': spike, 'spam_spike': spam_spike,
+        'spiked': bool(spike is not None and spike >= 3.0
+                       and total_cur - total_prev >= 100),
+        'spam_queries': [{'query': q, 'impressions': int(round(v))}
+                         for q, v in top],
+        'spam_queries_count': len(cur_spam),
+        'gsc_links_url': ('https://search.google.com/search-console/links'),
+    }
+
+
 def _api_error(r, site_url: str) -> str:
     try:
         msg = ((r.json().get("error") or {}).get("message") or "")[:200]

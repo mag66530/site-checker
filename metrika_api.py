@@ -658,6 +658,66 @@ def _period_rows(counters, token, proxy_url, cfg, lead_metric, log, tag=''):
     return rows
 
 
+def fetch_referral_anomaly(project_id, token, proxy_url=None, counter=None,
+                           log=None, days=30) -> Optional[dict]:
+    """«Нет аномалий переходов с мусорных сайтов» по Метрике. Домены-рефереры
+    (ym:s:refererDomain) за последние `days` дней vs предыдущие `days`:
+      • спам-домены - по эвристике link_profile.looks_spam_host (мусорные TLD /
+        gambling / adult / фарма);
+      • всплеск - резкий рост суммарных переходов с рефереров (или спам-части).
+    → dict для листа «Аномалии» или None."""
+    from datetime import date, timedelta
+    from link_profile import looks_spam_host
+
+    def _log(m):
+        if log:
+            log('info', m)
+
+    if requests is None or not token:
+        return None
+    counters = _counters_for(project_id, counter, token=token,
+                             proxy_url=proxy_url, log=log)
+    if not counters:
+        _log(f'⚠ Метрика-рефералы: нет счётчиков для {project_id}')
+        return None
+    today = date.today()
+    cur1, cur2 = today - timedelta(days=days), today
+    prev1, prev2 = today - timedelta(days=2 * days), today - timedelta(days=days + 1)
+    _log(f'Метрика-рефералы: {len(counters)} счётчик(ов), '
+         f'{cur1}…{cur2} vs {prev1}…{prev2}')
+    cur = _agg_dim(counters, token, proxy_url, cur1.isoformat(), cur2.isoformat(),
+                   'ym:s:visits', 'ym:s:refererDomain', _log)
+    prev = _agg_dim(counters, token, proxy_url, prev1.isoformat(),
+                    prev2.isoformat(), 'ym:s:visits', 'ym:s:refererDomain', _log)
+    if not cur and not prev:
+        return {'available': False,
+                'note': 'Метрика не отдала домены-рефереры (нет данных или '
+                        'измерение недоступно).'}
+
+    def _spam(d):
+        return {k: v for k, v in d.items() if k and looks_spam_host(k)}
+
+    cur_spam, prev_spam = _spam(cur), _spam(prev)
+    total_cur, total_prev = sum(cur.values()), sum(prev.values())
+    spam_cur, spam_prev = sum(cur_spam.values()), sum(prev_spam.values())
+    spike = round(total_cur / total_prev, 1) if total_prev else None
+    spam_spike = round(spam_cur / spam_prev, 1) if spam_prev else None
+    top = sorted(cur_spam.items(), key=lambda kv: -kv[1])[:20]
+    return {
+        'available': True,
+        'window_days': days,
+        'cur_period': f'{cur1.isoformat()}…{cur2.isoformat()}',
+        'prev_period': f'{prev1.isoformat()}…{prev2.isoformat()}',
+        'total_cur': int(round(total_cur)), 'total_prev': int(round(total_prev)),
+        'spam_cur': int(round(spam_cur)), 'spam_prev': int(round(spam_prev)),
+        'referral_spike': spike, 'spam_spike': spam_spike,
+        'spiked': bool(spike is not None and spike >= 3.0
+                       and total_cur - total_prev >= 50),
+        'spam_domains': [{'domain': d, 'visits': int(round(v))} for d, v in top],
+        'spam_domains_count': len(cur_spam),
+    }
+
+
 def list_counters(token, proxy_url=None):
     """Вывести все счётчики, доступные токену (Management API).
     Показывает id, имя, сайт и зеркала (поддомены) - для поиска нужного."""

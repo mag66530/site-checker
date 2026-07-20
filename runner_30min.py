@@ -1011,6 +1011,7 @@ def run_check(pid, params, creds, log, progress):
         _today_404 = None   # отчёт 404 из Метрика-API
         _404_goal = None    # есть ли в Метрике цель на отслеживание 404
         _traffic = None     # сравнение трафика день/месяц/год (Метрика)
+        _anomalies = None   # аномалии ГСК-запросов + Метрика-рефералов
         _nlog = lambda lvl, msg: log(msg)
         # Прокси для почты/Метрики/Вебмастера - тот же, что и для страниц: с
         # учётом use_proxy проекта. Иначе при use_proxy=false сбор всё равно лез
@@ -1151,6 +1152,34 @@ def run_check(pid, params, creds, log, progress):
                     log(f'⚠ Метрика-трафик: {_e}')
             else:
                 log(f'⚠ Метрика-трафик: токен не задан (metrika_oauth_{pid})')
+
+        # ── Аномалии: ГСК-запросы (негативное SEO) + Метрика-рефералы ──
+        if params.get('check_anomalies'):
+            _anom = {}
+            _mt_token = creds.get('metrika_oauth')
+            if _mt_token:
+                try:
+                    from metrika_api import fetch_referral_anomaly
+                    log('Метрика-рефералы: переходы с мусорных сайтов…')
+                    _anom['metrika'] = fetch_referral_anomaly(
+                        pid, _mt_token, _proxy,
+                        counter=creds.get('metrika_counter'), log=_nlog)
+                except Exception as _e:
+                    log(f'⚠ Метрика-рефералы: {_e}')
+            else:
+                log(f'⚠ Метрика-рефералы: токен не задан (metrika_oauth_{pid})')
+            _gsc_sa = creds.get('gsc_sa')
+            if _gsc_sa:
+                try:
+                    from index_gsc_api import query_anomaly
+                    log('GSC-аномалии: всплеск мусорных/иноязычных запросов…')
+                    _anom['gsc'] = query_anomaly(pid, _gsc_sa, log=_nlog)
+                except Exception as _e:
+                    log(f'⚠ GSC-аномалии: {_e}')
+            else:
+                log(f'⚠ GSC-аномалии: сервисный аккаунт не задан '
+                    f'(gsc_service_account_{pid})')
+            _anomalies = _anom or None
 
         # ── Автокликер - блокирует до перекликивания всех ошибок.
         # Локальный Chrome в приоритете, иначе облачный headless с сессией. ──
@@ -1722,7 +1751,8 @@ def run_check(pid, params, creds, log, progress):
             stress_check=_stress_check, link_profile=_link_profile,
             admin_settings=_admin_settings, yabusiness=_yabusiness,
             gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic,
-            arsenkin=_arsenkin, review_priority=_review_priority)
+            arsenkin=_arsenkin, review_priority=_review_priority,
+            anomalies=_anomalies)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
