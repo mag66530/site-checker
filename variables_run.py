@@ -247,6 +247,36 @@ def fetch_all(domains, proxy, log, retries=3):
     return out
 
 
+def _own_city_regex(city):
+    """Regex «свой город на странице», устойчивый к склонениям. ё→е; для каждого
+    слова несколько основ: само слово, без конечной гласной/й/ь, без прилагат.
+    окончания (-ый/-ий→«Новый»→«нов»), с беглой гласной (-ец/-ёл: «Череповец»→
+    «череповц», «Орёл»→«орл»). Для СВОЕГО города на его поддомене (омонимы не
+    страшны, поэтому берём широко). None - если город пуст."""
+    import re as _re
+    city = (city or "").replace("ё", "е").strip()
+    if not city:
+        return None
+    parts = []
+    for w in _re.split(r"[\s-]+", city):
+        wl = w.lower()
+        if len(wl) < 2:
+            parts.append(_re.escape(wl))
+            continue
+        stems = {wl}
+        if len(wl) > 4 and wl[-2:] in (
+                "ый", "ий", "ой", "ая", "яя", "ое", "ее", "ей"):
+            stems.add(wl[:-2])                     # прилагательное: Новый→нов
+        if wl[-1] in "аяоеиыуюьй":
+            stems.add(wl[:-1])                     # конечная гласная/й/ь
+        if len(wl) > 3 and wl[-1] not in "аяоеиыуюё" and wl[-2] in "ео":
+            stems.add(wl[:-2] + wl[-1])            # беглая гласная: Череповец→череповц
+        alt = "|".join(_re.escape(s) for s in sorted(stems, key=len))
+        parts.append(r"(?:" + alt + r")[а-яё]{0,3}")
+    return _re.compile(r"(?<![а-яё])" + r"[\s-]+".join(parts) + r"(?![а-яё])",
+                       _re.I)
+
+
 def _регион_статусы(html, host, ctx):
     """Город/страна через region_checker → (город_dict, страна_dict) в формате
     check_variables-поля {field, expected, found, status, note}."""
@@ -262,21 +292,14 @@ def _регион_статусы(html, host, ctx):
     if свой:
         try:
             zones = rc.извлечь_зоны(html)
+            # ё→е: на сайте пишут и «Могилёв», и «Могилеве»; нормализуем обе
+            # стороны, чтобы ё/е не давало ложного расхождения.
             hay = " ".join([zones.get("title", ""), zones.get("h1", ""),
                             zones.get("description", ""),
-                            (zones.get("текст", "") or "")[:8000]])
-            rx = ctx.city_regex.get(свой)
-            # Короткие города (Уфа/Ош, ≤3 букв) region_checker пропускает
-            # (омонимы при детекте ЧУЖИХ городов). Но СВОЙ город на его же
-            # поддомене искать надо - строим лёгкий regex со склонениями
-            # («Уфа»→«уф»+оконч. → ловит «Уфе/Уфу/Уфы»). Омонимы тут не страшны.
-            if rx is None:
-                import re as _re2
-                _b = свой.strip().lower()
-                _b = _b[:-1] if (_b and _b[-1] in 'аяоеиыуюьй') else _b
-                if len(_b) >= 2:
-                    rx = _re2.compile(r'(?<![а-яё])' + _re2.escape(_b)
-                                      + r'[а-яё]{0,3}(?![а-яё])', _re2.I)
+                            (zones.get("текст", "") or "")[:8000]]).replace("ё", "е")
+            # СВОЙ город на его же поддомене ищем устойчиво к склонениям (Тула→
+            # Туле, Череповец→Череповце, Орёл→Орле, Новый Уренгой→Новом Уренгое).
+            rx = _own_city_regex(свой)
             found_self = bool(rx and rc._city_match_propernoun(rx, hay))
             rv = rc.check_region_vars(html, host, ctx)
             foreign = ([i for i in (rv.get("issues") or [])
