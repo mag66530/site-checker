@@ -256,6 +256,17 @@ def _регион_статусы(html, host, ctx):
                             zones.get("description", ""),
                             (zones.get("текст", "") or "")[:8000]])
             rx = ctx.city_regex.get(свой)
+            # Короткие города (Уфа/Ош, ≤3 букв) region_checker пропускает
+            # (омонимы при детекте ЧУЖИХ городов). Но СВОЙ город на его же
+            # поддомене искать надо - строим лёгкий regex со склонениями
+            # («Уфа»→«уф»+оконч. → ловит «Уфе/Уфу/Уфы»). Омонимы тут не страшны.
+            if rx is None:
+                import re as _re2
+                _b = свой.strip().lower()
+                _b = _b[:-1] if (_b and _b[-1] in 'аяоеиыуюьй') else _b
+                if len(_b) >= 2:
+                    rx = _re2.compile(r'(?<![а-яё])' + _re2.escape(_b)
+                                      + r'[а-яё]{0,3}(?![а-яё])', _re2.I)
             found_self = bool(rx and rc._city_match_propernoun(rx, hay))
             rv = rc.check_region_vars(html, host, ctx)
             foreign = ([i for i in (rv.get("issues") or [])
