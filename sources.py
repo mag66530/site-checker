@@ -235,7 +235,6 @@ _TECH_PATHS_IMP = [
 ]
 TECH_PAGE_PATHS = {
     'smu': _TECH_PATHS_SMU,
-    'smu-test': _TECH_PATHS_SMU,   # тест-стенд СМУ - те же страницы
     'imp': _TECH_PATHS_IMP,
     'mpe': [
         '/about/', '/catalog/spetstekhnika/', '/payment_delivery/',
