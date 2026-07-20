@@ -122,7 +122,14 @@ def _fetch_one(dom, proxy_parts, ua=None):
             if resp.status >= 400:
                 resp.read()
                 return '', f'HTTP {resp.status}'
-            data = resp.read()
+            # Сервер иногда обрывает ответ (IncompleteRead: не дослал все байты
+            # из Content-Length - сеть/антибот/большая страница). Прочитанной
+            # части обычно хватает (шапка/подвал/город - в начале документа):
+            # берём её, если достаточно, вместо полного провала.
+            try:
+                data = resp.read()
+            except http.client.IncompleteRead as ie:
+                data = ie.partial or b''
             html = data.decode('utf-8', 'replace')
             # Антибот/заглушка вместо страницы (частый ответ при частых запросах):
             # либо совсем короткий ответ, либо явные маркеры проверки браузера.
