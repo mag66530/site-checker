@@ -26,6 +26,7 @@ from pagespeed_checker import (
     METRIC_THRESHOLDS, TYPE_LABELS, TYPE_ORDER,
     metric_rating, score_rating,
 )
+from pagespeed_history import fmt_ts
 
 # ── Палитра (в тон приложению + пороги Google) ───────────────────────────────
 INK = "1A1A1A"
@@ -151,10 +152,10 @@ def _build_summary_sheet(wb, project_name, run_ts, prev_ts, agg, deltas, provide
     ws = wb.active
     ws.title = "Сводка по типам"
     ncols = 6
-    compared = f"со снятием {prev_ts}" if prev_ts else "нет предыдущего периода"
+    compared = f"со снятием {fmt_ts(prev_ts)}" if prev_ts else "нет предыдущего периода"
     start = _title_block(ws, "Скорость страниц — сводка по типам", [
         f"Проект: {project_name}   ·   Источник: {provider_name}",
-        f"Проверка: {run_ts}   ·   Сравнение: {compared}",
+        f"Проверка: {fmt_ts(run_ts)}   ·   Сравнение: {compared}",
     ], ncols)
 
     headers = ["Тип страницы", "Кол-во", "🖥 Desktop AVG", "Δ Desktop",

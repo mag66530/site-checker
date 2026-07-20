@@ -296,7 +296,7 @@ try:
 except Exception:
     PH, _runs = None, []
 st.caption(f'В истории проекта: **{len(_runs)}** прошлых снятий'
-           + (f' (последнее {_runs[-1]})' if _runs else ' - это будет первое.'))
+           + (f' (последнее {PH.fmt_ts(_runs[-1])})' if _runs else ' - это будет первое.'))
 
 # ── Запуск ───────────────────────────────────────────────────────────
 st.divider()
@@ -371,9 +371,11 @@ else:
             data = None
         if data and data.get('project') == pid:
             st.divider()
-            _cmp = (f'сравнение со снятием {data.get("prev_ts")}'
-                    if data.get('prev_ts') else 'первый прогон - сравнивать не с чем')
-            st.markdown(f'#### Результат · {data.get("run_ts","")}  \n'
+            _fmt = PH.fmt_ts if PH else (lambda x: x or '')
+            _prev = data.get('prev_ts')
+            _cmp = (f'сравнение со снятием {_fmt(_prev)}'
+                    if _prev else 'первый прогон - сравнивать не с чем')
+            st.markdown(f'#### Результат · {_fmt(data.get("run_ts",""))}  \n'
                         f'<span style="color:#5B5853">{_cmp}</span>', unsafe_allow_html=True)
             _render_summary(data)
 
