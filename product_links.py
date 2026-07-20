@@ -370,3 +370,26 @@ def load_product_links(project_id: str) -> Optional[dict]:
         'categories_total': meta.get('categories_total', 0),
         'categories_ok': meta.get('categories_ok', 0),
     }
+
+
+def load_product_categories(project_id: str) -> dict:
+    """Карта {путь товара -> категория листинга} из базы товаров проекта.
+
+    Нужна проверке уникальности фото товаров (п.1.15): «изображения товаров
+    в разных категориях не дублируются» сравнивает именно по категориям, а у
+    МПЭ/ИМП категория из URL товара не видна (товар лежит в /catalog/tovar/…
+    или в корне) - реальная категория известна только из базы листингов.
+    Пусто, если база не собиралась."""
+    csv_file = _csv_path(project_id)
+    if not csv_file.exists():
+        return {}
+    out: dict = {}
+    try:
+        with open(csv_file, 'r', encoding='utf-8') as f:
+            for row in csv.DictReader(f):
+                url, cat = row.get('url'), row.get('category')
+                if url and cat:
+                    out[url] = cat
+    except Exception:
+        return {}
+    return out

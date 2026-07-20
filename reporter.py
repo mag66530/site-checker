@@ -2708,7 +2708,12 @@ def _build_images_sheet(wb, results):
                '(6) Уникальные картинки категорий - «главная» картинка '
                'категории (og:image / первая после h1) не повторяется на '
                'других категориях того же поддомена и не заглушка. '
-               'Вес берётся по Content-Length.')
+               '(7) Уникальные фото товаров - изображения товаров в разных '
+               'категориях не дублируются: одно фото не встречается у товаров '
+               'из разных категорий (внутри одной категории общее фото - '
+               'норма для металлопроката; один товар в нескольких категориях '
+               'тоже норма, ему нужен rel=canonical). Вес берётся по '
+               'Content-Length.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
@@ -2732,6 +2737,20 @@ def _build_images_sheet(wb, results):
                     f'(на {im["cat_dup"]["n"]} категориях)')
         if im.get('cat_img'):
             return f'заглушка: {im["cat_img"]["name"]}'
+        return ''
+
+    def _prod_extra(r):
+        """Контекст находки по фото товара: какое фото, в скольких категориях
+        и у скольких товаров оно встретилось."""
+        im = getattr(r, 'images', None) or {}
+        if im.get('prod_dup'):
+            d = im['prod_dup']
+            cats = d.get('cats')
+            cat_txt = f'в {cats} категориях, ' if cats else ''
+            return (f'та же картинка: {d["name"]} '
+                    f'({cat_txt}у {d["n"]} товаров)')
+        if im.get('prod_img'):
+            return f'заглушка: {im["prod_img"]["name"]}'
         return ''
 
     def _img_extra(r):
@@ -2817,6 +2836,43 @@ def _build_images_sheet(wb, results):
             c = ws.cell(row=row, column=2)
             c.value = ('· Картинка категории (og:image / первая после h1) '
                        'не распознана ни на одной категории - пропуск.')
+            c.font = _font(size=10, color=C.text_muted)
+            c.alignment = _align(indent=1)
+            ws.row_dimensions[row].height = 22
+            row += 2
+
+    # ── Фото товаров в разных категориях не дублируются ──
+    # Секция появляется, когда в прогоне были карточки товаров. Дубль - одно
+    # фото у товаров из РАЗНЫХ категорий; внутри одной категории общее фото -
+    # норма (металлопрокат: арматура/лист разных размеров с одним фото). Один
+    # товар в нескольких категориях (тот же slug) тоже не дубль - ему нужен
+    # rel=canonical.
+    prods = [r for r in checked if getattr(r, 'type_code', '') == 'product']
+    if prods:
+        prod_bad = [r for r in prods if r.images.get('prod_warnings')]
+        recognized_p = sum(1 for r in prods if r.images.get('prod_img'))
+        _meta_section_title(
+            ws, row,
+            f'Фото товаров в разных категориях - уникальность  '
+            f'({len(prod_bad)})',
+            C.warn if prod_bad else C.ok)
+        row += 1
+        if prod_bad:
+            row = _render_issue_groups(
+                ws, row, _issue_groups(prod_bad, 'images', 'prod_warnings'),
+                C.warn, extra=_prod_extra)
+        elif recognized_p:
+            _meta_ok_line(ws, row,
+                          f'✅ Фото товаров не дублируются между категориями, '
+                          f'заглушек нет (товаров: {len(prods)}, фото '
+                          f'распознано у {recognized_p}).')
+            row += 2
+        else:
+            ws.merge_cells(start_row=row, start_column=2,
+                           end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = ('· Фото товара (og:image / первое после h1) не '
+                       'распознано ни на одной карточке - пропуск.')
             c.font = _font(size=10, color=C.text_muted)
             c.alignment = _align(indent=1)
             ws.row_dimensions[row].height = 22
@@ -5266,6 +5322,193 @@ def _build_kp_sheet(wb, results):
         row += 1
 
 
+# ── Секция «Замена рекл. номера» (в группе «Аналитика», в конце) ────
+# Два столбца проверки в одной таблице:
+#   • «В конфиге» - СТАТИЧЕСКИ, каждый прогон: рекламный номер в коде
+#     коллтрекинга (Sipuni) совпадает с phone_ad из КП;
+#   • «Подмена (браузер)» - по галочке: реально ли номер подменяется при
+#     рекламном визите (?utm_source=yandex), JS выполняется в браузере.
+
+# статус статической сверки → (метка, цвет)
+_CT_CFG = {'ok': ('✓ совпал с КП', 'ok'), 'bug': ('БАГ ≠ КП', 'err'),
+           'na': ('нет подмены', 'text_muted')}
+# статус браузерной проверки → (метка, цвет)
+_CT_BROW = {'replaced_ok': ('✅ работает', 'ok'),
+            'not_replaced': ('❌ не работает', 'err'),
+            'no_element': ('⚠ номер не найден', 'warn'),
+            'error': ('⚠ ошибка загрузки', 'warn')}
+
+
+def _build_calltracking_sheet(wb, results, calltracking_check):
+    """Секция «Замена рекл. номера» (в конце «Аналитики»). Сводит воедино:
+    (1) статическую сверку рекламного номера в конфиге коллтрекинга с
+    phone_ad из КП - идёт в каждом прогоне (из kp_result.ad_check);
+    (2) браузерную проверку реальной подмены - по галочке (calltracking_check).
+    Лист не создаётся, если нет ни того, ни другого."""
+    from urllib.parse import urlparse as _up
+
+    def _nhost(s):
+        h = (s or '').strip().lower()
+        if '//' in h:
+            h = _up(h).netloc or h
+        return h.split(':')[0].lstrip('.').replace('www.', '')
+
+    # Статика (каждый прогон): главные с kp_result.ad_check.
+    stat = {}
+    for r in (results or []):
+        kp = getattr(r, 'kp_result', None)
+        if kp and kp.get('ad_check'):
+            stat[_nhost(r.subdomain or kp.get('domain'))] = {
+                'city': kp.get('city') or getattr(r, 'city', ''),
+                'url': getattr(r, 'url', ''), 'ad': kp['ad_check']}
+    # Браузер (по галочке).
+    brow = {_nhost(b.get('url')): b
+            for b in ((calltracking_check or {}).get('results') or [])}
+    if not stat and not brow:
+        return
+
+    hosts = list(dict.fromkeys(list(stat) + list(brow)))
+    cfg_bad = sum(1 for h in hosts
+                  if (stat.get(h, {}).get('ad') or {}).get('status') == 'bug')
+    brow_bad = sum(1 for h in hosts
+                   if (brow.get(h) or {}).get('status') == 'not_replaced')
+    brow_used = bool(brow)
+
+    ws = wb.create_sheet('Замена рекл. номера')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if (cfg_bad or brow_bad) else C.ok
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 22   # Город
+    ws.column_dimensions['C'].width = 9    # Открыть
+    ws.column_dimensions['D'].width = 16   # Рекл. номер (КП)
+    ws.column_dimensions['E'].width = 20   # В конфиге сайта
+    ws.column_dimensions['F'].width = 24   # Подмена (браузер)
+    ws.column_dimensions['G'].width = 30   # Показал сайт (браузер)
+
+    ws.merge_cells('B2:G2')
+    c = ws['B2']
+    c.value = 'Замена рекламного номера (коллтрекинг)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 24
+
+    ws.merge_cells('B3:G3')
+    c = ws['B3']
+    c.value = ('Реклама подменяет номер в шапке на отдельный (для отслеживания '
+               'звонков с рекламы). «В конфиге» - СТАТИЧЕСКИ, в каждом прогоне: '
+               'рекламный номер в коде коллтрекинга (Sipuni) совпадает с '
+               'phone_ad из КП. «Подмена (браузер)» - по галочке: открываем '
+               'главную с меткой ?utm_source=yandex и проверяем, реально ли '
+               'номер подменяется (JS выполняется). ✅/✓ - ок, ❌/БАГ - '
+               'проблема, «нет подмены» - коллтрекинг не найден.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 44
+
+    # Плитки сводки
+    tiles = [('Проверено городов', len(hosts), C.accent, C.accent_soft),
+             ('В конфиге ≠ КП', cfg_bad, C.err if cfg_bad else C.ok,
+              C.err_soft if cfg_bad else C.ok_soft)]
+    if brow_used:
+        tiles.append(('Подмена не работает', brow_bad,
+                      C.err if brow_bad else C.ok,
+                      C.err_soft if brow_bad else C.ok_soft))
+    col = 2
+    for label, value, color, bg in tiles:
+        vc = ws.cell(row=5, column=col, value=value)
+        vc.font = _font(size=22, bold=True, color=color)
+        vc.fill = _fill(bg); vc.alignment = _align(horizontal='center')
+        vc.border = _border(color=C.border_light)
+        lc = ws.cell(row=6, column=col, value=label)
+        lc.font = _font(size=9, color=C.text_muted)
+        lc.fill = _fill(bg); lc.alignment = _align(horizontal='center')
+        lc.border = _border(color=C.border_light)
+        col += 1
+    ws.row_dimensions[5].height = 30
+
+    def _fmt_num(n):
+        n = re.sub(r'\D', '', str(n or ''))
+        if len(n) == 10:
+            return f'{n[:3]}-{n[3:6]}-{n[6:8]}-{n[8:]}'
+        return n or '—'
+
+    # Сортировка: сначала проблемные (браузер не работает / конфиг ≠ КП).
+    def _rank(h):
+        b = (brow.get(h) or {}).get('status')
+        cfgs = (stat.get(h, {}).get('ad') or {}).get('status')
+        return (0 if b == 'not_replaced' else 1 if cfgs == 'bug' else 2,
+                (stat.get(h, {}).get('city') or brow.get(h, {}).get('city') or h))
+    hosts.sort(key=_rank)
+
+    hdr_row = 8
+    hdrs = ['Город', 'Открыть', 'Рекл. номер (КП)', 'В конфиге сайта',
+            'Подмена (браузер)', 'Показал сайт']
+    for ci, h in enumerate(hdrs, start=2):
+        cell = ws.cell(row=hdr_row, column=ci, value=h)
+        cell.font = _font(size=10, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.alignment = _align(horizontal='center' if ci > 3 else 'left')
+        cell.border = _border()
+    ws.row_dimensions[hdr_row].height = 24
+    ws.freeze_panes = f'B{hdr_row + 1}'
+
+    row = hdr_row + 1
+    for h in hosts:
+        s = stat.get(h, {})
+        b = brow.get(h)
+        ad = s.get('ad') or {}
+        city = s.get('city') or (b or {}).get('city') or h
+        url = s.get('url') or (b or {}).get('url') or ''
+        kp_ad = ad.get('kp') or (b or {}).get('kp') or ''
+
+        cc = ws.cell(row=row, column=2, value=city)
+        cc.font = _font(size=10); cc.alignment = _align(indent=1)
+        cc.border = _border(color=C.border_light)
+
+        uc = ws.cell(row=row, column=3, value='открыть')
+        uc.hyperlink = url or None
+        uc.font = _font(size=10, color=C.accent, underline='single')
+        uc.alignment = _align(horizontal='center')
+        uc.border = _border(color=C.border_light)
+
+        kc = ws.cell(row=row, column=4, value=_fmt_num(kp_ad))
+        kc.font = _font(size=10, color=C.text_soft)
+        kc.alignment = _align(horizontal='center')
+        kc.border = _border(color=C.border_light)
+
+        # В конфиге (статически)
+        cfg_label, cfg_ck = _CT_CFG.get(ad.get('status'), ('—', 'text_muted'))
+        fc = ws.cell(row=row, column=5, value=cfg_label)
+        fc.font = _font(size=10, bold=(cfg_ck != 'text_muted'),
+                        color=getattr(C, cfg_ck, C.text_muted))
+        if cfg_ck in ('ok', 'err'):
+            fc.fill = _fill(C.ok_soft if cfg_ck == 'ok' else C.err_soft)
+        fc.alignment = _align(horizontal='center')
+        fc.border = _border(color=C.border_light)
+        if ad.get('comment'):
+            fc.comment = Comment(ad['comment'], 'Site Checker', height=90, width=280)
+
+        # Подмена (браузер)
+        if b is None:
+            bl, bck = ('не проверяли', 'text_muted')
+        else:
+            bl, bck = _CT_BROW.get(b.get('status'), (b.get('status', ''), 'text_muted'))
+        bc = ws.cell(row=row, column=6, value=bl)
+        bc.font = _font(size=10, bold=(bck in ('ok', 'err')),
+                        color=getattr(C, bck, C.text_muted))
+        if bck in ('ok', 'err'):
+            bc.fill = _fill(C.ok_soft if bck == 'ok' else C.err_soft)
+        bc.alignment = _align(horizontal='center')
+        bc.border = _border(color=C.border_light)
+
+        shown = ', '.join(_fmt_num(n) for n in ((b or {}).get('shown') or [])) or '—'
+        gc = ws.cell(row=row, column=7, value=shown if b is not None else '—')
+        gc.font = _font(size=9, color=C.text_muted)
+        gc.alignment = _align(horizontal='center')
+        gc.border = _border(color=C.border_light)
+        ws.row_dimensions[row].height = 20
+        row += 1
+
+
 # Страна по доменной зоне URL (для листа «404 из Метрики»).
 _TLD_COUNTRY = {
     'ru': 'Россия', 'kz': 'Казахстан', 'by': 'Беларусь', 'kg': 'Кыргызстан',
@@ -5768,7 +6011,7 @@ _SHEET_GROUPS = [
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
         '404 из Метрики', 'Динамика трафика', 'Уведомления', 'Ошибки сервисов',
-        'Автокликер', 'Ссылочный профиль',
+        'Автокликер', 'Ссылочный профиль', 'Замена рекл. номера',
     ]),
     ('Контент', ['Изображения']),
 ]
@@ -5781,7 +6024,8 @@ _GROUP_NOTES = {
               'проверяется как часть страниц (см. лист «Техничка» → блоки '
               'страниц и «Страница 404»).'),
     'Контент': ('Изображения (alt, современные форматы webp/avif, вес, '
-                'lazy, уникальность картинок категорий) — если проверка '
+                'lazy, уникальность картинок категорий, фото товаров не '
+                'дублируются между категориями) — если проверка '
                 'выполнялась, показаны ниже. SEO-текст частотных категорий '
                 '(нейроответы) — на листе «Техничка» («Метаданные»); блоки '
                 'товара (похожие/отзывы/сортировка/цены) — на листе '
@@ -5910,6 +6154,7 @@ def build_report(
     meta_summary: dict = None,     # дубли мета/URL (п.1.8) - в лист «Метаданные»
     filters_test: dict = None,     # итоги фильтр-теста - секция на листе «Вёрстка»
     console_check: dict = None,    # ошибки JS в консоли (п.1.14) - лист «Ошибки JavaScript»
+    calltracking_check: dict = None,  # браузерная проверка замены рекл. номера - лист «Замена рекл. номера»
     w3c_check: dict = None,        # валидация W3C + скорость (п.1.16) - лист «Валидация и скорость»
     p404_check: dict = None,       # страница 404 (п.1.18) - лист «Страница 404»
     ps_filters: dict = None,       # фильтры ПС (п.1.19) - лист «Фильтры ПС»
@@ -6218,7 +6463,7 @@ def build_report(
         ('Формы', 'формы: детальная проверка - в отдельном отчёте форм-тестера; здесь - точки формы на страницах.'),
         ('Админка', 'работа функций настройки в админке: поддомены/категории/товары/тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
         ('Аналитика', '404 из Метрики, письма Вебмастера/GSC, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений, lite-профиль беклинков.'),
-        ('Контент', 'изображения (alt, webp/avif, вес, lazy, уникальность картинок категорий); SEO-текст частотных категорий - в «Техничке».'),
+        ('Контент', 'изображения (alt, webp/avif, вес, lazy, уникальность картинок категорий, фото товаров не дублируются между категориями); SEO-текст частотных категорий - в «Техничке».'),
         ('Я.Бизнес и GMB', 'если есть лист - каждый поддомен (город) зарегистрирован в Яндекс.Бизнесе под своим регионом; поддомены без организации.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
     ]
@@ -6295,6 +6540,7 @@ def build_report(
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
+    _build_calltracking_sheet(wb, results, calltracking_check)
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 2: Все детали

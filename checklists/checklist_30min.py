@@ -696,6 +696,7 @@ def init_session():
         'c30_check_arsenkin': False,  # индексация URL через API Арсенкина (токен из поля)
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
+        'c30_check_calltracking': False,  # замена рекламного номера (браузер) - по запросу
         'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
         'c30_check_w3c': True,         # п.1.16 - валидация W3C + скорость
         'c30_check_static': True,      # п.1.17 - сжатие/кеш статики
@@ -1453,6 +1454,17 @@ if pid:
                          'ресайзе (масштаб Ctrl+/- покрыт той же сеткой), на '
                          'мобильном шрифт минимум 14px. Тяжёлый браузерный '
                          'проход - по запросу.')
+        st.checkbox('Замена рекламного номера работает (браузер)',
+                    key='c30_check_calltracking',
+                    help='Открывает главную каждого города прогона в браузере '
+                         'с рекламной меткой (?utm_source=yandex - Яндекс.Директ) '
+                         'и проверяет, подменяется ли номер в шапке на рекламный '
+                         'из КП (phone_ad). Это end-to-end проверка работы '
+                         'коллтрекинга (JS реально выполняется). Результат - в '
+                         'секции «Замена рекл. номера» в конце листа «Аналитика» '
+                         '(колонка «Подмена (браузер)»). Статическая сверка '
+                         'конфига с КП идёт там же и без браузера (в каждом '
+                         'прогоне). Тяжёлый браузерный проход - по запросу.')
         _ck_stress = st.checkbox(
             'Ошибки сервера: парсинг, нагрузка, дубли URL (по запросу)',
             key='c30_check_stress',
@@ -1686,6 +1698,7 @@ if pid:
         bool(st.session_state.get('c30_check_links', False)),
         bool(st.session_state.get('c30_check_filter_fn', False)),
         bool(st.session_state.get('c30_check_console', False)),
+        bool(st.session_state.get('c30_check_calltracking', False)),
         bool(st.session_state.get('c30_check_stress', False)),
         int(st.session_state.get('c30_stress_concurrency', 30)),
         int(st.session_state.get('c30_stress_load_pages', 3)),
@@ -1769,6 +1782,7 @@ if pid:
                 'gsc_pages_crawled_ni': int(st.session_state.get('c30_gsc_crawled_ni', 0) or 0),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),
                 'check_console': st.session_state.get('c30_check_console', False),
+                'check_calltracking': st.session_state.get('c30_check_calltracking', False),
                 'check_stress': st.session_state.get('c30_check_stress', False),
                 'stress_concurrency': int(st.session_state.get('c30_stress_concurrency', 30)),
                 'stress_load_pages': int(st.session_state.get('c30_stress_load_pages', 3)),

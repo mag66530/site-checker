@@ -443,6 +443,47 @@ def _run_console_check(pid, urls, log):
                 'note': f'результат проверки консоли не прочитан: {e}'}
 
 
+def _run_calltracking_browser(pid, hosts, log):
+    """Браузерная проверка замены рекламного номера (уровень 2). Отдельный
+    процесс calltracking_run.py (Playwright): открывает главную города с
+    рекламной меткой и проверяет, подменился ли номер на рекламный из КП.
+    Возвращает dict для листа «Замена рекл. номера»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    (root / 'cache').mkdir(exist_ok=True)
+    _hosts_file = root / 'cache' / f'ct_hosts_{pid}.json'
+    _res_file = root / 'cache' / f'calltracking_{pid}.json'
+    try:
+        _hosts_file.write_text(json.dumps(list(hosts), ensure_ascii=False),
+                               encoding='utf-8')
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    args = [_sys.executable, 'calltracking_run.py', '--project', pid,
+            '--hosts-file', str(_hosts_file)]
+    log(f'Замена рекл. номера: {len(hosts)} город(ов), запускаю браузер…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [рекл.номер] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        log(f'⚠ Замена рекл. номера: {e}')
+        return {'available': True, 'results': [], 'note': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False, 'results': [],
+                'note': f'результат проверки замены номера не прочитан: {e}'}
+
+
 def _run_admin_settings(pid, params, creds, log):
     """Проверка «работают функции настройки» в админке (доп. чек-лист).
     Отдельный процесс admin_settings_run.py (Playwright): креды уходят через
@@ -810,7 +851,9 @@ def run_check(pid, params, creds, log, progress):
         # Находки - в cat_warnings (своя секция листа «Изображения»),
         # не в warnings: чтобы не смешивались с форматами/весом.
         if params.get('check_images', True):
-            from image_checker import category_image_dups
+            from image_checker import (category_image_dups,
+                                       product_image_dups, product_slug,
+                                       product_category)
             _cats15 = [(r.subdomain, r.url, r.images.get('cat_img'))
                        for r in results
                        if r.type_code == 'category'
@@ -833,6 +876,54 @@ def run_check(pid, params, creds, log, progress):
                                'разделу нужна своя)')
                 elif _ci15 and _ci15.get('placeholder'):
                     _cw.append('у категории вместо своей картинки заглушка '
+                               '(no-photo/placeholder)')
+
+            # ── Уникальные фото товаров В РАЗНЫХ КАТЕГОРИЯХ (тот же п.1.15) ──
+            # Пункт чек-листа - «изображения товаров в разных категориях не
+            # дублируются». Металлопрокат: внутри одной категории (арматура
+            # разных диаметров, лист разной толщины) общее фото - норма;
+            # находка - когда одно фото уходит в ДРУГУЮ категорию. Категорию
+            # берём из базы листингов (у МПЭ/ИМП в URL товара её не видно),
+            # иначе - из URL (у СМУ категория = родительский путь).
+            _prod_cats_map = {}
+            try:
+                from product_links import load_product_categories
+                _prod_cats_map = load_product_categories(pid) or {}
+            except Exception:
+                _prod_cats_map = {}
+
+            def _cat_of(_u):
+                _p = urlparse(_u).path or ''
+                return (_prod_cats_map.get(_p)
+                        or _prod_cats_map.get(_p.rstrip('/') + '/')
+                        or _prod_cats_map.get(_p.rstrip('/'))
+                        or product_category(_u))
+
+            _prods15 = [(r.subdomain, r.url, r.images.get('prod_img'))
+                        for r in results
+                        if r.type_code == 'product'
+                        and getattr(r, 'images', None)]
+            _pdup15 = {}
+            for (_sub, _key), _urls in product_image_dups(
+                    _prods15, category_of=_cat_of).items():
+                _npr = len({product_slug(_u) for _u in _urls})
+                _ncat = len({_cat_of(_u) for _u in _urls})
+                for _u in _urls:
+                    _pdup15[_u] = {'name': _key.rsplit('/', 1)[-1],
+                                   'n': _npr, 'cats': _ncat}
+            for r in results:
+                if r.type_code != 'product' \
+                        or not getattr(r, 'images', None):
+                    continue
+                _pi15 = r.images.get('prod_img')
+                _pw = r.images.setdefault('prod_warnings', [])
+                if r.url in _pdup15:
+                    r.images['prod_dup'] = _pdup15[r.url]
+                    _pw.append('фото товара дублируется в разных категориях - '
+                               'та же картинка у товаров из других разделов '
+                               '(в каждой категории свои фото товаров)')
+                elif _pi15 and _pi15.get('placeholder'):
+                    _pw.append('у товара вместо фото заглушка '
                                '(no-photo/placeholder)')
 
         # ── Метаданные и дубли (п.1.8) ──
@@ -1048,6 +1139,18 @@ def run_check(pid, params, creds, log, progress):
             _console_urls = [r.url for r in results if r.is_ok]
             if _console_urls:
                 _console_check = _run_console_check(pid, _console_urls, log)
+
+        # ── Замена рекламного номера (уровень 2, браузер) - по галочке ──
+        # Открываем главную каждого города прогона с рекламной меткой и
+        # проверяем, подменяется ли номер на рекламный из КП.
+        _calltracking_check = None
+        if params.get('check_calltracking'):
+            _ct_hosts = list(dict.fromkeys(
+                r.subdomain for r in results
+                if r.is_ok and r.type_code == 'main' and r.subdomain))
+            if _ct_hosts:
+                _calltracking_check = _run_calltracking_browser(
+                    pid, _ct_hosts, log)
 
         # ── Валидация W3C + скорость (1.16) и сжатие/кеш статики (1.17) ──
         # Обе по выборке страниц (главная/категория/товар); ресурсы качаем
@@ -1563,6 +1666,7 @@ def run_check(pid, params, creds, log, progress):
             service_issues=_service_issues, autoclick=_autoclick,
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,
+            calltracking_check=_calltracking_check,
             w3c_check=_w3c_check, p404_check=_p404_check,
             ps_filters=_ps_filters, search_check=_search_check,
             index_404_check=_index_404,
