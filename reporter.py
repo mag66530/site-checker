@@ -4186,6 +4186,10 @@ _TRAFFIC_COLS = [
 ]
 
 
+_MONTHS_NOM = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+               'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+
+
 def _fmt_duration(sec):
     """Секунды → «м:сс» (0 → «0:00»)."""
     sec = int(sec or 0)
@@ -4249,9 +4253,16 @@ def _build_traffic_sheet(wb, traffic):
     def _fmt(iso):
         return '.'.join(reversed(iso.split('-')))
 
-    def _daterange(r):
-        a, b = _fmt(r['d1']), _fmt(r['d2'])
-        return a if a == b else f'{a} – {b}'
+    def _srez(period, r):
+        """Что писать в колонке «Срез»: день - дату, месяц - «Месяц ГГГГ»,
+        год - год (вместо слов текущий/прошлый). Заодно заменяет старый
+        заголовок блока с датами."""
+        y, m, _d = r['d1'].split('-')
+        if period == 'Месяц':
+            return f'{_MONTHS_NOM[int(m)]} {y}'
+        if period == 'Год':
+            return y
+        return _fmt(r['d1'])
 
     def _nums(r):
         p = r.get('pages') or {}
@@ -4265,15 +4276,18 @@ def _build_traffic_sheet(wb, traffic):
         n[8] = _fmt_duration(n[8])   # время: секунды → м:сс
         return n
 
-    def _delta(cur, prev):
+    def _delta(cur, prev, invert=False):
+        # invert=True для «отказов»: рост - плохо (красный), падение - хорошо.
         if not prev:
             return '—', C.text_muted
         pct = round((cur - prev) / prev * 100, 1)
+        if pct == 0:
+            return '0%', C.text_muted
+        up_color = C.err if invert else C.ok
+        down_color = C.ok if invert else C.err
         if pct > 0:
-            return f'+{pct}%', C.ok
-        if pct < 0:
-            return f'{pct}%', C.err
-        return '0%', C.text_muted
+            return f'+{pct}%', up_color
+        return f'{pct}%', down_color
 
     def _put(row, idx, value, **fkw):
         cell = ws.cell(row=row, column=2 + idx, value=value)
@@ -4291,12 +4305,10 @@ def _build_traffic_sheet(wb, traffic):
         cur = next((r for r in prs if r['kind'] == 'текущий'), None)
         prev = next((r for r in prs if r['kind'] == 'прошлый'), None)
 
-        # Полоса-заголовок блока (день/месяц/год) с датами сравнения.
+        # Полоса-заголовок блока: просто период (День/Месяц/Год).
         ws.merge_cells(start_row=row, start_column=2, end_row=row,
                        end_column=last_col)
-        band = ws.cell(row=row, column=2, value=(
-            f'{period}   ·   {_daterange(cur) if cur else "?"}   vs   '
-            f'{_daterange(prev) if prev else "?"}'))
+        band = ws.cell(row=row, column=2, value=period)
         band.font = _font(size=11, bold=True, color='FFFFFF')
         band.fill = _fill(C.text_soft)
         band.alignment = _align(indent=1, vertical='center')
@@ -4310,20 +4322,21 @@ def _build_traffic_sheet(wb, traffic):
             base = C.text if is_cur else C.text_muted
             _put(row, 0, r.get('year'), color=base)
             _put(row, 1, period, color=base)
-            _put(row, 2, r.get('kind'), color=base)
+            _put(row, 2, _srez(period, r), color=base)   # дата/месяц/год
             for j, val in enumerate(_disp(r)):
                 _put(row, 3 + j, val, color=base, bold=(j == 0 and is_cur))
             ws.row_dimensions[row].height = 16
             row += 1
 
         # Строка динамики (%): текущий vs прошлый по каждой колонке.
+        # Отказы (индекс 6 в _nums) - рост плохой, красим наоборот.
         if cur and prev:
             _put(row, 0, '', color=C.text_muted)
             _put(row, 1, '', color=C.text_muted)
             _put(row, 2, 'Δ, %', color=C.text, bold=True)
             cn, pn = _nums(cur), _nums(prev)
             for j in range(len(cn)):
-                txt, clr = _delta(cn[j], pn[j])
+                txt, clr = _delta(cn[j], pn[j], invert=(j == 6))
                 _put(row, 3 + j, txt, color=clr, bold=True)
             ws.row_dimensions[row].height = 16
             row += 1
