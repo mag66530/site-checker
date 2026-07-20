@@ -1564,8 +1564,10 @@ def run_check(pid, params, creds, log, progress):
         # ── Lite-проверка ссылочного профиля (по галочке) ──
         # Официальные данные Яндекс.Вебмастера (links/external): объём,
         # доноры, динамика, спам. Тот же OAuth-токен, что и диагностика.
+        # Тянем и для 1.20 (свой лист), и для 1.21 (доноры нужны секции
+        # «Аномалии») - один раз, дорогой поход по API не дублируем.
         _link_profile = None
-        if params.get('check_link_profile'):
+        if params.get('check_link_profile') or params.get('check_anomaly'):
             _lp_token = creds.get('webmaster_oauth')
             if _lp_token:
                 try:
@@ -1585,6 +1587,27 @@ def run_check(pid, params, creds, log, progress):
                     '(webmaster_oauth) - пропуск.')
                 _link_profile = {'available': False,
                                  'note': 'OAuth-токен Вебмастера не задан.'}
+
+        # ── Аномалии Вебмастера (п.1.21) ──
+        # Своя галочка check_anomaly (тот же токен Вебмастера, что и 1.20).
+        # Результат - секция «Аномалии» в самом низу листа «Аналитика».
+        _wm_metrics = None
+        if params.get('check_anomaly'):
+            _wm_token = creds.get('webmaster_oauth')
+            if _wm_token:
+                try:
+                    from webmaster_metrics import fetch_webmaster_metrics
+                    log('Аномалии Вебмастера: тяну summary/историю обхода…')
+                    _wm_metrics = fetch_webmaster_metrics(
+                        pid, _wm_token, _proxy, log=lambda m: log(m))
+                    _wm_n = sum(len(h.get('anomalies') or [])
+                                for h in (_wm_metrics or {}).get('hosts') or [])
+                    log(f'✓ Аномалии Вебмастера: найдено {_wm_n}')
+                except Exception as _e:
+                    log(f'⚠ Аномалии Вебмастера: {_e}')
+            else:
+                _wm_metrics = {'available': False,
+                               'note': 'OAuth-токен Вебмастера не задан.'}
 
         # ── Настройки в админке (доп. чек-лист, по галочке) ──
         # Пункт 1: функции настройки работают (рендер разделов админки).
@@ -1737,6 +1760,7 @@ def run_check(pid, params, creds, log, progress):
             ps_filters=_ps_filters, search_check=_search_check,
             index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile,
+            wm_metrics=_wm_metrics,
             admin_settings=_admin_settings, yabusiness=_yabusiness,
             gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic,
             arsenkin=_arsenkin, review_priority=_review_priority,
