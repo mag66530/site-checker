@@ -284,10 +284,40 @@ def main() -> int:
     import kp as kpmod
     from region_checker import build_region_context
 
-    kp = kpmod.load_kp(a.project)
+    # Источник КП: Google-таблица или снапшот CSV. Логируем ЯВНО - иначе не
+    # видно, подтянулись ли правки из таблицы (частая причина «поменял данные в
+    # Google, а проверка их не заметила» = обновление молча не прошло).
+    _kp_url = ''
+    try:
+        import kp_sheets as _kps
+        _kp_url = _kps.kp_sheet_url(a.project)
+    except Exception:
+        _kps = None
+    if _kp_url and _kps:
+        try:
+            _ok, _msg = _kps.refresh_project(a.project, log=lambda *x, **k: None)
+            _stamp('КП ← Google-таблица: '
+                   + ('обновлено из таблицы' if _ok
+                      else f'НЕ удалось ({_msg}) - беру прежний снапшот CSV'))
+        except Exception as _e:
+            _stamp(f'КП ← Google: ошибка обновления ({_e}) - беру снапшот CSV')
+    else:
+        _stamp(f'⚠️ КП: ссылка на Google-таблицу НЕ задана (секрет '
+               f'kp_sheet_url_{a.project}) - беру СНАПШОТ '
+               f'catalogs/{a.project}-kp.csv. Правки в Google так НЕ '
+               f'подхватятся - обнови снапшот или задай секрет!')
+
+    kp = kpmod.load_kp(a.project, refresh=False)   # уже обновили выше
     if not kp:
         _stamp(f'✗ Нет базы КП catalogs/{a.project}-kp.csv')
         return 2
+    try:
+        _csvp = ROOT / 'catalogs' / f'{a.project}-kp.csv'
+        _mt = (datetime.fromtimestamp(_csvp.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
+               if _csvp.exists() else '—')
+    except Exception:
+        _mt = '—'
+    _stamp(f'КП загружена: {len(kp)} строк (город/домен), снапшот обновлён {_mt}')
 
     wanted = {c.strip().lower() for c in a.cities.split(',') if c.strip()}
     domains = [(d, row) for d, row in kp.items()
