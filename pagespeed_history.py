@@ -30,12 +30,28 @@ COLUMNS = [
     "mobile_score", "mobile_fcp", "mobile_lcp", "mobile_cls", "mobile_tbt", "mobile_error",
 ]
 
-TS_FMT = "%Y-%m-%d %H:%M:%S"
+TS_FMT = "%Y-%m-%d %H:%M:%S"        # формат хранения (ISO: сортируется хронологически)
+DISPLAY_FMT = "%d.%m.%Y %H:%M:%S"   # формат показа: 20.07.2026 11:58:42
+
+# Екатеринбург, UTC+5, без перехода на летнее время. Берём фиксированный сдвиг,
+# чтобы не зависеть от tzdata и от таймзоны сервера (на облаке обычно UTC).
+YEKB_TZ = datetime.timezone(datetime.timedelta(hours=5))
 
 
 def now_ts() -> str:
-    """Метка времени прогона в формате хранения."""
-    return datetime.datetime.now().strftime(TS_FMT)
+    """Метка времени прогона (Екатеринбург, UTC+5) в формате хранения."""
+    return datetime.datetime.now(YEKB_TZ).strftime(TS_FMT)
+
+
+def fmt_ts(ts: str) -> str:
+    """Метку хранения ('2026-07-20 11:58:42') показать как '20.07.2026 11:58:42'.
+    Нераспознанное/пустое значение возвращаем как есть."""
+    if not ts:
+        return ts
+    try:
+        return datetime.datetime.strptime(ts, TS_FMT).strftime(DISPLAY_FMT)
+    except (ValueError, TypeError):
+        return ts
 
 
 def history_path(project_id: str) -> Path:
