@@ -363,12 +363,82 @@ def _load_pagetypes(project_id):
     return cfg
 
 
-def _main_lead_goal(project_id):
-    """Номер основной цели-лида из catalogs/goals-<pid>.json (цель с названием,
-    содержащим «основная цель на лид»). None - если конфига/цели нет (тогда
-    лиды считаем по любой цели). Так лиды = реальные обращения, а не все клики
-    (тел/мессенджеры), и конверсия осмысленная."""
-    f = Path(__file__).parent / 'catalogs' / f'goals-{project_id}.json'
+# TLD домена → (название страны для отчёта, суффикс файла целей goals-<pid>-<sfx>).
+# Суффикс None - для страны нет отдельного файла целей (лиды по любой цели).
+_TLD_COUNTRY = {
+    'ru': ('Россия', ''), 'kz': ('Казахстан', 'kz'), 'uz': ('Узбекистан', 'uz'),
+    'by': ('Беларусь', 'rb'), 'kg': ('Киргизия', 'kg'), 'am': ('Армения', 'am'),
+    'az': ('Азербайджан', 'az'), 'md': ('Молдова', None), 'ua': ('Украина', None),
+    'ge': ('Грузия', None), 'tj': ('Таджикистан', None), 'tm': ('Туркменистан', None),
+}
+
+
+def _site_tld(site):
+    """Домен верхнего уровня из site счётчика ('voronezh.stalmetural.ru'→'ru',
+    'https://steemet.uz/'→'uz')."""
+    host = (site or '').lower().replace('https://', '').replace('http://', '')
+    host = host.split('/')[0].split(':')[0].strip().rstrip('.')
+    return host.rsplit('.', 1)[-1] if '.' in host else ''
+
+
+def _counter_sites(counters, token, proxy_url, log):
+    """{cid: site} для наших счётчиков через Management API (пагинация). Пусто -
+    если доступ к списку счётчиков не удался."""
+    if requests is None or not token:
+        return {}
+    want = {str(c) for c in counters}
+    out = {}
+    headers = {'Authorization': f'OAuth {token}'}
+    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    offset, per = 1, 1000
+    while True:
+        try:
+            r = requests.get(COUNTERS_URL, headers=headers, proxies=proxies,
+                             params={'per_page': per, 'offset': offset}, timeout=40)
+        except Exception as e:
+            log(f'⚠ Метрика-трафик: список счётчиков - {e}')
+            break
+        if r.status_code >= 400:
+            log(f'⚠ Метрика-трафик: список счётчиков HTTP {r.status_code}')
+            break
+        chunk = (r.json() or {}).get('counters', []) or []
+        for c in chunk:
+            cid = str(c.get('id'))
+            if cid in want:
+                out[cid] = (c.get('site') or '')
+        if len(chunk) < per:
+            break
+        offset += per
+    return out
+
+
+def _group_counters_by_country(counters, token, proxy_url, log):
+    """Счётчики → группы по стране (TLD домена). → [(country, suffix, [cid,...])]
+    в порядке: Россия первой, дальше по числу счётчиков убыв. Если сайты узнать
+    не удалось - одна группа «Все домены» (main-цель, суффикс '')."""
+    sites = _counter_sites(counters, token, proxy_url, log)
+    if not sites:
+        return [('Все домены', '', [str(c) for c in counters])]
+    groups = {}
+    for c in counters:
+        cid = str(c)
+        name, suffix = _TLD_COUNTRY.get(_site_tld(sites.get(cid, '')),
+                                        ('Прочее', None))
+        g = groups.setdefault(name, {'suffix': suffix, 'ids': []})
+        g['ids'].append(cid)
+    ordered = sorted(groups.items(),
+                     key=lambda kv: (kv[0] != 'Россия', -len(kv[1]['ids'])))
+    return [(name, g['suffix'], g['ids']) for name, g in ordered]
+
+
+def _main_lead_goal(project_id, suffix=''):
+    """Номер основной цели-лида из catalogs/goals-<pid>[-<suffix>].json (цель с
+    названием, содержащим «основная цель на лид»). suffix - страна (kz/uz/…);
+    для России пусто. None - если конфига/цели нет (лиды по любой цели). Так
+    лиды = реальные обращения, а не все клики, и конверсия осмысленная."""
+    fname = f'goals-{project_id}.json' if not suffix else \
+        f'goals-{project_id}-{suffix}.json'
+    f = Path(__file__).parent / 'catalogs' / fname
     if not f.exists():
         return None
     try:
@@ -551,25 +621,41 @@ def fetch_traffic_comparison(project_id, token, proxy_url=None, counter=None,
         _log(f'⚠ Метрика-трафик: нет счётчиков для {project_id}')
         return None
     cfg = _load_pagetypes(project_id)
-    gid = _main_lead_goal(project_id)
-    lead_metric = f'ym:s:goal{gid}reaches' if gid else 'ym:s:sumGoalReachesAny'
-    _log(f'Метрика-трафик: {len(counters)} счётчик(ов), день/месяц/год × 2; '
-         + (f'лиды по цели {gid}' if gid else 'лиды по любой цели'))
+    groups = _group_counters_by_country(counters, token, proxy_url, log)
+    _log(f'Метрика-трафик: {len(counters)} счётчик(ов) → {len(groups)} '
+         f'групп(ы) по странам: '
+         + ', '.join(f'{name} {len(ids)}' for name, _s, ids in groups))
 
+    out_groups = []
+    for name, suffix, ids in groups:
+        gid = _main_lead_goal(project_id, suffix)
+        lead_metric = f'ym:s:goal{gid}reaches' if gid else 'ym:s:sumGoalReachesAny'
+        _log(f'  [{name}] {len(ids)} счётчик(ов), '
+             + (f'лиды по цели {gid}' if gid else 'лиды по любой цели'))
+        rows = _period_rows(ids, token, proxy_url, cfg, lead_metric, _log, name)
+        if rows:
+            out_groups.append({'country': name, 'counters': len(ids),
+                               'rows': rows})
+    if not out_groups:
+        return None
+    return {'available': True, 'counters': len(counters), 'groups': out_groups}
+
+
+def _period_rows(counters, token, proxy_url, cfg, lead_metric, log, tag=''):
+    """6 строк (день/месяц/год × текущий/прошлый) по заданной группе счётчиков."""
     rows = []
     for label, (c1, c2), (p1, p2) in _traffic_periods():
         for kind, (a, b) in (('текущий', (c1, c2)), ('прошлый', (p1, p2))):
             st = _row_stats(counters, token, proxy_url, a.isoformat(),
-                            b.isoformat(), cfg, _log, lead_metric)
+                            b.isoformat(), cfg, log, lead_metric)
             if st is None:
                 continue
             rows.append({'year': a.year, 'period': label.capitalize(),
                          'kind': kind, 'd1': a.isoformat(), 'd2': b.isoformat(),
                          **st})
-            _log(f'  {label}/{kind}: визиты {st["visits"]}, лиды {st["leads"]}')
-    if not rows:
-        return None
-    return {'available': True, 'counters': len(counters), 'rows': rows}
+            log(f'    {tag} {label}/{kind}: визиты {st["visits"]}, '
+                f'лиды {st["leads"]}')
+    return rows
 
 
 def list_counters(token, proxy_url=None):
@@ -831,13 +917,21 @@ if __name__ == '__main__':
                                        log=lambda lvl, m: print(m))
         if not res:
             print('\nпусто'); sys.exit(0)
-        print(f'\nсчётчиков {res["counters"]}, строк {len(res["rows"])}')
-        for r in res['rows']:
-            print(f'  {r["year"]} {r["period"]:6} {r["kind"]:8} '
-                  f'визиты={r["visits"]:>7} прямые={r["direct"]:>6} '
-                  f'Я={r["yandex"]:>6} G={r["google"]:>6} лиды={r["leads"]:>4} '
-                  f'конв={r["conv"]}% отказы={r["bounce"]}% гл={r["depth"]} '
-                  f't={r["duration"]}s | {r["pages"]}')
+        print(f'\nсчётчиков {res["counters"]}, групп {len(res["groups"])}')
+        _grand = {}
+        for grp in res['groups']:
+            print(f'\n=== {grp["country"]} ({grp["counters"]} счётчиков)')
+            for r in grp['rows']:
+                print(f'  {r["year"]} {r["period"]:6} {r["kind"]:8} '
+                      f'визиты={r["visits"]:>7} прямые={r["direct"]:>6} '
+                      f'Я={r["yandex"]:>6} G={r["google"]:>6} лиды={r["leads"]:>4} '
+                      f'конв={r["conv"]}% отказы={r["bounce"]}% гл={r["depth"]} '
+                      f't={r["duration"]}s')
+                k = (r['period'], r['kind'])
+                _grand[k] = _grand.get(k, 0) + r['visits']
+        print('\n=== СУММА визитов по группам (сверка):')
+        for k, v in _grand.items():
+            print(f'  {k[0]} {k[1]}: {v}')
         sys.exit(0)
 
     # Диагностика доступа без фильтра

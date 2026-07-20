@@ -4258,16 +4258,26 @@ def _build_traffic_sheet(wb, traffic):
     конверсия, поведение, разбивка по типам страниц. Только если выполнялось."""
     if not traffic:
         return
-    rows = traffic.get('rows') or []
-    if not rows:
+    # Формат: группы по странам (новый) или один плоский список rows (старый).
+    groups = traffic.get('groups')
+    if not groups:
+        rows = traffic.get('rows') or []
+        if not rows:
+            return
+        groups = [{'country': 'Все домены',
+                   'counters': traffic.get('counters', 0), 'rows': rows}]
+    if not any(g.get('rows') for g in groups):
         return
 
-    # Спад визитов: текущий < прошлый в каком-либо периоде.
-    by_period = {}
-    for r in rows:
-        by_period.setdefault(r['period'], {})[r['kind']] = r.get('visits', 0)
-    declined = any(v.get('текущий', 0) < v.get('прошлый', 0)
-                   for v in by_period.values())
+    # Спад визитов где-либо (по любой стране/периоду) - для цвета вкладки.
+    declined = False
+    for g in groups:
+        by_period = {}
+        for r in g.get('rows') or []:
+            by_period.setdefault(r['period'], {})[r['kind']] = r.get('visits', 0)
+        if any(v.get('текущий', 0) < v.get('прошлый', 0)
+               for v in by_period.values()):
+            declined = True
 
     ws = wb.create_sheet('Динамика трафика')
     ws.sheet_view.showGridLines = False
@@ -4284,14 +4294,14 @@ def _build_traffic_sheet(wb, traffic):
 
     ws.merge_cells(start_row=3, start_column=2, end_row=3, end_column=last_col)
     c = ws.cell(row=3, column=2, value=(
-        f'Источник: Яндекс.Метрика, СУММА по ВСЕМ счётчикам проекта '
-        f'({traffic.get("counters", 0)} шт) - все домены и поддомены вместе, '
-        'один итог на проект (не по одному сайту). '
+        f'Источник: Яндекс.Метрика, {traffic.get("counters", 0)} счётчиков '
+        'проекта, РАЗБИВКА ПО СТРАНАМ/ДОМЕНАМ (каждый блок - свой набор '
+        'счётчиков по TLD домена, счётчик учтён ровно в одной стране). '
         'День = сегодня / вчера, Месяц = с 1-го числа до сегодня / тот же '
         'отрезок прошлого месяца, Год = с 1 января / прошлый год до той же даты. '
         'Яндекс и Google - весь трафик источника (органика + реклама ПС). Лиды - '
-        'достижения основной цели-лида проекта; конверсия = лиды / визиты. '
-        'Разбивка по типам страниц - по URL приземления.'))
+        'основная цель-лид страны; конверсия = лиды / визиты. Разбивка по типам '
+        'страниц - по URL приземления.'))
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 46
@@ -4355,48 +4365,64 @@ def _build_traffic_sheet(wb, traffic):
         return cell
 
     order = ['День', 'Месяц', 'Год']
-    seen_periods = sorted({r['period'] for r in rows},
-                          key=lambda p: order.index(p) if p in order else 9)
     row = hrow + 1
-    for period in seen_periods:
-        prs = [r for r in rows if r['period'] == period]
-        cur = next((r for r in prs if r['kind'] == 'текущий'), None)
-        prev = next((r for r in prs if r['kind'] == 'прошлый'), None)
-
-        # Полоса-заголовок блока: просто период (День/Месяц/Год).
+    for g in groups:
+        grows = g.get('rows') or []
+        if not grows:
+            continue
+        # Полоса страны/домена (шире и заметнее блоков периода).
         ws.merge_cells(start_row=row, start_column=2, end_row=row,
                        end_column=last_col)
-        band = ws.cell(row=row, column=2, value=period)
-        band.font = _font(size=11, bold=True, color='FFFFFF')
-        band.fill = _fill(C.text_soft)
-        band.alignment = _align(indent=1, vertical='center')
-        ws.row_dimensions[row].height = 20
+        gb = ws.cell(row=row, column=2,
+                     value=f'{g.get("country", "")}   ·   '
+                           f'{g.get("counters", 0)} счётчик(ов)')
+        gb.font = _font(size=12, bold=True, color='FFFFFF')
+        gb.fill = _fill(C.accent)
+        gb.alignment = _align(indent=1, vertical='center')
+        ws.row_dimensions[row].height = 22
         row += 1
 
-        for r in (cur, prev):
-            if not r:
-                continue
-            is_cur = r['kind'] == 'текущий'
-            base = C.text if is_cur else C.text_muted
-            _put(row, 0, r.get('year'), color=base)
-            _put(row, 1, _srez(period, r), color=base)   # дата/месяц/год
-            for j, val in enumerate(_disp(r)):
-                _put(row, 2 + j, val, color=base, bold=(j == 0 and is_cur))
-            ws.row_dimensions[row].height = 16
+        seen_periods = sorted({r['period'] for r in grows},
+                              key=lambda p: order.index(p) if p in order else 9)
+        for period in seen_periods:
+            prs = [r for r in grows if r['period'] == period]
+            cur = next((r for r in prs if r['kind'] == 'текущий'), None)
+            prev = next((r for r in prs if r['kind'] == 'прошлый'), None)
+
+            # Полоса-заголовок блока периода (День/Месяц/Год).
+            ws.merge_cells(start_row=row, start_column=2, end_row=row,
+                           end_column=last_col)
+            band = ws.cell(row=row, column=2, value=period)
+            band.font = _font(size=11, bold=True, color='FFFFFF')
+            band.fill = _fill(C.text_soft)
+            band.alignment = _align(indent=1, vertical='center')
+            ws.row_dimensions[row].height = 20
             row += 1
 
-        # Строка динамики (%): текущий vs прошлый по каждой колонке.
-        # Отказы (индекс 6 в _nums) - рост плохой, красим наоборот.
-        if cur and prev:
-            _put(row, 0, '', color=C.text_muted)
-            _put(row, 1, 'Δ, %', color=C.text, bold=True)
-            cn, pn = _nums(cur), _nums(prev)
-            for j in range(len(cn)):
-                txt, clr = _delta(cn[j], pn[j], invert=(j == 6))
-                _put(row, 2 + j, txt, color=clr, bold=True)
-            ws.row_dimensions[row].height = 16
-            row += 1
-        row += 1   # пустая строка-разделитель между блоками
+            for r in (cur, prev):
+                if not r:
+                    continue
+                is_cur = r['kind'] == 'текущий'
+                base = C.text if is_cur else C.text_muted
+                _put(row, 0, r.get('year'), color=base)
+                _put(row, 1, _srez(period, r), color=base)   # дата/месяц/год
+                for j, val in enumerate(_disp(r)):
+                    _put(row, 2 + j, val, color=base, bold=(j == 0 and is_cur))
+                ws.row_dimensions[row].height = 16
+                row += 1
+
+            # Строка динамики (%). Отказы (индекс 6) - рост плохой, наоборот.
+            if cur and prev:
+                _put(row, 0, '', color=C.text_muted)
+                _put(row, 1, 'Δ, %', color=C.text, bold=True)
+                cn, pn = _nums(cur), _nums(prev)
+                for j in range(len(cn)):
+                    txt, clr = _delta(cn[j], pn[j], invert=(j == 6))
+                    _put(row, 2 + j, txt, color=clr, bold=True)
+                ws.row_dimensions[row].height = 16
+                row += 1
+            row += 1   # разделитель между периодами
+        row += 1       # доп. разделитель между странами
 
 
 _RP_COLS = [
