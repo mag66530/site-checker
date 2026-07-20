@@ -207,10 +207,13 @@ def main() -> int:
         # их проставляет страница из секретов). Без настроенного TG - тихо пропуск.
         try:
             import telegram_notify as tn
+            import datetime as _dt
             текст = _сводка_для_telegram(base, результаты)
+            _дата = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y')
             res = tn.send_report_from_env(
                 project_name=_ИМЕНА.get(base, base.upper()),
                 summary_text=текст, report_file=out if out.is_file() else None,
+                report_filename=f'Goals-{base}-{_дата}.xlsx',
                 log=lambda lvl, msg: _stamp(msg))
             if not res.get('skipped'):
                 _stamp(f'✓ Telegram: отправлено {res.get("sent", 0)}, '

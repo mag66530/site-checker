@@ -313,23 +313,27 @@ def send_document(
     proxy_url: Optional[str] = None,
     parse_mode: str = 'HTML',
     timeout: int = 120,
+    filename: Optional[str] = None,
 ) -> dict:
     """
     Отправить файл-вложение через Telegram Bot API (sendDocument).
     Использует multipart/form-data.
+
+    filename - имя, под которым файл придёт в чат (по умолчанию имя файла на
+    диске). Расширение оставляйте .xlsx/.pdf - по нему определяется MIME.
     """
     url = f'{TELEGRAM_API_BASE}{bot_token}/sendDocument'
     file_path = Path(file_path)
-    
+
     if not file_path.exists():
         raise FileNotFoundError(f'Файл не найден: {file_path}')
-    
+
     # Готовим multipart/form-data вручную (без сторонних зависимостей)
     import secrets as _sec
     boundary = '----site-checker-' + _sec.token_hex(16)
-    
+
     file_bytes = file_path.read_bytes()
-    filename = file_path.name
+    filename = filename or file_path.name
     
     # MIME-тип xlsx
     if filename.lower().endswith('.xlsx'):
@@ -418,10 +422,14 @@ def send_run_notification(
     *,
     proxy_url: Optional[str] = None,
     log: Optional[Callable] = None,
+    report_filename: Optional[str] = None,
 ) -> dict:
     """
     Разослать уведомление всем получателям проекта.
-    
+
+    report_filename - имя, под которым отчёт придёт в чат (по умолчанию имя
+    файла на диске).
+
     Возвращает словарь {'sent': N, 'failed': N, 'errors': [...]}
     """
     sent = 0
@@ -448,6 +456,7 @@ def send_run_notification(
                     bot_token, chat_id, report_file,
                     caption=caption,
                     proxy_url=proxy_url,
+                    filename=report_filename,
                 )
             else:
                 send_message(bot_token, chat_id, summary_text, proxy_url=proxy_url)
@@ -470,6 +479,7 @@ def send_report_from_env(
     report_file: Optional[Path] = None,
     *,
     log: Optional[Callable] = None,
+    report_filename: Optional[str] = None,
 ) -> dict:
     """
     Отправить отчёт в Telegram, взяв креды из окружения. Для фоновых прогонов
@@ -496,4 +506,5 @@ def send_report_from_env(
         bot_token=token, recipients=recipients,
         project_name=project_name, summary_text=summary_text,
         report_file=report_file, proxy_url=proxy, log=log,
+        report_filename=report_filename,
     )
