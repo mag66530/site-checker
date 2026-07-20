@@ -242,6 +242,58 @@ def test_матрица_заметки_щедрые_по_размеру(tmp_path
     assert max(heights) >= 110, f"окна заметок низкие: {sorted(set(heights))}"
 
 
+def _vml_stats(path):
+    import re
+    import zipfile
+    widths = []
+    sw = 0
+    with zipfile.ZipFile(str(path)) as z:
+        for n in z.namelist():
+            if n.lower().endswith(".vml"):
+                d = z.read(n).decode("utf-8", "replace")
+                widths += [int(m) for m in re.findall(r"width:(\d+)px", d)]
+                sw += d.count("SizeWithCells")
+    return widths, sw
+
+
+def test_порядок_как_в_forms_run_заметки_целые(tmp_path):
+    """Регресс бага «заметки снова 144x79»: в forms_run ПОСЛЕ матрицы шло ещё
+    одно load+save (подгонка ширины «Комментарий»), а openpyxl при перечитывании
+    сбрасывает размер окон заметок на дефолт и возвращает SizeWithCells. Теперь
+    матрица строится ПОСЛЕДНЕЙ. Повторяем этот порядок и проверяем, что окна
+    заметок остались крупными."""
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+    path = tmp_path / "log_forms.xlsx"
+    _минимальный_лог(path)
+    t.консолидировать_форм_строки(str(path))
+    # подгонка ширины колонки «Комментарий» - ДО матрицы (как в forms_run)
+    wb = load_workbook(str(path))
+    ws = wb["Логи"]
+    hh = [str(c.value or "").lower() for c in ws[1]]
+    if "комментарий" in hh:
+        ws.column_dimensions[get_column_letter(hh.index("комментарий") + 1)].width = 120
+        wb.save(str(path))
+    t.построить_матрицу_проверок(str(path))        # ПОСЛЕДНЕЙ
+    widths, sw = _vml_stats(path)
+    assert widths and max(widths) >= 300, f"заметки сбились: {sorted(set(widths))}"
+    assert sw == 0, "SizeWithCells вернулся - заметки будут ужиматься"
+
+
+def test_load_save_после_матрицы_ломает_заметки(tmp_path):
+    """Документируем ПРИЧИНУ: любой load+save ПОСЛЕ матрицы возвращает дефолтный
+    размер заметок и SizeWithCells - поэтому матрица должна быть последней."""
+    from openpyxl import load_workbook
+    path = tmp_path / "log_forms.xlsx"
+    _минимальный_лог(path)
+    t.построить_матрицу_проверок(str(path))
+    w1, sw1 = _vml_stats(path)
+    assert max(w1) >= 300 and sw1 == 0            # сразу после матрицы - крупные
+    load_workbook(str(path)).save(str(path))       # повторное сохранение
+    w2, sw2 = _vml_stats(path)
+    assert max(w2) < 200 and sw2 > 0               # сбилось - вот почему матрица последняя
+
+
 if __name__ == "__main__":
     import traceback
     import inspect
