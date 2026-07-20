@@ -478,8 +478,10 @@ def _classify_path(path, cfg):
     return None
 
 
-def _metrika_json(ids_csv, token, proxy_url, d1, d2, extra, log):
+def _metrika_json(ids_csv, token, proxy_url, d1, d2, extra, log, quiet=False):
     """GET к stat/v1/data (с выборкой _ACCURACY). Ретрай 1 раз на таймаут/сеть.
+    quiet=True - не логировать HTTP 4xx (для запроса лидов: цель-лид есть не на
+    всех счётчиках, 400 code 4002 ожидаем и не является ошибкой прогона).
     Возвращает payload (dict) или None при ошибке."""
     params = {'ids': ids_csv, 'date1': d1, 'date2': d2, 'accuracy': _ACCURACY}
     params.update(extra)
@@ -492,11 +494,13 @@ def _metrika_json(ids_csv, token, proxy_url, d1, d2, extra, log):
         except Exception as e:
             if attempt == 1:
                 continue
-            log(f'⚠ Метрика-трафик {d1}…{d2}: сеть - {e}')
+            if not quiet:
+                log(f'⚠ Метрика-трафик {d1}…{d2}: сеть - {e}')
             return None
         if r.status_code >= 400:
-            log(f'⚠ Метрика-трафик {d1}…{d2}: HTTP {r.status_code}: '
-                f'{r.text[:140]}')
+            if not quiet:
+                log(f'⚠ Метрика-трафик {d1}…{d2}: HTTP {r.status_code}: '
+                    f'{r.text[:140]}')
             return None
         try:
             return r.json() or {}
@@ -559,9 +563,12 @@ def _row_stats(counters, token, proxy_url, d1, d2, cfg, log, lead_metric):
             w_bounce += g(1) * cv
             w_depth += g(2) * cv
             w_dur += g(3) * cv
-        # Лиды - отдельным запросом (цель может быть не на всех счётчиках).
+        # Лиды - отдельным запросом. Цель-лид есть не на всех счётчиках группы
+        # (у mpe 166 отдельных счётчиков по городам, основная цель - на
+        # главном): по чанкам без цели Метрика вернёт 400 code 4002 - это
+        # ОЖИДАЕМО, глушим (quiet), лиды берём с чанков, где цель есть.
         pl = _metrika_json(ids, token, proxy_url, d1, d2,
-                           {'metrics': lead_metric}, log)
+                           {'metrics': lead_metric}, log, quiet=True)
         if pl:
             lt = pl.get('totals') or []
             if lt and lt[0] is not None:
