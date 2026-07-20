@@ -1586,6 +1586,27 @@ def run_check(pid, params, creds, log, progress):
                 _link_profile = {'available': False,
                                  'note': 'OAuth-токен Вебмастера не задан.'}
 
+        # ── Аномалии Вебмастера (Блок B пункта «нет аномалий») ──
+        # Тот же OAuth-токен и та же галочка, что и ссылочный профиль.
+        # Результат - секция «Аномалии» в конце листа «Аналитика».
+        _wm_metrics = None
+        if params.get('check_link_profile'):
+            _wm_token = creds.get('webmaster_oauth')
+            if _wm_token:
+                try:
+                    from webmaster_metrics import fetch_webmaster_metrics
+                    log('Аномалии Вебмастера: тяну summary/историю обхода…')
+                    _wm_metrics = fetch_webmaster_metrics(
+                        pid, _wm_token, _proxy, log=lambda m: log(m))
+                    _wm_n = sum(len(h.get('anomalies') or [])
+                                for h in (_wm_metrics or {}).get('hosts') or [])
+                    log(f'✓ Аномалии Вебмастера: найдено {_wm_n}')
+                except Exception as _e:
+                    log(f'⚠ Аномалии Вебмастера: {_e}')
+            else:
+                _wm_metrics = {'available': False,
+                               'note': 'OAuth-токен Вебмастера не задан.'}
+
         # ── Настройки в админке (доп. чек-лист, по галочке) ──
         # Пункт 1: функции настройки работают (рендер разделов админки).
         # Пункт 2 (admin_crud): CRUD поддоменов/категорий (симуляция + запись
@@ -1737,6 +1758,7 @@ def run_check(pid, params, creds, log, progress):
             ps_filters=_ps_filters, search_check=_search_check,
             index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile,
+            wm_metrics=_wm_metrics,
             admin_settings=_admin_settings, yabusiness=_yabusiness,
             gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic,
             arsenkin=_arsenkin, review_priority=_review_priority,
