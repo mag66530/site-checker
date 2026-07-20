@@ -17,7 +17,9 @@ import goals_tester as G
 def test_missing_on_site_goals_excluded(monkeypatch):
     monkeypatch.setattr(G, '_результаты_форм', lambda pid: {})
     monkeypatch.setattr(G, '_формные_цели', lambda pid: set())
-    monkeypatch.setattr(G, '_формные_url', lambda pid: set())
+    # Формы в прогоне были (есть проверенные формные url), но конкретной формы
+    # subscribeform среди них нет → «Форма не в этом прогоне».
+    monkeypatch.setattr(G, '_формные_url', lambda pid: {'https://x.ru/form'})
     # План: у цели «managerform» на этом сайте формы нет (СНГ-only).
     monkeypatch.setitem(
         G.ACTIONS, '__test_missing__',
@@ -30,7 +32,9 @@ def test_missing_on_site_goals_excluded(monkeypatch):
              'условие': 'reachGoal managerform', 'идентификаторы': ['managerform']},
             {'тип': 'js', 'номер': 2, 'название': 'клик по кнопке',
              'условие': 'reachGoal call_ordering', 'идентификаторы': ['call_ordering']},
-            {'тип': 'js', 'номер': 3, 'название': 'Рабочая цель',
+            {'тип': 'js', 'номер': 3, 'название': 'Отправленная форма подписки на рассылку',
+             'условие': 'reachGoal subscribeform', 'идентификаторы': ['subscribeform']},
+            {'тип': 'js', 'номер': 4, 'название': 'Рабочая цель',
              'условие': 'reachGoal a1', 'идентификаторы': ['a1']},
         ],
     }
@@ -44,16 +48,19 @@ def test_missing_on_site_goals_excluded(monkeypatch):
 
     assert 'Отправка формы "Связаться с менеджером"' not in names   # «Не найдена» убрана
     assert 'клик по кнопке' not in names                           # «Нет в коде сайта» убрана
+    assert 'Отправленная форма подписки на рассылку' not in names  # «Форма не в этом прогоне» убрана
     assert 'Рабочая цель' in names                                 # обычная цель осталась
     assert all(s['статус'] not in ('Не найдена на сайте', 'Не найдено на сайте',
-                                   'Нет в коде сайта') for s in res['строки'])
+                                   'Нет в коде сайта', 'Форма не в этом прогоне')
+               for s in res['строки'])
     # «Всего» согласован с фактически показанными строками.
     assert res['всего'] == len(res['строки']) == 1
-    # Счётчики скрытых строк обнулены (managerform - manual, call_ordering - no_code).
+    # Счётчики скрытых строк обнулены (managerform/subscribeform - manual,
+    # call_ordering - no_code).
     assert res['счёт']['manual'] == 0
     assert res['счёт']['no_code'] == 0
-    print('✓ цели «Не найдена/найдено на сайте» и «Нет в коде сайта» '
-          'исключены из «Проверки целей»')
+    print('✓ цели «не найдено на сайте», «нет в коде сайта» и «форма не в этом '
+          'прогоне» исключены из «Проверки целей»')
 
 
 if __name__ == '__main__':
