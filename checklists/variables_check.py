@@ -249,6 +249,20 @@ else:
                'IP, часть страниц не загрузится (это будет видно в отчёте).')
 
 _alive = _pid_alive(_read_pid())
+# Прошлый прогон уже завершён (в логе метка), но pid-файл остался, а на облаке
+# os.kill(pid,0) может ложно считать его «живым» (pid переиспользован) - тогда
+# кнопка «Запустить» блокировалась до ручного «Отменить». Если в логе есть
+# метка завершения - прогон НЕ живой, чистим протухший pid-файл.
+if _alive:
+    _log_early = (LOG_FILE.read_text(encoding='utf-8', errors='ignore')
+                  if LOG_FILE.exists() else '')
+    if ('✅ ВСЁ ГОТОВО' in _log_early or 'ОТМЕНЕНО' in _log_early
+            or '✗' in _log_early):
+        _alive = False
+        try:
+            PID_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
 _none_chosen = (_mode == 'Выбрать города' and not _chosen)
 
 # Прокси + проверка доступности сайта (над кнопкой запуска)
