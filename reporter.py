@@ -4211,11 +4211,24 @@ def _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies):
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
 
+    def _not_run(r, text):
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
+        cc = ws.cell(row=r, column=2, value=text)
+        cc.font = _font(size=10, color=C.text_muted)
+        cc.alignment = _align(indent=1, wrap=True)
+        return r + 2
+
     row = 5
     if has_wm:
         row = _render_wm_anomalies(ws, row, wm_metrics, link_profile)
+    else:
+        row = _not_run(row, 'A. Вебмастер и ссылочный профиль - в этом прогоне '
+                            'не проверялось (включите галочку «1.21 Нет аномалий»).')
     if has_q:
         _render_query_anomalies(ws, row, anomalies)
+    else:
+        _not_run(row, 'B. Запросы (ГСК) и переходы (Метрика) - в этом прогоне '
+                      'не проверялось (включите проверку аномалий ГСК/Метрики).')
 
 
 # ── Лист «Настройки в админке» (доп. чек-лист: функции настройки) ──
