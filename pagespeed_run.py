@@ -28,7 +28,6 @@ import json
 import os
 import sys
 import traceback
-from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -162,7 +161,7 @@ def run(args) -> int:
         _log("Прошлых снятий нет - первый прогон, сравнивать не с чем.")
 
     out = _out_dir(pid)
-    date_disp = datetime.now().strftime("%d.%m.%Y")
+    date_disp = PH.fmt_ts(run_ts)[:10]   # ДД.ММ.ГГГГ по метке прогона (Екатеринбург)
     xlsx_name = f"{pid.upper()}-скорость-{date_disp}.xlsx"
     xlsx_path = out / xlsx_name
     PR.save_report(

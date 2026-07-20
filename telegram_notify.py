@@ -460,5 +460,40 @@ def send_run_notification(
             errors.append({'chat_id': chat_id, 'error': str(e)})
             if log:
                 log('warn', f'⚠ Не доставлено в chat_id={chat_id}: {e}')
-    
+
     return {'sent': sent, 'failed': failed, 'errors': errors}
+
+
+def send_report_from_env(
+    project_name: str,
+    summary_text: str,
+    report_file: Optional[Path] = None,
+    *,
+    log: Optional[Callable] = None,
+) -> dict:
+    """
+    Отправить отчёт в Telegram, взяв креды из окружения. Для фоновых прогонов
+    (goals_run.py / forms_run.py), которые запускаются отдельным процессом:
+    страница кладёт креды в env, прогон после сборки отчёта зовёт эту функцию.
+
+    Переменные окружения:
+      TG_BOT_TOKEN   - токен бота (telegram_bot_token);
+      TG_RECIPIENTS  - chat_id получателей через запятую/пробел/точку с запятой;
+      TG_PROXY       - (необяз.) прокси для api.telegram.org.
+
+    Если токен или получатели не заданы - тихо ничего не делаем (возвращаем
+    skipped=True), чтобы прогон без настроенного Telegram не падал.
+    """
+    import os
+    token = (os.environ.get('TG_BOT_TOKEN') or '').strip()
+    recipients = [x for x in re.split(r'[\s,;]+', os.environ.get('TG_RECIPIENTS') or '') if x]
+    if not token or not recipients:
+        if log:
+            log('info', 'Telegram не настроен (нет TG_BOT_TOKEN / TG_RECIPIENTS) - отчёт не отправляю.')
+        return {'sent': 0, 'failed': 0, 'skipped': True}
+    proxy = (os.environ.get('TG_PROXY') or '').strip() or None
+    return send_run_notification(
+        bot_token=token, recipients=recipients,
+        project_name=project_name, summary_text=summary_text,
+        report_file=report_file, proxy_url=proxy, log=log,
+    )
