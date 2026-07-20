@@ -2316,6 +2316,178 @@ def csrf_вердикт(найдено: bool, заполнено: bool, ошиб
             "защиты (например SameSite-cookie), форма может быть уязвима к CSRF")
 
 
+def _куки_из_ответа_requests(response) -> list:
+    """Список {name, sameSite} из заголовков Set-Cookie ответа requests - тот же
+    вход, что page.context.cookies() в браузере, чтобы оценить CSRF по SameSite и
+    для code-пути (requests). SameSite в cookiejar не хранится, поэтому читаем
+    СЫРЫЕ заголовки Set-Cookie. Любая ошибка → пустой список (тогда вердикт CSRF
+    опирается только на наличие токена)."""
+    setc = []
+    try:
+        raw = response.raw.headers
+        if hasattr(raw, "getlist"):
+            setc = raw.getlist("Set-Cookie")
+    except Exception:  # noqa: BLE001
+        setc = []
+    if not setc:
+        try:
+            one = response.headers.get("Set-Cookie") or ""
+        except Exception:  # noqa: BLE001
+            one = ""
+        setc = [one] if one else []
+    out = []
+    for line in setc:
+        try:
+            name = str(line).split("=", 1)[0].strip()
+            if not name:
+                continue
+            m = re.search(r"samesite\s*=\s*(\w+)", str(line), re.I)
+            out.append({"name": name, "sameSite": (m.group(1) if m else "")})
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+# Скрытое поле токена/сессии - тот же вокабуляр, что и _CSRF_ПОЛЕ_JS (браузер).
+_CSRF_ИМЯ_RE = re.compile(
+    r"csrf|sessid|_token|authenticity_token|requestverificationtoken|xsrf|nonce",
+    re.I)
+
+
+def _html_структурные_проверки(form, html: str = "", куки: dict | None = None) -> dict:
+    """Структурные проверки формы ПО СТАТИЧЕСКОМУ HTML (без браузера) - те же
+    колонки отчёта, что заполняет браузерный путь, но на разобранной
+    BeautifulSoup-форме (code-путь «по коду», requests). Раньше у форм,
+    проверенных по коду, эти колонки были пустыми и в матрице показывались
+    прочерками; теперь заполняются реальными вердиктами там, где ответ виден
+    прямо в разметке. Чистая функция (юнит-тест без сети).
+
+    Возвращает словарь log-ключ → значение В ТОМ ЖЕ ВОКАБУЛЯРЕ, что и браузерный
+    путь (чтобы правила матрицы и консолидация работали без изменений)."""
+    out: dict = {}
+    if form is None:
+        return out
+
+    def _find_all(tag, **attrs):
+        try:
+            return form.find_all(tag, attrs=attrs) if attrs else form.find_all(tag)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _attr(el, name):
+        try:
+            return el.get(name)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _has(el, name):
+        try:
+            return el.has_attr(name)
+        except Exception:  # noqa: BLE001
+            return False
+
+    # ── CSRF: скрытое поле токена/сессии + SameSite-cookie (как csrf_вердикт). ──
+    найдено = заполнено = False
+    for h in _find_all("input", type="hidden"):
+        nm = str(_attr(h, "name") or _attr(h, "id") or "")
+        if _CSRF_ИМЯ_RE.search(nm):
+            найдено = True
+            if str(_attr(h, "value") or "").strip():
+                заполнено = True
+            break
+    # Значение hash/sessid на Bitrix часто проставляет JS - подхватим из скриптов
+    # (как extract_form_security_from_html), тогда «Есть», а не «Проверить».
+    if найдено and not заполнено and html:
+        try:
+            sec = extract_form_security_from_html(html)
+            if (sec.get("sessid") or "").strip() or (sec.get("hash") or "").strip():
+                заполнено = True
+        except Exception:  # noqa: BLE001
+            pass
+    _cs, _ = csrf_вердикт(найдено, заполнено, ошибка=False, куки=куки)
+    out["csrf_защита"] = _cs
+
+    # ── Согласие 2.13: чекбоксы, предустановка, ссылка на политику, обязательность.
+    видимые_cb = []
+    for cb in _find_all("input", type="checkbox"):
+        st = str(_attr(cb, "style") or "").replace(" ", "").lower()
+        if "display:none" in st or "visibility:hidden" in st:
+            continue
+        видимые_cb.append(cb)
+    предустановлены = any(_has(cb, "checked") for cb in видимые_cb)
+    обязательно = any(
+        _has(cb, "required")
+        or str(_attr(cb, "aria-required") or "").lower() == "true"
+        for cb in видимые_cb)
+    ссылка = False
+    for a in _find_all("a"):
+        txt = ""
+        try:
+            txt = a.get_text() or ""
+        except Exception:  # noqa: BLE001
+            txt = ""
+        if ссылка_ведёт_на_политику(str(_attr(a, "href") or ""), txt):
+            ссылка = True
+            break
+    out["согласие_чекбоксы"] = f"{len(видимые_cb)} (нужно ≥2)"
+    out["согласие_предустановка"] = ('да' if not предустановлены
+                                     else 'НЕТ - стоят по умолчанию')
+    out["согласие_ссылка"] = 'да' if ссылка else 'нет'
+    out["согласие_обязательно"] = 'да' if обязательно else 'нет'
+
+    # ── Выпадающие списки: пустой <select> - битый; со списком - корректно. ──
+    selects = _find_all("select")
+    if not selects:
+        out["выпадающие_списки"] = "не найдено"
+    elif any(len(_find_all_options(s)) == 0 for s in selects):
+        out["выпадающие_списки"] = "ошибка"
+    else:
+        out["выпадающие_списки"] = "корректно"
+
+    # ── Типы файлов: загрузчик без accept принимает ЛЮБЫЕ файлы. ──
+    files = _find_all("input", type="file")
+    if not files:
+        out["типы_файлов"] = ""
+    elif any(not str(_attr(f, "accept") or "").strip() for f in files):
+        out["типы_файлов"] = "⚠ ЛЮБЫЕ типы (accept не задан)"
+    else:
+        типы = []
+        for f in files:
+            типы += [t.strip() for t in str(_attr(f, "accept") or "").split(",")
+                     if t.strip()]
+        out["типы_файлов"] = ", ".join(dict.fromkeys(типы)) or "заданы"
+
+    # ── Подсказки (placeholder) у текстовых полей: есть - корректно; совсем нет -
+    # мягкая заметка (⚠). Флажим только ПОЛНОЕ отсутствие, как браузерный путь. ──
+    текстовые = []
+    for el in _find_all("input") + _find_all("textarea"):
+        try:
+            nm = el.name
+        except Exception:  # noqa: BLE001
+            nm = ""
+        if nm == "textarea":
+            текстовые.append(el)
+            continue
+        t = str(_attr(el, "type") or "text").lower()
+        if t in ("text", "email", "tel", "search", "url", "number", "password"):
+            текстовые.append(el)
+    if not текстовые:
+        out["подсказки"] = ""
+    elif any(str(_attr(el, "placeholder") or "").strip() for el in текстовые):
+        out["подсказки"] = "корректно"
+    else:
+        out["подсказки"] = "нет подсказок"
+
+    return out
+
+
+def _find_all_options(select_el) -> list:
+    try:
+        return select_el.find_all("option")
+    except Exception:  # noqa: BLE001
+        return []
+
+
 # ── Данные формы дошли до сервера (видно в DevTools → Network) ────────────
 # Проверяется ВСЕГДА, без единого лишнего запроса - вешается на ту же самую
 # единственную легитимную отправку формы, что и так уже происходит (для ЛЮБОЙ
@@ -5012,6 +5184,18 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 snippet = re.sub(r"\s+", " ", result.text[:400]).strip()
                 print(f"      Ответ (фрагмент): {snippet[:200]}…")
 
+            # Структурные проверки формы ПО КОДУ (без браузера): CSRF, согласие
+            # 2.13, выпадающие списки, типы файлов, подсказки полей. Раньше эти
+            # колонки у code-проверенных форм были пустыми (в матрице - прочерки);
+            # теперь заполняются реальными вердиктами из разметки. Ошибка проверок
+            # не должна ронять запись самой отправки - всё под try.
+            _структ = {}
+            try:
+                _куки = csrf_куки_инфо(_куки_из_ответа_requests(response))
+                _структ = _html_структурные_проверки(form, response.text, _куки)
+            except Exception as _est:  # noqa: BLE001
+                print(f"      ⚠️ Структурные проверки по коду не удались: {_est}")
+
             записать_в_excel(
                 {
                     "тип": "REQUESTS",
@@ -5024,6 +5208,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_теста,
                     "статус": статус,
                     "код": result.status_code,
+                    **_структ,
                 }
             )
             print(f"   ✅ {название} - {статус}")
