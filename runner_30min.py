@@ -1564,8 +1564,10 @@ def run_check(pid, params, creds, log, progress):
         # ── Lite-проверка ссылочного профиля (по галочке) ──
         # Официальные данные Яндекс.Вебмастера (links/external): объём,
         # доноры, динамика, спам. Тот же OAuth-токен, что и диагностика.
+        # Тянем и для 1.20 (свой лист), и для 1.21 (доноры нужны секции
+        # «Аномалии») - один раз, дорогой поход по API не дублируем.
         _link_profile = None
-        if params.get('check_link_profile'):
+        if params.get('check_link_profile') or params.get('check_anomaly'):
             _lp_token = creds.get('webmaster_oauth')
             if _lp_token:
                 try:
@@ -1586,11 +1588,11 @@ def run_check(pid, params, creds, log, progress):
                 _link_profile = {'available': False,
                                  'note': 'OAuth-токен Вебмастера не задан.'}
 
-        # ── Аномалии Вебмастера (Блок B пункта «нет аномалий») ──
-        # Тот же OAuth-токен и та же галочка, что и ссылочный профиль.
-        # Результат - секция «Аномалии» в конце листа «Аналитика».
+        # ── Аномалии Вебмастера (п.1.21) ──
+        # Своя галочка check_anomaly (тот же токен Вебмастера, что и 1.20).
+        # Результат - секция «Аномалии» в самом низу листа «Аналитика».
         _wm_metrics = None
-        if params.get('check_link_profile'):
+        if params.get('check_anomaly'):
             _wm_token = creds.get('webmaster_oauth')
             if _wm_token:
                 try:

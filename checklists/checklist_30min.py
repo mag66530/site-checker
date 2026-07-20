@@ -705,6 +705,7 @@ def init_session():
         'c30_check_404': True,         # п.1.18 - страница 404
         'c30_check_ps_filters': True,  # п.1.19 - фильтры/санкции ПС
         'c30_check_link_profile': True,   # п.1.20 - lite-профиль ссылок (Вебмастер API)
+        'c30_check_anomaly': False,       # п.1.21 - аномалии Вебмастера + внезапные мусорные ссылки
         'c30_check_admin_settings': False,  # админка: функции настройки работают (рендер)
         'c30_check_admin_crud': False,      # админка: CRUD поддоменов/категорий
         'c30_check_admin_product_crud': False,  # админка: CRUD товаров (по CMS)
@@ -1293,6 +1294,18 @@ if pid:
                              'сверку в GSC. Нужен настроенный токен Вебмастера '
                              '(webmaster_oauth). Отдельный лист «Ссылочный '
                              'профиль».')
+            st.checkbox('1.21  Нет аномалий: Вебмастер + внезапные мусорные ссылки',
+                        key='c30_check_anomaly',
+                        help='Мониторинг резких отклонений «от себя-прошлого» - '
+                             'Вебмастер часто сигналит раньше, чем просядут '
+                             'позиции и трафик. Смотрим: обход (всплеск 4xx/5xx, '
+                             'просадка доступных страниц - историю хранит Яндекс), '
+                             'проблемы сайта (фатальные/критические), страницы в '
+                             'поиске и ИКС (падение от эталона прошлых прогонов), а '
+                             'также внезапные мусорные доноры и скачки ссылочной '
+                             'массы. Результат - секция «Аномалии» в самом низу '
+                             'листа «Аналитика». Нужен токен Вебмастера '
+                             '(webmaster_oauth), тот же, что у 1.20.')
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
@@ -1720,6 +1733,7 @@ if pid:
         int(st.session_state.get('c30_stress_concurrency', 30)),
         int(st.session_state.get('c30_stress_load_pages', 3)),
         bool(st.session_state.get('c30_check_link_profile', False)),
+        bool(st.session_state.get('c30_check_anomaly', False)),
         bool(st.session_state.get('c30_check_admin_settings', False)),
         bool(st.session_state.get('c30_check_admin_crud', False)),
         bool(st.session_state.get('c30_check_admin_product_crud', False)),
@@ -1808,6 +1822,7 @@ if pid:
                 'stress_concurrency': int(st.session_state.get('c30_stress_concurrency', 30)),
                 'stress_load_pages': int(st.session_state.get('c30_stress_load_pages', 3)),
                 'check_link_profile': st.session_state.get('c30_check_link_profile', False),
+                'check_anomaly': st.session_state.get('c30_check_anomaly', False),
                 'check_admin_settings': st.session_state.get('c30_check_admin_settings', False),
                 'admin_crud': st.session_state.get('c30_check_admin_crud', False),
                 'admin_product_crud': st.session_state.get('c30_check_admin_product_crud', False),
