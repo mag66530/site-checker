@@ -4077,13 +4077,10 @@ def _collect_anomaly_rows(wm_metrics, link_profile):
                 'severity': 'critical',
                 'text': f'{h["recent_spam_count"]} новых спам-доноров за ~30 дн. '
                         f'- негативное SEO? (детали - лист «Ссылочный профиль»)'})
+        # Обвал ссылочной массы - это про ПОТЕРЮ доноров, не про мусор; ему
+        # место на листе «Ссылочный профиль», в аномалии не тащим (иначе
+        # десятки строк на каждом прогоне). Всплеск (возможный спам) - тащим.
         hist = h.get('history') or {}
-        if hist.get('dropped'):
-            rows.append({
-                'host': host, 'metric': 'Ссылочная масса',
-                'before': hist.get('peak'), 'after': hist.get('latest'),
-                'delta_pct': -(hist.get('drop_pct') or 0), 'severity': 'possible',
-                'text': f'обвал ссылок −{hist.get("drop_pct")}% от пика - потеря доноров'})
         if hist.get('spiked'):
             rows.append({
                 'host': host, 'metric': 'Рост ссылок',
@@ -4214,11 +4211,24 @@ def _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies):
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 56
 
+    def _not_run(r, text):
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
+        cc = ws.cell(row=r, column=2, value=text)
+        cc.font = _font(size=10, color=C.text_muted)
+        cc.alignment = _align(indent=1, wrap=True)
+        return r + 2
+
     row = 5
     if has_wm:
         row = _render_wm_anomalies(ws, row, wm_metrics, link_profile)
+    else:
+        row = _not_run(row, 'A. Вебмастер и ссылочный профиль - в этом прогоне '
+                            'не проверялось (включите галочку «1.21 Нет аномалий»).')
     if has_q:
         _render_query_anomalies(ws, row, anomalies)
+    else:
+        _not_run(row, 'B. Запросы (ГСК) и переходы (Метрика) - в этом прогоне '
+                      'не проверялось (включите проверку аномалий ГСК/Метрики).')
 
 
 # ── Лист «Настройки в админке» (доп. чек-лист: функции настройки) ──
@@ -4691,6 +4701,36 @@ def _build_review_priority_sheet(wb, rp):
         row += 1
 
 
+def _fmt_dt(d):
+    """'2026-07-06' -> '06.07.2026'."""
+    p = str(d or '').split('-')
+    return f'{p[2]}.{p[1]}.{p[0]}' if len(p) == 3 else str(d or '')
+
+
+def _fmt_period(s):
+    """'2026-07-06...2026-07-20' -> '06.07.2026 – 20.07.2026'."""
+    parts = str(s or '').split('...')
+    return (f'{_fmt_dt(parts[0])} – {_fmt_dt(parts[1])}'
+            if len(parts) == 2 else str(s or '—'))
+
+
+def _ratio_word(spike, spiked):
+    """Пояснение к коэффициенту ×: во сколько раз изменилось."""
+    if not spike:
+        return ''
+    try:
+        z = float(spike)
+    except (TypeError, ValueError):
+        return f'  ·  ×{spike}'
+    if spiked:
+        return f'  ·  ×{spike} — ВСПЛЕСК'
+    if z <= 0.9:
+        return f'  ·  ×{spike} — ниже, чем было'
+    if z >= 1.1:
+        return f'  ·  ×{spike} — чуть выше'
+    return f'  ·  ×{spike} — без изменений'
+
+
 def _render_query_anomalies(ws, start_row, anomalies):
     """Часть B секции «Аномалии»: ГСК - всплеск показов по мусорным/иноязычным
     запросам; Метрика - переходы со спам-сайтов (спам-домены-рефереры +
@@ -4728,6 +4768,16 @@ def _render_query_anomalies(ws, start_row, anomalies):
         cc.font = _font(size=10, color=color)
         row[0] += 1
 
+    # Короткая расшифровка обозначений (чтобы «сейчас / было» и «×» были понятны).
+    ws.merge_cells(start_row=row[0], start_column=2, end_row=row[0], end_column=6)
+    _hint = ws.cell(row=row[0], column=2,
+                    value='Обозначения: «сейчас / было» - показатель за текущий '
+                          'период и за такой же предыдущий; × - во сколько раз '
+                          'изменилось (≈×1 - норма, ×2 и больше - всплеск).')
+    _hint.font = _font(size=9, italic=True, color=C.text_muted)
+    _hint.alignment = _align(indent=1, wrap=True)
+    row[0] += 1
+
     # ── ГСК ──
     _hdr('Google Search Console - аномалии запросов', C.text_soft)
     if not gsc.get('available'):
@@ -4736,10 +4786,11 @@ def _render_query_anomalies(ws, start_row, anomalies):
         bad = gsc.get('spiked') or gsc.get('spam_queries_count')
         _line('Вердикт', 'ЕСТЬ аномалии' if bad else 'аномалий нет',
               C.err if bad else C.ok)
-        _line('Период', f'{gsc.get("cur_period")} vs {gsc.get("prev_period")}')
-        _line('Показы (тек / пред)',
+        _line('Сейчас (период)', _fmt_period(gsc.get('cur_period')))
+        _line('Сравниваем с', _fmt_period(gsc.get('prev_period')))
+        _line('Показы: сейчас / было',
               f'{gsc.get("total_impr_cur")} / {gsc.get("total_impr_prev")}'
-              + (f'  ·  ×{gsc.get("impr_spike")}' if gsc.get('impr_spike') else ''),
+              + _ratio_word(gsc.get('impr_spike'), gsc.get('spiked')),
               C.err if gsc.get('spiked') else C.text)
         _line('Мусорные/иноязыч. запросы',
               f'{gsc.get("spam_queries_count", 0)} (показов '
@@ -4771,11 +4822,11 @@ def _render_query_anomalies(ws, start_row, anomalies):
         bad = mtr.get('spiked') or mtr.get('spam_domains_count')
         _line('Вердикт', 'ЕСТЬ аномалии' if bad else 'аномалий нет',
               C.err if bad else C.ok)
-        _line('Период', f'{mtr.get("cur_period")} vs {mtr.get("prev_period")}')
-        _line('Переходы-рефералы (тек / пред)',
+        _line('Сейчас (период)', _fmt_period(mtr.get('cur_period')))
+        _line('Сравниваем с', _fmt_period(mtr.get('prev_period')))
+        _line('Переходы-рефералы: сейчас / было',
               f'{mtr.get("total_cur")} / {mtr.get("total_prev")}'
-              + (f'  ·  ×{mtr.get("referral_spike")}'
-                 if mtr.get('referral_spike') else ''),
+              + _ratio_word(mtr.get('referral_spike'), mtr.get('spiked')),
               C.err if mtr.get('spiked') else C.text)
         _line('Спам-домены-рефереры',
               f'{mtr.get("spam_domains_count", 0)} (переходов '
