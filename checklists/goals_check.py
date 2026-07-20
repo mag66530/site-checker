@@ -283,9 +283,9 @@ with c1:
             pass
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0
         f = open(LOG_FILE, 'a', encoding='utf-8')
-        # Формы гоняются САМИ внутри проверки целей (полный прогон по умолчанию) -
-        # цели форм подтверждаются без отдельного запуска «Проверки форм» и без
-        # ручных «подтягиваний».
+        # Цели форм «Проверка целей» находит по коду (reachGoal в HTML/JS/DOM,
+        # включая открытие модалок) без отправки; из форм гоняется только сквозной
+        # заказ (для url-целей). Отдельный запуск «Проверки форм» не нужен.
         args = [PY, 'goals_run.py', '--projects', ','.join(_selected)]
         proc = subprocess.Popen(args, cwd=str(ROOT), stdout=f,
                                 stderr=subprocess.STDOUT, env=env,
