@@ -660,7 +660,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 # Версия набора дефолтов галочек «Что проверять». Поднимать при добавлении
 # нового пункта или смене дефолта, чтобы автовыбор применился и к уже
 # открытым (сохранённым) сессиям (см. init_session).
-_C30_CHECKS_DEFAULTS_VER = 12
+_C30_CHECKS_DEFAULTS_VER = 13
 
 
 def init_session():
@@ -706,7 +706,7 @@ def init_session():
         'c30_check_404': True,         # п.1.18 - страница 404
         'c30_check_ps_filters': True,  # п.1.19 - фильтры/санкции ПС
         'c30_check_link_profile': True,   # п.1.20 - lite-профиль ссылок (Вебмастер API)
-        'c30_check_anomaly': False,       # п.1.21 - аномалии Вебмастера + внезапные мусорные ссылки
+        'c30_check_anomaly': True,        # п.1.21 - аномалии Вебмастера + внезапные мусорные ссылки
         'c30_check_admin_settings': False,  # админка: функции настройки работают (рендер)
         'c30_check_admin_crud': False,      # админка: CRUD поддоменов/категорий
         'c30_check_admin_product_crud': False,  # админка: CRUD товаров (по CMS)
@@ -1127,7 +1127,7 @@ if pid:
     }
     budget['per_city'] = 2 + budget['cats'] + budget['filters'] + budget['products']
 
-    # БЛОК 2 - Что проверять на страницах (1.1-1.10)
+    # БЛОК 2 - Что проверять на страницах (1.1-1.21)
     with st.container(border=True):
         # Учитываем только РЕАЛЬНО показанные галочки: фильтры есть не у всех
         # проектов (если их нет - чекбокс не рисуется, и его нельзя учитывать в
@@ -1138,7 +1138,7 @@ if pid:
                      'c30_check_layout', 'c30_check_markup', 'c30_check_security',
                      'c30_check_images', 'c30_check_w3c', 'c30_check_static',
                      'c30_check_404', 'c30_check_ps_filters',
-                     'c30_check_link_profile']
+                     'c30_check_link_profile', 'c30_check_anomaly']
         if stats['has_filters']:
             _CHK_KEYS.insert(3, 'c30_check_filters')
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
