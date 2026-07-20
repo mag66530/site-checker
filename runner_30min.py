@@ -1588,6 +1588,23 @@ def run_check(pid, params, creds, log, progress):
                 _link_profile = {'available': False,
                                  'note': 'OAuth-токен Вебмастера не задан.'}
 
+        # ── Траст проекта: ИКС (Вебмастер) + DR (Open PageRank) - по галочке ──
+        _trust = None
+        if params.get('check_trust'):
+            try:
+                from trust_check import run as _trust_run
+                log('Траст: ИКС (Яндекс) + DR (Open PageRank)…')
+                _trust = _trust_run(
+                    pid, wm_token=creds.get('webmaster_oauth'),
+                    opr_key=creds.get('openpagerank_key'),
+                    proxy_url=_proxy, log=lambda m: log(m))
+                if (_trust or {}).get('available'):
+                    log(f'✓ Траст: хостов {len((_trust.get("hosts") or []))}')
+                else:
+                    log(f'⚠ Траст: {(_trust or {}).get("note")}')
+            except Exception as _e:
+                log(f'⚠ Траст: {_e}')
+
         # ── Аномалии Вебмастера (п.1.21) ──
         # Своя галочка check_anomaly (тот же токен Вебмастера, что и 1.20).
         # Результат - секция «Аномалии» в самом низу листа «Аналитика».
@@ -1764,7 +1781,7 @@ def run_check(pid, params, creds, log, progress):
             admin_settings=_admin_settings, yabusiness=_yabusiness,
             gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic,
             arsenkin=_arsenkin, review_priority=_review_priority,
-            anomalies=_anomalies)
+            anomalies=_anomalies, trust=_trust)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

@@ -660,7 +660,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 # Версия набора дефолтов галочек «Что проверять». Поднимать при добавлении
 # нового пункта или смене дефолта, чтобы автовыбор применился и к уже
 # открытым (сохранённым) сессиям (см. init_session).
-_C30_CHECKS_DEFAULTS_VER = 11
+_C30_CHECKS_DEFAULTS_VER = 12
 
 
 def init_session():
@@ -693,6 +693,7 @@ def init_session():
         'c30_check_traffic': False,     # сравнение трафика день/месяц/год (Метрика)
         'c30_check_review_priority': False,  # приоритет докупки отзывов (Я.Бизнес+2ГИС)
         'c30_check_anomalies': False,   # аномалии ГСК-запросов + Метрика-рефералы
+        'c30_check_trust': False,       # траст проекта: ИКС + DR (Open PageRank)
         'c30_check_gsc_pages': False,  # количество страниц в ГСК по статусам - браузер, по запросу
         'c30_check_home_dupes': False,  # дубли главной страницы (HTTP, без браузера)
         'c30_check_arsenkin': False,  # индексация URL через API Арсенкина (токен из поля)
@@ -1409,6 +1410,15 @@ if pid:
                          'Links в GSC API не отдаёт - на листе ссылка на ручную '
                          'сверку. Нужны metrika_oauth_<проект> и '
                          'gsc_service_account_<проект>.')
+        st.checkbox('Показатели и траст проекта (ИКС + DR)',
+                    key='c30_check_trust',
+                    help='Бесплатно: Яндекс ИКС (индекс качества сайта) по '
+                         'верифицированным хостам через Вебмастер API + DR '
+                         '(Domain Rating-подобный ранг 0-100) через Open PageRank '
+                         '(бесплатный ключ openpagerank_key). Платные CheckTrust/'
+                         'Ahrefs/Semrush не подключены (Ahrefs free-чекер за '
+                         'капчей). Отдельный лист «Траст проекта». Нужен '
+                         'webmaster_oauth_<проект>; для DR - секрет openpagerank_key.')
         st.checkbox('Количество страниц в ГСК (индексировано / не индексировано / сумма)',
                     key='c30_check_gsc_pages',
                     help='Снимает из отчёта Google Search Console «Индексирование '
@@ -1743,6 +1753,7 @@ if pid:
         bool(st.session_state.get('c30_check_traffic', False)),
         bool(st.session_state.get('c30_check_review_priority', False)),
         bool(st.session_state.get('c30_check_anomalies', False)),
+        bool(st.session_state.get('c30_check_trust', False)),
         bool(st.session_state.get('c30_check_w3c', False)),
         bool(st.session_state.get('c30_check_static', False)),
         bool(st.session_state.get('c30_check_404', True)),
@@ -1804,6 +1815,7 @@ if pid:
                 'check_traffic': st.session_state.get('c30_check_traffic', False),
                 'check_review_priority': st.session_state.get('c30_check_review_priority', False),
                 'check_anomalies': st.session_state.get('c30_check_anomalies', False),
+                'check_trust': st.session_state.get('c30_check_trust', False),
                 'check_gsc_pages': st.session_state.get('c30_check_gsc_pages', False),
                 'check_home_dupes': st.session_state.get('c30_check_home_dupes', False),
                 'check_arsenkin': st.session_state.get('c30_check_arsenkin', False),

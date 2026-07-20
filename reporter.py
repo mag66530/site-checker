@@ -4790,6 +4790,73 @@ def _render_query_anomalies(ws, start_row, anomalies):
     return row[0]
 
 
+def _build_trust_sheet(wb, trust):
+    """Лист «Траст проекта»: ИКС (Яндекс) + DR (Open PageRank) по хостам.
+    Платные CheckTrust/Ahrefs/Semrush не подключены. Только если выполнялось."""
+    if not trust:
+        return
+    ws = wb.create_sheet('Траст проекта')
+    ws.sheet_view.showGridLines = False
+    for col, w in (('A', 3), ('B', 36), ('C', 14), ('D', 20), ('E', 3)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:D2')
+    c = ws['B2']
+    c.value = 'Траст проекта'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    if not trust.get('available'):
+        ws.sheet_properties.tabColor = C.warn
+        cc = ws.cell(row=4, column=2,
+                     value='⚪ ' + (trust.get('note') or 'не выполнялось'))
+        cc.font = _font(size=10, color=C.text_muted)
+        cc.alignment = _align(indent=1, wrap=True)
+        return
+
+    hosts = trust.get('hosts') or []
+    low = any((h.get('sqi') or 0) < 10 for h in hosts)
+    ws.sheet_properties.tabColor = C.warn if low else C.ok
+
+    ws.merge_cells('B3:D3')
+    c = ws.cell(row=3, column=2, value=(
+        'ИКС - индекс качества сайта (Яндекс, бесплатно). DR - Domain Rating-'
+        'подобный ранг 0-100 (Open PageRank, бесплатно). '
+        + (trust.get('note_paid') or '')))
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 42
+
+    row = 5
+    for col, txt in ((2, 'Хост'), (3, 'ИКС (Яндекс)'), (4, 'DR (Open PageRank)')):
+        h = ws.cell(row=row, column=col, value=txt)
+        h.font = _font(size=10, bold=True, color=C.text)
+        h.fill = _fill(C.surface)
+        h.alignment = _align(indent=1)
+        h.border = _border()
+    ws.row_dimensions[row].height = 18
+    row += 1
+
+    for hh in hosts:
+        sqi = hh.get('sqi')
+        dr = hh.get('dr')
+        ws.cell(row=row, column=2, value=hh.get('host') or '').font = _font(
+            size=10, color=C.text)
+        sc = ws.cell(row=row, column=3,
+                     value='—' if sqi is None else sqi)
+        sc.font = _font(size=10, bold=True,
+                        color=C.err if (sqi is not None and sqi < 10) else C.text)
+        ws.cell(row=row, column=4,
+                value=('—' if dr is None
+                       else (int(dr) if float(dr).is_integer() else round(dr, 1)))
+                ).font = _font(size=10, color=C.text)
+        for col in (2, 3, 4):
+            ws.cell(row=row, column=col).alignment = _align(indent=1)
+            ws.cell(row=row, column=col).border = _border()
+        ws.row_dimensions[row].height = 15
+        row += 1
+
+
 def _build_admin_settings_sheet(wb, admin_settings):
     """Лист «Настройки в админке»: работают ли функции настройки поддоменов/
     категорий/товаров/тех.страниц (браузерная проверка + round-trip
@@ -6402,8 +6469,8 @@ _SHEET_GROUPS = [
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
         '404 из Метрики', 'Динамика трафика', 'Отзывы (докупка)',
-        'Уведомления', 'Ошибки сервисов', 'Автокликер', 'Ссылочный профиль',
-        'Замена рекл. номера', 'Аномалии',
+        'Траст проекта', 'Уведомления', 'Ошибки сервисов', 'Автокликер',
+        'Ссылочный профиль', 'Замена рекл. номера', 'Аномалии',
     ]),
     ('Контент', ['Изображения']),
 ]
@@ -6563,6 +6630,7 @@ def build_report(
     arsenkin: dict = None,         # индексация URL через Арсенкин - лист «Индексация (Арсенкин)»
     review_priority: dict = None,  # приоритет докупки отзывов - лист «Отзывы (докупка)»
     anomalies: dict = None,        # аномалии ГСК/Метрика - лист «Аномалии»
+    trust: dict = None,            # ИКС + DR - лист «Траст проекта»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -6924,6 +6992,7 @@ def build_report(
     # ─── Лист «Ссылочный профиль» - если lite-проверка выполнялась ─────
     _build_link_profile_sheet(wb, link_profile)
     _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies)
+    _build_trust_sheet(wb, trust)
 
     # ─── Лист «Настройки в админке» - если проверка выполнялась ────────
     _build_admin_settings_sheet(wb, admin_settings)
