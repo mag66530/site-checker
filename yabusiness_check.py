@@ -259,16 +259,9 @@ async def _afetch_orgs(state: dict, proxy_url: str, log):
             csem = asyncio.Semaphore(_CARD_CONCURRENCY)
             orgs = list(await asyncio.gather(
                 *[_acard(ctx, csem, p, ic) for p, ic in _cards]))
-            # ОТЗЫВЫ - параллельно, только по активным (с городом).
-            active = [o for o in orgs if o.get('city')]
-            rsem = asyncio.Semaphore(_REVIEW_CONCURRENCY)
-            rmap = dict(await asyncio.gather(
-                *[_areviews(ctx, rsem, o['permalink']) for o in active]))
-            for o in orgs:
-                o['review_dates'] = rmap.get(o['permalink'], [])
             if log:
-                log(f'Я.Бизнес: карточек {len(orgs)}, активных {len(active)}, '
-                    f'отзывы собраны')
+                active = [o for o in orgs if o.get('city')]
+                log(f'Я.Бизнес: карточек {len(orgs)}, активных {len(active)}')
             return True, {'chains': sorted(chains), 'companies': orgs}
         finally:
             await br.close()
@@ -510,11 +503,9 @@ def run(project_id: str, session_b64: str = None, proxy_url: str = None,
     res['total_orgs'] = len(chains) + len(companies)
     res['chain_check'] = check_chain(chains, companies)
     res['profile_check'] = check_profile(companies)
-    res['reviews_check'] = check_reviews(companies)
     res['available'] = True
     _log(f'Я.Бизнес: активных карточек {res["active_orgs"]}, поддоменов с орг '
          f'{len(res["matched"])}/{res["total_subdomains"]}; в сеть '
          f'объединены: {res["chain_check"]["united"]}; профиль полон: '
-         f'{res["profile_check"]["all_full"]}; отзывы ≥1/мес: '
-         f'{res["reviews_check"]["all_ok"]}')
+         f'{res["profile_check"]["all_full"]}')
     return res

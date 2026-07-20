@@ -204,34 +204,18 @@ def compute_priority(branches):
         b['negative'] = (r is not None and r < NEGATIVE_RATING)
         b['order'] = ORDER_NEGATIVE if b['negative'] else ORDER_DEFAULT
 
-    # Сортировка: сначала приоритетные (низкий рейтинг), внутри - по населению;
-    # затем остальные по населению.
+    # Сортировка: сначала приоритетные (низкий рейтинг), внутри - по населению
+    # (города-миллионники выше); затем остальные по населению. Население - для
+    # ПОРЯДКА, в таблицу не выводим.
     def _key(b):
         return (0 if b['low_rating'] else 1, -b['population'], _norm(b['city']))
     branches.sort(key=_key)
-
-    # План на цикл: набираем приоритетные, пока сумма не дойдёт до цели.
-    cycle, total = [], 0
-    for b in branches:
-        if not b['low_rating']:
-            break
-        if total >= TARGET_MAX:
-            break
-        b['in_cycle'] = True
-        cycle.append(b)
-        total += b['order']
-    for b in branches:
-        b.setdefault('in_cycle', False)
 
     return {
         'available': True,
         'branches': branches,
         'total_branches': len(branches),
         'low_rating_count': sum(1 for b in branches if b['low_rating']),
-        'cycle_count': len(cycle),
-        'cycle_reviews': total,
-        'target_min': TARGET_MIN,
-        'target_max': TARGET_MAX,
     }
 
 

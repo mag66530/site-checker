@@ -4237,9 +4237,10 @@ def _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies):
 # ── Лист «Я.Бизнес/GMB» ─────────────────────────────────────────────
 
 
-def _build_yabusiness_sheet(wb, yabusiness):
+def _build_yabusiness_sheet(wb, yabusiness, review_priority=None):
     """Лист «Я.Бизнес/GMB»: каждый поддомен зарегистрирован под свой регион
-    (Яндекс.Бизнес). Данные из кабинета Справочника на сессии. Добавляется,
+    (Яндекс.Бизнес). Внизу - единая проверка отзывов (приоритет докупки,
+    Яндекс+2ГИС). Данные из кабинета Справочника на сессии. Добавляется,
     только если проверка выполнялась."""
     if not yabusiness:
         return
@@ -4252,7 +4253,8 @@ def _build_yabusiness_sheet(wb, yabusiness):
     ws.sheet_view.showGridLines = False
     ws.sheet_properties.tabColor = (C.err if missing else C.ok
                                     if yabusiness.get('available') else C.warn)
-    for col, w in (('A', 3), ('B', 30), ('C', 40), ('D', 60), ('E', 3)):
+    for col, w in (('A', 3), ('B', 26), ('C', 30), ('D', 42),
+                   ('E', 12), ('F', 12), ('G', 13), ('H', 11), ('I', 3)):
         ws.column_dimensions[col].width = w
 
     ws.merge_cells('B2:D2')
@@ -4397,32 +4399,67 @@ def _build_yabusiness_sheet(wb, yabusiness):
             ws.row_dimensions[row].height = 15
             row += 1
 
-    # ── Пункт: закупаются отзывы на важные филиалы (≥1 в месяц) ──
-    rch = yabusiness.get('reviews_check') or {}
-    rorgs = rch.get('orgs') or []
-    if rorgs:
+    # ── Отзывы: приоритет докупки (единая проверка отзывов, Яндекс + 2ГИС) ──
+    rp = review_priority
+    if rp:
         row += 1
-        n_mon = rch.get('months', 3)
-        bad = [o for o in rorgs if not o.get('ok')]
-        _hdr(('✅ ' if rch.get('all_ok') else '❌ ')
-             + f'Отзывы на важные филиалы (≥1/мес за {n_mon} мес) - '
-             + (f'без отзыва в срок: {len(bad)} из {len(rorgs)}'
-                if bad else 'у всех есть'))
-        for o in rorgs:
-            miss = o.get('missing_months') or []
-            ws.cell(row=row, column=2, value=o.get('city') or '').font = _font(
-                size=10, color=C.ok if o.get('ok') else C.err)
-            last = o.get('last_review')
-            ws.cell(row=row, column=3,
-                    value=f'всего отзывов {o.get("total_reviews",0)}'
-                    + (f' · последний {last}' if last else ' · отзывов нет')
-                    ).font = _font(size=9, color=C.text_soft)
-            ws.cell(row=row, column=4,
-                    value=('норма' if o.get('ok')
-                           else 'нет отзыва за: ' + ', '.join(miss))).font = \
-                _font(size=9, color=C.text_muted if o.get('ok') else C.err)
-            ws.row_dimensions[row].height = 15
+        if not rp.get('available'):
+            _hdr('Отзывы: приоритет докупки')
+            ws.merge_cells(start_row=row, start_column=2, end_row=row,
+                           end_column=8)
+            cc = ws.cell(row=row, column=2,
+                         value='⚪ ' + (rp.get('note') or 'не выполнялось'))
+            cc.font = _font(size=10, color=C.text_muted)
+            cc.alignment = _align(indent=1, wrap=True)
             row += 1
+        else:
+            low = rp.get('low_rating_count', 0)
+            tot = rp.get('total_branches', 0)
+            _hdr(('❌ ' if low else '✅ ')
+                 + f'Отзывы: приоритет докупки - с рейтингом < 4.7: {low} '
+                 + f'из {tot}')
+            ws.merge_cells(start_row=row, start_column=2, end_row=row,
+                           end_column=8)
+            nt = ws.cell(row=row, column=2, value=(
+                'Рейтинг филиала = худший из Яндекс/2ГИС. Докупаем по 2 отзыва '
+                '(3 при низком рейтинге). Порядок: рейтинг < 4.7 выше, затем '
+                'города от миллионников к меньшим.'))
+            nt.font = _font(size=9, italic=True, color=C.text_soft)
+            nt.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 26
+            row += 1
+            cols = [('Город', 2), ('Рейтинг Я', 3), ('Отз. Я', 4),
+                    ('Рейтинг 2ГИС', 5), ('Отз. 2ГИС', 6),
+                    ('Рейтинг (мин)', 7), ('Докупить', 8)]
+            for name, ci in cols:
+                h = ws.cell(row=row, column=ci, value=name)
+                h.font = _font(size=9, bold=True, color=C.text)
+                h.fill = _fill(C.surface)
+                h.alignment = _align(indent=1)
+                h.border = _border()
+            ws.row_dimensions[row].height = 16
+            row += 1
+
+            def _rv(v):
+                return '' if v is None else v
+
+            for b in (rp.get('branches') or []):
+                y = b.get('yandex') or {}
+                g = b.get('twogis') or {}
+                low_b = b.get('low_rating')
+                vals = [b.get('city') or '', _rv(y.get('rating')),
+                        _rv(y.get('count')), _rv(g.get('rating')),
+                        _rv(g.get('count')), _rv(b.get('rating')),
+                        b.get('order')]
+                for j, (_name, ci) in enumerate(cols):
+                    cell = ws.cell(row=row, column=ci, value=vals[j])
+                    clr = C.err if (ci == 7 and low_b) else C.text
+                    cell.font = _font(size=9, color=clr,
+                                      bold=(ci == 7 and low_b))
+                    cell.alignment = _align(indent=1)
+                    cell.border = _border()
+                ws.row_dimensions[row].height = 15
+                row += 1
 
 
 _TRAFFIC_COLS = [
@@ -4616,89 +4653,6 @@ def _build_traffic_sheet(wb, traffic):
                 row += 1
             row += 1   # разделитель между периодами
         row += 1       # доп. разделитель между странами
-
-
-_RP_COLS = [
-    ('№', 5), ('Город', 20), ('Страна', 12), ('Нас., тыс', 9),
-    ('Рейтинг Я', 10), ('Отз. Я', 8), ('Рейтинг 2ГИС', 12), ('Отз. 2ГИС', 10),
-    ('Рейтинг (мин)', 12), ('Докупить', 10), ('В цикл', 8),
-]
-
-
-def _build_review_priority_sheet(wb, rp):
-    """Лист «Отзывы (докупка)»: приоритет докупки отзывов на филиалы
-    (рейтинг Яндекс/2ГИС, население, сколько докупить, план на цикл).
-    Добавляется, только если проверка выполнялась."""
-    if not rp:
-        return
-    ws = wb.create_sheet('Отзывы (докупка)')
-    ws.sheet_view.showGridLines = False
-    ws.column_dimensions['A'].width = 3
-    for idx, (_n, w) in enumerate(_RP_COLS):
-        ws.column_dimensions[get_column_letter(2 + idx)].width = w
-    last_col = 1 + len(_RP_COLS)
-
-    ws.merge_cells(start_row=2, start_column=2, end_row=2, end_column=8)
-    c = ws.cell(row=2, column=2, value='Отзывы: приоритет докупки')
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    if not rp.get('available'):
-        ws.merge_cells(start_row=4, start_column=2, end_row=4, end_column=last_col)
-        cc = ws.cell(row=4, column=2,
-                     value='⚪ ' + (rp.get('note') or 'Проверка не выполнена.'))
-        cc.font = _font(size=10, color=C.text_muted)
-        cc.alignment = _align(indent=1, wrap=True)
-        ws.sheet_properties.tabColor = C.warn
-        return
-
-    low = rp.get('low_rating_count', 0)
-    ws.sheet_properties.tabColor = C.err if low else C.ok
-    ws.merge_cells(start_row=3, start_column=2, end_row=3, end_column=last_col)
-    c = ws.cell(row=3, column=2, value=(
-        f'Филиалов: {rp.get("total_branches", 0)}  ·  с рейтингом < '
-        f'{4.7}: {low}  ·  план на цикл: {rp.get("cycle_count", 0)} филиалов / '
-        f'{rp.get("cycle_reviews", 0)} отзывов (цель {rp.get("target_min")}–'
-        f'{rp.get("target_max")}). Докупаем по 2 отзыва (3 если низкий рейтинг/'
-        f'негатив). Приоритет: рейтинг < 4.7, затем города от миллионников к '
-        f'меньшим. Рейтинг филиала = худший из Яндекс/2ГИС.'))
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 46
-
-    hrow = 5
-    for idx, (name, _w) in enumerate(_RP_COLS):
-        h = ws.cell(row=hrow, column=2 + idx, value=name)
-        h.font = _font(size=9, bold=True, color=C.text)
-        h.fill = _fill(C.surface)
-        h.alignment = _align(wrap=True, horizontal='center', vertical='center')
-        h.border = _border()
-    ws.row_dimensions[hrow].height = 28
-
-    def _r(v):
-        return '' if v is None else v
-
-    row = hrow + 1
-    for i, b in enumerate(rp.get('branches') or [], 1):
-        y = b.get('yandex') or {}
-        g = b.get('twogis') or {}
-        low_b = b.get('low_rating')
-        vals = [i, b.get('city'), b.get('country'), b.get('population') or '',
-                _r(y.get('rating')), _r(y.get('count')),
-                _r(g.get('rating')), _r(g.get('count')),
-                _r(b.get('rating')), b.get('order'),
-                '✓' if b.get('in_cycle') else '']
-        for idx, val in enumerate(vals):
-            cell = ws.cell(row=row, column=2 + idx, value=val)
-            clr = C.err if (idx == 8 and low_b) else C.text
-            cell.font = _font(size=9, color=clr,
-                              bold=(idx in (8, 10) and b.get('in_cycle')))
-            cell.alignment = _align(horizontal='center', vertical='center')
-            cell.border = _border()
-            if b.get('in_cycle'):
-                cell.fill = _fill(C.surface)
-        ws.row_dimensions[row].height = 15
-        row += 1
 
 
 def _fmt_dt(d):
@@ -6519,7 +6473,7 @@ _SHEET_GROUPS = [
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
-        '404 из Метрики', 'Динамика трафика', 'Отзывы (докупка)',
+        '404 из Метрики', 'Динамика трафика',
         'Траст проекта', 'Уведомления', 'Ошибки сервисов', 'Автокликер',
         'Ссылочный профиль', 'Замена рекл. номера', 'Аномалии',
     ]),
@@ -7048,14 +7002,11 @@ def build_report(
     # ─── Лист «Настройки в админке» - если проверка выполнялась ────────
     _build_admin_settings_sheet(wb, admin_settings)
 
-    # ─── Лист «Я.Бизнес/GMB» - если проверка выполнялась ──────────────
-    _build_yabusiness_sheet(wb, yabusiness)
+    # ─── Лист «Я.Бизнес/GMB» + единая проверка отзывов (приоритет докупки) ──
+    _build_yabusiness_sheet(wb, yabusiness, review_priority)
 
     # ─── Лист «Динамика трафика» - если сравнение выполнялось ──────────
     _build_traffic_sheet(wb, traffic)
-
-    # ─── Лист «Отзывы (докупка)» - приоритет докупки отзывов ───────────
-    _build_review_priority_sheet(wb, review_priority)
 
     # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
     _build_kp_sheet(wb, results)
