@@ -77,10 +77,44 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
 _МЕТКИ = {'': 'РФ', 'uz': 'УЗ', 'az': 'АЗ', 'az2': 'АЗ-перевод', 'am': 'АМ',
           'kg': 'КГ', 'kz': 'КЗ', 'rb': 'РБ'}
 
+_ИМЕНА = {'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром', 'mpe': 'МПЭ - Мепэн'}
+
 
 def _метка(pid: str) -> str:
     suf = pid.split('-', 1)[1] if '-' in pid else ''
     return _МЕТКИ.get(suf, suf.upper() or 'РФ')
+
+
+def _сводка_для_telegram(base: str, результаты: list) -> str:
+    """HTML-текст сводки по целям для Telegram (подпись к вложению).
+    Считает по каждому сайту: подтверждено (зелёные) / проблемы (к разработчикам)
+    / всего целей - через ту же классификацию, что и в Excel-отчёте."""
+    import goals_tester as gt
+    from telegram_notify import escape_html
+    имя = _ИМЕНА.get(base, base.upper())
+    строки, вс_ok, вс_проб, вс_целей = [], 0, 0, 0
+    for pid, каталог, прогон, метка in результаты:
+        try:
+            c = gt._классифицировать(pid, каталог, прогон)['счёт']
+        except Exception:
+            continue
+        ok = c.get('ok', 0) + c.get('ok_forms', 0)
+        проб = c.get('no_code', 0) + c.get('bad', 0)
+        всего = ok + проб + sum(c.get(k, 0) for k in ('special', 'manual', 'forms', 'info'))
+        вс_ok += ok
+        вс_проб += проб
+        вс_целей += всего
+        строки.append(f'• {escape_html(метка)}: ✅ {ok}/{всего}'
+                      + (f' · ❗ проблем {проб}' if проб else ''))
+    import datetime as _dt
+    when = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y %H:%M')
+    head = (f'🎯 <b>Проверка целей</b> · {escape_html(имя)}\n'
+            f'{when} (Екб)\n'
+            f'Сайтов: {len(результаты)} · целей: {вс_целей}\n'
+            f'✅ Подтверждено: {вс_ok}   ❗ Проблемы: {вс_проб}')
+    body = ('\n\n' + '\n'.join(строки)) if строки else ''
+    tail = '\n\nПодробности по каждой цели - в приложенном отчёте.'
+    return head + body + tail
 
 
 def main() -> int:
@@ -168,6 +202,21 @@ def main() -> int:
     if результаты:
         gt.построить_сводный_отчёт(результаты, out)
         _stamp(f'Отчёт (сводный, {len(результаты)} лист(ов) целей): {out}')
+
+        # Telegram: шлём сводный отчёт получателям проекта (креды - в окружении,
+        # их проставляет страница из секретов). Без настроенного TG - тихо пропуск.
+        try:
+            import telegram_notify as tn
+            текст = _сводка_для_telegram(base, результаты)
+            res = tn.send_report_from_env(
+                project_name=_ИМЕНА.get(base, base.upper()),
+                summary_text=текст, report_file=out if out.is_file() else None,
+                log=lambda lvl, msg: _stamp(msg))
+            if not res.get('skipped'):
+                _stamp(f'✓ Telegram: отправлено {res.get("sent", 0)}, '
+                       f'не доставлено {res.get("failed", 0)}')
+        except Exception as e:  # noqa: BLE001
+            _stamp(f'⚠ Telegram-отправка не удалась ({e}) - отчёт всё равно готов.')
 
     _stamp(f'Всего сработавших идентификаторов по сайтам: {поймано}')
     # УНИКАЛЬНЫЙ финал именно для целей: форм-прогон (--with-forms) пишет своё

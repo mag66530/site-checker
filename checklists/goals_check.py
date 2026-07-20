@@ -274,6 +274,13 @@ with c1:
         env = dict(os.environ)
         env['PYTHONIOENCODING'] = 'utf-8'
         env['PYTHONUNBUFFERED'] = '1'
+        # Telegram: креды берём из секретов (те же, что у еженедельной проверки) и
+        # кладём в окружение прогона - goals_run сам отправит сводный отчёт в чат.
+        try:
+            import tg_report
+            env.update(tg_report.runner_env(_base))
+        except Exception:
+            pass
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0
         f = open(LOG_FILE, 'a', encoding='utf-8')
         # Лишние формы НЕ шлём (их цели зелёные по «reachGoal в коде»), но сквозной

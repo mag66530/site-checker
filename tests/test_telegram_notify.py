@@ -1,8 +1,10 @@
 """Тесты telegram_notify.py - без реальной сети."""
+import os
 import sys
 sys.path.insert(0, '/home/claude/site-checker-py-current')
 
-from telegram_notify import format_summary_message, escape_html
+import telegram_notify
+from telegram_notify import format_summary_message, escape_html, send_report_from_env
 
 
 def test_escape_html():
@@ -90,10 +92,51 @@ def test_format_escapes_in_project_name():
     print('✓ format_summary_message: спецсимволы в имени экранированы')
 
 
+def test_send_report_from_env_skips_without_creds():
+    """Без TG_BOT_TOKEN/TG_RECIPIENTS - тихо пропускаем (skipped), не падаем."""
+    for k in ('TG_BOT_TOKEN', 'TG_RECIPIENTS', 'TG_PROXY'):
+        os.environ.pop(k, None)
+    res = send_report_from_env('СМУ', 'текст', None)
+    assert res.get('skipped') is True
+    assert res.get('sent') == 0
+    print('✓ send_report_from_env: без кредов пропуск (skipped)')
+
+
+def test_send_report_from_env_parses_recipients():
+    """Получатели из TG_RECIPIENTS режутся по запятой/пробелу/;, прокси проброшен."""
+    captured = {}
+
+    def _fake(bot_token, recipients, project_name, summary_text,
+              report_file=None, *, proxy_url=None, log=None):
+        captured.update(bot_token=bot_token, recipients=recipients,
+                        proxy_url=proxy_url, project_name=project_name)
+        return {'sent': len(recipients), 'failed': 0}
+
+    orig = telegram_notify.send_run_notification
+    telegram_notify.send_run_notification = _fake
+    try:
+        os.environ['TG_BOT_TOKEN'] = 'BOT'
+        os.environ['TG_RECIPIENTS'] = '111, 222 333;444'
+        os.environ['TG_PROXY'] = 'http://proxy:8080'
+        res = send_report_from_env('СМУ', 'текст', None)
+    finally:
+        telegram_notify.send_run_notification = orig
+        for k in ('TG_BOT_TOKEN', 'TG_RECIPIENTS', 'TG_PROXY'):
+            os.environ.pop(k, None)
+
+    assert captured['recipients'] == ['111', '222', '333', '444']
+    assert captured['bot_token'] == 'BOT'
+    assert captured['proxy_url'] == 'http://proxy:8080'
+    assert res['sent'] == 4
+    print('✓ send_report_from_env: получатели/прокси разобраны из окружения')
+
+
 if __name__ == '__main__':
     test_escape_html()
     test_format_success()
     test_format_critical()
     test_format_with_metrika()
     test_format_escapes_in_project_name()
+    test_send_report_from_env_skips_without_creds()
+    test_send_report_from_env_parses_recipients()
     print('\n✅ Все тесты telegram_notify.py прошли')

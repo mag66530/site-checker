@@ -1045,8 +1045,15 @@ with _run_col:
             # чтобы браузер форм ходил через него - для сайтов, режущих прямое
             # подключение (напр. Метпромко). Пусто = браузер идёт напрямую.
             _proxy_env = {'FORMS_PROXY': _forms_proxy} if _forms_proxy else {}
+            # Telegram: креды из секретов (те же, что у еженедельной проверки) -
+            # forms_run сам отправит отчёт в чат после прогона.
+            try:
+                import tg_report
+                _tg_env = tg_report.runner_env(pid_key)
+            except Exception:
+                _tg_env = {}
             _launch_background(args, LOG_FILE,
-                               extra_env={**_admin_env, **_mail_env, **_proxy_env})
+                               extra_env={**_admin_env, **_mail_env, **_proxy_env, **_tg_env})
             st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key
