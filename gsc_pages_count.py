@@ -138,7 +138,7 @@ _FF_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) '
 async def _open_browser_gsc(p, log):
     """Открыть браузер для чтения отчёта GSC.
 
-    На облаке вход в Google делается через Firefox (страница «Вход в Google»),
+    На облаке сессия Google берётся из Secrets (autoclick_session_<проект>),
     поэтому и читаем отчёт Firefox'ом с той же сессией - cookies одного движка
     полностью совместимы, Google не переспрашивает вход. Локально - обычный
     open_browser (твой залогиненный Chrome по CDP)."""
