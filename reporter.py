@@ -4066,15 +4066,17 @@ def _collect_anomaly_rows(wm_metrics, link_profile):
     rows = []
     for h in (wm_metrics or {}).get('hosts') or []:
         for a in h.get('anomalies') or []:
-            rows.append({**a, 'host': h.get('host', '')})
+            rows.append({**a, 'host': h.get('host', ''),
+                         'panel_url': h.get('panel_url')})
     # Ссылочный профиль → аномалии (детали на своём листе).
     for h in (link_profile or {}).get('hosts') or []:
         host = h.get('host', '')
+        purl = h.get('panel_url')
         if h.get('recent_spam_count'):
             rows.append({
                 'host': host, 'metric': 'Внезапные мусорные доноры',
                 'before': None, 'after': h['recent_spam_count'], 'delta_pct': None,
-                'severity': 'critical',
+                'severity': 'critical', 'panel_url': purl,
                 'text': f'{h["recent_spam_count"]} новых спам-доноров за ~30 дн. '
                         f'- негативное SEO? (детали - лист «Ссылочный профиль»)'})
         # Обвал ссылочной массы - это про ПОТЕРЮ доноров, не про мусор; ему
@@ -4085,7 +4087,7 @@ def _collect_anomaly_rows(wm_metrics, link_profile):
             rows.append({
                 'host': host, 'metric': 'Рост ссылок',
                 'before': hist.get('first'), 'after': hist.get('latest'),
-                'delta_pct': None, 'severity': 'possible',
+                'delta_pct': None, 'severity': 'possible', 'panel_url': purl,
                 'text': f'резкий рост ×{hist.get("spike_factor")} - проверить на спам/накрутку'})
     rows.sort(key=lambda r: (_ANOM_SEV.get(r.get('severity'), (9,))[0],
                              r.get('host', '')))
@@ -4172,6 +4174,11 @@ def _render_wm_anomalies(ws, start_row, wm_metrics, link_profile):
             cell.border = _border(color=C.border_light)
             if red and col in 'CE':
                 cell.fill = _fill(C.err_soft)
+        # Хост - кликабельный: ведёт в панель Вебмастера этого сайта.
+        if r.get('panel_url'):
+            hc = ws[f'B{row}']
+            hc.hyperlink = r['panel_url']
+            hc.font = _font(size=10, color=C.accent, underline='single')
         ws.row_dimensions[row].height = 20
         row += 1
     return row + 1
