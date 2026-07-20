@@ -574,6 +574,44 @@ def _run_yabusiness(pid, session_b64, proxy_url, log):
                 'note': f'результат Я.Бизнеса не прочитан: {e}'}
 
 
+def _run_review_priority(pid, proxy_url, log):
+    """Приоритет докупки отзывов (Я.Бизнес + 2ГИС). Отдельный процесс
+    review_priority_run.py (Playwright). Прокси через env. → dict для листа
+    «Отзывы (докупка)»."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    root = Path(__file__).parent
+    (root / 'cache' / 'review_priority').mkdir(parents=True, exist_ok=True)
+    _res_file = root / 'cache' / 'review_priority' / f'{pid}-run.json'
+    try:
+        _res_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    _env = dict(_os.environ)
+    _env['PYTHONIOENCODING'] = 'utf-8'
+    if proxy_url:
+        _env['REVIEW_PRIORITY_PROXY'] = proxy_url
+    args = [_sys.executable, 'review_priority_run.py', '--project', pid,
+            '--out', str(_res_file)]
+    log('Отзывы: тяну рейтинги филиалов (Яндекс + 2ГИС)…')
+    try:
+        proc = subprocess.Popen(
+            args, cwd=str(root), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace', env=_env)
+        for line in proc.stdout:
+            log(f'  [Отзывы] {line.rstrip()}')
+        proc.wait()
+    except Exception as e:
+        return {'available': False, 'note': str(e)}
+    try:
+        return json.loads(_res_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        return {'available': False,
+                'note': f'результат отзывов не прочитан: {e}'}
+
+
 def run_check(pid, params, creds, log, progress):
     """Выполнить прогон. log(msg), progress(frac, text) - колбэки.
     Возвращает dict с results / report_path / started_at / finished_at / error."""
@@ -1571,6 +1609,17 @@ def run_check(pid, params, creds, log, progress):
             else:
                 log(f'⚠ Я.Бизнес: {(_yabusiness or {}).get("note")}')
 
+        # ── Отзывы: приоритет докупки (Я.Бизнес + 2ГИС) - отдельный процесс ──
+        _review_priority = None
+        if params.get('check_review_priority'):
+            _review_priority = _run_review_priority(pid, proxy_url, log)
+            if (_review_priority or {}).get('available'):
+                log(f'✓ Отзывы: филиалов с рейтингом < 4.7 '
+                    f'{_review_priority.get("low_rating_count", 0)} из '
+                    f'{_review_priority.get("total_branches", 0)}')
+            else:
+                log(f'⚠ Отзывы: {(_review_priority or {}).get("note")}')
+
         # ── Ошибки сервера: парсинг / нагрузка / дубли URL (по галочке) ──
         # Тяжёлые сетевые пробы на прод: гоняем В КОНЦЕ, отчёт по страницам
         # уже собран - падение сервера/бан здесь = находка, не сбой прогона.
@@ -1673,7 +1722,7 @@ def run_check(pid, params, creds, log, progress):
             stress_check=_stress_check, link_profile=_link_profile,
             admin_settings=_admin_settings, yabusiness=_yabusiness,
             gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic,
-            arsenkin=_arsenkin)
+            arsenkin=_arsenkin, review_priority=_review_priority)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
