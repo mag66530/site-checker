@@ -85,6 +85,27 @@ def _страницы_форм(src_config: Path) -> list[tuple[str, str]]:
             out.append((str(тип), u))
     return out
 
+
+def _страницы_только_города(src_config: Path) -> dict:
+    """{тип_страницы: set(городов)} для блоков СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ с
+    «только_города» - такие страницы существуют лишь в этих городах (напр.
+    подписка Хабаровска). Нужно, чтобы НЕ гонять их мобильную вёрстку в других
+    городах, иначе в отчёт всплывает лишний домен (habarovsk.stalmetural.ru)."""
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location('cfg_only_cities', src_config)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+    except Exception:
+        return {}
+    out: dict[str, set] = {}
+    for блок in getattr(m, 'СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ', []) or []:
+        тип = str(блок.get('тип', '')).strip()
+        только = блок.get('только_города')
+        if тип and только:
+            out[тип] = {str(g).strip() for g in только}
+    return out
+
 # Проекты-варианты со своим config.py, но БЕЗ своего cities.csv - берут
 # справочник городов у «родителя». Так «МПЭ - Корзина» гоняет те же города,
 # что и Мепэн, без дублирования файла на 160 строк.
@@ -169,7 +190,9 @@ def _rewrite_logi(path: str, hdr, rows) -> None:
         ws.delete_rows(2, ws.max_row - 1)
     for r in rows:
         ws.append(r)
-    wb.save(path)
+    tmp = f'{path}.tmp'                       # атомарно: temp + rename (как в движке)
+    wb.save(tmp)
+    os.replace(tmp, path)
 
 
 def main() -> int:
@@ -399,11 +422,19 @@ def main() -> int:
             try:
                 import mobile_check
                 _pages = _страницы_форм(src_config)
+                _огр_города = _страницы_только_города(src_config)
+                _run_города = {c[0] for c in run_cities if c and c[0]}
                 if _pages and run_cities:
                     _c0_url = run_cities[0][1]
                     _c0_host = urlparse(_c0_url).netloc
                     _моб = []
                     for _тип, _purl in _pages:
+                        # Страницы «только для» других городов (подписка Хабаровска
+                        # и т.п.) в этом прогоне пропускаем - иначе в отчёт лезет
+                        # чужой домен, которого мы не выбирали.
+                        _только = _огр_города.get(_тип)
+                        if _только and not (_run_города & _только):
+                            continue
                         _u = _purl
                         if main_host and _c0_host and _c0_host != main_host:
                             _u = _u.replace(f'//{main_host}', f'//{_c0_host}')

@@ -3741,6 +3741,28 @@ def _status_clean_reason(raw: str):
     return (base.capitalize() if base else s), ""
 
 
+def _atomic_save_wb(wb, path: str) -> None:
+    """Атомарное сохранение книги: пишем во ВРЕМЕННЫЙ файл рядом и переименовываем
+    (rename атомарен на одном диске). Так log_forms.xlsx НИКОГДА не остаётся полу-
+    записанным: сбой сохранения (нет места на диске, обрыв) оставляет ПРЕДЫДУЩИЙ
+    валидный файл целым - теряется максимум одна текущая строка, а не весь отчёт.
+    Раньше запись шла прямо в файл: оборванное сохранение било его, и все
+    последующие чтения падали («Truncated file header») - терялись все прошлые
+    формы прогона."""
+    import os as _os
+    tmp = f"{path}.tmp"
+    try:
+        wb.save(tmp)
+        _os.replace(tmp, path)
+    except Exception:
+        try:
+            if _os.path.exists(tmp):
+                _os.remove(tmp)
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+
+
 def init_excel_log(path: str, очистить: bool = True) -> None:
     """Готовит файл лога: при «очистить» удаляет старый, создаёт новый с шапкой LOG_HEADERS.
     Столбцам с описанием в FORM_LOG_DESCRIPTIONS ставится комментарий к заголовку
@@ -3765,7 +3787,7 @@ def init_excel_log(path: str, очистить: bool = True) -> None:
             desc = FORM_LOG_DESCRIPTIONS.get(val)
             if desc:
                 cell.comment = Comment(desc, 'Site Checker', height=200, width=340)
-        wb.save(path)
+        _atomic_save_wb(wb, path)
         print(f"✅ Создан новый Excel файл: {path}")
 
 
@@ -3832,7 +3854,7 @@ def append_log_row(path: str, row: dict) -> None:
             ws.cell(r, ui).font = Font(color="B26A00", bold=True)
     except Exception:
         pass
-    wb.save(path)
+    _atomic_save_wb(wb, path)
 
 
 def консолидировать_форм_строки(path: str) -> None:
@@ -3943,7 +3965,7 @@ def консолидировать_форм_строки(path: str) -> None:
         except Exception:  # noqa: BLE001
             pass
     try:
-        wb.save(path)
+        _atomic_save_wb(wb, path)
         print(f"   🧹 Отчёт сведён: {len(data)} строк → {len(merged)} (1 форма = 1 строка)")
     except Exception as e:  # noqa: BLE001
         print(f"   ⚠️ Консолидация отчёта не сохранена: {e}")
@@ -4375,7 +4397,7 @@ def построить_матрицу_проверок(path: str) -> None:
     except Exception:  # noqa: BLE001
         pass
     try:
-        wb.save(path)
+        _atomic_save_wb(wb, path)
         # Заметки не должны ужиматься до ячейки (иначе текст обрезается).
         _снять_size_with_cells(path)
         print(f"   🗂️ Матрица проверок построена: {len(matrix_titles)} лист(ов) "
@@ -4581,7 +4603,7 @@ def write_summary_sheet(path: str, время_прогона: str = "") -> None:
             prev = cur
 
     wb.active = wb.sheetnames.index("Сводка")
-    wb.save(path)
+    _atomic_save_wb(wb, path)
 
 
 def _значение_формы_для_имени(fc: dict):

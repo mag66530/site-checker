@@ -180,7 +180,7 @@ def записать_в_логи(excel_path: str, результаты: list) ->
                 prev = str(ws.cell(r, i_comment).value or "").strip()
                 ws.cell(r, i_comment, (prev + "; " if prev else "") + деталь)
 
-    wb.save(excel_path)
+    __import__("test_all")._atomic_save_wb(wb, excel_path)
 
 
 def выполнить_проверку(проект_дир, зоны, orders_path: str = "placed_orders.json",

@@ -339,7 +339,7 @@ def записать_в_логи(excel_path: str, результаты: list) ->
                 ws.cell(r, i_comment,
                         (prev + "; " if prev else "") + деталь)
 
-    wb.save(excel_path)
+    __import__("test_all")._atomic_save_wb(wb, excel_path)
 
 
 def _домен_кратко(домен: str) -> str:
@@ -383,7 +383,7 @@ def _xss_admin_в_отчёт(excel_path, статус: str, деталь: str, l
         ("Проверить" if статус == "Проверить" else "Ошибка"))
     put("Защита от XSS", статус)
     put("Комментарий", деталь)
-    wb.save(excel_path)
+    __import__("test_all")._atomic_save_wb(wb, excel_path)
 
 
 def выполнить_проверку(проект_дир, зоны, excel_path: str = "log_forms.xlsx",
