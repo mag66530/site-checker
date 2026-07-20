@@ -865,64 +865,25 @@ if _project_has_admin(pid_key):
             st.caption('⚠️ Введите логин и пароль - без них админка не проверится.')
 
 # ── Проверка письма о заказе покупателю (пункт 2.9) ──────────────────
-# Заказ оформляется на РЕАЛЬНУЮ почту (тестовый ящик или свою рабочую), чтобы
-# письмо-подтверждение реально пришло. Два режима (по просьбе - вариативность):
-#  • Тестовая почта - скрипт сам зайдёт по IMAP и подтвердит письмо;
-#  • Своя почта - заказ уйдёт на неё, письмо проверяешь глазами.
+# Заказ оформляется на РЕАЛЬНУЮ почту (свою рабочую), чтобы письмо-подтверждение
+# реально пришло. Пока один режим - «Своя почта»: заказ уйдёт на неё, письмо
+# проверяешь глазами. Автопроверку по IMAP временно убрали.
 # Без выбора - как раньше: заказ на адрес из конфига, письмо не проверяем.
-def _secret(key: str, default: str = '') -> str:
-    try:
-        if hasattr(st, 'secrets') and key in st.secrets:
-            return str(st.secrets[key])
-    except Exception:
-        pass
-    return default
-
-
 _mail_env: dict[str, str] = {}
 st.subheader('Проверка письма о заказе')
 st.caption('Относится к оформлению заказа через корзину: на какую почту оформить '
            'заказ и как проверить письмо-подтверждение покупателю.')
-_MAIL_MODES = ['Не проверять', 'Тестовая почта (автопроверка по IMAP)',
-               'Своя почта (проверю письмо вручную)']
-# Если тестовая почта задана в секретах - по умолчанию включаем автопроверку
-# (чтобы «запустил и убедился» работало само, для любого проекта).
-_default_mail_mode = (_MAIL_MODES[1]
-                      if (_secret('order_mail_email') and _secret('order_mail_password'))
-                      else _MAIL_MODES[0])
-st.session_state.setdefault(f'fc_mail_mode_{pid_key}', _default_mail_mode)
+_MAIL_MODES = ['Не проверять', 'Своя почта (проверю письмо вручную)']
+_mail_mode_key = f'fc_mail_mode_{pid_key}'
+st.session_state.setdefault(_mail_mode_key, _MAIL_MODES[0])
+# Раньше был режим «Тестовая почта» - если он ещё лежит в session_state открытой
+# сессии, сбрасываем на «Не проверять», иначе st.radio упадёт (значения нет в списке).
+if st.session_state.get(_mail_mode_key) not in _MAIL_MODES:
+    st.session_state[_mail_mode_key] = _MAIL_MODES[0]
 _mail_mode = st.radio('Как проверяем письмо покупателю', _MAIL_MODES,
-                      key=f'fc_mail_mode_{pid_key}', label_visibility='collapsed')
+                      key=_mail_mode_key, label_visibility='collapsed')
 
 if _mail_mode == _MAIL_MODES[1]:
-    # Тестовая почта берётся ТОЛЬКО из секретов приложения (order_mail_email /
-    # order_mail_password / опц. order_mail_imap_host) - один раз для всех проектов.
-    # Ввод своего ящика здесь не нужен: если кому-то нужен свой ящик, для этого
-    # есть режим «Своя почта».
-    _sec_mail = _secret('order_mail_email')
-    _sec_pass = _secret('order_mail_password')
-    _sec_host = _secret('order_mail_imap_host')
-    if _sec_mail and _sec_pass:
-        st.success(f'Тестовый ящик задан в секретах приложения: **{_sec_mail}**. '
-                   'Просто запускай проверку - заказ оформится на него, а письмо-'
-                   'подтверждение проверится автоматически. Нужен свой ящик - выбери '
-                   'режим «Своя почта».')
-        _mail_env = {
-            'ORDER_BUYER_EMAIL': _sec_mail,
-            'ORDER_MAIL_EMAIL': _sec_mail,
-            'ORDER_MAIL_PASSWORD': _sec_pass,
-        }
-        if _sec_host:
-            _mail_env['ORDER_MAIL_IMAP_HOST'] = _sec_host
-        _px = _secret('proxy_url')
-        if _px:
-            _mail_env['proxy_url'] = _px
-    else:
-        st.warning('Тестовая почта не задана в секретах приложения - авто-проверка '
-                   'недоступна. Её настраивает администратор приложения (один раз, для '
-                   'всех проектов). Чтобы проверить письмо на свой ящик - выбери режим '
-                   '«Своя почта».')
-elif _mail_mode == _MAIL_MODES[2]:
     st.caption('Заказ оформится на указанную почту. Автопроверку не делаем - '
                'просто открой этот ящик и убедись, что письмо о заказе пришло. '
                'В отчёте (колонка «Письмо покупателю») будет напоминание с адресом.')
