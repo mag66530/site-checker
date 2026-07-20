@@ -123,13 +123,16 @@ def _fetch_one(dom, proxy_parts, ua=None):
                 resp.read()
                 return '', f'HTTP {resp.status}'
             # Сервер иногда обрывает ответ (IncompleteRead: не дослал все байты
-            # из Content-Length - сеть/антибот/большая страница). Прочитанной
-            # части обычно хватает (шапка/подвал/город - в начале документа):
-            # берём её, если достаточно, вместо полного провала.
+            # из Content-Length). Прочитанную часть сохраняем, но помечаем как
+            # НЕПОЛНУЮ - тогда fetch_all повторит (адрес/контакты в ПОДВАЛЕ, а он
+            # в конце документа: у обрезанной страницы его нет). Если и повторы
+            # оборвутся - используем самый полный partial (лучше, чем провал).
+            truncated = False
             try:
                 data = resp.read()
             except http.client.IncompleteRead as ie:
                 data = ie.partial or b''
+                truncated = True
             html = data.decode('utf-8', 'replace')
             # Антибот/заглушка вместо страницы (частый ответ при частых запросах):
             # либо совсем короткий ответ, либо явные маркеры проверки браузера.
@@ -141,6 +144,8 @@ def _fetch_one(dom, proxy_parts, ua=None):
                       'доступ ограничен', 'captcha-delivery')
             if len(html) < 1500 or (len(html) < 25000 and any(m in low for m in _block)):
                 return '', 'похоже на антибот/капчу'
+            if truncated:
+                return html, 'неполная страница (обрыв соединения)'
             return html, ''
         finally:
             try:
@@ -209,7 +214,12 @@ def fetch_all(domains, proxy, log, retries=3):
                     html, err = fut.result()
                 except Exception as e:  # noqa: BLE001
                     html, err = '', str(e)[:200]
-                out[dom] = (html, err)
+                # Держим ЛУЧШИЙ результат: успешный (без ошибки) в приоритете,
+                # иначе - самый ПОЛНЫЙ partial (у обрыва подвал может быть длиннее
+                # на другом заходе). Так повтор не затрёт больший кусок меньшим.
+                prev = out.get(dom)
+                if (not err) or prev is None or len(html) > len(prev[0] or ''):
+                    out[dom] = (html, err)
                 if counting:
                     log(f'  [{k}/{N}] {dom} ({city}): '
                         + (f'ошибка загрузки - {err}' if err else 'загружено'))
@@ -420,9 +430,13 @@ def main() -> int:
                    f'{row.phone_seo!r}, тел.общий={row.phone_common!r}, '
                    f'город={row.city!r}, адрес={(row.address or "")[:30]!r}')
     результаты = []
+    _n_partial = 0
     for dom, row in domains:
         html, err = html_map.get(dom, ("", "не загружено"))
-        if err:
+        # Полный провал (без html) - строка «ошибка загрузки». Но неполная
+        # страница (обрыв, html есть) - НЕ провал: сверяем что успели загрузить
+        # (город/телефон/почта в шапке найдутся; подвал-адрес может отсутствовать).
+        if err and not html:
             _le = err.lower()
             if ('name or service not known' in _le or 'errno -2' in _le
                     or 'getaddrinfo' in _le or 'nodename nor servname' in _le):
@@ -431,6 +445,8 @@ def main() -> int:
             результаты.append({"domain": dom, "city": row.city,
                                "country": row.country, "error": err, "fields": []})
             continue
+        if err:                       # html есть, но страница неполная
+            _n_partial += 1
         var = kpmod.check_variables(html, dom)
         # WhatsApp: кнопка есть, но ссылка не ведёт в WhatsApp - проверяем ссылку
         # вживую и уточняем код (404 и т.п.), чтобы в примечании был точный ответ.
@@ -450,6 +466,10 @@ def main() -> int:
         var["error"] = ""
         результаты.append(var)
 
+    if _n_partial:
+        _stamp(f'⚠️ Неполных страниц (обрыв соединения, повторы не помогли): '
+               f'{_n_partial} - у них подвал мог не догрузиться, адрес там может '
+               'показать «не найден». Шапка (город/телефон/почта) проверена.')
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
     xlsx = work / 'variables.xlsx'
