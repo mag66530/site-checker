@@ -15,27 +15,11 @@ def _p(vals):
     return [{'date': f'2026-{i + 1:02d}-01', 'value': v} for i, v in enumerate(vals)]
 
 
-def test_crawl_2xx_drop():
-    # Устойчивая просадка от недавнего фона (нужно >=4 точек).
-    ind = {'HTTP_2XX': _p([1000, 1000, 1000, 700])}
-    an = analyze_crawl(ind)
-    assert any(a['metric'] == 'Обход: страницы 2xx' and a['delta_pct'] == -30
-               for a in an), an
-    print('✓ обход: устойчивая просадка 2xx (−30% от фона) - аномалия')
-
-
-def test_crawl_2xx_early_peak_not_flagged():
-    # Старый разовый пик 538, дальше стабильно 6 - это НЕ просадка (норма).
-    ind = {'HTTP_2XX': _p([538, 6, 6, 6])}
+def test_crawl_2xx_ignored():
+    # Число обойдённых 2xx-страниц за период само гуляет - это шум, не аномалия.
+    ind = {'HTTP_2XX': _p([1000, 1000, 1000, 200])}
     assert not any(a['metric'] == 'Обход: страницы 2xx' for a in analyze_crawl(ind))
-    print('✓ обход: старый разовый пик не даёт мнимой −99% просадки')
-
-
-def test_crawl_2xx_incomplete_last_not_flagged():
-    # Последняя точка - неполный текущий период (6 << 538) - откидываем.
-    ind = {'HTTP_2XX': _p([500, 520, 538, 6])}
-    assert not any(a['metric'] == 'Обход: страницы 2xx' for a in analyze_crawl(ind))
-    print('✓ обход: неполный последний период не даёт мнимой просадки')
+    print('✓ обход: просадка 2xx больше НЕ считается (шум)')
 
 
 def test_crawl_4xx_5xx_spike():
@@ -47,11 +31,13 @@ def test_crawl_4xx_5xx_spike():
     print('✓ обход: всплеск 4xx/5xx - аномалии (5xx = фатально)')
 
 
-def test_crawl_small_4xx_not_flagged():
-    # Пара 404 (1→5) - норма, floor=10 гасит мелочь.
+def test_crawl_small_errors_not_flagged():
+    # Мелочь гасится порогами: 404 до 15, 5xx до 10.
     assert not any(a['metric'] == 'Обход: ошибки 404 (4xx)'
-                   for a in analyze_crawl({'HTTP_4XX': _p([1, 2, 5])}))
-    print('✓ обход: мелкий рост 404 (до 10) не аномалия')
+                   for a in analyze_crawl({'HTTP_4XX': _p([1, 2, 11])}))
+    assert not any(a['metric'] == 'Обход: ошибки сервера (5xx)'
+                   for a in analyze_crawl({'HTTP_5XX': _p([1, 2, 8])}))
+    print('✓ обход: мелкие 404 (до 15) и 5xx (до 10) не аномалия')
 
 
 def test_crawl_stable_no_anomaly():
@@ -111,11 +97,9 @@ def test_append_baseline_returns_prior_medians():
 
 
 if __name__ == '__main__':
-    test_crawl_2xx_drop()
-    test_crawl_2xx_early_peak_not_flagged()
-    test_crawl_2xx_incomplete_last_not_flagged()
+    test_crawl_2xx_ignored()
     test_crawl_4xx_5xx_spike()
-    test_crawl_small_4xx_not_flagged()
+    test_crawl_small_errors_not_flagged()
     test_crawl_stable_no_anomaly()
     test_summary_problems_no_baseline()
     test_summary_pages_and_sqi_drop()
