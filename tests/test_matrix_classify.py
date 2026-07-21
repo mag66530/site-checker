@@ -368,6 +368,162 @@ def test_load_save_после_матрицы_ломает_заметки(tmp_pat
     assert max(w2) < 200 and sw2 > 0               # сбилось - вот почему матрица последняя
 
 
+# ── Пер-ячеечные КОНКРЕТНЫЕ причины (двойная отправка / серверная валидация) ──
+def _лог_с_формой(path, поля):
+    """Мини-лог с ОДНОЙ формой (Москва/Товар/«Купить в один клик») + заданные
+    значения проверок. Для тестов пер-ячеечных пояснений и инфо-подсказок."""
+    from openpyxl import Workbook
+    wb = Workbook(); sv = wb.active; sv.title = "Сводка"
+    ws = wb.create_sheet("Логи"); ws.append(list(t.LOG_HEADERS))
+    row = {h: "" for h in t.LOG_HEADERS}
+    row.update({"Дата": "21.07.2026", "Город": "Москва", "Страница": "Товар",
+                "URL": "https://example.ru/tovar/",
+                "Название": "Купить в один клик", "Где находится": "Товар",
+                "Статус": "УСПЕШНО (Playwright - как ручная отправка)"})
+    row.update(поля)
+    ws.append([row[h] for h in t.LOG_HEADERS])
+    wb.save(str(path))
+
+
+def _коммент_ячейки(ws, label, col=2):
+    """Текст всплывающей заметки первой формы (кол.2) в строке-проверке label."""
+    for i in range(2, ws.max_row + 1):
+        if str(ws.cell(i, 1).value) == label:
+            c = ws.cell(i, col).comment
+            return c.text if c else None
+    return None
+
+
+def test_ключ_детали_стабилен_и_различает():
+    k = t._матрица_ключ_детали
+    # обрезка пробелов - запись и чтение дают один ключ
+    assert k("Москва", "Товар", "Форма", "Двойная отправка") == \
+           k(" Москва ", "Товар", "Форма ", "Двойная отправка")
+    # разные колонки / формы - разные ключи
+    assert k("Москва", "Товар", "Форма", "Двойная отправка") != \
+           k("Москва", "Товар", "Форма", "Серверная валидация")
+    assert k("Москва", "Товар", "A", "X") != k("Москва", "Товар", "B", "X")
+
+
+def test_запись_чтение_детали_роундтрип(tmp_path):
+    old = t.MATRIX_DETAILS_FILE
+    t.MATRIX_DETAILS_FILE = str(tmp_path / "matrix_details.json")
+    try:
+        t.record_matrix_detail("Москва", "Товар", "Форма",
+                               "Двойная отправка", "кнопка перекрыта")
+        t.record_matrix_detail("Москва", "Товар", "Форма",
+                               "Серверная валидация", "без почты (поле «email»)")
+        d = t.load_matrix_details()
+        assert d[t._матрица_ключ_детали("Москва", "Товар", "Форма",
+                                        "Двойная отправка")] == "кнопка перекрыта"
+        assert d[t._матрица_ключ_детали("Москва", "Товар", "Форма",
+                 "Серверная валидация")] == "без почты (поле «email»)"
+        # пустую деталь НЕ пишем и НЕ затираем прежнюю
+        t.record_matrix_detail("Москва", "Товар", "Форма", "Двойная отправка", "   ")
+        d2 = t.load_matrix_details()
+        assert d2[t._матрица_ключ_детали("Москва", "Товар", "Форма",
+                                         "Двойная отправка")] == "кнопка перекрыта"
+    finally:
+        t.MATRIX_DETAILS_FILE = old
+
+
+def test_матрица_показывает_конкретную_причину_двойной_отправки(tmp_path):
+    # «под вопросом» ⚠: в ячейке должна всплывать ПОЧЕМУ именно (перекрыта кнопка),
+    # а не общая фраза «проверьте вручную».
+    from openpyxl import load_workbook
+    old = t.MATRIX_DETAILS_FILE
+    t.MATRIX_DETAILS_FILE = str(tmp_path / "matrix_details.json")
+    try:
+        path = tmp_path / "log_forms.xlsx"
+        _лог_с_формой(path, {"Двойная отправка": "под вопросом"})
+        причина = ("Кнопка перекрыта другим элементом - чистую двойную отправку "
+                   "автоматически не проверить.")
+        t.record_matrix_detail("Москва", "Товар", "Купить в один клик",
+                               "Двойная отправка", причина)
+        t.построить_матрицу_проверок(str(path))
+        ws = load_workbook(str(path))["Москва"]
+        assert str([ws.cell(i, 2).value for i in range(2, ws.max_row + 1)
+                    if str(ws.cell(i, 1).value) == "Двойная отправка"][0]) == "⚠"
+        got = _коммент_ячейки(ws, "Двойная отправка")
+        assert got and "перекрыта" in got                       # КОНКРЕТНАЯ причина
+        assert "Не удалось однозначно проверить" not in got     # общая фраза заменена
+    finally:
+        t.MATRIX_DETAILS_FILE = old
+
+
+def test_матрица_показывает_без_чего_серверная_валидация(tmp_path):
+    # УЯЗВИМА ✗: в ячейке - БЕЗ ЧЕГО именно ушло (без почты, с именем поля),
+    # а не общая «принял заведомо невалидные данные».
+    from openpyxl import load_workbook
+    old = t.MATRIX_DETAILS_FILE
+    t.MATRIX_DETAILS_FILE = str(tmp_path / "matrix_details.json")
+    try:
+        path = tmp_path / "log_forms.xlsx"
+        _лог_с_формой(path, {"Серверная валидация": "УЯЗВИМА"})
+        деталь = ("сервер ПРИНЯЛ невалидную отправку без почты (поле «email») - "
+                  "это и есть уязвимость")
+        t.record_matrix_detail("Москва", "Товар", "Купить в один клик",
+                               "Серверная валидация", деталь)
+        t.построить_матрицу_проверок(str(path))
+        ws = load_workbook(str(path))["Москва"]
+        assert str([ws.cell(i, 2).value for i in range(2, ws.max_row + 1)
+                    if str(ws.cell(i, 1).value) == "Серверная валидация"][0]) == "✗"
+        got = _коммент_ячейки(ws, "Серверная валидация")
+        assert got and "без почты" in got and "поле «email»" in got
+        assert "заведомо невалидные данные" not in got          # общая фраза заменена
+    finally:
+        t.MATRIX_DETAILS_FILE = old
+
+
+def test_нет_детали_остаётся_общая_фраза_правила(tmp_path):
+    # Если проба деталь не записала (файла нет) - показываем общий текст правила,
+    # а не пусто. Это гарантирует обратную совместимость со старыми прогонами.
+    from openpyxl import load_workbook
+    old = t.MATRIX_DETAILS_FILE
+    t.MATRIX_DETAILS_FILE = str(tmp_path / "нет_такого_файла.json")
+    try:
+        path = tmp_path / "log_forms.xlsx"
+        _лог_с_формой(path, {"Двойная отправка": "под вопросом"})
+        t.построить_матрицу_проверок(str(path))
+        ws = load_workbook(str(path))["Москва"]
+        got = _коммент_ячейки(ws, "Двойная отправка")
+        assert got and "Не удалось однозначно проверить" in got  # общая фраза правила
+    finally:
+        t.MATRIX_DETAILS_FILE = old
+
+
+def test_матрица_инфо_подсказка_на_зелёной_ячейке(tmp_path):
+    # R3: ✓ (зелёная) ячейка получает НЕЙТРАЛЬНУЮ инфо-заметку «что подтвердил
+    # тул»; символ остаётся ✓ (клетку не «краснит»).
+    from openpyxl import load_workbook
+    old = t.MATRIX_DETAILS_FILE
+    t.MATRIX_DETAILS_FILE = str(tmp_path / "matrix_details.json")   # деталей нет
+    try:
+        path = tmp_path / "log_forms.xlsx"
+        _лог_с_формой(path, {"Уведомление пользователю": "Да", "CSRF-защита": "Есть"})
+        t.построить_матрицу_проверок(str(path))
+        ws = load_workbook(str(path))["Москва"]
+        # символ - зелёная галочка
+        assert str([ws.cell(i, 2).value for i in range(2, ws.max_row + 1)
+                    if str(ws.cell(i, 1).value) == "Уведомление пользователю"][0]) == "✓"
+        # и на ней всплывает инфо-пояснение
+        info = _коммент_ячейки(ws, "Уведомление пользователю")
+        assert info and "подтверждение" in info
+        # на ✓ CSRF - тоже своя инфо-подсказка
+        assert (_коммент_ячейки(ws, "CSRF-защита") or "").strip()
+    finally:
+        t.MATRIX_DETAILS_FILE = old
+
+
+def test_инфо_подсказки_покрывают_основные_проверки():
+    # Ключи инфо-словаря должны быть реальными колонками правил (не опечатка).
+    for col in t._МАТРИЦА_ИНФО:
+        assert col in t._МАТРИЦА_IDENT or col in t._МАТРИЦА_ПРАВИЛА \
+            or col in t.LOG_HEADERS, f"инфо для неизвестной колонки: {col}"
+    # флагманский пример пользователя присутствует
+    assert "Уведомление пользователю" in t._МАТРИЦА_ИНФО
+
+
 if __name__ == "__main__":
     import traceback
     import inspect
