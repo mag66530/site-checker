@@ -415,8 +415,11 @@ def main() -> int:
                f'catalogs/{a.project}-kp.csv. Правки в Google так НЕ '
                f'подхватятся - обнови снапшот или задай секрет!')
 
-    kp = kpmod.load_kp(a.project, refresh=False)   # уже обновили выше
-    if not kp:
+    # ПОЛНЫЙ список городов КП (а не свёрнутый по домену): у СНГ-стран несколько
+    # городов делят один сайт (stalmetural.kz/.by/.uz - поддоменов нет), но в
+    # отчёте показываем каждый город отдельной строкой. Сам сайт качаем один раз.
+    kp_rows = kpmod.load_kp_rows(a.project)   # уже обновили выше
+    if not kp_rows:
         _stamp(f'✗ Нет базы КП catalogs/{a.project}-kp.csv')
         return 2
     try:
@@ -425,15 +428,15 @@ def main() -> int:
                if _csvp.exists() else '—')
     except Exception:
         _mt = '—'
-    _stamp(f'КП загружена: {len(kp)} строк (город/домен), снапшот обновлён {_mt}')
+    _stamp(f'КП загружена: {len(kp_rows)} городов, снапшот обновлён {_mt}')
 
     wanted = {c.strip().lower() for c in a.cities.split(',') if c.strip()}
-    domains = [(d, row) for d, row in kp.items()
+    domains = [(row.domain, row) for row in kp_rows
                if not wanted or (row.city or '').lower() in wanted]
     # Порядок как в КП: страны в порядке появления в КП, но Россия первой;
     # внутри страны сохраняем исходный порядок КП (сортировка стабильная).
     _country_seq = []
-    for _d, _row in kp.items():
+    for _row in kp_rows:
         _c = (_row.country or '').strip()
         if _c and _c not in _country_seq:
             _country_seq.append(_c)
@@ -469,14 +472,25 @@ def main() -> int:
         _stamp('⚠️ proxy_url задан, но не разобрался '
                '(ожидается http://логин:пароль@хост:порт).')
 
+    # Регион-контекст строим из dict-КП (по одному городу на домен) - ему нужен
+    # набор городов/телефонов для сверки «чужой город на странице».
+    kp = kpmod.load_kp(a.project, refresh=False)
     ctx = build_region_context(
         kp, [SimpleNamespace(host=d, city=row.city, country=row.country)
              for d, row in kp.items()])
 
+    # Один сайт качаем ОДИН раз, даже если на нём несколько городов: СНГ-страны
+    # делят сайт (stalmetural.kz/.by/.uz), не бьём сервер повторами.
+    _seen_dom = set()
+    _fetch_list = []
+    for _d, _r in domains:
+        if _d not in _seen_dom:
+            _seen_dom.add(_d)
+            _fetch_list.append((_d, _r))
     _stamp(f'ПРОВЕРКА КП (1.4) - {PROJECT_NAMES[a.project]} - '
-           f'поддоменов: {len(domains)}')
+           f'городов: {len(domains)} (уникальных сайтов: {len(_fetch_list)})')
 
-    html_map = fetch_all(domains, proxy, _stamp)
+    html_map = fetch_all(_fetch_list, proxy, _stamp)
     _n407 = sum(1 for h, e in html_map.values() if '407' in (e or ''))
     if _n407 and _n407 == len(html_map):
         _stamp('⚠️ ВСЕ страницы вернули 407 Proxy Authentication Required - '
@@ -508,7 +522,7 @@ def main() -> int:
             результаты.append({"domain": dom, "city": row.city,
                                "country": row.country, "error": err, "fields": []})
             continue
-        var = kpmod.check_variables(html, dom)
+        var = kpmod.check_variables(html, dom, row=row)
         # Адрес не нашли в шапке/подвале главной? У части проектов (МПЭ/mepen) он
         # только на «Контактах». Догружаем эту страницу и пересверяем адрес.
         # ВАЖНО: только если ГЛАВНАЯ загрузилась чисто (not err). Если главная
@@ -526,7 +540,7 @@ def main() -> int:
                         break
                     time.sleep(1.0)
                 if _ch and not _cerr:
-                    var = kpmod.check_variables(html, dom, contacts_html=_ch)
+                    var = kpmod.check_variables(html, dom, contacts_html=_ch, row=row)
                     _stamp(f'    {dom}: адрес не в подвале - догрузил «Контакты» '
                            f'({_cpath})')
         # WhatsApp: кнопка есть, но ссылка не ведёт в WhatsApp - проверяем ссылку

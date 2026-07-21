@@ -266,6 +266,26 @@ def _csv_path(project_id: str) -> Path:
 
 
 _KP_MEM: dict[str, dict] = {}
+_KP_ROWS_MEM: dict[str, list] = {}
+
+
+def load_kp_rows(project_id: str, refresh: bool = True) -> list[KPRow]:
+    """ВСЕ строки КП списком - для «Проверки КП», где нужен ПОЛНЫЙ список городов.
+    У СНГ-стран несколько городов делят один сайт (stalmetural.kz и т.п.);
+    load_kp() (dict по домену) их схлопывает - это для сайт-проверок (один сайт =
+    одна проверка), а тут каждый город отдельной строкой. Кэш на процесс."""
+    if project_id in _KP_ROWS_MEM:
+        return _KP_ROWS_MEM[project_id]
+    if refresh:
+        try:
+            import kp_sheets
+            if kp_sheets.kp_sheet_url(project_id):
+                kp_sheets.refresh_project(project_id, log=lambda *a, **k: None)
+        except Exception:
+            pass
+    rows = _load_kp_rows_csv(project_id)
+    _KP_ROWS_MEM[project_id] = rows
+    return rows
 
 
 def load_kp(project_id: str, refresh: bool = True) -> dict[str, KPRow]:
@@ -287,31 +307,49 @@ def load_kp(project_id: str, refresh: bool = True) -> dict[str, KPRow]:
     return kp
 
 
+def _row_from_csv(row: dict) -> Optional[KPRow]:
+    """Одна строка CSV → KPRow (None если нет домена)."""
+    dom = (row.get('domain') or '').strip().lower()
+    if not dom:
+        return None
+    return KPRow(
+        domain=dom, city=row.get('city', ''),
+        phone_seo=row.get('phone_seo', ''),
+        phone_ad=row.get('phone_ad', ''),
+        phone_common=row.get('phone_common', ''),
+        all_phones=row.get('all_phones', ''),
+        email=row.get('email', ''),
+        address=row.get('address', ''),
+        # новые колонки могут отсутствовать в старых csv - берём по умолчанию.
+        country=row.get('country', ''),
+        telegram=row.get('telegram', ''),
+        whatsapp=row.get('whatsapp', ''),
+    )
+
+
 def _load_kp_csv(project_id: str) -> dict[str, KPRow]:
-    """Прочитать catalogs/{proj}-kp.csv → {домен: KPRow}. {} если нет файла."""
+    """catalogs/{proj}-kp.csv → {домен: KPRow}. У СНГ-стран несколько городов на
+    одном домене - в dict берём ПЕРВЫЙ (главный чекер проверяет сайт, ему нужен
+    один город на домен; порядок как раньше). {} если нет файла."""
     p = _csv_path(project_id)
     if not p.exists():
         return {}
     out: dict[str, KPRow] = {}
     with open(p, encoding='utf-8') as f:
         for row in csv.DictReader(f):
-            dom = (row.get('domain') or '').strip().lower()
-            if not dom:
-                continue
-            out[dom] = KPRow(
-                domain=dom, city=row.get('city', ''),
-                phone_seo=row.get('phone_seo', ''),
-                phone_ad=row.get('phone_ad', ''),
-                phone_common=row.get('phone_common', ''),
-                all_phones=row.get('all_phones', ''),
-                email=row.get('email', ''),
-                address=row.get('address', ''),
-                # новые колонки могут отсутствовать в старых csv - берём по умолчанию.
-                country=row.get('country', ''),
-                telegram=row.get('telegram', ''),
-                whatsapp=row.get('whatsapp', ''),
-            )
+            kr = _row_from_csv(row)
+            if kr and kr.domain not in out:
+                out[kr.domain] = kr
     return out
+
+
+def _load_kp_rows_csv(project_id: str) -> list[KPRow]:
+    """ВСЕ строки КП списком (каждый город отдельно, СНГ на общем домене - тоже)."""
+    p = _csv_path(project_id)
+    if not p.exists():
+        return []
+    with open(p, encoding='utf-8') as f:
+        return [kr for kr in (_row_from_csv(r) for r in csv.DictReader(f)) if kr]
 
 
 def normalize_tg(s: Optional[str]) -> str:
@@ -665,7 +703,8 @@ def _addr_on_page(text: str, kp_addr: str) -> str:
     return ''
 
 
-def check_variables(html: str, domain: str, contacts_html: str = "") -> dict:
+def check_variables(html: str, domain: str, contacts_html: str = "",
+                    row: 'KPRow' = None) -> dict:
     """Сверяет контактные переменные главной страницы поддомена с КП: телефоны
     (поиск/реклама/общий - по правилу «номер на сайте входит в набор КП города»),
     почта, адрес, Telegram, WhatsApp. Город/страна проверяются отдельно
@@ -679,9 +718,12 @@ def check_variables(html: str, domain: str, contacts_html: str = "") -> dict:
     находился («⚠ адрес не найден» у всех городов). Телефоны/почта берутся из
     шапки главной и от этого параметра не зависят.
     """
-    kp = load_kp_for_domain(domain)
+    # row задан (конкретный город - у СНГ несколько городов на одном домене) -
+    # сверяем его; иначе берём город по домену из КП (как раньше).
     host = _norm_host(domain)
-    row = kp.get(host) if kp else None
+    if row is None:
+        kp = load_kp_for_domain(domain)
+        row = kp.get(host) if kp else None
     out = {"domain": host, "city": row.city if row else "",
            "country": row.country if row else "", "matched": bool(row), "fields": []}
     if not row:

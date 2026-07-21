@@ -193,9 +193,13 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             joined = ' '.join(str(c) for c in row if c)
             m = re.search(r'([a-z0-9-]+\.)*(?:inmetprom|stalmetural|mepen|aviastal|smg)\.(?:ru|uz|kz|by|az|kg|am)', joined)
             host = _norm_host(m.group(0)) if m else ''
-        if not host or host in seen:
+        # Дедуп по (домен, ГОРОД), а не только по домену: у СНГ-стран все города
+        # делят один сайт (stalmetural.kz/.by/.uz - поддоменов нет), но это РАЗНЫЕ
+        # города КП - храним каждый (полный список городов в отчёте «Проверка КП»).
+        _key = (host, (city or '').strip().lower())
+        if not host or _key in seen:
             continue
-        seen.add(host)
+        seen.add(_key)
         # Все телефоны города (нормализованные, 10 цифр) из всех тел. колонок -
         # сайт может статически показывать любой из них (Общий/SEO/Сотовый).
         all_norm = []
