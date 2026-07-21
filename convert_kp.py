@@ -20,6 +20,10 @@ from openpyxl import load_workbook
 from kp import KP_LAYOUT, CATALOGS_DIR, _norm_host
 from kp import split_phones as _split_phones
 
+# Домены, которые НЕ проверяем нигде (по просьбе заказчика) - даже если они есть
+# в КП-таблице. Строку с таким доменом пропускаем при сборке CSV.
+_EXCLUDE_HOSTS = {'steemet.uz'}
+
 
 def _phone_columns(headers):
     """Индексы всех телефонных колонок (Общий/Реклама/SEO/Сотовый/основной/
@@ -193,6 +197,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             joined = ' '.join(str(c) for c in row if c)
             m = re.search(r'([a-z0-9-]+\.)*(?:inmetprom|stalmetural|mepen|aviastal|smg)\.(?:ru|uz|kz|by|az|kg|am)', joined)
             host = _norm_host(m.group(0)) if m else ''
+        if host in _EXCLUDE_HOSTS:          # исключённый домен - не проверяем нигде
+            continue
         # Дедуп по (домен, ГОРОД), а не только по домену: у СНГ-стран все города
         # делят один сайт (stalmetural.kz/.by/.uz - поддоменов нет), но это РАЗНЫЕ
         # города КП - храним каждый (полный список городов в отчёте «Проверка КП»).
