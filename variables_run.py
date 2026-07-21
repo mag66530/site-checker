@@ -17,6 +17,7 @@ variables_run.py - фоновый прогон «Проверки КП» (пун
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -84,8 +85,8 @@ def _proxy_parts(proxy):
     return pr.hostname, pr.port or 8080, headers
 
 
-def _fetch_one(dom, proxy_parts, ua=None):
-    """Скачивает https://<dom>/ через http.client (CONNECT-туннель с
+def _fetch_one(dom, proxy_parts, ua=None, path='/'):
+    """Скачивает https://<dom><path> через http.client (CONNECT-туннель с
     Proxy-Authorization в CONNECT-запросе - надёжный способ прокси-авторизации
     для HTTPS, в отличие от aiohttp, который упорно отдавал 407). Один редирект
     в пределах того же/родственного хоста поддерживаем. Каждый вызов - свежее
@@ -155,9 +156,38 @@ def _fetch_one(dom, proxy_parts, ua=None):
                 pass
 
     try:
-        return _get(dom, '/')
+        return _get(dom, path or '/')
     except Exception as e:  # noqa: BLE001
         return '', (str(e)[:200] or e.__class__.__name__)
+
+
+# Ссылка на «Контакты» в навигации главной - чтобы догрузить эту страницу для
+# сверки адреса (у части проектов - МПЭ/mepen - адрес выводится только там, в
+# карточке «Адрес: …», а в подвале главной его нет). Берём <a> с текстом
+# «Контакты» либо href с /contacts//kontakty/ на этом же хосте.
+_CONTACTS_LINK_RE = re.compile(
+    r'<a\b[^>]*?href=["\']([^"\']+)["\'][^>]*>(?:(?!</a>)[\s\S]){0,80}?контакт',
+    re.I)
+_CONTACTS_PATH_RE = re.compile(
+    r'href=["\']([^"\']*/(?:contacts?|kontakt\w*)/[^"\']*)["\']', re.I)
+
+
+def _find_contacts_path(html, dom):
+    """Путь страницы «Контакты» на этом же хосте (из навигации главной) или ''."""
+    from urllib.parse import urlparse, urljoin
+    from kp import _norm_host
+    host = _norm_host(dom)
+    cands = ([m.group(1) for m in list(_CONTACTS_LINK_RE.finditer(html or ''))[:6]]
+             + [m.group(1) for m in list(_CONTACTS_PATH_RE.finditer(html or ''))[:6]])
+    for href in cands:
+        href = (href or '').strip()
+        if not href or href.startswith(('#', 'tel:', 'mailto:', 'javascript:')):
+            continue
+        p = urlparse(urljoin(f'https://{dom}/', href))
+        if (p.hostname and _norm_host(p.hostname) == host
+                and p.path and p.path != '/'):
+            return p.path + (f'?{p.query}' if p.query else '')
+    return ''
 
 
 def _проверить_ссылку(url, base_dom, proxy_parts):
@@ -471,6 +501,18 @@ def main() -> int:
         if err:                       # html есть, но страница неполная
             _n_partial += 1
         var = kpmod.check_variables(html, dom)
+        # Адрес не нашли в шапке/подвале главной? У части проектов (МПЭ/mepen) он
+        # только на «Контактах». Догружаем эту страницу и пересверяем адрес -
+        # ТОЛЬКО когда нужно (для СМУ/ИМП адрес в подвале, лишних запросов нет).
+        _af = next((f for f in var["fields"] if f.get("field") == "Адрес"), None)
+        if html and _af and _af.get("status") == "warn":
+            _cpath = _find_contacts_path(html, dom)
+            if _cpath:
+                _ch, _cerr = _fetch_one(dom, _proxy_parts(proxy), path=_cpath)
+                if _ch and not _cerr:
+                    var = kpmod.check_variables(html, dom, contacts_html=_ch)
+                    _stamp(f'    {dom}: адрес не в подвале - догрузил «Контакты» '
+                           f'({_cpath})')
         # WhatsApp: кнопка есть, но ссылка не ведёт в WhatsApp - проверяем ссылку
         # вживую и уточняем код (404 и т.п.), чтобы в примечании был точный ответ.
         for f in var.get("fields", []):

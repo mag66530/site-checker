@@ -665,13 +665,19 @@ def _addr_on_page(text: str, kp_addr: str) -> str:
     return ''
 
 
-def check_variables(html: str, domain: str) -> dict:
+def check_variables(html: str, domain: str, contacts_html: str = "") -> dict:
     """Сверяет контактные переменные главной страницы поддомена с КП: телефоны
     (поиск/реклама/общий - по правилу «номер на сайте входит в набор КП города»),
     почта, адрес, Telegram, WhatsApp. Город/страна проверяются отдельно
     region_checker'ом. Возвращает {domain, city, country, matched, fields:[...]}
     где каждое поле = {field, expected, found, status, note}.
     status: ok | ok_set | bug | warn | na.
+
+    contacts_html - HTML страницы «Контакты» (необязательно). У части проектов
+    (МПЭ/mepen) адрес города выводится ТОЛЬКО там, в карточке «Адрес: …», а в
+    подвале главной его нет - без этой страницы адрес по одной главной не
+    находился («⚠ адрес не найден» у всех городов). Телефоны/почта берутся из
+    шапки главной и от этого параметра не зависят.
     """
     kp = load_kp_for_domain(domain)
     host = _norm_host(domain)
@@ -732,10 +738,29 @@ def check_variables(html: str, domain: str) -> dict:
     else:
         add("Почта", exp_mail, "—", "warn", "почта на сайте не найдена")
 
-    # Адрес сверяем по ВСЕМУ тексту шапки+подвала (там на сайтах СМУ и лежит
-    # адрес города). Точечный сниппет ловил не то место (напр. «Город: … изменить»)
-    # и давал ложное «адрес не найден» - хотя адрес есть в подвале.
-    haystack = site.get("full_text") or site.get("address") or ""
+    # Адрес сверяем по ВСЕМУ тексту шапки+подвала главной (там на сайтах СМУ и
+    # лежит адрес города), А ТАКЖЕ по странице «Контакты», если её передали: у
+    # части проектов (МПЭ/mepen) адрес только на «Контактах», в карточке
+    # «Адрес: …», а в подвале главной его нет - тогда сверка по одной главной
+    # давала ложное «адрес не найден». Точечный сниппет ловил не то место (напр.
+    # «Город: … изменить») - поэтому сверяем по всему тексту.
+    contacts_text = ""
+    if contacts_html:
+        try:
+            from text_checker import html_to_visible_text
+            contacts_text = html_to_visible_text(contacts_html)
+        except Exception:
+            contacts_text = contacts_html
+    haystack = " ".join(x for x in (site.get("full_text"),
+                                    site.get("address"), contacts_text) if x)
+
+    def _found_addr() -> str:
+        # Чистый адрес «По факту» по метке «Адрес:»: сначала главная, потом
+        # «Контакты»; в последнюю очередь - сырой текст из шапки/подвала.
+        return (_site_address_full(html)
+                or _site_address_full(contacts_html or "")
+                or (site.get("address") or "").strip())
+
     if not row.address:
         add("Адрес", "—", "", "na", "нет в КП")
     elif not re.search(r'[а-яё]', _norm_addr(row.address)):
@@ -748,13 +773,14 @@ def check_variables(html: str, domain: str) -> dict:
             "в КП адрес не распознан (нет названия улицы) - проверьте КП")
     elif address_match(haystack, row.address):
         add("Адрес", row.address,
-            _addr_on_page(haystack, row.address) or "совпадает с КП", "ok")
+            _addr_on_page(haystack, row.address) or _found_addr()
+            or "совпадает с КП", "ok")
     else:
         # Адрес из КП не совпал. Показываем, ЧТО реально на сайте (иначе выходило
         # непонятное «По факту: —», хотя адрес на странице есть - просто другой).
-        # Предпочитаем адрес по метке «Адрес:» со всей страницы (чистый), и только
+        # Предпочитаем адрес по метке «Адрес:» (главная → «Контакты»), и только
         # если его нет - берём из шапки/подвала. Так в «на сайте» нет мусора.
-        site_addr = _site_address_full(html) or (site.get("address") or "").strip()
+        site_addr = _found_addr()
         # site.get('address') из шапки/подвала бывает мусорным (схваченные
         # категории без номера дома) - показываем как «другой адрес» только
         # если это правда похоже на адрес (есть номер дома).
@@ -764,7 +790,7 @@ def check_variables(html: str, domain: str) -> dict:
         else:
             add("Адрес", row.address, "—", "warn",
                 "адрес из КП на сайте не найден (в шапке/подвале/по метке "
-                "«Адрес:») - проверьте вручную")
+                "«Адрес:», в т.ч. на «Контактах») - проверьте вручную")
 
     # Telegram: СТРОГО сверяем аккаунт из КП с аккаунтом на сайте (по просьбе
     # заказчика). Аккаунт в ссылке t.me/<username> нормализуем к username.
