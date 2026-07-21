@@ -510,21 +510,21 @@ def main() -> int:
             _n_partial += 1
         var = kpmod.check_variables(html, dom)
         # Адрес не нашли в шапке/подвале главной? У части проектов (МПЭ/mepen) он
-        # только на «Контактах». Догружаем эту страницу и пересверяем адрес -
-        # ТОЛЬКО когда нужно (для СМУ/ИМП адрес в подвале, лишних запросов нет).
+        # только на «Контактах». Догружаем эту страницу и пересверяем адрес.
+        # ВАЖНО: только если ГЛАВНАЯ загрузилась чисто (not err). Если главная
+        # упала (500/обрыв), «Контакты» тоже не откроются - незачем их дёргать:
+        # иначе на сотне не загрузившихся доменов фаза «сверяю с КП» висела
+        # минутами на ретраях. Один лёгкий повтор - главная-то грузится нормально.
         _af = next((f for f in var["fields"] if f.get("field") == "Адрес"), None)
-        if html and _af and _af.get("status") == "warn":
+        if html and not err and _af and _af.get("status") == "warn":
             _cpath = _find_contacts_path(html, dom)
             if _cpath:
-                # Догрузка «Контактов» с парой мягких повторов: сервер mepen на
-                # доп. запрос тоже иногда отдаёт 500/рвёт соединение - без ретрая
-                # адрес зря оставался «не найден».
                 _ch, _cerr = '', 'not tried'
-                for _try in range(3):
+                for _try in range(2):
                     _ch, _cerr = _fetch_one(dom, _proxy_parts(proxy), path=_cpath)
                     if _ch and not _cerr:
                         break
-                    time.sleep(1.5 * (_try + 1))
+                    time.sleep(1.0)
                 if _ch and not _cerr:
                     var = kpmod.check_variables(html, dom, contacts_html=_ch)
                     _stamp(f'    {dom}: адрес не в подвале - догрузил «Контакты» '
