@@ -313,7 +313,13 @@ def main() -> int:
                    'прогоняю все формы.')
     if forms_filter:
         base_config = base_config.rstrip() + '\n\nТОЛЬКО_ФОРМЫ = ' + repr(list(forms_filter)) + '\n'
-        _stamp(f'Выбрано форм: {len(forms_filter)} (остальные пропускаем).')
+        # Дублируем выбор в окружение: движок читает его НАПРЯМУЮ (тот же процесс),
+        # без круговорота через config.py на диске - надёжнее, если рабочий config
+        # почему-то прочитается без ТОЛЬКО_ФОРМЫ (тогда прогонялись ВСЕ формы).
+        import json as _json
+        os.environ['FORMS_ONLY'] = _json.dumps(list(forms_filter), ensure_ascii=False)
+        _stamp(f'Выбрано форм: {len(forms_filter)} (остальные пропускаем): '
+               f'{", ".join(map(str, forms_filter))}')
 
     # Базовый домен для подмены берём НЕ из первой строки cities.csv, а из самого
     # конфига: тот город-домен, что реально встречается в URL-ах СТРАНИЦ. Иначе если
