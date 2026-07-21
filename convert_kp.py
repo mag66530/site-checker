@@ -153,6 +153,16 @@ def convert(project_id: str, xlsx_path: str) -> Path:
         return '' if v.lower() in ('нет', '-', '#n/a', 'подтвердить',
                                    'подтвердить телефон') else v
 
+    # Предпроход: домены, у которых ЕСТЬ своя ссылка (непустая колонка url) -
+    # это города-«владельцы» своего сайта. Нужен, чтобы город без своей ссылки,
+    # чей домен уже принадлежит владельцу, не попал в отчёт (см. ниже).
+    url_hosts = set()
+    for row in ws.iter_rows(min_row=hdr_row_idx + 1, values_only=True):
+        if row and any(row):
+            h = _norm_host(cell(row, ci_url))
+            if h:
+                url_hosts.add(h)
+
     rows_out = []
     seen = set()
     for row in ws.iter_rows(min_row=hdr_row_idx + 1, values_only=True):
@@ -160,22 +170,26 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             continue
         city = cell(row, ci_city)
         url = cell(row, ci_url)
-        # домен: из url-колонки, либо ищем по строке любой домен сети
-        # (.ru/.uz/.kz/.by - у МПЭ есть Узбекистан и Казахстан)
+        # Домен берём из колонки url (это «своя ссылка» города).
         host = _norm_host(url)
         if not host:
+            # Своей ссылки нет. Пробуем достать домен сети из строки (для проектов
+            # без явной колонки url, напр. АПС). НО: если этот домен уже есть у
+            # города-владельца ссылки - значит это город-«спутник» без своего сайта
+            # (у СНГ одна ссылка на всю страну: stalmetural.kz/.by/.uz). Такие в
+            # отчёт НЕ берём - иначе они сверялись бы с чужим городским сайтом и
+            # давали ложные ошибки. В отчёте остаётся один город на ссылку.
             joined = ' '.join(str(c) for c in row if c)
             m = re.search(r'([a-z0-9-]+\.)*(?:inmetprom|stalmetural|mepen|aviastal|smg)\.(?:ru|uz|kz|by|az|kg|am)', joined)
             host = _norm_host(m.group(0)) if m else ''
+            if host and host in url_hosts:
+                continue                     # спутник владельца ссылки - пропускаем
         if host in _EXCLUDE_HOSTS:          # исключённый домен - не проверяем нигде
             continue
-        # Дедуп по (домен, ГОРОД), а не только по домену: у СНГ-стран все города
-        # делят один сайт (stalmetural.kz/.by/.uz - поддоменов нет), но это РАЗНЫЕ
-        # города КП - храним каждый (полный список городов в отчёте «Проверка КП»).
-        _key = (host, (city or '').strip().lower())
-        if not host or _key in seen:
+        # Дедуп по ДОМЕНУ: один город (владелец ссылки) на один сайт.
+        if not host or host in seen:
             continue
-        seen.add(_key)
+        seen.add(host)
         # Все телефоны города (нормализованные, 10 цифр) из всех тел. колонок -
         # сайт может статически показывать любой из них (Общий/SEO/Сотовый).
         all_norm = []
