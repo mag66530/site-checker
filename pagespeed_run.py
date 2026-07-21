@@ -59,31 +59,47 @@ def _log(msg: str) -> None:
 
 
 # ── Сбор URL ─────────────────────────────────────────────────────────────────
+def _load_products(pid: str, project: dict, sources) -> list[str]:
+    """Товарные pathname'ы для выборки: сперва локальная база листингов
+    (catalogs/{pid}-products.csv, самый надёжный источник - как в проверке
+    «30 минут»), затем - разовая загрузка sitemap. Обе неудачи не фатальны:
+    вернём пустой список, и товары просто не попадут в прогон."""
+    # 1) База листингов из репозитория (офлайн, без сети).
+    try:
+        from product_links import load_product_links
+        base = load_product_links(pid)
+        if base and base.get("pathnames"):
+            _log(f"Товары из базы листингов: {len(base['pathnames'])}")
+            return list(base["pathnames"])
+    except Exception as e:  # noqa: BLE001
+        _log(f"⚠ База листингов недоступна ({e}) - пробую sitemap.")
+
+    # 2) Fallback - sitemap (нужна сеть). Правильная сигнатура: project-конфиг +
+    #    известные категории/фильтры (чтобы отсечь их из товаров).
+    try:
+        import asyncio
+        import sitemap
+        sm = asyncio.run(sitemap.load_product_pathnames(
+            project, sources.categories, sources.filters,
+            log=lambda lvl, msg: _log(msg)))
+        paths = (sm or {}).get("pathnames") or []
+        _log(f"Товары из sitemap: {len(paths)}")
+        return list(paths)
+    except Exception as e:  # noqa: BLE001
+        _log(f"⚠ Товары из sitemap недоступны ({e}) - прогон без товаров.")
+        return []
+
+
 def _sample_urls(pid: str, per_type: int, want_products: bool) -> list[tuple[str, str]]:
     """Выборка по типам из каталогов проекта (только главный домен - Москва)."""
     project = S.load_project_config(pid)
     sources = S.load_sources(project)
 
-    # Товары - из sitemap (кэш или разовая загрузка). Не фатально при ошибке.
+    # Товары - из базы листингов (или sitemap). Не фатально при ошибке.
     if want_products:
-        try:
-            info = None
-            try:
-                info = __import__("sitemap").get_cached_products_info(pid)
-            except Exception:
-                info = None
-            paths = (info or {}).get("pathnames") if info else None
-            if not paths:
-                import asyncio
-                import sitemap
-                data = asyncio.run(sitemap.load_product_pathnames(
-                    pid, project.get("sitemap_url", ""), force=False))
-                paths = (data or {}).get("pathnames") or []
-            sources.products = list(paths)
-            _log(f"Sitemap: товаров доступно {len(sources.products)}")
-        except Exception as e:  # noqa: BLE001
-            _log(f"⚠ Товары из sitemap недоступны ({e}) - пропускаю этот тип.")
-            sources.products = []
+        sources.products = _load_products(pid, project, sources)
+        if not sources.products:
+            _log("⚠ Товаров не нашлось - в этом прогоне тип «Товар» будет пропущен.")
 
     plan = S.build_plan(
         sources,

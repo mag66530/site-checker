@@ -346,7 +346,10 @@ if scope.startswith('Выборка'):
                                    help='Главная/Каталог/Категории/Фильтры (+Товары). '
                                         'PageSpeed медленный, поэтому берём выборку.')
     with c2:
-        want_products = st.checkbox('Включить товары (из sitemap)', value=True)
+        want_products = st.checkbox(
+            'Включить товары', value=True,
+            help='Товары берутся из базы листингов проекта '
+                 '(catalogs/<проект>-products.csv), при её отсутствии - из sitemap.')
     st.caption('Проверяются главный домен проекта: главная, каталог, N категорий, '
                'N фильтров и (опц.) N товаров.')
 else:
