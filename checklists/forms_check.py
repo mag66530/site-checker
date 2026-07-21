@@ -405,6 +405,16 @@ if not pid_key:
     st.info('Выберите проект, чтобы настроить и запустить проверку форм.')
     st.stop()
 proj = PROJECTS[pid_key]
+
+# PID и лог прогона - ПЕР-ПРОЕКТНЫЕ (cache/forms/<pid>/…), а не один файл на всё
+# приложение. С глобальным файлом проверка, запущенная одним человеком, гасила
+# кнопку и роняла страницу у другого (чужая сессия не знала проект → PROJECTS[None]).
+# Теперь разные проекты гоняются с разных компьютеров независимо, а один и тот же
+# проект честно показывает «идёт», кто бы его ни запустил. Переменные модульные -
+# переопределяем здесь, чтобы _read_pid()/_launch_background() читали новые пути.
+PID_FILE = ROOT / 'cache' / 'forms' / pid_key / 'run.pid'
+LOG_FILE = ROOT / 'cache' / 'forms' / pid_key / 'run.log'
+
 st.markdown(
     f"Будут проверены формы сайта **{proj['name']}** (`{proj['domain']}`): "
     'обратная связь, заявки, расчёты, оформление заказа и т.п. - по настройкам '
@@ -1108,8 +1118,10 @@ st.divider()
 st.subheader('Прогресс')
 
 _sel = pid_key
-_run_proj = st.session_state.get('forms_project')      # какой проект реально гоняли
-_this = (_run_proj == _sel)                            # выбранный == запущенный
+# Факт «идёт проверка» берём из ПЕР-ПРОЕКТНОГО PID/лога - его видят все сессии
+# (в т.ч. с другого компьютера). _own = запускали ли ИМЕННО в этой сессии -
+# нужно только для секундомера/ETA и подписи «Последний запуск».
+_own = (st.session_state.get('forms_project') == _sel)
 xlsx = ROOT / 'cache' / 'forms' / _sel / 'log_forms.xlsx'
 
 # Готовность определяем ПО ЛОГУ (движок пишет «✅ ВСЁ ГОТОВО»), а не только по
@@ -1139,12 +1151,18 @@ def _forms_done_live(txt: str) -> int:
     return n
 
 
-if _this and st.session_state.get('forms_started'):
+if _own and st.session_state.get('forms_started'):
     st.caption(f'Последний запуск: {st.session_state["forms_started"]}')
 
-if _alive and _this and not _done_by_log:
-    # Идёт проверка ВЫБРАННОГО проекта - живой прогресс
-    _ts = st.session_state.get('forms_started_ts')
+if _alive and not _done_by_log:
+    # Идёт проверка ВЫБРАННОГО проекта (запущена в этой ИЛИ в другой сессии /
+    # на другом компьютере - per-проектный PID/лог видят все). Секундомер и ETA
+    # считаем только своей сессии (_own); чужой прогон - прогресс по логу.
+    if not _own:
+        st.info('▶ Проверку этого проекта запустили в другой сессии (на другом '
+                'компьютере). Здесь виден живой прогресс по логу; секундомер и '
+                'остаток считаются у того, кто запустил.')
+    _ts = st.session_state.get('forms_started_ts') if _own else None
     _elapsed = int(time.time() - _ts) if _ts else None
     _mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
     # Прогресс по живому логу (обновляется сразу); подстраховка - строки Excel.
@@ -1152,8 +1170,8 @@ if _alive and _this and not _done_by_log:
     _xl = _rows_done(xlsx)
     if _xl and _xl > _done:
         _done = _xl
-    _total = st.session_state.get('forms_expected_total') \
-        or _count_expected(_sel) * st.session_state.get('forms_cities_n', 1)
+    _total = (st.session_state.get('forms_expected_total') if _own else 0) \
+        or _count_expected(_sel) * (st.session_state.get('forms_cities_n', 1) if _own else 1)
     # Оценка приблизительная (кроме форм в прогон попадают проверки 2.13/2.12,
     # поля, оформление) - реальный счётчик может её превысить. Не показываем
     # «47 из ~40»: подтягиваем «всего» минимум до фактически проверенного.
@@ -1186,7 +1204,7 @@ if _alive and _this and not _done_by_log:
     time.sleep(2)
     st.rerun()
 
-elif _alive and _this and _done_by_log:
+elif _alive and _done_by_log:
     # Процесс ещё числится живым (в облаке PID «висит»), но лог говорит «готово».
     # Снимаем зависший PID и перерисовываем - дальше сработает ветка результата.
     try:
@@ -1195,19 +1213,12 @@ elif _alive and _this and _done_by_log:
         pass
     st.rerun()
 
-elif _alive and not _this:
-    # Идёт проверка ДРУГОГО проекта - не путаем
-    st.info(f'Сейчас идёт проверка проекта «{PROJECTS[_run_proj]["name"]}». '
-            'Переключи выбор проекта на него, чтобы видеть прогресс.')
-    time.sleep(2)
-    st.rerun()
-
 else:
-    # Ничего не идёт. Лог/статус показываем только для прогона ВЫБРАННОГО проекта.
-    if _this and st.session_state.get('forms_started') and \
-            LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
-        # Итоговое время прогона = последняя запись лога минус старт.
-        _st_ts = st.session_state.get('forms_started_ts')
+    # Ничего не идёт для выбранного проекта. Лог/результат берём из per-проектных
+    # файлов - их видит любая сессия (не только та, что запускала).
+    if LOG_FILE.exists() and LOG_FILE.read_text(encoding='utf-8', errors='ignore').strip():
+        # Итоговое время прогона = последняя запись лога минус старт (только своя сессия).
+        _st_ts = st.session_state.get('forms_started_ts') if _own else None
         _fin_ts = LOG_FILE.stat().st_mtime
         _spent = int(_fin_ts - _st_ts) if _st_ts else None
         _spent_txt = f' · ⏱ заняло {_spent // 60}:{_spent % 60:02d}' if _spent and _spent > 0 else ''
