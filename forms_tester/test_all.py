@@ -6601,10 +6601,30 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     # станет «под вопросом» (см. блок подсчёта).
                     if not _перекрыто:
                         page.wait_for_timeout(250)     # дать 1-му POST зарегистрироваться
+                        # Реальный юзер быстрым дабл-кликом отправит второй раз
+                        # ТОЛЬКО если кнопка ещё принимает клики. JS b.click()
+                        # игнорит disabled (там он сам no-op по спецификации), но
+                        # НЕ уважает pointer-events:none / aria-disabled - поэтому
+                        # проверяем их ЯВНО: если форма СИНХРОННО залочила кнопку
+                        # так (это защита - реальный клик бы не прошёл), второй раз
+                        # НЕ жмём → останется 1 POST → «защищена». СКРЫТОСТЬ/
+                        # перекрытие успех-оверлеем тут НЕ проверяем: на (медленном)
+                        # сайте оверлея на 250 мс ещё нет, а проверка «спрятана» и
+                        # вернула бы прежний флаки (её async-появление ≠ защита от
+                        # быстрого дабл-клика).
                         try:
-                            sub.evaluate("b => b.click()")
+                            _залочена2 = bool(sub.evaluate(
+                                "b => { const cs = getComputedStyle(b);"
+                                " return !!(b.disabled"
+                                "   || b.getAttribute('aria-disabled')==='true'"
+                                "   || cs.pointerEvents==='none'); }"))
                         except Exception:  # noqa: BLE001
-                            pass    # кнопка disabled/исчезла - второй сабмит не ушёл
+                            _залочена2 = True   # кнопка исчезла - нажать нельзя
+                        if not _залочена2:
+                            try:
+                                sub.evaluate("b => b.click()")
+                            except Exception:  # noqa: BLE001
+                                pass    # кнопка disabled/исчезла - второй не ушёл
             except Exception:  # noqa: BLE001
                 pass
 
