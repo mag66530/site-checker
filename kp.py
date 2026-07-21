@@ -838,10 +838,17 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     # заказчика). Аккаунт в ссылке t.me/<username> нормализуем к username.
     exp_tg = row.telegram_norm()
     site_tg = set(site.get("telegram", []))
+    _tg_raw = (row.telegram or "").strip()
+    _tg_found = (("есть: " + ", ".join("@" + t for t in sorted(site_tg)[:2]))
+                 if site_tg else "—")
     if not exp_tg:
-        add("Telegram", "—",
-            ("есть: " + ", ".join("@" + t for t in sorted(site_tg)[:2]))
-            if site_tg else "—", "na", "нет в КП")
+        if _tg_raw and _tg_raw not in ("—", "-"):
+            # В КП есть значение, но это не Telegram-ник (напр. «2» / мусор) -
+            # ошибка КП, как у телефонов, а не «нет в КП».
+            add("Telegram", _tg_raw, _tg_found, "bug",
+                f"в КП значение «{_tg_raw}» не распознано как Telegram-ник - проверьте КП")
+        else:
+            add("Telegram", "—", _tg_found, "na", "нет в КП")
     elif exp_tg in site_tg:
         add("Telegram", "@" + exp_tg, "@" + exp_tg, "ok", "совпадает с КП")
     elif site_tg:
@@ -858,10 +865,17 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     exp_wa = row.whatsapp_norm()
     site_wa = set(site.get("whatsapp", []))
     wa_anchor = site.get("whatsapp_anchor_urls", [])    # <a> с текстом «вотсап»
-    if not exp_wa:
-        add("WhatsApp", "—",
-            ("есть: " + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]))
-            if site_wa else "—", "na", "нет в КП")
+    _wa_raw = (row.whatsapp or "").strip()
+    _wa_valid = len(re.sub(r"\D", "", exp_wa)) >= 9     # настоящий номер, не «2»
+    _wa_found = (("есть: " + ", ".join(_fmt(w) for w in sorted(site_wa)[:2]))
+                 if site_wa else "—")
+    if not _wa_valid:
+        if _wa_raw and _wa_raw not in ("—", "-"):
+            # В КП есть значение, но это не номер (напр. «2») - ошибка КП.
+            add("WhatsApp", _wa_raw, _wa_found, "bug",
+                f"в КП значение «{_wa_raw}» не распознано как номер WhatsApp - проверьте КП")
+        else:
+            add("WhatsApp", "—", _wa_found, "na", "нет в КП")
     elif exp_wa in site_wa:
         add("WhatsApp", _fmt(exp_wa), _fmt(exp_wa), "ok", "совпадает с КП")
     elif site_wa:
