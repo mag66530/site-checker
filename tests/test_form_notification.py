@@ -12,6 +12,32 @@ sys.path.insert(0, str(ROOT / "forms_tester"))
 t = pytest.importorskip("test_all")
 
 
+class _FakeBtnTxt:
+    """Мини-локатор для _текст_кнопки: inner_text + get_attribute."""
+    def __init__(self, inner="", value="", aria=""):
+        self._inner = inner
+        self._attrs = {"value": value, "aria-label": aria}
+
+    def inner_text(self, timeout=0):
+        return self._inner
+
+    def get_attribute(self, name):
+        return self._attrs.get(name, "")
+
+
+def test_текст_кнопки_читает_value_у_input_submit():
+    # <button>Отправлено</button> - через inner_text.
+    assert t._текст_кнопки(_FakeBtnTxt(inner="Отправлено")) == "Отправлено"
+    # <input type=submit value="Отправлено"> - inner_text ПУСТОЙ, берём value.
+    # Именно из-за этого тул раньше не видел смену кнопки на input-формах
+    # (напр. «Срочный заказ») и ложно писал «нет подтверждения».
+    assert t._текст_кнопки(_FakeBtnTxt(inner="", value="Отправлено")) == "Отправлено"
+    # aria-label - последний фолбэк.
+    assert t._текст_кнопки(_FakeBtnTxt(inner="", value="", aria="Отправить")) == "Отправить"
+    # ничего нет → пустая строка (не падаем).
+    assert t._текст_кнопки(_FakeBtnTxt()) == ""
+
+
 def test_маркеры_подтверждения_срабатывают():
     ok = [
         "Спасибо, ваша заявка принята!",
