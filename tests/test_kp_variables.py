@@ -96,6 +96,46 @@ def test_check_variables_garbage_kp_values_are_flagged():
         row.phone_seo, row.phone_common, row.email, row.address = saved
 
 
+def test_check_variables_address_from_contacts():
+    """Адрес на «Контактах», а не в подвале главной (кейс МПЭ/mepen): по одной
+    главной адрес не находится (⚠), с переданным html «Контактов» - находится."""
+    m = kp.load_kp("smu")
+    row = m.get("stalmetural.ru")
+    assert row and row.address, "нужна строка КП с адресом"
+
+    # Главная: телефон/почта в шапке ЕСТЬ, адреса НЕТ (как у mepen).
+    home = ('<header><a href="tel:+74991303669">+7 (499) 130-36-69</a> '
+            '<a href="mailto:msk@stalmetural.ru">msk@stalmetural.ru</a></header>'
+            '<footer>Стальметурал политика конфиденциальности</footer>')
+    r0 = kp.check_variables(home, "stalmetural.ru")
+    by0 = {f["field"]: f for f in r0["fields"]}
+    assert by0["Адрес"]["status"] == "warn"      # без «Контактов» - не найден
+    assert by0["Почта"]["status"] == "ok"        # почта из шапки не пострадала
+
+    # Страница «Контакты» с карточкой «Адрес: …» (формат mepen: «улица …, дом N»).
+    contacts = ('<main><div class="card"><h3>Стальметурал в Москве</h3>'
+                f'Адрес: 115477, г. Москва, {row.address} '
+                'Телефон 8 (499) 130-36-69 Email msk@stalmetural.ru</div></main>')
+    r1 = kp.check_variables(home, "stalmetural.ru", contacts_html=contacts)
+    by1 = {f["field"]: f for f in r1["fields"]}
+    assert by1["Адрес"]["status"] == "ok"        # с «Контактами» - найден и совпал
+    assert by1["Почта"]["status"] == "ok"
+
+
+def test_find_contacts_path():
+    """variables_run находит ссылку «Контакты» на том же хосте (для догрузки)."""
+    import variables_run as vr
+    home = ('<nav><a href="/catalog/">Каталог</a>'
+            '<a href="/kontakty/">Контакты</a></nav>')
+    assert vr._find_contacts_path(home, "minsk.mepen.by") == "/kontakty/"
+    # href с /contacts/ ловится, даже если текст не «Контакты»
+    assert vr._find_contacts_path('<a href="/contacts/">Contact</a>', "x.ru") == "/contacts/"
+    # чужой хост игнорируем (ссылка на соцсеть с текстом «Контакты»)
+    assert vr._find_contacts_path('<a href="https://vk.com/x">Контакты</a>', "x.ru") == ""
+    # ссылки нет - пусто
+    assert vr._find_contacts_path("<a href='/about/'>О нас</a>", "x.ru") == ""
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
