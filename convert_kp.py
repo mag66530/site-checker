@@ -100,34 +100,6 @@ def _pick_sheet(wb, preferred: str):
         f'в «{preferred}» либо укажите её название.')
 
 
-def _looks_tg(v: str) -> bool:
-    """Похоже на Telegram-ник (буквы), а не число/пусто."""
-    v = (v or '').strip().lower()
-    if not v or re.fullmatch(r'[\d.,\s]+', v):
-        return False
-    return bool(re.search(r'[a-z][a-z0-9_]{2,}', v))
-
-
-def _looks_wa(v: str) -> bool:
-    """Похоже на телефон WhatsApp (>=7 цифр)."""
-    return len(re.sub(r'\D', '', v or '')) >= 7
-
-
-def _msgr_value(row, cands, is_valid):
-    """Значение мессенджера из СТРОКИ: среди колонок-кандидатов (в КП бывают две
-    одноимённые - 'Telegram' и 'Телеграм') берём первое РЕАЛЬНОЕ (проходит
-    is_valid). Нет валидного - первое непустое (дальше отфильтрует clean_msgr).
-    Так ник/номер читается из любой колонки, где он реально стоит."""
-    vals = []
-    for c in cands:
-        v = row[c] if c is not None and c < len(row) else None
-        vals.append('' if v is None else str(v).strip())
-    for v in vals:
-        if is_valid(v):
-            return v
-    return next((v for v in vals if v), '')
-
-
 def convert(project_id: str, xlsx_path: str) -> Path:
     layout = KP_LAYOUT[project_id]
     wb = load_workbook(xlsx_path, read_only=True, data_only=True)
@@ -156,14 +128,12 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     ci_country = _col(headers, exact='страна') or _col(headers, 'страна')
     if ci_country is None and layout.get('country_col') is not None:
         ci_country = layout['country_col']
-    # Telegram/WhatsApp: в КП бывают ДВЕ одноимённые колонки ('Telegram' и
-    # 'Телеграм') - реальный ник/номер может лежать в любой. Собираем все
-    # кандидаты, значение берём по строке (см. _msgr_value).
-    _tg_cands = [i for i, h in enumerate(headers)
-                 if h and ('telegram' in str(h).lower() or 'телеграм' in str(h).lower())]
-    _wa_cands = [i for i, h in enumerate(headers)
-                 if h and any(k in str(h).lower()
-                              for k in ('whatsapp', 'ватсап', 'вацап', 'ватсапп'))]
+    # Telegram/WhatsApp: читаем ПЕРВУЮ одноимённую колонку (её и редактируют в
+    # КП). Нераспознанное значение (напр. «2») дальше отфильтрует check_variables
+    # как ошибку КП - так же, как у телефонов.
+    ci_tg = _col(headers, 'telegram') or _col(headers, 'телеграм')
+    ci_wa = (_col(headers, 'whatsapp') or _col(headers, 'ватсап')
+             or _col(headers, 'вацап') or _col(headers, 'ватсапп'))
 
     def cell(row, idx):
         if idx is None or idx >= len(row):
@@ -223,8 +193,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             'email': cell(row, ci_email),
             'address': cell(row, ci_addr),
             'country': norm_country(cell(row, ci_country)),
-            'telegram': clean_msgr(_msgr_value(row, _tg_cands, _looks_tg)),
-            'whatsapp': clean_msgr(_msgr_value(row, _wa_cands, _looks_wa)),
+            'telegram': clean_msgr(cell(row, ci_tg)),
+            'whatsapp': clean_msgr(cell(row, ci_wa)),
         })
     wb.close()
 
