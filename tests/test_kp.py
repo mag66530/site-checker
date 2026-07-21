@@ -287,3 +287,32 @@ def test_convert_drops_linkless_satellites(tmp_path, monkeypatch):
     # ровно один город на домен .kz и всего два города (Москва + Алматы)
     assert sum(1 for d, _ in got if d == 'stalmetural.kz') == 1
     assert len(got) == 2
+
+
+def test_convert_relabels_azerbaijan_translation(tmp_path, monkeypatch):
+    """У СМУ азербайджанский сайт живёт в двух версиях: основной smg.az («Баку»)
+    и переводная копия steelgroup.az. На обоих сайтах город подписан «Баку», из-за
+    чего в «Проверке КП» получались два одинаковых «Баку» подряд. Переводную
+    версию подписываем «Азербайджан (перевод)» (как в проверке целей), чтобы
+    строки различались, а основной smg.az остаётся «Баку»."""
+    pytest.importorskip('openpyxl')
+    from openpyxl import Workbook
+    import csv
+    import convert_kp
+
+    wb = Workbook(); ws = wb.active; ws.title = 'Справочники'
+    ws.append(['Страна', 'Город', 'url', 'Адрес', 'e-mail',
+               'SEO Город', 'Реклама Город', 'Общий Город', 'Telegram', 'WhatsApp'])
+    ws.append(('Азербайджан', 'Баку', 'https://smg.az/', 'ш. С, 10',
+               'baku@smg.az', '', '', '994 12 311 01 38', '', ''))
+    ws.append(('Азербайджан', 'Баку', 'https://steelgroup.az/', 'ш. С, 10',
+               'baku@steelgroup.az', '', '', '994 12 311 01 39', '', ''))
+    src = tmp_path / 'kp.xlsx'; wb.save(str(src))
+
+    monkeypatch.setattr(convert_kp, 'CATALOGS_DIR', tmp_path)
+    out = convert_kp.convert('smu', str(src))
+    with open(out, encoding='utf-8') as f:
+        got = dict((r['domain'], r['city']) for r in csv.DictReader(f))
+
+    assert got.get('smg.az') == 'Баку'                       # основной - как был
+    assert got.get('steelgroup.az') == 'Азербайджан (перевод)'  # дубль переподписан
