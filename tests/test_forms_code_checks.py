@@ -171,6 +171,70 @@ def test_разбор_set_cookie_пустой_ответ():
     print('✓ ответ без Set-Cookie → пустой список (без падения)')
 
 
+# ── Телефон принимает мусорный номер (реальный кейс СМУ-Алматы) ──
+class _FakePhone:
+    """Поле телефона: запоминает, что положил fill/type. Параметр garbage - что
+    поле оставит, когда в него программно вставят «1»*20 (маска не срезала)."""
+    def __init__(self, garbage):
+        self.v, self.g = '', garbage
+    def count(self):
+        return 1
+    def evaluate(self, js, *a):
+        return {'type': 'tel', 'pattern': None, 'maxlength': -1,
+                'inputmode': 'tel', 'mask': '', 'cls': ''}
+    def input_value(self, timeout=0):
+        return self.v
+    def fill(self, val, timeout=0, force=False):
+        self.v = self.g if val == '1' * 20 else val
+    def type(self, val, timeout=0):
+        self.v = val
+
+
+class _FakeEmpty:
+    def count(self):
+        return 0
+    def evaluate(self, *a, **k):
+        return {}
+    def input_value(self, *a, **k):
+        return ''
+    def fill(self, *a, **k):
+        pass
+    def type(self, *a, **k):
+        pass
+
+
+_FakeEmpty.first = _FakeEmpty()
+
+
+class _FakeScope:
+    def __init__(self, phone):
+        self._p = phone
+    def locator(self, sel):
+        if 'tel' in sel and 'phone' in sel:            # phone_sel
+            w = type('W', (), {})()
+            w.first = self._p
+            return w
+        return _FakeEmpty()
+
+
+def test_телефон_принимает_мусорный_номер_флагуется():
+    # Поле оставило 20 одинаковых цифр (как СМУ-Алматы: в админку падали заявки
+    # с телефоном «1111…1111») → формат не проверяется → флаг + понятный текст.
+    r = t.проверка_полей_форм(_FakeScope(_FakePhone('1' * 20)), None)
+    assert r['телефон_мусор_принят'] is True
+    assert 'ПРИНИМАЕТ заведомо неверный номер' in r['телефон_детали']
+    print('✓ поле принимает мусорный номер → флаг выставлен с пояснением')
+
+
+def test_телефон_с_ограничением_не_флагуется():
+    # Поле срезало вставку до нормальной длины (11 цифр) → мусор не принят,
+    # ложного флага нет.
+    r = t.проверка_полей_форм(_FakeScope(_FakePhone('+7 (111) 111-11-11')), None)
+    assert r['телефон_мусор_принят'] is False
+    assert 'ПРИНИМАЕТ заведомо неверный' not in r['телефон_детали']
+    print('✓ поле с ограничением длины → мусорный номер не принят (нет ложного флага)')
+
+
 if __name__ == '__main__':
     import pytest
     raise SystemExit(pytest.main([__file__, '-v', '-s']))
