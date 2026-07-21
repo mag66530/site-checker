@@ -200,6 +200,26 @@ def test_матрица_рендерит_модалку_галочкой(tmp_pat
     assert legend_syms <= {"✓", "✗", "⚠", "–"}
 
 
+def test_пустые_строки_прочерки_скрыты(tmp_path):
+    # Если у ВСЕХ форм листа проверка «–» (нет данных - напр. на сайте нигде нет
+    # выпадающих списков/полей загрузки), строка НЕ выводится в матрицу (данные
+    # при этом остаются в листе «Логи»). А строки с реальным вердиктом остаются.
+    from openpyxl import load_workbook
+    path = tmp_path / "log_forms.xlsx"
+    _минимальный_лог(path)          # одна форма: без списков/файлов/автозаполнения
+    t.построить_матрицу_проверок(str(path))
+    wb = load_workbook(str(path))
+    ws = wb["Москва"]
+    labels = {str(ws.cell(i, 1).value) for i in range(2, ws.max_row + 1)}
+    assert "Выпадающие списки" not in labels
+    assert "Типы файлов формы" not in labels
+    assert "Автозаполнение полей" not in labels
+    # реальные вердикты остаются:
+    assert "Статус" in labels
+    assert "CSRF-защита" in labels
+    assert "Двойная отправка" in labels
+
+
 def test_заметки_не_ужимаются_до_ячейки(tmp_path):
     # openpyxl пишет <x:SizeWithCells/>, из-за чего Excel обрезает длинный
     # комментарий до узкой ячейки. Матрица должна убрать этот флаг (оставив
