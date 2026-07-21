@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -223,21 +224,27 @@ def _проверить_ссылку(url, base_dom, proxy_parts):
 
 
 def fetch_all(domains, proxy, log, retries=3):
-    """Качает главные всех поддоменов параллельно (пул потоков), печатает
-    прогресс «[i/N]». Не загрузившиеся (500/таймаут/антибот) повторяет ещё
-    `retries` раз - только их, «как из другого браузера»: свежее соединение
-    без кеша (инкогнито) + другой User-Agent на каждом заходе, помягче (меньший
-    пул + пауза). Успешные повторно не трогает. → {domain: (html, ошибка)}."""
+    """Качает главные всех поддоменов МЯГКО, чтобы сервер не сыпал 500: малый
+    пул (3 потока) + разнесённые старты запросов (pace), не бьём залпом. Bitrix
+    у mepen обслуживает все поддомены одним бэкендом и отдаёт 500/рвёт соединение,
+    когда в него летит много параллельных запросов. Не загрузившиеся повторяет
+    ещё `retries` раз - только их, «как из другого браузера» (свежее соединение,
+    другой User-Agent), с РАСТУЩЕЙ паузой (бэкофф 5→10→20с) и ещё меньшим пулом.
+    Успешные повторно не трогает. → {domain: (html, ошибка)}."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    import time
     parts = _proxy_parts(proxy)
     out: dict = {}
     N = len(domains)
 
-    def _pass(items, workers, counting, ua=None):
+    def _pass(items, workers, counting, ua=None, pace=0.0):
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = {ex.submit(_fetch_one, d, parts, ua): (d, row.city)
-                    for d, row in items}
+            # Разносим СТАРТЫ запросов (pace) - не бьём по серверу залпом. Bitrix
+            # у mepen отдаёт 500, когда все поддомены (один бэкенд) дёргают разом.
+            futs = {}
+            for d, row in items:
+                futs[ex.submit(_fetch_one, d, parts, ua)] = (d, row.city)
+                if pace:
+                    time.sleep(pace)
             for k, fut in enumerate(as_completed(futs), 1):
                 dom, city = futs[fut]
                 try:
@@ -257,19 +264,20 @@ def fetch_all(domains, proxy, log, retries=3):
                     log(f'    повтор {dom} ({city}): '
                         + (f'снова ошибка - {err}' if err else 'загружено ✓'))
 
-    _pass(domains, 6, counting=True)
+    _pass(domains, 3, counting=True, pace=0.15)
     # Повторяем ТОЛЬКО упавшие: сервер часто отдаёт 500 при частых параллельных
-    # запросах - на повторе меньшим пулом, с паузой и от имени другого браузера
-    # большинство доходит. Успешные не перезапрашиваем.
+    # запросах - на повторе ещё меньшим пулом, с РАСТУЩЕЙ паузой (бэкофф, даём
+    # серверу остыть) и от имени другого браузера большинство доходит.
     for attempt in range(1, retries + 1):
         failed = [(d, row) for d, row in domains if out.get(d, ('', ''))[1]]
         if not failed:
             break
         ua = _UA_POOL[attempt % len(_UA_POOL)]
+        _back = min(30, 5 * (2 ** (attempt - 1)))   # 5с → 10с → 20с
         log(f'↻ Повтор {attempt}/{retries}: заново пробуем {len(failed)} '
-            'не загрузившихся, как из другого браузера (успешные не трогаем)…')
-        time.sleep(4)
-        _pass(failed, 3, counting=False, ua=ua)
+            f'не загрузившихся, помягче (пауза {_back}с, 2 потока, другой браузер)…')
+        time.sleep(_back)
+        _pass(failed, 2, counting=False, ua=ua, pace=0.35)
     n_ok = sum(1 for v in out.values() if not v[1])
     n_fail = N - n_ok
     log(f'Итог загрузки: {n_ok} из {N}'
@@ -508,7 +516,15 @@ def main() -> int:
         if html and _af and _af.get("status") == "warn":
             _cpath = _find_contacts_path(html, dom)
             if _cpath:
-                _ch, _cerr = _fetch_one(dom, _proxy_parts(proxy), path=_cpath)
+                # Догрузка «Контактов» с парой мягких повторов: сервер mepen на
+                # доп. запрос тоже иногда отдаёт 500/рвёт соединение - без ретрая
+                # адрес зря оставался «не найден».
+                _ch, _cerr = '', 'not tried'
+                for _try in range(3):
+                    _ch, _cerr = _fetch_one(dom, _proxy_parts(proxy), path=_cpath)
+                    if _ch and not _cerr:
+                        break
+                    time.sleep(1.5 * (_try + 1))
                 if _ch and not _cerr:
                     var = kpmod.check_variables(html, dom, contacts_html=_ch)
                     _stamp(f'    {dom}: адрес не в подвале - догрузил «Контакты» '
