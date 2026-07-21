@@ -47,7 +47,6 @@ COUNTER_GROUPS = {
         '92480064',  # stalmetural.am
         '92628866',  # stalmetural.by
         '92479352',  # stalmetural.uz
-        '92907275',  # steemet.uz
         '92479314',  # smg.az
     ],
     'mpe': ['99551890'],
@@ -375,7 +374,7 @@ _TLD_COUNTRY = {
 
 def _site_tld(site):
     """Домен верхнего уровня из site счётчика ('voronezh.stalmetural.ru'→'ru',
-    'https://steemet.uz/'→'uz')."""
+    'https://stalmetural.uz/'→'uz')."""
     host = (site or '').lower().replace('https://', '').replace('http://', '')
     host = host.split('/')[0].split(':')[0].strip().rstrip('.')
     return host.rsplit('.', 1)[-1] if '.' in host else ''
