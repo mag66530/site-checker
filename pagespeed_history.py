@@ -145,6 +145,23 @@ def aggregate_for_run(project_id: str, run_ts: str) -> Optional[dict]:
     return aggregate(_rows_to_results(rows))
 
 
+def all_run_aggregates(project_id: str) -> list[dict]:
+    """Агрегат КАЖДОГО прогона истории за один проход по CSV, хронологически.
+
+    Для экрана «все прогоны» (обзор и сверка любых двух периодов):
+      [{'run_ts': '2026-07-20 11:58:42', 'agg': {'by_type': …, 'overall': …}}, …]
+    """
+    by_run: dict[str, list[dict]] = {}
+    for row in load_rows(project_id):
+        ts = row.get("run_ts", "")
+        if ts:
+            by_run.setdefault(ts, []).append(row)
+    return [
+        {"run_ts": ts, "agg": aggregate(_rows_to_results(by_run[ts]))}
+        for ts in sorted(by_run.keys())
+    ]
+
+
 # ── Выбор периода для сравнения ──────────────────────────────────────────────
 def _ts_date(ts: str) -> Optional[datetime.date]:
     try:
