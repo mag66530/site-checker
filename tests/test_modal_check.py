@@ -260,6 +260,58 @@ def test_колонки_модалок_в_шапке_лога():
     assert len(t.LOG_HEADERS) == len(t.LOG_KEYS_ORDER)
 
 
+# ── Попап выбора региона (СНГ-домены) - закрытие по «крестику» ──
+class _FakeRegionLoc:
+    def __init__(self, present, visible, clicks):
+        self._present, self._visible, self._clicks = present, visible, clicks
+    @property
+    def first(self):
+        return self
+    def count(self):
+        return 1 if self._present else 0
+    def is_visible(self, timeout=0):
+        return self._visible
+    def click(self, timeout=0, force=False):
+        self._clicks.append(True)
+
+
+class _FakeRegionPage:
+    """Страница: первый известный селектор попапа региона присутствует/видим по
+    флагам; всё остальное - отсутствует."""
+    def __init__(self, present, visible):
+        self._present, self._visible, self.clicks = present, visible, []
+        self._used = False
+    def locator(self, sel):
+        # только ПЕРВЫЙ запрошенный селектор «есть» (имитируем один попап)
+        if not self._used and self._present:
+            self._used = True
+            return _FakeRegionLoc(True, self._visible, self.clicks)
+        return _FakeRegionLoc(False, False, self.clicks)
+    def wait_for_timeout(self, ms):
+        pass
+
+
+def test_закрыть_попап_региона_кликает_видимый_крестик():
+    # Виден попап региона → тул кликает по «крестику» и возвращает True.
+    p = _FakeRegionPage(present=True, visible=True)
+    assert t.закрыть_попап_региона(p) is True
+    assert p.clicks, "крестик попапа региона не был нажат"
+
+
+def test_закрыть_попап_региона_нет_попапа_ничего_не_делает():
+    # Попапа нет → False, без кликов (на .ru ничего лишнего не жмём).
+    p = _FakeRegionPage(present=False, visible=False)
+    assert t.закрыть_попап_региона(p) is False
+    assert not p.clicks
+
+
+def test_закрыть_попап_региона_невидимый_не_кликаем():
+    # Элемент есть в DOM, но скрыт → не кликаем (не дёргаем скрытую разметку).
+    p = _FakeRegionPage(present=True, visible=False)
+    assert t.закрыть_попап_региона(p) is False
+    assert not p.clicks
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

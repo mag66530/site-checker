@@ -3549,6 +3549,38 @@ def _проба_закрытия_модалки(page, modal) -> tuple:
     return "Нет", "не закрылась ни крестиком, ни Esc, ни кликом вне модалки"
 
 
+# Попап выбора города/региона (Sotbit select-city / RegionsChoose) на СНГ-
+# доменах (mepen.kz/.by/.uz и т.п.): перекрывает страницу, из-за чего форма не
+# находится (напр. «Обратная связь» на mepen.kz давала «найдено форм: 0», хотя
+# в HTML форма есть). На .ru его гасит конфиговый «клик по тексту Да», но на СНГ
+# там не «Да», а вкладки выбора города - нужен «крестик» попапа.
+_РЕГИОН_ПОПАП_ЗАКРЫТЬ = (
+    "[data-entity='select-city__close']",
+    ".select-city-wrap .select-city__close",
+    ".select-city-wrap .close",
+    "#regions_choose_component .close",
+    ".sotbit-regions .close, .sotbit-regions-popup .close",
+    ".region-popup .close, .city-popup .close, .popup-city .close",
+)
+
+
+def закрыть_попап_региона(page) -> bool:
+    """Best-effort: закрывает попап выбора города/региона по «крестику», если он
+    виден. Возвращает True, если что-то закрыл. Любая ошибка гасится - прогон не
+    падает. Для СНГ-доменов, где конфиговый «клик Да» не подходит."""
+    for sel in _РЕГИОН_ПОПАП_ЗАКРЫТЬ:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() and loc.is_visible(timeout=800):
+                loc.click(timeout=2000, force=True)
+                page.wait_for_timeout(300)
+                print(f"      🧹 Закрыт попап выбора региона ({sel})")
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
 # Для форм, открытых через сценарий «клик → форма» (не через выделенный блок
 # «модалки») - определяем, лежит ли найденная форма внутри модалки/попапа.
 # XPath ancestor:: от САМОЙ формы (не .filter(has=form)!) - .filter(has=…)
@@ -5784,8 +5816,6 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             None,
         )
         steps = prep_steps_from_page(pg) if pg else []
-        if not steps:
-            return
         for s in steps:
             act = s.get("действие")
             try:
@@ -5827,6 +5857,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 # неизвестное действие в «подготовке» - тихо пропускаем
             except Exception as e:
                 print(f"      ⚠️ Подготовка ({act}): {e}")
+        # Встроенное снятие попапа выбора города/региона (СНГ-домены .kz/.by/.uz):
+        # конфиговый «клик Да» его не закрывает, а он перекрывает форму. Всегда,
+        # best-effort - если попапа нет, ничего не делает.
+        try:
+            закрыть_попап_региона(page)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _replay_open_step(page, step, base_url):
         """Тихо проигрывает ОДИН шаг ОТКРЫТИЯ формы при переоткрытии (только
@@ -5953,6 +5990,36 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 f"      Подобран селектор: {sel!r} → {cand!r} (найдено {n_try})"
                             )
                         break
+
+                # Не нашли с первого раза: снимаем попап региона (СНГ-домены им
+                # перекрыты) и ЖДЁМ форму (AJAX/поздняя отрисовка), потом пробуем
+                # ещё раз. Раньше тул сразу писал «найдено 0» и всю форму пропускал
+                # (напр. «Обратная связь» на mepen.kz - форма в HTML есть, но
+                # попап выбора города мешал её увидеть).
+                if n_match == 0:
+                    try:
+                        закрыть_попап_региона(page)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    for cand in _expand_form_selector_fallbacks(sel):
+                        try:
+                            page.wait_for_selector(cand, timeout=5000, state="attached")
+                        except Exception:  # noqa: BLE001
+                            continue
+                        try:
+                            loc_try = page.locator(cand)
+                            n_try = loc_try.count()
+                        except Exception:  # noqa: BLE001
+                            n_try = 0
+                        if n_try > 0:
+                            loc = loc_try
+                            n_match = n_try
+                            sel_desc = cand
+                            print(
+                                f"      Форма появилась после снятия попапа/ожидания: "
+                                f"{cand!r} (найдено {n_try})"
+                            )
+                            break
 
             print(
                 f"      Селектор: {sel_desc!r} - найдено форм: {n_match}, берём №{idx + 1}"
