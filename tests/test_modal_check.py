@@ -227,6 +227,14 @@ def test_форма_внутри_модалки_найдена():
     assert t._найти_модалку_вокруг(form) is not None
 
 
+def test_детектор_модалки_ловит_fancybox_и_aria():
+    # XPath расширен на типовые попап-библиотеки и aria-modal - иначе форма в
+    # fancybox/magnific/lightbox шла прочерком «Модалка открывается».
+    x = t._MODAL_ANCESTOR_XPATH.lower()
+    for маркер in ("modal", "popup", "fancybox", "mfp", "lightbox", "aria-modal"):
+        assert маркер in x, маркер
+
+
 # ── Колонки в шапке лога ───────────────────────────────────────────────
 
 def test_колонки_модалок_в_шапке_лога():
