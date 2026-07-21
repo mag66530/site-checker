@@ -163,13 +163,13 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
                     site = probe_site(_u, effective)
                 _pm = "через прокси" if effective else "напрямую"
                 if site["error"]:
-                    st.error(f"❌ Не доступен ({_pm}) — {site['error']} · "
+                    st.error(f"❌ Не доступен ({_pm}) – {site['error']} · "
                              f"{site['ms']} мс")
                 elif site["status"] == 200:
-                    st.success(f"✅ Доступен — HTTP 200 ({_pm}) · "
-                               f"Server {site['server'] or '—'} · {site['ms']} мс")
+                    st.success(f"✅ Доступен – HTTP 200 ({_pm}) · "
+                               f"Server {site['server'] or '–'} · {site['ms']} мс")
                 else:
-                    st.error(f"❌ Не доступен — HTTP {site['status']} ({_pm}) · "
+                    st.error(f"❌ Не доступен – HTTP {site['status']} ({_pm}) · "
                              f"{site['ms']} мс"
                              + (" · возможно блок по IP/региону, включи прокси"
                                 if effective is None else ""))

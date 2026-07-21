@@ -95,9 +95,9 @@ def format_summary_message(
     )
 
     # Короткое имя проекта: "СМУ - Стальметурал" → "СМУ".
-    # Терпимо к любому тире (- / - / -), т.к. в именах перешли на короткое.
+    # Терпимо к любому тире (дефис / en / em), т.к. в именах перешли на короткое.
     short_name = escape_html(
-        re.split(r'\s[---]\s', project_name or '', maxsplit=1)[0].strip()
+        re.split(r'\s[-–—]\s', project_name or '', maxsplit=1)[0].strip()
     )
     # Только дата - без времени и длительности
     date_only = escape_html((started_at or '').split(' ')[0])
@@ -182,7 +182,7 @@ def escape_html(text: str) -> str:
 
 def _short_project_name(project_name: str) -> str:
     """«СМУ - Стальметурал» → «СМУ» (терпимо к любому тире)."""
-    return re.split(r'\s[---]\s', project_name or '', maxsplit=1)[0].strip()
+    return re.split(r'\s[-–—]\s', project_name or '', maxsplit=1)[0].strip()
 
 
 # ── Критические ошибки (п.4.3): срочное сообщение + блок в подписи ───

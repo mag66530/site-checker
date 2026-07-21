@@ -225,7 +225,7 @@ def _run_index404_download(pid, params, log, session_b64=None):
 
 def _run_gsc_index404(pid, params, log, session_b64=None, gsc_login=None):
     """Авто-экспорт «Не найдено (404)» / «Ошибка сервера (5xx)» из Google
-    Search Console браузером. Основа — сохранённая сессия (путь B); слетела —
+    Search Console браузером. Основа – сохранённая сессия (путь B); слетела –
     автологин по логину/паролю Google (путь C, gsc_login=(email,password)).
     Возвращает dict в форме «404 в индексе» с source='Google' у записей."""
     import os as _os
@@ -235,7 +235,7 @@ def _run_gsc_index404(pid, params, log, session_b64=None, gsc_login=None):
     _env = dict(_os.environ)
     _env['PYTHONIOENCODING'] = 'utf-8'
     # Запасной автовход (C) ВЫКЛ по умолчанию: Google блокирует автоматический
-    # вход («Не удалось войти в аккаунт» — анти-бот стена), а повторные попытки
+    # вход («Не удалось войти в аккаунт» – анти-бот стена), а повторные попытки
     # рискуют залочить аккаунт. Оставлен под флагом для робота-аккаунта без 2FA.
     if params.get('index_404_gsc_autologin', False) and gsc_login:
         _gl_email, _gl_pass = (gsc_login or (None, None))
@@ -283,9 +283,9 @@ def _run_gsc_index404(pid, params, log, session_b64=None, gsc_login=None):
 
 def _run_gsc_pages(pid, params, log, session_b64=None, gsc_login=None):
     """Количество страниц в ГСК по статусам индексации (браузер + сессия/автологин
-    Google). Отдельный процесс gsc_pages_count.py; результат —
+    Google). Отдельный процесс gsc_pages_count.py; результат –
     cache/gsc_pages_result_{pid}.json. gsc_login=(email, password) включает
-    автологин — нужен робо-аккаунт Google БЕЗ 2FA с доступом к ресурсу."""
+    автологин – нужен робо-аккаунт Google БЕЗ 2FA с доступом к ресурсу."""
     import os as _os
     import subprocess
     import sys as _sys
@@ -301,7 +301,7 @@ def _run_gsc_pages(pid, params, log, session_b64=None, gsc_login=None):
             _env['GSC_LOGIN_PASSWORD'] = _gl_pass
     if not _cdp_alive():
         # Источник сессии: Secrets (autoclick_session_<проект>). Так «Количество
-        # страниц в ГСК» снимается без ручного ввода — прогоны берут сохранённую
+        # страниц в ГСК» снимается без ручного ввода – прогоны берут сохранённую
         # сессию, пока жив контейнер.
         if session_b64:
             try:
@@ -314,7 +314,7 @@ def _run_gsc_pages(pid, params, log, session_b64=None, gsc_login=None):
                         'error': f'сессия не читается: {_e}'}
         else:
             return {'available': False,
-                    'error': ('нет сохранённой сессии Google — пункт пропущен. '
+                    'error': ('нет сохранённой сессии Google – пункт пропущен. '
                               'Добавь сессию в Secrets ключом '
                               'autoclick_session_<проект> (или впиши 2 числа '
                               'вручную).')}
@@ -1286,13 +1286,13 @@ def run_check(pid, params, creds, log, progress):
         if params.get('check_index_404'):
             import time as _time
             _t404 = _time.monotonic()
-            # Источник 1 — Яндекс.Вебмастер: браузер качает выгрузку «Страницы
+            # Источник 1 – Яндекс.Вебмастер: браузер качает выгрузку «Страницы
             # в поиске» (код ответа уже в ней, боевой сайт не пингуем).
             _wm_404 = _run_index404_download(
                 pid, params, log, session_b64=creds.get('autoclick_session'))
             if _wm_404.get('error'):
                 log(f'⚠ 404 в индексе (Яндекс): {_wm_404["error"]}')
-            # Источник 2 — Sitemap: слепой прозвон всех URL из sitemap. По
+            # Источник 2 – Sitemap: слепой прозвон всех URL из sitemap. По
             # умолчанию ВЫКЛ: он медленный (сайт тормозит на страницах фильтров)
             # и почти всегда находит только таймауты, а не реальные 404 -
             # sitemap и так чистый. Реальную пользу даёт перепроверка кандидатов
@@ -1314,11 +1314,11 @@ def run_check(pid, params, creds, log, progress):
                             f'{_sm_404.get("total_dead", 0)}')
                 except Exception as _e:
                     log(f'⚠ 404 в индексе (sitemap): {_e}')
-            # Источник 3 — Google Search Console: браузер экспортирует причины
+            # Источник 3 – Google Search Console: браузер экспортирует причины
             # «Не найдено (404)» и «Ошибка сервера (5xx)». Domain-ресурс покрывает
             # и поддомены, поэтому ловит 404, которых нет у Яндекса/в sitemap.
             _gsc_404 = None
-            # Браузерный Google-источник (капризная сессия) — запасной: только
+            # Браузерный Google-источник (капризная сессия) – запасной: только
             # когда НЕ настроен сервисный аккаунт. Если gsc_sa задан, Google идёт
             # надёжно через API (ниже), а браузерный не гоняем и не пугаем ⚠.
             if params.get('index_404_gsc', True) and not creds.get('gsc_sa'):
@@ -1329,7 +1329,7 @@ def run_check(pid, params, creds, log, progress):
                     log(f'⚠ 404 в индексе (GSC): {_gsc_404["error"]}')
                 else:
                     log(f'404 в индексе (GSC): битых {_gsc_404.get("total_dead", 0)}')
-            # Источник 4 — Google Search Console через API (сервисный аккаунт).
+            # Источник 4 – Google Search Console через API (сервисный аккаунт).
             # В отличие от браузерного источника выше, работает на облаке и в
             # расписании без Chrome/сессии: берём список проиндексированных
             # страниц (Search Analytics) и прозваниваем их на 404 нашим чекером.
@@ -1372,7 +1372,7 @@ def run_check(pid, params, creds, log, progress):
                 log(f'404 в индексе (итог за {int(_time.monotonic() - _t404)}с): '
                     f'проверено {_index_404.get("total_checked", 0)}, битых 404/410 '
                     f'{_index_404.get("total_dead", 0)}, '
-                    f'источники: {", ".join(_index_404.get("sources") or []) or "—"}')
+                    f'источники: {", ".join(_index_404.get("sources") or []) or "–"}')
 
         # ── Количество страниц в ГСК (индексировано / не индексировано / сумма) ──
         # Браузером снимаем 3 числа из отчёта «Страницы» GSC (в API их нет).

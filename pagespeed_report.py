@@ -75,7 +75,7 @@ _METRIC_FG = {"good": FG_GOOD, "ok": FG_OK, "poor": FG_POOR, "na": FG_NA}
 def _delta_text(v: Optional[float]) -> tuple[str, str]:
     """(текст, цвет) для дельты оценки."""
     if v is None:
-        return "—", FG_FLAT
+        return "–", FG_FLAT
     if v > 0:
         return f"▲ +{v:g}", FG_UP
     if v < 0:
@@ -88,7 +88,7 @@ def _score_cell(ws, row, col, score):
     c.border = _BORDER
     c.alignment = _align("center")
     if score is None:
-        c.value = "—"
+        c.value = "–"
         c.fill = _fill(FILL_NA)
         c.font = _font(bold=True, color="FFFFFF")
     else:
@@ -100,7 +100,7 @@ def _score_cell(ws, row, col, score):
 
 def _metric_cell(ws, row, col, metric, disp, val):
     c = ws.cell(row=row, column=col)
-    c.value = disp or "—"
+    c.value = disp or "–"
     c.border = _BORDER
     c.alignment = _align("center")
     c.font = _font(color=_METRIC_FG[metric_rating(metric, val)])
@@ -153,7 +153,7 @@ def _build_summary_sheet(wb, project_name, run_ts, prev_ts, agg, deltas, provide
     ws.title = "Сводка по типам"
     ncols = 6
     compared = f"со снятием {fmt_ts(prev_ts)}" if prev_ts else "нет предыдущего периода"
-    start = _title_block(ws, "Скорость страниц — сводка по типам", [
+    start = _title_block(ws, "Скорость страниц – сводка по типам", [
         f"Проект: {project_name}   ·   Источник: {provider_name}",
         f"Проверка: {fmt_ts(run_ts)}   ·   Сравнение: {compared}",
     ], ncols)
@@ -261,12 +261,12 @@ def _build_detail_sheet(wb, results):
 
 # ── Лист «Рекомендации» ──────────────────────────────────────────────────────
 def _rec_items_text(items) -> str:
-    """Конкретные ресурсы одной рекомендации в столбик: «url — экономия 320 КБ»."""
+    """Конкретные ресурсы одной рекомендации в столбик: «url – экономия 320 КБ»."""
     lines = []
     for it in items or []:
         url = it.get("url", "")
         info = it.get("info", "")
-        lines.append(f"• {url} — {info}" if info else f"• {url}")
+        lines.append(f"• {url} – {info}" if info else f"• {url}")
     return "\n".join(lines)
 
 
@@ -295,11 +295,11 @@ def _build_recs_sheet(wb, top_recs, total_pages):
         b = ws.cell(row=row, column=2, value=cnt)
         b.alignment = _align("center")
         b.font = _font(bold=True, color=FG_POOR if cnt else INK)
-        c = ws.cell(row=row, column=3, value=savings or "—")
+        c = ws.cell(row=row, column=3, value=savings or "–")
         c.font = _font(color=FG_OK)
-        d = ws.cell(row=row, column=4, value=items_txt or "—")
+        d = ws.cell(row=row, column=4, value=items_txt or "–")
         d.font = _font(size=9, color=MUTED)
-        e = ws.cell(row=row, column=5, value=pages_txt or "—")
+        e = ws.cell(row=row, column=5, value=pages_txt or "–")
         e.font = _font(size=9, color=MUTED)
         for col in range(1, 6):
             cell = ws.cell(row=row, column=col)

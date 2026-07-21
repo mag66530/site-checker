@@ -107,7 +107,7 @@ def build_params(pid: str, profile_id: str, days: int, fetch_notifications: bool
         'check_links': False,   # «ссылки открываются (404)» - тяжёлая, по запросу
         'check_index_404': True,  # 404 в индексе: Яндекс + GSC, с живой перепроверкой
         'index_404_reverify': True,       # перепроверять кандидатов живьём (убирает ложные)
-        'index_404_sitemap': False,       # слепой прозвон sitemap — медленный, по умолчанию выкл
+        'index_404_sitemap': False,       # слепой прозвон sitemap – медленный, по умолчанию выкл
         'index_404_sitemap_max': 1000,    # URL из sitemap за прогон, если включён
         'index_404_gsc': True,            # источник Google Search Console (экспорт причин 404/5xx)
         'check_filter_fn': False,  # фильтр-тест (браузер) - по запросу, не в расписании

@@ -37,7 +37,7 @@ PROJECT_NAMES = {
 VAR_COLUMNS = ["Город", "Тел. поиск", "Тел. реклама", "Тел. общий",
                "Почта", "Адрес", "Telegram", "WhatsApp"]
 
-_SYMBOL = {"ok": "✓", "ok_set": "✓", "bug": "✗", "warn": "⚠", "na": "—"}
+_SYMBOL = {"ok": "✓", "ok_set": "✓", "bug": "✗", "warn": "⚠", "na": "–"}
 _COLOR = {"ok": "1E8E3E", "ok_set": "1E8E3E", "bug": "C62828",
           "warn": "B26A00", "na": "9E9E9E"}
 
@@ -320,10 +320,10 @@ def _регион_статусы(html, host, ctx):
     check_variables-поля {field, expected, found, status, note}."""
     import region_checker as rc
     свой = ctx.host_city.get(host, "")
-    город = {"field": "Город", "expected": свой or "—",
-             "found": "—", "status": "na", "note": ""}
-    страна = {"field": "Страна", "expected": ctx.host_country.get(host, "—"),
-              "found": "—", "status": "na", "note": ""}
+    город = {"field": "Город", "expected": свой or "–",
+             "found": "–", "status": "na", "note": ""}
+    страна = {"field": "Страна", "expected": ctx.host_country.get(host, "–"),
+              "found": "–", "status": "na", "note": ""}
     # Город: СТРОГО - город из КП должен быть выведен на странице (шапка/H1/
     # title/текст). Нет = ✗ (переменная не подставилась / другой город). Плюс
     # ловим ЧУЖОЙ город проекта (затесался номер/город другого поддомена).
@@ -425,9 +425,9 @@ def main() -> int:
     try:
         _csvp = ROOT / 'catalogs' / f'{a.project}-kp.csv'
         _mt = (datetime.fromtimestamp(_csvp.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
-               if _csvp.exists() else '—')
+               if _csvp.exists() else '–')
     except Exception:
-        _mt = '—'
+        _mt = '–'
     _stamp(f'КП загружена: {len(kp_rows)} городов, снапшот обновлён {_mt}')
 
     wanted = {c.strip().lower() for c in a.cities.split(',') if c.strip()}
@@ -578,14 +578,14 @@ def main() -> int:
 _ЛЕГЕНДА = [
     ("Как читать результат", True),
     ("", False),
-    ("✓  — значение на сайте совпадает с КП "
+    ("✓  – значение на сайте совпадает с КП "
      "(для телефона: номер входит в набор номеров города из КП).", False),
-    ("✗  — расхождение. В примечании ячейки: «Ожидалось (КП) / По факту (на сайте)». "
+    ("✗  – расхождение. В примечании ячейки: «Ожидалось (КП) / По факту (на сайте)». "
      "Все расхождения также собраны на листе «Расхождения».", False),
-    ("⚠  — на сайте не найдено (телефон / почта / адрес / мессенджер).", False),
-    ("—  — в КП этого поля нет (проверять не с чем).", False),
-    ("✗ по ВСЕЙ строке — сайт этого города не загрузился (HTTP 500 / обрыв / "
-     "таймаут). В примечании ячейки — причина. Это НЕ ошибка КП, а недоступность "
+    ("⚠  – на сайте не найдено (телефон / почта / адрес / мессенджер).", False),
+    ("–  – в КП этого поля нет (проверять не с чем).", False),
+    ("✗ по ВСЕЙ строке – сайт этого города не загрузился (HTTP 500 / обрыв / "
+     "таймаут). В примечании ячейки – причина. Это НЕ ошибка КП, а недоступность "
      "сайта: перезапусти позже или проверь, открывается ли сайт в браузере.", False),
 ]
 
@@ -654,7 +654,7 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
         for c, name in enumerate(VAR_COLUMNS, _FIRST_VAR_COL):
             f = by.get(name)
             if not f:
-                ws.cell(r, c, "—")
+                ws.cell(r, c, "–")
                 continue
             status = f["status"]
             cell = ws.cell(r, c, _SYMBOL.get(status, "?"))

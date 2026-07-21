@@ -37,7 +37,7 @@ def test_host_of():
 
 
 def test_merge_dedup_and_sources():
-    """Слияние источников: total суммируется, доступность — хоть один,
+    """Слияние источников: total суммируется, доступность – хоть один,
     источники доступных перечислены."""
     ya = {'available': True, 'source': 'yandex_export', 'total_checked': 100,
           'total_dead': 1, 'total_soft': 0, 'hosts': [

@@ -331,7 +331,7 @@ def run_case(page, case: dict, log) -> dict:
         return out
     if status and status >= 400:
         out['verdict'] = 'http_error'
-        _hint = ' — страницы нет (404)' if status == 404 else ''
+        _hint = ' – страницы нет (404)' if status == 404 else ''
         out['detail'] = f'страница категории отдала HTTP {status}{_hint}'
         return out
     page.wait_for_timeout(1500)
@@ -394,7 +394,7 @@ def run_case(page, case: dict, log) -> dict:
             _clicked.append(_lbl)
         nav_code = _apply_filter(page, idx, filt, apply_sel, wait_ms, _pre)
         if nav_code and nav_code >= 400:
-            _hint = ' — отфильтрованной страницы нет (404)' if nav_code == 404 else ''
+            _hint = ' – отфильтрованной страницы нет (404)' if nav_code == 404 else ''
             last = ('http_error', f'после применения фильтра HTTP {nav_code}{_hint}')
             break
         after, _ = _best_card_count(page, used_sel)

@@ -71,7 +71,7 @@ def test_check_variables_bug_wrong_phone():
 def test_check_variables_garbage_kp_values_are_flagged():
     """Правка КП не должна проходить мимо проверки. Если в ячейке телефона или
     адреса лежит не номер/не адрес, а мусор («2»), это ошибка КП (✗), а не «нет
-    в КП» (—). Раньше ловилась только почта - телефон показывал «—», адрес мог
+    в КП» (–). Раньше ловилась только почта - телефон показывал «–», адрес мог
     дать ложное ✓."""
     m = kp.load_kp("smu")
     kp._KP_CACHE["smu"] = m
@@ -87,8 +87,8 @@ def test_check_variables_garbage_kp_values_are_flagged():
             '</header>')
         r = kp.check_variables(html, "stalmetural.ru")
         by = {f["field"]: f for f in r["fields"]}
-        assert by["Тел. поиск"]["status"] == "bug"    # было «na» («—»)
-        assert by["Тел. общий"]["status"] == "bug"    # было «na» («—»)
+        assert by["Тел. поиск"]["status"] == "bug"    # было «na» («–»)
+        assert by["Тел. общий"]["status"] == "bug"    # было «na» («–»)
         assert by["Почта"]["status"] == "bug"         # ловилось и раньше
         assert by["Адрес"]["status"] == "bug"         # было ложное «ok» (✓)
         assert by["Тел. реклама"]["status"] == "ok"   # реальный номер по-прежнему ✓

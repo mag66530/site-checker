@@ -137,7 +137,7 @@ def run(cities, log=print, show: bool = False, timeout_ms: int = 30000) -> list:
                       'not_replaced': '❌ НЕ подменился',
                       'no_element': '⚠ номер (.ct_phone) не найден',
                       'error': '⚠ ошибка'}.get(r['status'], r['status'])
-                log(f"  {city}: {_m} (на сайте {', '.join(r['shown']) or '—'}, "
+                log(f"  {city}: {_m} (на сайте {', '.join(r['shown']) or '–'}, "
                     f"рекл. КП {kp_nat})")
                 try:
                     ctx.close()

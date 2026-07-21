@@ -17,7 +17,7 @@ def test_parse_gsc_csv():
 
 
 def test_parse_gsc_csv_bom():
-    """CSV с BOM (utf-8-sig) — заголовок всё равно распознан, URL взяты."""
+    """CSV с BOM (utf-8-sig) – заголовок всё равно распознан, URL взяты."""
     csv = '﻿URL,x\nhttps://a.ru/1,2026\nhttps://a.ru/2,2026\n'.encode('utf-8')
     assert g.parse_gsc_export(csv) == ['https://a.ru/1', 'https://a.ru/2']
 

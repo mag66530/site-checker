@@ -1,4 +1,4 @@
-"""Тест живой перепроверки «404 в индексе» (без сети — _check_all замокан)."""
+"""Тест живой перепроверки «404 в индексе» (без сети – _check_all замокан)."""
 import sys
 from pathlib import Path
 
@@ -14,7 +14,7 @@ def _check(monkeyverdicts):
 
 
 def test_reverify_drops_false_positives(monkeypatch):
-    """404 остаётся, 200 (уже работает) и таймаут — убираются; 5xx остаётся."""
+    """404 остаётся, 200 (уже работает) и таймаут – убираются; 5xx остаётся."""
     monkeypatch.setattr(rv, '_check_all', _check({
         'https://s/a': ('dead', 404),      # реально битая
         'https://s/b': ('ok', 200),        # уже починили → убрать
@@ -41,7 +41,7 @@ def test_reverify_drops_false_positives(monkeypatch):
 
 
 def test_reverify_all_fixed_gives_empty(monkeypatch):
-    """Если все кандидаты уже работают (200) — хостов не остаётся."""
+    """Если все кандидаты уже работают (200) – хостов не остаётся."""
     monkeypatch.setattr(rv, '_check_all', _check({
         'https://s/a': ('ok', 200), 'https://s/b': ('ok', 200)}))
     check = {'available': True, 'source': 'combo', 'sources': ['Яндекс'],

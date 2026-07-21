@@ -462,9 +462,9 @@ def run_batch(
             results[url][strat] = ms
             done += 1
             if ms.error:
-                _log(f"[{done}/{total}] {strat:7} ✗ {url} — {ms.error}")
+                _log(f"[{done}/{total}] {strat:7} ✗ {url} – {ms.error}")
             else:
-                _log(f"[{done}/{total}] {strat:7} → {url} — {ms.score}")
+                _log(f"[{done}/{total}] {strat:7} → {url} – {ms.score}")
 
     out = []
     for url in order:

@@ -1,6 +1,6 @@
 """Тесты источника «Google (API)» для 404 в индексе: разбор ответа Search
 Analytics, определение GSC-ресурса, группировка в стандартный формат index_404.
-Без сети — сетевые вызовы (list_indexed_urls, _check_all) подменяются."""
+Без сети – сетевые вызовы (list_indexed_urls, _check_all) подменяются."""
 import asyncio
 import os
 import sys
@@ -14,9 +14,9 @@ def test_parse_search_analytics_rows():
     resp = {"rows": [
         {"keys": ["https://stalmetural.ru/catalog/armatura/"], "clicks": 5},
         {"keys": ["https://stalmetural.ru/catalog/truba/"], "impressions": 10},
-        {"keys": ["not-a-url"]},          # без http — отбрасываем
-        {"keys": []},                      # пустые ключи — отбрасываем
-        {"clicks": 1},                     # без keys — отбрасываем
+        {"keys": ["not-a-url"]},          # без http – отбрасываем
+        {"keys": []},                      # пустые ключи – отбрасываем
+        {"clicks": 1},                     # без keys – отбрасываем
     ]}
     urls = G.parse_search_analytics_rows(resp)
     assert urls == ["https://stalmetural.ru/catalog/armatura/",

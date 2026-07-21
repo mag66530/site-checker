@@ -168,9 +168,9 @@ streamlit run app.py
 4. Deploy
 
 Секреты (Manage app → Settings → Secrets):
-- `pagespeed_api_key` или `pagespeed_api_key_<проект>` — ключ PageSpeed для
+- `pagespeed_api_key` или `pagespeed_api_key_<проект>` – ключ PageSpeed для
   вкладки «Скорость страниц».
-- `gsc_service_account_<проект>` — base64 JSON сервисного аккаунта Google для
+- `gsc_service_account_<проект>` – base64 JSON сервисного аккаунта Google для
   источника «Google» в «404 в индексе» (Search Console API, работает на облаке
   без браузера). Сервисный аккаунт должен быть добавлен пользователем в
   GSC-ресурс проекта (Search Console → Settings → Users). Ресурс задаётся в

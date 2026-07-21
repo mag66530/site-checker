@@ -74,7 +74,7 @@ def test_creds_missing(tmp_path):
 
 
 def test_check_admin_settings_signature():
-    # crud/product_crud/execute — параметры вместо старого roundtrip
+    # crud/product_crud/execute – параметры вместо старого roundtrip
     import inspect
     from admin_settings_check import check_admin_settings
     params = inspect.signature(check_admin_settings).parameters

@@ -129,9 +129,9 @@ async def _google_login(page, email, password, log) -> tuple:
     """Автоматический вход в Google логином/паролем (запасной путь C, когда
     сохранённая сессия слетела). (ok, причина_если_нет).
 
-    Честно: Google активно против автовхода — 2FA, капча, «небезопасный
+    Честно: Google активно против автовхода – 2FA, капча, «небезопасный
     браузер», подтверждение по телефону. Если что-то из этого всплывает,
-    автоматом не пройти — возвращаем False с понятной причиной."""
+    автоматом не пройти – возвращаем False с понятной причиной."""
     _BLOCK = ('небезопасн', 'not secure', 'подтвердите, что это вы', "verify it",
               'captcha', 'капча', 'необычн', 'unusual', '2-этап', 'two-step',
               'two-factor', 'двухэтап', 'код подтверждения', 'verification code',
@@ -198,7 +198,7 @@ async def _google_login(page, email, password, log) -> tuple:
             return True, ''                      # ушли с логина → вошли
         body = (await page.inner_text('body')).lower()
         if any(k in body for k in _BLOCK):
-            return False, '2FA / подтверждение по телефону — автоматом не пройти'
+            return False, '2FA / подтверждение по телефону – автоматом не пройти'
         if 'wrong password' in body or 'неверный пароль' in body:
             return False, 'неверный пароль (проверь секрет gsc_<pid>_password)'
         return False, 'вход не завершился (Google требует доп. проверку)'
@@ -207,7 +207,7 @@ async def _google_login(page, email, password, log) -> tuple:
 
 
 async def _ensure_logged_in(page, res, acct, email, password, log) -> bool:
-    """Открыть отчёт GSC; если сессия жива — True. Если слетела — пробуем
+    """Открыть отчёт GSC; если сессия жива – True. Если слетела – пробуем
     автологин по логину/паролю (запасной путь C) и проверяем снова."""
     url = GSC_REPORT.format(acct=acct, res=res)
     try:
