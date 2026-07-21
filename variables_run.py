@@ -491,23 +491,23 @@ def main() -> int:
                    f'{row.phone_seo!r}, тел.общий={row.phone_common!r}, '
                    f'город={row.city!r}, адрес={(row.address or "")[:30]!r}')
     результаты = []
-    _n_partial = 0
+    _n_fail = 0
     for dom, row in domains:
         html, err = html_map.get(dom, ("", "не загружено"))
-        # Полный провал (без html) - строка «ошибка загрузки». Но неполная
-        # страница (обрыв, html есть) - НЕ провал: сверяем что успели загрузить
-        # (город/телефон/почта в шапке найдутся; подвал-адрес может отсутствовать).
-        if err and not html:
+        # ЛЮБАЯ ошибка загрузки (HTTP 500 / обрыв соединения / таймаут / неполная
+        # страница) = сайт не отдал страницу целиком. НЕ сверяем «что успели» -
+        # это давало мешанину (шапка ✓, адрес ⚠), хотя по факту сайт упал.
+        # Помечаем весь город ✗ с причиной (по просьбе заказчика).
+        if err:
             _le = err.lower()
             if ('name or service not known' in _le or 'errno -2' in _le
                     or 'getaddrinfo' in _le or 'nodename nor servname' in _le):
                 err = ('домен не существует (DNS не находит) - проверьте адрес '
                        'в КП, обычно опечатка')
+            _n_fail += 1
             результаты.append({"domain": dom, "city": row.city,
                                "country": row.country, "error": err, "fields": []})
             continue
-        if err:                       # html есть, но страница неполная
-            _n_partial += 1
         var = kpmod.check_variables(html, dom)
         # Адрес не нашли в шапке/подвале главной? У части проектов (МПЭ/mepen) он
         # только на «Контактах». Догружаем эту страницу и пересверяем адрес.
@@ -547,10 +547,11 @@ def main() -> int:
         var["error"] = ""
         результаты.append(var)
 
-    if _n_partial:
-        _stamp(f'⚠️ Неполных страниц (обрыв соединения, повторы не помогли): '
-               f'{_n_partial} - у них подвал мог не догрузиться, адрес там может '
-               'показать «не найден». Шапка (город/телефон/почта) проверена.')
+    if _n_fail:
+        _stamp(f'⚠️ Не загрузилось (сайт отдал 500 / оборвал соединение / таймаут): '
+               f'{_n_fail} из {len(domains)}. В отчёте они помечены ✗ по всей строке '
+               'с причиной - это НЕ ошибки КП, а недоступность сайта. '
+               'Перезапусти позже или проверь, открывается ли сайт в браузере.')
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
     xlsx = work / 'variables.xlsx'
@@ -569,6 +570,9 @@ _ЛЕГЕНДА = [
      "Все расхождения также собраны на листе «Расхождения».", False),
     ("⚠  — на сайте не найдено (телефон / почта / адрес / мессенджер).", False),
     ("—  — в КП этого поля нет (проверять не с чем).", False),
+    ("✗ по ВСЕЙ строке — сайт этого города не загрузился (HTTP 500 / обрыв / "
+     "таймаут). В примечании ячейки — причина. Это НЕ ошибка КП, а недоступность "
+     "сайта: перезапусти позже или проверь, открывается ли сайт в браузере.", False),
 ]
 
 
@@ -619,8 +623,18 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
         gcell.font = LINK_FONT
         by = {f["field"]: f for f in res.get("fields", [])}
         if res.get("error"):
-            hc = ws.cell(r, _FIRST_VAR_COL, f"ошибка загрузки: {res['error']}")
-            hc.font = Font(color="C62828")
+            # Сайт не загрузился - ✗ по ВСЕМ колонкам + причина в примечании
+            # каждой ячейки (не путаем с «телефон ✓, адрес ⚠» у частично
+            # загруженной страницы: тут упал весь сайт).
+            reason = f"Сайт не загрузился: {res['error']}"
+            for c in range(_FIRST_VAR_COL, _FIRST_VAR_COL + len(VAR_COLUMNS)):
+                cell = ws.cell(r, c, "✗")
+                cell.font = Font(color=_COLOR.get("bug", "C62828"), bold=True)
+                cell.alignment = Alignment(horizontal="center")
+                cell.fill = BUG_FILL
+                cm = Comment(reason, "1.4")
+                cm.width, cm.height = 340, 90
+                cell.comment = cm
             r += 1
             continue
         for c, name in enumerate(VAR_COLUMNS, _FIRST_VAR_COL):
