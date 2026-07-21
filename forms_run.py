@@ -575,7 +575,7 @@ def main() -> int:
                 _дата = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y')
                 _имя = f'Form-{a.project}-{_дата}.xlsx'
                 _бренд = name.split(' - ')[0].strip()
-                _части = [f'Проверка форм {escape_html(_бренд)}']
+                _части = [f'<b>Проверка форм {escape_html(_бренд)}</b>']
                 if _города:
                     _части.append(f'Города: {escape_html(", ".join(_города))}')
                 _части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')
