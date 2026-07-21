@@ -360,6 +360,23 @@ def _rows_done(xlsx: Path):
 st.markdown(
     """
     <style>
+    /* Чёрная primary-кнопка «Запустить проверку»: белый текст. Без этого на этой
+       странице глобальное правило .stApp p/div красит подпись в тёмный - и текст
+       сливается с чёрным фоном. Как на Чек-листе и «Проверке целей». */
+    div[data-testid="stButton"] > button[kind="primary"],
+    div[data-testid="stButton"] > button[data-testid="stBaseButton-primary"],
+    div[data-testid="stButton"] > button[data-testid="baseButton-primary"] {
+        background: #1A1A1A !important; border: 1px solid #1A1A1A !important;
+        color: #FFFFFF !important;
+    }
+    div[data-testid="stButton"] > button[kind="primary"] *,
+    div[data-testid="stButton"] > button[data-testid="stBaseButton-primary"] *,
+    div[data-testid="stButton"] > button[data-testid="baseButton-primary"] * {
+        color: #FFFFFF !important;
+    }
+    div[data-testid="stButton"] > button[kind="primary"]:hover {
+        background: #000000 !important; border-color: #000000 !important;
+    }
     [data-testid="stDownloadButton"] button {
         background: #1E8E3E !important; border: 1px solid #1E8E3E !important;
     }
