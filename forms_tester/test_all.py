@@ -3488,8 +3488,13 @@ def _проба_закрытия_модалки(page, modal) -> tuple:
 # дело, когда форма ищется по id/css из конфига), повторный скоуп внутри
 # кандидата #modal1 ищет #modal1 ВНУТРИ #modal1 - ничего не находит. XPath
 # ancestor:: работает от уже разрешённого узла формы - этой проблемы нет.
+# ancestor-OR-SELF: локатор формы иногда указывает на САМ popup-контейнер
+# (напр. Bitrix «Оставить заявку»: селектор формы разрешается в div#txt-back с
+# class="popup", а не во внутренний <form>). Тогда «модалка вокруг формы» = сам
+# элемент, и ancestor:: её не находил → модалка шла прочерком. self учитывает и
+# этот случай, и обычный (форма ВНУТРИ .popup).
 _MODAL_ANCESTOR_XPATH = (
-    "xpath=(ancestor::*[contains(@class,'modal') or contains(@class,'popup') "
+    "xpath=(ancestor-or-self::*[contains(@class,'modal') or contains(@class,'popup') "
     "or contains(@class,'fancybox') or contains(@class,'mfp') "
     "or contains(@class,'lightbox') "
     "or @role='dialog' or @role='alertdialog' "
