@@ -343,3 +343,101 @@ def save_report(path, **kwargs) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     build_workbook(**kwargs).save(path)
     return path
+
+
+# ── Отчёт «Все прогоны» (сравнение со всеми прошлыми снятиями) ────────────────
+def _dnum(cur, prev):
+    """Δ оценки (cur-prev) или None, если чего-то нет."""
+    if not isinstance(cur, (int, float)) or not isinstance(prev, (int, float)):
+        return None
+    return round(cur - prev, 1)
+
+
+def _build_all_runs_overall_sheet(wb, project_name, runs_agg, provider_name):
+    """Лист «Все прогоны»: строка = прогон (новые сверху), средние desktop/mobile
+    и Δ к предыдущему по времени прогону."""
+    ws = wb.active
+    ws.title = "Все прогоны"
+    ncols = 6
+    start = _title_block(ws, "Скорость страниц — все прогоны", [
+        f"Проект: {project_name}   ·   Источник: {provider_name}",
+        f"Снятий в истории: {len(runs_agg)}   ·   Δ — к предыдущему по времени прогону",
+    ], ncols)
+
+    headers = ["Дата прогона", "Стр.", "🖥 Desktop AVG", "Δ Desktop",
+               "📱 Mobile AVG", "Δ Mobile"]
+    hrow = start
+    _header_row(ws, hrow, headers)
+
+    ordered = list(reversed(runs_agg))   # новые сверху
+    row = hrow + 1
+    for i, r in enumerate(ordered):
+        ov = r["agg"].get("overall", {})
+        prev_ov = ordered[i + 1]["agg"].get("overall", {}) if i + 1 < len(ordered) else {}
+        c = ws.cell(row=row, column=1, value=fmt_ts(r["run_ts"]))
+        c.border = _BORDER
+        c.font = _font(bold=True)
+        c.alignment = _align("left")
+        cnt = ws.cell(row=row, column=2, value=ov.get("count"))
+        cnt.border = _BORDER
+        cnt.alignment = _align("center")
+        _score_cell(ws, row, 3, ov.get("desktop_avg"))
+        _delta_cell(ws, row, 4, _dnum(ov.get("desktop_avg"), prev_ov.get("desktop_avg")))
+        _score_cell(ws, row, 5, ov.get("mobile_avg"))
+        _delta_cell(ws, row, 6, _dnum(ov.get("mobile_avg"), prev_ov.get("mobile_avg")))
+        row += 1
+
+    for i, w in enumerate([22, 8, 15, 12, 15, 12], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = ws.cell(row=hrow + 1, column=1)
+
+
+def _build_all_runs_bytype_sheet(wb, runs_agg):
+    """Лист «По типам»: длинный формат — для каждого прогона строки по типам
+    страниц со средними desktop/mobile (новые прогоны сверху)."""
+    ws = wb.create_sheet("По типам")
+    headers = ["Дата прогона", "Тип страницы", "Кол-во", "🖥 Desktop AVG", "📱 Mobile AVG"]
+    _header_row(ws, 1, headers)
+
+    row = 2
+    for r in reversed(runs_agg):
+        ts = fmt_ts(r["run_ts"])
+        bt = r["agg"].get("by_type", {})
+        ordered = [tc for tc in TYPE_ORDER if tc in bt] + \
+                  [tc for tc in bt if tc not in TYPE_ORDER]
+        for tc in ordered:
+            b = bt[tc]
+            a = ws.cell(row=row, column=1, value=ts)
+            a.border = _BORDER
+            a.alignment = _align("left")
+            t = ws.cell(row=row, column=2, value=TYPE_LABELS.get(tc, tc))
+            t.border = _BORDER
+            t.alignment = _align("left")
+            cnt = ws.cell(row=row, column=3, value=b.get("count"))
+            cnt.border = _BORDER
+            cnt.alignment = _align("center")
+            _score_cell(ws, row, 4, b.get("desktop_avg"))
+            _score_cell(ws, row, 5, b.get("mobile_avg"))
+            row += 1
+
+    for col, w in zip("ABCDE", [22, 18, 8, 15, 15]):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = ws.cell(row=2, column=1)
+
+
+def build_all_runs_workbook(*, project_name, runs_agg,
+                            provider_name="PageSpeed Insights") -> Workbook:
+    """Книга «Все прогоны»: лист с общими средними по каждому прогону + Δ и лист
+    с разбивкой по типам. runs_agg - результат
+    pagespeed_history.all_run_aggregates() (хронологически)."""
+    wb = Workbook()
+    _build_all_runs_overall_sheet(wb, project_name, runs_agg, provider_name)
+    _build_all_runs_bytype_sheet(wb, runs_agg)
+    return wb
+
+
+def all_runs_to_bytes(**kwargs) -> bytes:
+    """xlsx «Все прогоны» как bytes - для st.download_button."""
+    buf = io.BytesIO()
+    build_all_runs_workbook(**kwargs).save(buf)
+    return buf.getvalue()
