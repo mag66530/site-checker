@@ -51,6 +51,30 @@ def test_aggregate_for_run(monkeypatch, tmp_path):
     assert agg["by_type"]["category"]["mobile_avg"] == 35.0
 
 
+def test_all_run_aggregates_chronological(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    # прогоны заносим НЕ по порядку - функция должна вернуть их хронологически
+    H.append_run("smu", "2026-07-16 10:00:00",
+                 [_mk("u1", "main", 80, 40), _mk("u2", "category", 60, 30)])
+    H.append_run("smu", "2026-07-02 10:00:00", [_mk("u1", "main", 70, 35)])
+
+    runs = H.all_run_aggregates("smu")
+    assert [r["run_ts"] for r in runs] == ["2026-07-02 10:00:00", "2026-07-16 10:00:00"]
+
+    # overall второго (позднего) прогона: desktop (80+60)/2, mobile (40+30)/2, count 2
+    ov = runs[1]["agg"]["overall"]
+    assert ov["count"] == 2
+    assert ov["desktop_avg"] == 70.0
+    assert ov["mobile_avg"] == 35.0
+    # per-run агрегат совпадает с aggregate_for_run
+    assert runs[0]["agg"] == H.aggregate_for_run("smu", "2026-07-02 10:00:00")
+
+
+def test_all_run_aggregates_empty_history(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    assert H.all_run_aggregates("smu") == []
+
+
 def test_pick_previous_run_prev(monkeypatch, tmp_path):
     _use_tmp(monkeypatch, tmp_path)
     H.append_run("smu", "2026-07-02 10:00:00", [_mk("u", "main", 55, 25)])
