@@ -242,3 +242,48 @@ def test_page_phone_vs_kp():
     assert check_page_phone('Звоните +7 (499) 130-60-28', 'x.ru', kp)['status'] == 'ok'
     assert check_page_phone('Звоните +7 (495) 000-11-22', 'x.ru', kp)['status'] == 'bug'
     assert check_page_phone('Текст без номера', 'x.ru', kp)['status'] == 'bug'
+
+
+def test_convert_drops_linkless_satellites(tmp_path, monkeypatch):
+    """Города без своей ссылки в КП не попадают в отчёт: у СНГ-стран одна ссылка
+    на всю страну (stalmetural.kz/.by/.uz), поэтому в «Проверке КП» остаётся один
+    город-владелец ссылки, а безссылочные города-спутники убираем - иначе они
+    сверялись бы с чужим городским сайтом и давали ложные ошибки. Проверяем и
+    порядок: спутники стоят ВЫШЕ владельца, но владелец всё равно побеждает."""
+    pytest.importorskip('openpyxl')
+    from openpyxl import Workbook
+    import csv
+    import convert_kp
+
+    wb = Workbook(); ws = wb.active; ws.title = 'Справочники'
+    ws.append(['Страна', 'Город', 'url', 'Адрес', 'e-mail',
+               'SEO Город', 'Реклама Город', 'Общий Город', 'Telegram', 'WhatsApp'])
+    rows = [
+        ('Россия', 'Москва', 'https://stalmetural.ru/', 'ул. Т, 1',
+         'msk@stalmetural.ru', '+7 495 000 00 01', '', '', '', ''),
+        # спутники .kz БЕЗ своей ссылки (домен только в почте) - стоят выше владельца
+        ('Казахстан', 'Астана', '', 'ул. Т, 5',
+         'astana@stalmetural.kz', '+7 717 000 00 01', '', '', '', ''),
+        ('Казахстан', 'Караганда', '', 'ул. Т, 6',
+         'kar@stalmetural.kz', '+7 721 000 00 01', '', '', '', ''),
+        # владелец ссылки .kz - ниже спутников
+        ('Казахстан', 'Алматы', 'https://stalmetural.kz/', 'пр. Т, 3',
+         'almaty@stalmetural.kz', '+7 727 000 00 01', '', '', '', ''),
+    ]
+    for r in rows:
+        ws.append(r)
+    src = tmp_path / 'kp.xlsx'; wb.save(str(src))
+
+    monkeypatch.setattr(convert_kp, 'CATALOGS_DIR', tmp_path)
+    out = convert_kp.convert('smu', str(src))
+    with open(out, encoding='utf-8') as f:
+        got = [(r['domain'], r['city']) for r in csv.DictReader(f)]
+
+    # владелец ссылки .kz - Алматы (несмотря на то, что спутники были выше)
+    assert ('stalmetural.kz', 'Алматы') in got
+    # спутники без своей ссылки убраны
+    cities = {c for _, c in got}
+    assert 'Астана' not in cities and 'Караганда' not in cities
+    # ровно один город на домен .kz и всего два города (Москва + Алматы)
+    assert sum(1 for d, _ in got if d == 'stalmetural.kz') == 1
+    assert len(got) == 2
