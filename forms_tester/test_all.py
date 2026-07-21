@@ -6543,11 +6543,22 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             try:
                 sub.click(timeout=5000)
             except Exception:
-                # Кнопку видно, но её перекрывает другой элемент (баг вёрстки
-                # на части доменов): кликаем принудительно - обработчик сайта
-                # срабатывает так же, как при обычном клике.
-                print("      ↻ Обычный клик по кнопке перекрыт - кликаем принудительно (force)")
-                sub.click(timeout=5000, force=True)
+                # Кнопку видно, но её ПЕРЕКРЫВАЕТ другой элемент (баг вёрстки:
+                # напр. на «Срочный заказ» декоративная картинка quick_order--img
+                # лежит ПОВЕРХ кнопки). force-клик кликает по КООРДИНАТЕ и попадает
+                # в оверлей, а не в кнопку - форма НЕ отправляется (POST не уходит,
+                # тул писал ложное «нет подтверждения»). JS-клик b.click() шлёт
+                # событие ПРЯМО на элемент-кнопку (мимо хит-теста координат):
+                # <button type=submit> отправит форму штатно, обработчик сайта
+                # сработает. force оставляем запасным вариантом.
+                print("      ↻ Обычный клик перекрыт - отправляю через JS (b.click)")
+                try:
+                    sub.evaluate("b => b.click()")
+                except Exception:  # noqa: BLE001
+                    try:
+                        sub.click(timeout=5000, force=True)
+                    except Exception:  # noqa: BLE001
+                        pass
 
             # Сам тест двойной отправки (guarded - никогда не роняет отправку).
             try:
@@ -6579,24 +6590,25 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     # заблокировалась/сменила текст/исчезла - защита ЕСТЬ, второй
                     # клик реальный пользователь не сделает. Второй клик (если
                     # кнопка так и не заблокировалась) - обычный, БЕЗ force.
-                    _btn_до_ds = ""
-                    try:
-                        _btn_до_ds = _текст_кнопки(sub, 500).lower()
-                    except Exception:  # noqa: BLE001
-                        _btn_до_ds = ""
+                    # ВАЖНО: «заблокирована» = кнопку РЕАЛЬНО нельзя нажать второй
+                    # раз (disabled / aria-disabled / pointer-events:none / скрыта /
+                    # исчезла). Смену ТЕКСТА на «Отправлено» тут НЕ считаем защитой:
+                    # на части форм кнопка косметически меняет текст, но остаётся
+                    # КЛИКАБЕЛЬНОЙ - и второй клик уходит второй заявкой. Раньше
+                    # текст-смену считали блокировкой → пропускали второй клик →
+                    # ложное «защищена» (хотя заявки летят). Теперь: если кнопку
+                    # реально можно нажать - жмём второй раз и судим по РЕАЛЬНОМУ
+                    # числу POST (честная проверка). JS-guard (кнопка кликабельна,
+                    # но сайт игнорит второй сабмит) даст 1 POST → «защищена» верно.
                     _locked2 = False
                     for _ in range(11):                # ~1650 мс наблюдения
                         try:
                             _locked2 = bool(sub.evaluate(
-                                "(b, txtDo) => { const cs = getComputedStyle(b);"
-                                " const t = (b.innerText||b.value||'').trim().toLowerCase();"
-                                " return !!(b.disabled || b.getAttribute('aria-disabled')==='true'"
-                                "   || /disabl|load|sending|wait|process|sent|отправ|подожд/i.test(b.className||'')"
-                                "   || /отправлено|отправляется|подожд|sending|sent|done|спасибо|thank/i.test(t)"
-                                "   || (txtDo && t && t!==txtDo)"   # текст кнопки сменился
+                                "b => { const cs = getComputedStyle(b);"
+                                " return !!(b.disabled"
+                                "   || b.getAttribute('aria-disabled')==='true'"
                                 "   || cs.pointerEvents==='none' || cs.display==='none'"
-                                "   || cs.visibility==='hidden' || b.offsetParent===null); }",
-                                _btn_до_ds))
+                                "   || cs.visibility==='hidden' || b.offsetParent===null); }"))
                         except Exception:  # noqa: BLE001
                             _locked2 = True            # кнопка исчезла = защита есть
                         if _locked2:
