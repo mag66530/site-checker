@@ -1605,7 +1605,7 @@ if pid:
         # Админка - отдельный аккордеон (нужны креды); свёрнута, галочки вручную
         _sec_adm = st.container(key='c30_sec_adm')
         with _sec_adm.expander(f'🛠️  Админка – настройки, CRUD, счётчики (нужны креды)  `{_sec_n(_SEC_ADM)}/{len(_SEC_ADM)}`',
-                               expanded=False):
+                               expanded=True):
             _amc1, _amc2 = st.columns([3, 2])
             with _amc1:
                 _ck_adm = st.checkbox(
@@ -1717,7 +1717,7 @@ if pid:
 
         # Дополнительно - тяжёлые/точечные проверки; свёрнуто, по умолчанию выкл
         _sec_dop = st.container(key='c30_sec_dop')
-        with _sec_dop.expander(f'➕  Дополнительно – уведомления, 404 из Метрики, Арсенкин, нагрузка, свои URL, уникальность  `{_sec_n(_SEC_DOP)}/{len(_SEC_DOP)}`', expanded=False):
+        with _sec_dop.expander(f'➕  Дополнительно – уведомления, 404 из Метрики, Арсенкин, нагрузка, свои URL, уникальность  `{_sec_n(_SEC_DOP)}/{len(_SEC_DOP)}`', expanded=True):
             _ck_notif = st.checkbox(
                 'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google)',
                 key='c30_fetch_notifications',
