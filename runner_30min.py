@@ -1781,12 +1781,20 @@ def run_check(pid, params, creds, log, progress):
                     _ures = _UC.run_batch(_utyped, _UC.TextRuClient(_tk),
                                           exceptdomain=_uexcept,
                                           log=lambda m: log(f'  {m}'))
+                    # Авто-углубление: берём топ-конкурента каждой страницы (кого
+                    # нашёл text.ru) и БЕСПЛАТНО сверяем наш текст с их страницей.
+                    try:
+                        log('Уникальность: углубляюсь по найденным конкурентам…')
+                        _UC.enrich_with_deep_compare(_ures, log=log)
+                    except Exception as _de:  # noqa: BLE001
+                        log(f'  углубление пропущено: {_de}')
                     _usum = _UC.summarize(_ures, threshold=_uthr)
                     _uniqueness = {
                         'threshold': _uthr, 'summary': _usum,
                         'rows': [{'url': r.url, 'type': r.type_code,
                                   'unique': r.unique, 'chars': r.chars,
-                                  'error': r.error, 'sources': r.sources[:10]}
+                                  'error': r.error, 'sources': r.sources[:10],
+                                  'deep': r.deep}
                                  for r in _ures]}
                     log(f'Уникальность (text.ru): проверено {_usum["checked"]}/'
                         f'{_usum["total"]}, ниже {_uthr:.0f}% - {_usum["below"]}, '

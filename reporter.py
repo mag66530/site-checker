@@ -6721,6 +6721,14 @@ def _build_uniqueness_sheet(wb, uniqueness):
             (f'{s.get("url", "")}  ({s["plagiat"]:.1f}%)'
              if s.get('plagiat') is not None else s.get('url', ''))
             for s in (r.get('sources') or []) if s.get('url'))
+        # Авто-углубление: своя бесплатная сверка с топ-конкурентом.
+        _dp = r.get('deep')
+        if _dp and _dp.get('a_in_b') is not None:
+            _dl = (f'🔎 наша сверка: {_dp["a_in_b"]:.0f}% нашего текста на '
+                   f'{_dp.get("competitor", "")}')
+            if _dp.get('samples'):
+                _dl += ' · фразы: ' + '; '.join(f'«{x}»' for x in _dp['samples'][:2])
+            src = (src + '\n' + _dl) if src else _dl
         cs = ws.cell(row=row, column=5)
         cs.value = src or ('—' if not r.get('error') else '')
         cs.alignment = _align(wrap=True, vertical='top')

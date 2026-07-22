@@ -217,6 +217,8 @@ class UniqResult:
     sources: list = field(default_factory=list)  # [{'url','plagiat'}] чужих совпадений
     chars: int = 0
     error: str = ""
+    text: str = ""                          # извлечённый SEO-текст (для авто-сверки)
+    deep: Optional[dict] = None             # авто-углубление: сверка с топ-конкурентом
 
     @property
     def has_data(self) -> bool:
@@ -286,6 +288,7 @@ def run_batch(
         if res.chars > MAX_CHARS:
             text = text[:MAX_CHARS]
             res.chars = MAX_CHARS
+        res.text = text          # сохраняем для авто-сверки с конкурентом
         try:
             uid = client.submit(text, exceptdomain=exceptdomain)
             pending[uid] = url
@@ -387,6 +390,35 @@ def compare_urls(url_a: str, url_b: str, *, fetcher=None, n: int = 4) -> dict:
     r["url_a"], r["url_b"] = url_a, url_b
     r["chars_a"], r["chars_b"] = len(ta), len(tb)
     return r
+
+
+def enrich_with_deep_compare(results, *, fetcher=None, log=None):
+    """Авто-углубление: text.ru уже нашёл, С КЕМ пересекается каждая наша страница
+    (r.sources). Берём ТОП-источник (макс. совпадение), скачиваем его и БЕСПЛАТНО
+    сверяем НАШ текст с ИХ текстом (compare_texts). Пишем в r.deep:
+      {'competitor': url, 'a_in_b': % нашего текста у них, 'samples': [фразы]}.
+    Так «берём тех, с кем совпадение, и углубляемся» - автоматически, без ключей."""
+    fetch = fetcher or _default_fetch
+
+    def _log(m):
+        if log:
+            log(m)
+
+    for r in results:
+        if not r.sources or not (r.text or "").strip():
+            continue
+        top = (r.sources[0] or {}).get("url")   # sources отсортированы по plagiat ↓
+        if not top:
+            continue
+        try:
+            their = extract_main_text(fetch(top))
+            cmp = compare_texts(r.text, their)
+            r.deep = {"competitor": top, "a_in_b": cmp["a_in_b"],
+                      "samples": cmp["samples"]}
+            _log(f"  углубление: {r.url} ↔ {top} - нашего текста у них "
+                 f"{cmp['a_in_b']:.0f}%")
+        except Exception as e:   # noqa: BLE001
+            r.deep = {"competitor": top, "error": str(e)[:100]}
 
 
 def summarize(results: list[UniqResult], threshold: float = 95.0) -> dict:
