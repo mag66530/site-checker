@@ -1756,6 +1756,41 @@ if pid:
                            'конкурентов, с чьим сайтом пересекается контент, и на '
                            'скольких наших страницах (сигнал «скопировали каталог»). '
                            'Свои домены исключаются. Идёт в конце прогона (несколько минут).')
+        # ── Бесплатное 1-к-1 сравнение двух страниц (без text.ru и ключей) ──
+        with st.expander('🆚 Разово сравнить 2 страницы (бесплатно, без text.ru)',
+                         expanded=False):
+            st.caption('Сравнивает SEO-текст ДВУХ конкретных страниц между собой '
+                       '(как бесплатный copyscape.com/compare, но вырезает шапку/'
+                       'меню - без «0% из 1134 слов меню»). Ключи и сервисы не '
+                       'нужны. Удобно проверить, скопировал ли КОНКРЕТНЫЙ конкурент '
+                       'нашу страницу. Ищет только точные совпадения фраз.')
+            _cmp_a = st.text_input('Наша страница (URL)', key='c30_cmp_a',
+                                   placeholder='https://stalmetural.ru/catalog/setka/')
+            _cmp_b = st.text_input('Страница конкурента (URL)', key='c30_cmp_b',
+                                   placeholder='https://konkurent.ru/catalog/setka/')
+            if st.button('Сравнить', key='c30_cmp_go',
+                         disabled=not ((_cmp_a or '').strip() and (_cmp_b or '').strip())):
+                try:
+                    import uniqueness_checker as _UCcmp
+                    with st.spinner('Скачиваю обе страницы и сравниваю…'):
+                        _cr = _UCcmp.compare_urls(_cmp_a.strip(), _cmp_b.strip())
+                    _cc = st.columns(3)
+                    _cc[0].metric('Нашего текста у них', f'{_cr["a_in_b"]:.0f}%',
+                                  help='Сколько % нашего SEO-текста есть на их странице.')
+                    _cc[1].metric('Наш текст, симв.', _cr['chars_a'])
+                    _cc[2].metric('Их текст, симв.', _cr['chars_b'])
+                    if _cr['a_in_b'] >= 30:
+                        st.error(f'⚠ {_cr["a_in_b"]:.0f}% нашего текста есть у них — '
+                                 'похоже на копию.')
+                    elif _cr['a_in_b'] >= 10:
+                        st.warning(f'{_cr["a_in_b"]:.0f}% совпадения — частичное пересечение.')
+                    else:
+                        st.success('Существенных совпадений нет.')
+                    if _cr['samples']:
+                        st.caption('Совпавшие фразы: '
+                                   + '; '.join(f'«{s}»' for s in _cr['samples']))
+                except Exception as _ce:
+                    st.error(f'Не удалось сравнить: {_ce}')
 
     # БЛОК 4 - Админка: браузерная проверка функций настройки (нужны креды).
     with st.container(border=True):

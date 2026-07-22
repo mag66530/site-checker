@@ -344,6 +344,51 @@ def _source_domain(url: str) -> str:
     return d[4:] if d.startswith("www.") else d
 
 
+# ── Бесплатное 1-к-1 сравнение двух текстов (без внешних сервисов) ────────────
+# Не ищет по интернету (для этого нужен поисковый индекс / text.ru / Copyscape
+# Premium), а сравнивает ДВЕ КОНКРЕТНЫЕ страницы, которые мы уже скачали, - как
+# бесплатный copyscape.com/compare. Работает на «шинглах» (перекрывающиеся
+# фразы из N слов): доля общих фраз = процент совпадения.
+_WORD_RE = re.compile(r"[а-яёa-z0-9]+", re.I)
+
+
+def _shingles(text: str, n: int = 4) -> set:
+    words = _WORD_RE.findall((text or "").lower())
+    if len(words) < n:
+        return {" ".join(words)} if words else set()
+    return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def compare_texts(a: str, b: str, n: int = 4) -> dict:
+    """Сравнить два текста без внешних сервисов. Возвращает:
+      a_in_b - сколько % текста A встречается в B (=«сколько НАШЕГО у них»);
+      b_in_a - сколько % текста B встречается в A;
+      overlap - общий процент пересечения (Жаккар);
+      samples - несколько совпавших фраз для примера."""
+    sa, sb = _shingles(a, n), _shingles(b, n)
+    if not sa or not sb:
+        return {"a_in_b": 0.0, "b_in_a": 0.0, "overlap": 0.0, "samples": []}
+    common = sa & sb
+    return {
+        "a_in_b": round(100 * len(common) / len(sa), 1),
+        "b_in_a": round(100 * len(common) / len(sb), 1),
+        "overlap": round(100 * len(common) / len(sa | sb), 1),
+        "samples": sorted(common)[:5],
+    }
+
+
+def compare_urls(url_a: str, url_b: str, *, fetcher=None, n: int = 4) -> dict:
+    """Скачать две страницы, вырезать SEO-текст и сравнить (compare_texts).
+    url_a - наша страница, url_b - страница конкурента."""
+    fetch = fetcher or _default_fetch
+    ta = extract_main_text(fetch(url_a))
+    tb = extract_main_text(fetch(url_b))
+    r = compare_texts(ta, tb, n)
+    r["url_a"], r["url_b"] = url_a, url_b
+    r["chars_a"], r["chars_b"] = len(ta), len(tb)
+    return r
+
+
 def summarize(results: list[UniqResult], threshold: float = 95.0) -> dict:
     """Свод для отчёта/страницы + агрегат конкурентов.
 
