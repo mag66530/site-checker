@@ -334,6 +334,13 @@ with _c1:
                     _env['GCP_SA_JSON'] = _sa_json
             except Exception:
                 pass
+            # Telegram: креды из секретов (те же, что у форм/целей) - variables_run
+            # сам отправит отчёт КП в чат после прогона.
+            try:
+                import tg_report
+                _env.update(tg_report.runner_env(pid_key))
+            except Exception:
+                pass
             _launch(args, extra_env=_env or None)
             st.session_state['vars_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['vars_project'] = pid_key

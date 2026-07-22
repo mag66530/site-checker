@@ -572,6 +572,33 @@ def main() -> int:
     xlsx = work / 'variables.xlsx'
     _записать_xlsx(xlsx, PROJECT_NAMES[a.project], результаты)
     _stamp(f'Отчёт сохранён: {xlsx}')
+    # Telegram: отчёт КП получателям проекта (креды - в окружении, их проставляет
+    # страница из секретов). Подпись унифицирована с формами и целями. Без
+    # настроенного TG - тихо пропуск.
+    try:
+        import telegram_notify as tn
+        from telegram_notify import escape_html
+        import datetime as _dt
+        _бренд = PROJECT_NAMES[a.project].split(' - ')[0].strip()
+        _дата = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y')
+        _города_список = [c.strip() for c in (a.cities or '').split(',') if c.strip()]
+        _части = [f'<b>Проверка КП {escape_html(_бренд)}</b>']
+        if _города_список:
+            _части.append(f'Города: {escape_html(", ".join(_города_список))}')
+        else:
+            _части.append('Проверены все домены и поддомены проекта')
+        _части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')
+        _текст = '\n\n'.join(_части)
+        _res = tn.send_report_from_env(
+            project_name=PROJECT_NAMES[a.project], summary_text=_текст,
+            report_file=xlsx if xlsx.is_file() else None,
+            report_filename=f'KP-{a.project}-{_дата}.xlsx',
+            log=lambda lvl, msg: _stamp(msg))
+        if not _res.get('skipped'):
+            _stamp(f'✓ Telegram: отправлено {_res.get("sent", 0)}, '
+                   f'не доставлено {_res.get("failed", 0)}')
+    except Exception as e:  # noqa: BLE001
+        _stamp(f'⚠ Telegram-отправка не удалась ({e}) - отчёт всё равно готов.')
     _stamp('✅ ВСЁ ГОТОВО')
     return 0
 
