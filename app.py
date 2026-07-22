@@ -54,15 +54,39 @@ st.markdown(
         border-radius: 10px; padding: 0.6rem 1.1rem;
         transition: background .18s, transform .15s;
     }
-    .stButton > button[kind="primary"] {
-        background: #1A1A1A; color: #fff; border: 1px solid #1A1A1A;
+    /* Тёмные (primary) кнопки. Streamlit меняет разметку кнопок между версиями
+       (kind="primary" → data-testid="stBaseButton-primary"), поэтому ловим и
+       через [data-testid*="rimary"]. */
+    .stButton > button[kind="primary"],
+    .stButton > button[data-testid*="rimary"] {
+        background: #1A1A1A !important; color: #fff !important; border: 1px solid #1A1A1A !important;
     }
-    .stButton > button[kind="primary"]:hover { background: #000; transform: translateY(-1px); }
-    .stButton > button[kind="secondary"], .stDownloadButton > button {
-        background: transparent; color: #1A1A1A; border: 1px solid rgba(26,26,26,.18);
+    /* Текст и иконка ВНУТРИ тёмной кнопки - всегда белые. Без этого правило
+       .stApp div{color:#1A1A1A} перебивало наследование и текст выходил
+       чёрным на чёрном (кнопка «Запустить», «Сохранить шаблон» и т.п.). */
+    .stButton > button[kind="primary"] *,
+    .stButton > button[data-testid*="rimary"] * {
+        color: #fff !important; fill: #fff !important;
     }
-    .stButton > button[kind="secondary"]:hover, .stDownloadButton > button:hover {
-        background: rgba(26,26,26,.05);
+    .stButton > button[kind="primary"]:hover,
+    .stButton > button[data-testid*="rimary"]:hover {
+        background: #000 !important; transform: translateY(-1px);
+    }
+    /* Светлые (secondary) кнопки + скачивание: прозрачный фон, тёмный текст. */
+    .stButton > button[kind="secondary"],
+    .stButton > button[data-testid*="econdary"],
+    .stDownloadButton > button {
+        background: transparent !important; color: #1A1A1A !important;
+        border: 1px solid rgba(26,26,26,.18) !important;
+    }
+    .stButton > button[kind="secondary"] *,
+    .stButton > button[data-testid*="econdary"] * {
+        color: #1A1A1A !important;
+    }
+    .stButton > button[kind="secondary"]:hover,
+    .stButton > button[data-testid*="econdary"]:hover,
+    .stDownloadButton > button:hover {
+        background: rgba(26,26,26,.05) !important;
     }
     /* Кнопки отправки формы (st.form_submit_button): без этих правил текст
        невидим - тёмный на тёмном фоне. Приводим к обычному светлому виду. */
