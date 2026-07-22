@@ -101,7 +101,7 @@ def _сводка_для_telegram(base: str, результаты: list) -> str:
     from telegram_notify import escape_html
     бренд = _ИМЕНА.get(base, base.upper()).split(' - ')[0].strip()
     страны = [_страна(pid) for pid, _к, _п, _м in результаты]
-    части = [f'Проверка целей {escape_html(бренд)}']
+    части = [f'<b>Проверка целей {escape_html(бренд)}</b>']
     if страны:
         части.append(f'Проверено: {escape_html(", ".join(страны))}')
     части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')

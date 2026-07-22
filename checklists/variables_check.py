@@ -311,7 +311,7 @@ except Exception as _e_pa:
 _c1, _c2 = st.columns([3, 1])
 with _c1:
     if st.button('▶ Запустить проверку', use_container_width=True,
-                 disabled=_alive or _none_chosen):
+                 type='primary', disabled=_alive or _none_chosen):
         if not _deps_ready():
             st.error('В этом окружении нет нужных библиотек (requests/bs4/openpyxl).')
         else:

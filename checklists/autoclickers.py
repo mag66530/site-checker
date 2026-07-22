@@ -268,7 +268,7 @@ _running = _alive and not _done
 
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
-    if st.button('Запустить', use_container_width=True, disabled=_running):
+    if st.button('Запустить', use_container_width=True, type='primary', disabled=_running):
         if not do_gsc and not do_wm:
             st.info('Отметь хотя бы один пункт выше.')
         elif not _cdp and not _cloud_session:
@@ -328,6 +328,8 @@ elif _log_txt.strip():
     st.markdown('**Статус:** ✅ завершено / остановлено')
 
 if _log_txt.strip():
-    st.code('\n'.join(_log_txt.splitlines()[-300:]), language='text')
+    # По завершении лог сворачиваем (открыть можно кликом); пока идёт - раскрыт.
+    with st.expander('Подробный лог', expanded=_running):
+        st.code('\n'.join(_log_txt.splitlines()[-300:]), language='text')
 else:
     st.caption('Лог пуст - кликер ещё не запускали.')
