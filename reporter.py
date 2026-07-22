@@ -6603,6 +6603,95 @@ def _regroup_into_groups(wb):
     wb._sheets = ordered
 
 
+_UNIQ_TYPE_RU = {'main': 'Главная', 'catalog': 'Каталог', 'category': 'Категория',
+                 'product': 'Товар', 'filter': 'Фильтр', 'custom': 'URL'}
+
+
+def _build_uniqueness_sheet(wb, uniqueness):
+    """Лист «Уникальность»: по каждой странице - % уникальности по text.ru и с
+    какими ЧУЖИМИ сайтами пересекается контент. Источники пересечения показываем
+    ВСЕГДА, если они есть (даже когда уникальность выше порога). Добавляется
+    только если проверка выполнялась."""
+    if not uniqueness or not uniqueness.get('rows'):
+        return
+    rows = uniqueness['rows']
+    thr = float(uniqueness.get('threshold', 95) or 95)
+    summ = uniqueness.get('summary', {}) or {}
+    _below = [r for r in rows if r.get('unique') is not None and r['unique'] < thr]
+    has_bugs = bool(_below)
+
+    ws = wb.create_sheet('Уникальность')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
+
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 58   # URL страницы
+    ws.column_dimensions['C'].width = 13   # Тип
+    ws.column_dimensions['D'].width = 14   # Уникальность
+    ws.column_dimensions['E'].width = 70   # Источники пересечения
+    ws.column_dimensions['F'].width = 3
+
+    ws.merge_cells('B2:E2')
+    c = ws['B2']
+    c.value = 'Уникальность контента (text.ru)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:E3')
+    c = ws['B3']
+    c.value = ('Проверяем SEO-текст страниц главного домена через text.ru: процент '
+               'уникальности и с какими ЧУЖИМИ сайтами пересекается контент (свои '
+               'домены/поддомены исключены). Красным - страницы ниже порога '
+               f'({thr:.0f}%). Сайты-источники пересечения показаны ВСЕГДА, если '
+               'они есть, - даже при высокой уникальности.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 40
+
+    row = 5
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    _avg = summ.get('avg_unique')
+    c.value = (f'Проверено страниц: {summ.get("checked", 0)}/{summ.get("total", 0)} · '
+               f'средняя уникальность: {_avg if _avg is not None else "—"}% · '
+               f'ниже {thr:.0f}%: {summ.get("below", 0)} · ошибок: {summ.get("errors", 0)}')
+    c.font = _font(size=11, bold=True)
+    row += 2
+
+    heads = ['Страница', 'Тип', 'Уникальность', 'С каким сайтом пересекается (совпадение %)']
+    for j, h in enumerate(heads, start=2):
+        c = ws.cell(row=row, column=j)
+        c.value = h
+        c.font = _font(bold=True, color=C.text)
+        c.fill = _fill(C.surface)
+        c.alignment = _align(wrap=True, vertical='top')
+    row += 1
+
+    for r in rows:
+        u = r.get('unique')
+        ws.cell(row=row, column=2).value = r.get('url', '')
+        ws.cell(row=row, column=2).alignment = _align(wrap=True, vertical='top')
+        ws.cell(row=row, column=3).value = _UNIQ_TYPE_RU.get(r.get('type'), r.get('type', ''))
+        ws.cell(row=row, column=3).alignment = _align(vertical='top')
+        cu = ws.cell(row=row, column=4)
+        if r.get('error'):
+            cu.value = f'— ({r["error"]})'
+            cu.font = _font(italic=True, color=C.text_muted)
+        elif u is not None:
+            cu.value = f'{u:.1f}%'
+            cu.font = _font(bold=True, color=(C.err if u < thr else C.ok))
+        cu.alignment = _align(vertical='top')
+        # Источники пересечения - ВСЕГДА, если есть.
+        src = '\n'.join(
+            (f'{s.get("url", "")}  ({s["plagiat"]:.1f}%)'
+             if s.get('plagiat') is not None else s.get('url', ''))
+            for s in (r.get('sources') or []) if s.get('url'))
+        cs = ws.cell(row=row, column=5)
+        cs.value = src or ('—' if not r.get('error') else '')
+        cs.alignment = _align(wrap=True, vertical='top')
+        row += 1
+
+
 # ── Главная функция ────────────────────────────────────────────────
 
 
@@ -6643,6 +6732,7 @@ def build_report(
     review_priority: dict = None,  # приоритет докупки отзывов - лист «Отзывы (докупка)»
     anomalies: dict = None,        # аномалии ГСК/Метрика - лист «Аномалии»
     trust: dict = None,            # ИКС + DR - лист «Траст проекта»
+    uniqueness: dict = None,       # уникальность контента (text.ru) - лист «Уникальность»
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -7005,6 +7095,7 @@ def build_report(
     _build_link_profile_sheet(wb, link_profile)
     _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies)
     _build_trust_sheet(wb, trust)
+    _build_uniqueness_sheet(wb, uniqueness)
 
     # ─── Лист «Настройки в админке» - если проверка выполнялась ────────
     _build_admin_settings_sheet(wb, admin_settings)

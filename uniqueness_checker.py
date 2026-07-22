@@ -54,26 +54,48 @@ class TextRuError(Exception):
 # Срезаем сквозные шапку/подвал/меню - оставляем контентную область (как в
 # content_checker), затем берём видимый текст (как в text_checker).
 _CHROME_RE = re.compile(r"<(header|footer|nav|aside)\b[^>]*>.*?</\1>", re.I | re.S)
+_RE_P = re.compile(r"<p\b[^>]*>(.*?)</p>", re.I | re.S)
+_RE_TAG = re.compile(r"<[^>]+>")
 
 
-def extract_main_text(html: str) -> str:
-    """Видимый «контентный» текст страницы: без шапки/подвала/меню, без
-    скриптов/стилей/тегов, с нормализованными пробелами."""
+def _visible_text(html: str) -> str:
+    """Весь видимый текст фрагмента HTML (без скриптов/стилей/тегов)."""
+    try:
+        from text_checker import html_to_visible_text
+        return html_to_visible_text(html)
+    except Exception:
+        h = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", " ", html, flags=re.I)
+        h = re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", h, flags=re.I)
+        h = re.sub(r"<!--[\s\S]*?-->", " ", h)
+        h = re.sub(r"<[^>]+>", " ", h)
+        h = (h.replace("&nbsp;", " ").replace("&amp;", "&")
+             .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"'))
+        return re.sub(r"\s+", " ", h).strip()
+
+
+def extract_main_text(html: str, *, prefer_paragraphs: bool = True) -> str:
+    """«Контентный» текст страницы для проверки уникальности.
+
+    Сначала берём СВЯЗНЫЙ SEO-текст - абзацы <p> от 100 символов. Это ровно
+    «текст, который лежит внизу категории», описание товара и т.п. - именно его
+    надо проверять на уникальность, а НЕ карточки товаров / меню / фильтры
+    (они короткие и повторяются между страницами, зашумляют проверку).
+
+    Если связного текста нет (или он совсем короткий) - откатываемся на весь
+    видимый текст контентной области (без сквозных шапки/подвала/меню)."""
     if not html:
         return ""
     body = _CHROME_RE.sub(" ", html)
-    try:
-        from text_checker import html_to_visible_text
-        return html_to_visible_text(body)
-    except Exception:
-        # Автономный fallback, если text_checker недоступен (напр. в изоляции).
-        body = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", " ", body, flags=re.I)
-        body = re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", body, flags=re.I)
-        body = re.sub(r"<!--[\s\S]*?-->", " ", body)
-        body = re.sub(r"<[^>]+>", " ", body)
-        body = (body.replace("&nbsp;", " ").replace("&amp;", "&")
-                .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"'))
-        return re.sub(r"\s+", " ", body).strip()
+    if prefer_paragraphs:
+        paras = []
+        for p_ in _RE_P.findall(body):
+            t = re.sub(r"\s+", " ", _RE_TAG.sub(" ", p_)).strip()
+            if len(t) >= 100:
+                paras.append(t)
+        seo = " ".join(paras)
+        if len(seo) >= MIN_CHARS:
+            return seo
+    return _visible_text(body)
 
 
 def _project_domains(urls) -> str:

@@ -700,6 +700,7 @@ def init_session():
         'c30_check_gsc_pages': False,  # количество страниц в ГСК по статусам - браузер, по запросу
         'c30_check_home_dupes': False,  # дубли главной страницы (HTTP, без браузера)
         'c30_check_arsenkin': False,  # индексация URL через API Арсенкина (токен из поля)
+        'c30_check_uniqueness': False,  # уникальность контента через text.ru (ключ из поля)
         'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
         'c30_check_calltracking': False,  # замена рекламного номера (браузер) - по запросу
@@ -729,6 +730,10 @@ def init_session():
         # Свой список URL
         'c30_use_custom_urls': False,
         'c30_custom_urls_text': '',
+        # Уникальность контента (text.ru): объём выборки и порог
+        'c30_uniq_cats': 3,
+        'c30_uniq_prods': 3,
+        'c30_uniq_threshold': 95,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1707,6 +1712,43 @@ if pid:
                 _bt = ', '.join(f'{lbl}: {n}' for lbl, n
                                 in _Counter(t.type_label for t in _typed).items())
                 st.success(f'Будет добавлено {len(_typed)} URL - {_bt}')
+        # ── Уникальность контента через text.ru (самый нижний пункт) ──
+        st.checkbox(
+            'Уникальность контента через text.ru (с каким сайтом пересечение)',
+            key='c30_check_uniqueness',
+            help='Проверяет через text.ru, насколько уникален SEO-текст страниц '
+                 'и с какими ЧУЖИМИ сайтами он пересекается. Берём небольшую '
+                 'выборку ГЛАВНОГО домена (главная + каталог + N категорий + N '
+                 'товаров) - города-поддомены не трогаем (дубли). Свои домены '
+                 'исключаются из сравнения. Ключ и объём - в блоке ниже. '
+                 'Каждая страница тратит символы аккаунта text.ru. Отдельный лист '
+                 '«Уникальность».')
+        if st.session_state.get('c30_check_uniqueness'):
+            with st.expander('text.ru: ключ и объём проверки', expanded=True):
+                st.text_input(
+                    'API-ключ text.ru', key='c30_textru_key', type='password',
+                    placeholder='вставь ключ (личный кабинет text.ru → раздел «API»)',
+                    help='Обязателен, если галочка включена. Берётся из этого поля '
+                         'или из секрета textru_key. В git/отчёты не попадает.')
+                _uq1, _uq2, _uq3 = st.columns(3)
+                with _uq1:
+                    st.number_input('Категорий', 0, 30, key='c30_uniq_cats',
+                                    help='Случайные категории каталога (главный домен).')
+                with _uq2:
+                    st.number_input('Товаров', 0, 30, key='c30_uniq_prods',
+                                    help='Случайные карточки товаров (главный домен).')
+                with _uq3:
+                    st.number_input('Порог, %', 50, 100, key='c30_uniq_threshold',
+                                    help='Ниже порога - красным. Сайты-источники '
+                                         'пересечения показываем всегда, если они есть.')
+                if not (st.session_state.get('c30_textru_key', '').strip()
+                        or _secret_pid('textru_key', pid) or _secret('textru_key')):
+                    st.warning('⚠ Вставьте ключ text.ru - без него проверка '
+                               'уникальности пропустится (остальной прогон пройдёт).')
+                st.caption('Проверяем главный домен: главная + каталог + категории + '
+                           'товары (берём SEO-текст внизу страниц, не карточки/меню). '
+                           'Свои домены исключаются. text.ru проверяет асинхронно - '
+                           'этот пункт добавит несколько минут в конце прогона.')
 
     # БЛОК 4 - Админка: браузерная проверка функций настройки (нужны креды).
     with st.container(border=True):
@@ -1862,6 +1904,7 @@ if pid:
         bool(st.session_state.get('c30_check_404', True)),
         bool(st.session_state.get('c30_check_ps_filters', True)),
         bool(st.session_state.get('c30_fetch_notifications', True)),
+        bool(st.session_state.get('c30_check_uniqueness', False)),
     )
 
     # Прокси + проверка доступности сайта (над кнопкой запуска)
@@ -1928,6 +1971,12 @@ if pid:
                 'arsenkin_google': st.session_state.get('c30_arsenkin_google', True),
                 'arsenkin_search_all': st.session_state.get('c30_arsenkin_search_all', True),
                 'arsenkin_inurl': st.session_state.get('c30_arsenkin_inurl', False),
+                'check_uniqueness': st.session_state.get('c30_check_uniqueness', False),
+                'textru_key': (st.session_state.get('c30_textru_key', '') or '').strip()
+                or _secret_pid('textru_key', pid) or _secret('textru_key') or '',
+                'uniq_cats': int(st.session_state.get('c30_uniq_cats', 3) or 0),
+                'uniq_prods': int(st.session_state.get('c30_uniq_prods', 3) or 0),
+                'uniq_threshold': int(st.session_state.get('c30_uniq_threshold', 95) or 95),
                 'gsc_pages_indexed': int(st.session_state.get('c30_gsc_indexed', 0) or 0),
                 'gsc_pages_crawled_ni': int(st.session_state.get('c30_gsc_crawled_ni', 0) or 0),
                 'check_filter_fn': st.session_state.get('c30_check_filter_fn', False),

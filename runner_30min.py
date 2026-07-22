@@ -1757,6 +1757,43 @@ def run_check(pid, params, creds, log, progress):
         if _today_404:                       # сегодняшние 404 (API) - первыми
             _metrika_reports = [_today_404] + list(_metrika_reports)
         _metrika_reports = _metrika_reports or None
+        # ── Уникальность контента через text.ru (последней: медленная, платная) ──
+        _uniqueness = None
+        if params.get('check_uniqueness') and _main:
+            _tk = (params.get('textru_key') or '').strip()
+            if not _tk:
+                log('⚠ Уникальность (text.ru): не введён ключ - пропускаю.')
+            else:
+                try:
+                    import uniqueness_checker as _UC
+                    from sources import build_plan as _bp
+                    _uc_n = int(params.get('uniq_cats', 3) or 0)
+                    _up_n = int(params.get('uniq_prods', 3) or 0)
+                    _uthr = float(params.get('uniq_threshold', 95) or 95)
+                    _uplan = _bp(src, random_subdomains_count=0, mandatory_city=_mcity,
+                                 mandatory_hosts=[], categories_per_subdomain=_uc_n,
+                                 filters_per_subdomain=0, products_per_subdomain=_up_n,
+                                 check_products=_up_n > 0 and bool(src.products))
+                    _utyped = [(t.url, t.type_code) for t in _uplan.tasks]
+                    _uexcept = _UC._project_domains([s.url for s in src.subdomains])
+                    log(f'Уникальность (text.ru): проверяю {len(_utyped)} страниц '
+                        'главного домена (это займёт несколько минут)…')
+                    _ures = _UC.run_batch(_utyped, _UC.TextRuClient(_tk),
+                                          exceptdomain=_uexcept,
+                                          log=lambda m: log(f'  {m}'))
+                    _usum = _UC.summarize(_ures, threshold=_uthr)
+                    _uniqueness = {
+                        'threshold': _uthr, 'summary': _usum,
+                        'rows': [{'url': r.url, 'type': r.type_code,
+                                  'unique': r.unique, 'chars': r.chars,
+                                  'error': r.error, 'sources': r.sources[:10]}
+                                 for r in _ures]}
+                    log(f'Уникальность (text.ru): проверено {_usum["checked"]}/'
+                        f'{_usum["total"]}, ниже {_uthr:.0f}% - {_usum["below"]}, '
+                        f'ошибок {_usum["errors"]}')
+                except Exception as _e:
+                    log(f'⚠ Уникальность (text.ru): {_e}')
+
         build_report(
             project_name=cfg['name'], started_at_ms=started_ms,
             finished_at_ms=finished_ms,
@@ -1781,7 +1818,7 @@ def run_check(pid, params, creds, log, progress):
             admin_settings=_admin_settings, yabusiness=_yabusiness,
             gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic,
             arsenkin=_arsenkin, review_priority=_review_priority,
-            anomalies=_anomalies, trust=_trust)
+            anomalies=_anomalies, trust=_trust, uniqueness=_uniqueness)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')
