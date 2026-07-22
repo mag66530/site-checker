@@ -338,11 +338,32 @@ def run_batch(
     return [results[u] for u in order]
 
 
+def _source_domain(url: str) -> str:
+    """Домен источника без www (для агрегации по конкурентам)."""
+    d = urlparse(url or "").netloc.lower()
+    return d[4:] if d.startswith("www.") else d
+
+
 def summarize(results: list[UniqResult], threshold: float = 95.0) -> dict:
-    """Свод для отчёта/страницы."""
+    """Свод для отчёта/страницы + агрегат конкурентов.
+
+    competitors: с какими ЧУЖИМИ доменами пересекается контент и НА СКОЛЬКИХ наших
+    страницах. Если один домен пересекается с большинством наших страниц - сильный
+    сигнал, что у нас скопировали каталог целиком (а не одну страницу)."""
+    from collections import Counter
     checked = [r for r in results if r.has_data]
     below = [r for r in checked if (r.unique or 0) < threshold]
     uniques = [r.unique for r in checked if r.unique is not None]
+
+    # домен-конкурент -> на скольких НАШИХ проверенных страницах он встретился
+    comp = Counter()
+    for r in checked:
+        doms = {_source_domain(s.get("url", "")) for s in (r.sources or [])}
+        for d in doms:
+            if d:
+                comp[d] += 1
+    competitors = [{"domain": d, "pages": n} for d, n in comp.most_common(30)]
+
     return {
         "total": len(results),
         "checked": len(checked),
@@ -351,4 +372,5 @@ def summarize(results: list[UniqResult], threshold: float = 95.0) -> dict:
         "avg_unique": round(sum(uniques) / len(uniques), 1) if uniques else None,
         "min_unique": round(min(uniques), 1) if uniques else None,
         "threshold": threshold,
+        "competitors": competitors,
     }

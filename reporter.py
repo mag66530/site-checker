@@ -6658,6 +6658,41 @@ def _build_uniqueness_sheet(wb, uniqueness):
     c.font = _font(size=11, bold=True)
     row += 2
 
+    # ── Конкуренты: с кем пересекаемся и на скольких страницах ──
+    _comps = summ.get('competitors') or []
+    _checked = summ.get('checked', 0) or 0
+    if _comps:
+        c = ws.cell(row=row, column=2)
+        c.value = 'Конкуренты (пересечение по каталогу)'
+        c.font = _font(size=12, bold=True)
+        row += 1
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = ('С какими ЧУЖИМИ доменами пересекается наш контент и на скольких '
+                   f'из {_checked} проверенных страниц. Если домен пересекается с '
+                   'большинством страниц - вероятно, у нас скопировали каталог '
+                   'целиком (а не одну страницу).')
+        c.font = _font(size=10, italic=True, color=C.text_soft)
+        c.alignment = _align(wrap=True, vertical='top')
+        ws.row_dimensions[row].height = 30
+        row += 1
+        for comp in _comps[:15]:
+            _n = comp.get('pages', 0)
+            frac = (_n / _checked) if _checked else 0
+            ws.cell(row=row, column=2).value = comp.get('domain', '')
+            ws.cell(row=row, column=2).alignment = _align(vertical='top')
+            cc = ws.cell(row=row, column=3)
+            cc.value = f'{_n} из {_checked}'
+            cc.font = _font(bold=True, color=(C.err if frac >= 0.5 else C.text))
+            cc.alignment = _align(vertical='top')
+            if frac >= 0.5:
+                cf = ws.cell(row=row, column=4)
+                cf.value = 'возможно скопирован каталог'
+                cf.font = _font(italic=True, color=C.err)
+                cf.alignment = _align(wrap=True, vertical='top')
+            row += 1
+        row += 1
+
     heads = ['Страница', 'Тип', 'Уникальность', 'С каким сайтом пересекается (совпадение %)']
     for j, h in enumerate(heads, start=2):
         c = ws.cell(row=row, column=j)
