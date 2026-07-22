@@ -690,20 +690,20 @@ def init_session():
         'c30_check_markup': True,      # пункт 1.12 - микроразметка Schema.org + OpenGraph
         'c30_check_security': True,    # доп. 1.8 - заголовки безопасности HTTP
         'c30_check_images': True,      # пункт 1.15 - изображения (alt/webp/вес)
-        'c30_check_links': False,      # «ссылки открываются (404)» - тяжёлая, по запросу
-        'c30_check_index_404': False,  # 404 среди страниц в индексе (Вебмастер) - тяжёлая, по запросу
-        'c30_check_yabusiness': False,  # Я.Бизнес: поддомен под свой регион (сессия)
-        'c30_check_traffic': False,     # сравнение трафика день/месяц/год (Метрика)
-        'c30_check_review_priority': False,  # приоритет докупки отзывов (Я.Бизнес+2ГИС)
-        'c30_check_anomalies': False,   # аномалии ГСК-запросов + Метрика-рефералы
-        'c30_check_trust': False,       # траст проекта: ИКС + DR (Open PageRank)
+        'c30_check_links': True,      # «ссылки открываются (404)» - тяжёлая, по запросу
+        'c30_check_index_404': True,  # 404 среди страниц в индексе (Вебмастер) - тяжёлая, по запросу
+        'c30_check_yabusiness': True,  # Я.Бизнес: поддомен под свой регион (сессия)
+        'c30_check_traffic': True,     # сравнение трафика день/месяц/год (Метрика)
+        'c30_check_review_priority': True,  # приоритет докупки отзывов (Я.Бизнес+2ГИС)
+        'c30_check_anomalies': True,   # аномалии ГСК-запросов + Метрика-рефералы
+        'c30_check_trust': True,       # траст проекта: ИКС + DR (Open PageRank)
         'c30_check_gsc_pages': False,  # количество страниц в ГСК по статусам - браузер, по запросу
-        'c30_check_home_dupes': False,  # дубли главной страницы (HTTP, без браузера)
+        'c30_check_home_dupes': True,  # дубли главной страницы (HTTP, без браузера)
         'c30_check_arsenkin': False,  # индексация URL через API Арсенкина (токен из поля)
         'c30_check_uniqueness': False,  # уникальность контента через text.ru (ключ из поля)
-        'c30_check_filter_fn': False,  # фильтр-тест товаров (браузер) - по запросу
-        'c30_check_console': False,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
-        'c30_check_calltracking': False,  # замена рекламного номера (браузер) - по запросу
+        'c30_check_filter_fn': True,  # фильтр-тест товаров (браузер) - по запросу
+        'c30_check_console': True,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
+        'c30_check_calltracking': True,  # замена рекламного номера (браузер) - по запросу
         'c30_check_stress': False,     # ошибки сервера: парсинг/нагрузка/дубли URL - по запросу
         'c30_check_w3c': True,         # п.1.16 - валидация W3C + скорость
         'c30_check_static': True,      # п.1.17 - сжатие/кеш статики
@@ -720,9 +720,9 @@ def init_session():
         # Сервисные проверки
         'c30_check_webmaster': True,
         'c30_check_gsc': True,
-        'c30_fetch_notifications': True,
+        'c30_fetch_notifications': False,
         'c30_notify_days': 1,   # прогон ежедневный → по умолчанию забираем за 1 день
-        'c30_fetch_metrika_404': True,    # 404 из Метрики (API) в отчёт
+        'c30_fetch_metrika_404': False,    # 404 из Метрики (API) в отчёт
         'c30_m404_mode': 'За день',       # при включении сразу «За день» + дата
         'c30_autoclick': False,           # автокликер (локально) после проверки
         'c30_ac_wm': False,
@@ -1206,15 +1206,35 @@ if pid:
         # Учитываем только РЕАЛЬНО показанные галочки: фильтры есть не у всех
         # проектов (если их нет - чекбокс не рисуется, и его нельзя учитывать в
         # «Выбрать/Снять все», иначе кнопка врёт).
-        _CHK_KEYS = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
-                     'c30_check_products', 'c30_check_text', 'c30_check_indexing',
-                     'c30_check_meta', 'c30_check_region', 'c30_check_cis',
-                     'c30_check_layout', 'c30_check_markup', 'c30_check_security',
-                     'c30_check_images', 'c30_check_w3c', 'c30_check_static',
-                     'c30_check_404', 'c30_check_ps_filters',
-                     'c30_check_link_profile', 'c30_check_anomaly']
+        # Ключи по разделам - для счётчиков «выбрано/всего» в шапках аккордеонов
+        # и для кнопки «Выбрать/Снять все». Фильтры учитываем, только если они
+        # есть в каталоге (иначе чекбокс не рисуется). Порядок = как в разделе.
+        _SEC_TEH = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
+                    'c30_check_products', 'c30_check_text', 'c30_check_indexing',
+                    'c30_check_meta', 'c30_check_w3c', 'c30_check_static',
+                    'c30_check_404', 'c30_check_ps_filters', 'c30_check_link_profile',
+                    'c30_check_links', 'c30_check_index_404', 'c30_check_home_dupes',
+                    'c30_check_filter_fn']
         if stats['has_filters']:
-            _CHK_KEYS.insert(3, 'c30_check_filters')
+            _SEC_TEH.insert(3, 'c30_check_filters')
+        _SEC_VER = ['c30_check_layout', 'c30_check_markup', 'c30_check_images',
+                    'c30_check_console']
+        _SEC_SEC = ['c30_check_security']
+        _SEC_KP = ['c30_check_region', 'c30_check_cis', 'c30_check_yabusiness']
+        _SEC_ANA = ['c30_check_anomaly', 'c30_check_traffic', 'c30_check_review_priority',
+                    'c30_check_anomalies', 'c30_check_trust', 'c30_check_calltracking']
+        _SEC_ADM = ['c30_check_admin_settings', 'c30_check_admin_crud',
+                    'c30_check_admin_product_crud', 'c30_check_admin_tech_crud',
+                    'c30_check_admin_counters']
+        _SEC_DOP = ['c30_fetch_notifications', 'c30_fetch_metrika_404',
+                    'c30_check_arsenkin', 'c30_check_stress', 'c30_autoclick',
+                    'c30_use_custom_urls', 'c30_check_uniqueness']
+
+        def _sec_n(_keys):
+            return sum(1 for _k in _keys if st.session_state.get(_k, False))
+        # «Выбрать/Снять все» - только страничные проверки (5 разделов), без
+        # Админки (ручная) и Дополнительно (точечное, по умолчанию выкл).
+        _CHK_KEYS = _SEC_TEH + _SEC_VER + _SEC_SEC + _SEC_KP + _SEC_ANA
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
         # прогоне session_state консистентен (галочки покажут ровно эти значения),
         # поэтому подпись всегда совпадает. Обычную кнопку (не в st.empty) - иначе
@@ -1246,9 +1266,10 @@ if pid:
             '.st-key-c30_sec_kp [data-testid="stExpander"]{border-left:5px solid #0F9C8E !important}'
             '.st-key-c30_sec_ana [data-testid="stExpander"]{border-left:5px solid #1F9D2F !important}'
             '.st-key-c30_sec_adm [data-testid="stExpander"]{border-left:5px solid #5A6B7B !important}'
+            '.st-key-c30_sec_dop [data-testid="stExpander"]{border-left:5px solid #C77D2E !important}'
             '</style>', unsafe_allow_html=True)
         _sec_teh = st.container(key='c30_sec_teh')
-        with _sec_teh.expander('⚙️  Техничка – доступность, индексация, дубли, метаданные, 404, скорость', expanded=True):
+        with _sec_teh.expander(f'⚙️  Техничка  {_sec_n(_SEC_TEH)}/{len(_SEC_TEH)}  – доступность, индексация, дубли, метаданные, 404, скорость', expanded=True):
             st.checkbox('1.1  Главная', key='c30_check_main',
                         help='Проверяем главную страницу: открывается ли (код 200), '
                              'есть ли H1, Title, телефон и основные блоки. С неё '
@@ -1391,7 +1412,7 @@ if pid:
                              'проект в catalogs/filters-<проект>.json.')
 
         _sec_ver = st.container(key='c30_sec_ver')
-        with _sec_ver.expander('🎨  Вёрстка – адаптивность, микроразметка, изображения', expanded=True):
+        with _sec_ver.expander(f'🎨  Вёрстка  {_sec_n(_SEC_VER)}/{len(_SEC_VER)}  – адаптивность, микроразметка, изображения', expanded=True):
             st.checkbox('1.11  Вёрстка, адаптивность и навигация (viewport, стили, меню)',
                         key='c30_check_layout',
                         help='ТЗ 2.1/2.1.1: задан тег viewport (мобильная версия '
@@ -1441,7 +1462,7 @@ if pid:
                              'проход - по запросу.')
 
         _sec_sec = st.container(key='c30_sec_sec')
-        with _sec_sec.expander('🔒  Безопасность – заголовки ответа сервера', expanded=True):
+        with _sec_sec.expander(f'🔒  Безопасность  {_sec_n(_SEC_SEC)}/{len(_SEC_SEC)}  – заголовки ответа сервера', expanded=True):
             st.checkbox('1.13  Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
                         key='c30_check_security',
                         help='Доп. чек-лист: HTTP-заголовки безопасности ответа. '
@@ -1451,7 +1472,7 @@ if pid:
                              'конфликт дублей) = баг.')
 
         _sec_kp = st.container(key='c30_sec_kp')
-        with _sec_kp.expander('🗺️  Данные по городам', expanded=True):
+        with _sec_kp.expander(f'🗺️  Данные по городам  {_sec_n(_SEC_KP)}/{len(_SEC_KP)}', expanded=True):
             st.checkbox('1.9  Переменные города (город, телефон, почта - по КП)',
                         key='c30_check_region',
                         help='На странице города не должно быть подстановок другого '
@@ -1479,7 +1500,7 @@ if pid:
                              'когда дадут доступ, перейдём на него.')
 
         _sec_ana = st.container(key='c30_sec_ana')
-        with _sec_ana.expander('📊  Аналитика – аномалии Вебмастера', expanded=True):
+        with _sec_ana.expander(f'📊  Аналитика  {_sec_n(_SEC_ANA)}/{len(_SEC_ANA)}  – аномалии Вебмастера', expanded=True):
             st.checkbox('1.21  Нет аномалий: Вебмастер + внезапные мусорные ссылки',
                         key='c30_check_anomaly',
                         help='Мониторинг резких отклонений «от себя-прошлого» - '
@@ -1546,423 +1567,424 @@ if pid:
         st.caption('Технические страницы (оплата, доставка, контакты, политики) '
                    'проверяются автоматически при каждом прогоне.')
 
-    # БЛОК 3 - Дополнительно: три одинаковых пункта-галочки (по клику разворачиваются)
-    with st.container(border=True):
-        st.markdown('### Дополнительно')
-        _ck_notif = st.checkbox(
-            'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google)',
-            key='c30_fetch_notifications',
-            help='Собирает свежие уведомления из панелей вебмастера и сервисов '
-                 '(Яндекс.Вебмастер, Google Search Console, Яндекс.Бизнес, 2ГИС, '
-                 'Google) - чтобы не заходить в каждую панель вручную. Нужны '
-                 'настроенные доступы/токены; без них пункт пропускается.')
-        if _ck_notif:
-            # Без st.columns (пустая вторая колонка оставляла «призрачный»
-            # селектор при выключенном чекбоксе - как было у 404).
-            st.selectbox('За какой период',
-                         [1, 3, 7, 14, 30],
-                         format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
-                         key='c30_notify_days', label_visibility='collapsed')
-        _ck_m404 = st.checkbox(
-            'Собрать 404 из Метрики',
-            key='c30_fetch_metrika_404',
-            help='Берёт 404-страницы напрямую из Метрики (API, по всем счётчикам '
-                 'проекта) за выбранный период. За день трафик на 404 мал - '
-                 'обычно нужен период 7+ дней.')
-        if _ck_m404:
-            from datetime import date as _date, timedelta as _td
-            # Селектор без обёртки в колонки (пустые колонки оставляли
-            # «призрачные» виджеты при выключении чекбокса). Поля даты -
-            # сразу под селектором, появляются в том же ране.
-            _m404_mode = st.selectbox(
-                'Период 404',
-                ['За день', 'За неделю', 'За 14 дней', 'За 30 дней', 'За период'],
-                key='c30_m404_mode', label_visibility='collapsed')
-            if _m404_mode == 'За день':
-                st.date_input('Дата', value=_date.today() - _td(days=1),
-                              key='c30_m404_day', format='DD.MM.YYYY',
-                              label_visibility='collapsed')
-            elif _m404_mode == 'За период':
-                _pm2, _pm3 = st.columns(2)
-                with _pm2:
-                    st.date_input('С', value=_date.today() - _td(days=7),
-                                  key='c30_m404_from', format='DD.MM.YYYY')
-                with _pm3:
-                    st.date_input('По', value=_date.today(),
-                                  key='c30_m404_to', format='DD.MM.YYYY')
-        st.checkbox('Проверка индексации URL через Арсенкин (Яндекс + Google)',
-                    key='c30_check_arsenkin',
-                    help='Массово проверяет через API Арсенкина, есть ли страницы '
-                         '(категории, теги, подфильтры поддоменов и домена) в '
-                         'индексе Яндекса и Google. Без браузера, без блокировок. '
-                         'Токен и список URL вводятся в блоке ниже. Отдельный лист '
-                         '«Индексация (Арсенкин)».')
-        if st.session_state.get('c30_check_arsenkin'):
-            with st.expander('Арсенкин: токен и список URL', expanded=True):
-                st.text_input(
-                    'API-токен Арсенкина', key='c30_arsenkin_token',
-                    type='password',
-                    placeholder='вставь токен (профиль Арсенкина → API)',
-                    help='Токен берётся ТОЛЬКО из этого поля (не из Secrets). '
-                         'Один аккаунт СМУ подходит для СМУ / ИМП / МПЭ. '
-                         'Обязателен, если галочка включена.')
-                st.text_area(
-                    'URL-адреса (по одному в строке, до 5000)',
-                    key='c30_arsenkin_urls', height=160,
-                    placeholder='https://site.ru/catalog/…\nhttps://city.site.ru/tag/…',
-                    help='Категории, отслеживаемые теги/подфильтры нужного '
-                         'поддомена и домена. Какие именно – уточняй у SEO-'
-                         'специалиста проекта.')
-                _ac1, _ac2, _ac3, _ac4 = st.columns(4)
-                with _ac1:
-                    st.checkbox('Яндекс', value=True, key='c30_arsenkin_yandex')
-                with _ac2:
-                    st.checkbox('Google', value=True, key='c30_arsenkin_google')
-                with _ac3:
-                    st.checkbox('http/https/www как один', value=True,
-                                key='c30_arsenkin_search_all')
-                with _ac4:
-                    st.checkbox('inurl-перепроверка', value=False,
-                                key='c30_arsenkin_inurl',
-                                help='Для Google: перепроверяет оператором inurl: '
-                                     'страницы, которых нет в индексе, чтобы меньше '
-                                     'ложных «не в индексе».')
-                st.caption('1 URL × 1 поисковая система = 2 лимита Арсенкина. '
-                           'Проверка идёт в конце прогона, результат – в отчёте.')
-        _ck_stress = st.checkbox(
-            'Ошибки сервера: парсинг, нагрузка, дубли URL (по запросу)',
-            key='c30_check_stress',
-            help='В конце прогона гоняет три сетевые пробы на прод: (1) '
-                 'быстрый обход страниц парсингом; (2) параллельный залп '
-                 'по репрезентативным страницам; (3) кривые дубли адресов '
-                 'категорий/фильтров/товаров (сдвоенный сегмент, двойной '
-                 'слэш, глубокая пагинация). Ищем ошибки сервера (5xx), '
-                 'обрывы и деградацию скорости. При первых 5xx/обрывах проба '
-                 'сама останавливается (не добивает сервер); поймали бан на '
-                 'парсинге - нагрузку и дубли пропускаем. Создаёт реальную '
-                 'нагрузку на боевой сайт - по запросу. Результат: лист '
-                 '«Нагрузка и парсинг».')
-        if _ck_stress:
-            _sc1, _sc2 = st.columns(2)
-            with _sc1:
-                st.slider('Параллельных запросов в залпе',
-                          min_value=10, max_value=50, value=30, step=5,
-                          key='c30_stress_concurrency',
-                          help='Сколько запросов летят к ОДНОЙ странице '
-                               'одновременно. 15 - лёгкий безопасный всплеск; '
-                               '30 (по умолчанию) - заметный, показательный; '
-                               'выше - ближе к тому, что защита примет за '
-                               'атаку (риск бана). Каждая страница получает '
-                               'этот залп в 2 волны (итого запросов на '
-                               'страницу = число × 2).')
-            with _sc2:
-                st.slider('Сколько страниц под залпом',
-                          min_value=1, max_value=8, value=3, step=1,
-                          key='c30_stress_load_pages',
-                          help='На сколько разных страниц по очереди пойдёт '
-                               'залп нагрузки. Сначала берутся разнотипные '
-                               '(главная/категория/фильтр/товар), потом '
-                               'добираются остальные из прогона. Больше '
-                               'страниц - шире картина, но выше суммарная '
-                               'нагрузка на сайт.')
+        # Админка - отдельный аккордеон (нужны креды); свёрнута, галочки вручную
+        _sec_adm = st.container(key='c30_sec_adm')
+        with _sec_adm.expander(f'🛠️  Админка  {_sec_n(_SEC_ADM)}/{len(_SEC_ADM)}  – настройки, CRUD, счётчики (нужны креды)',
+                               expanded=False):
+            _amc1, _amc2 = st.columns([3, 2])
+            with _amc1:
+                _ck_adm = st.checkbox(
+                    'Работают функции настройки (поддомены/категории/товары/тех.страницы)',
+                    key='c30_check_admin_settings',
+                    help='Браузер заходит в админку Bitrix и проверяет, что разделы '
+                         'настройки открываются и работают: мастер поддоменов, '
+                         'разделы каталога, товарная подсистема (HL-блок '
+                         '«Ассортимент»), структура сайта и редактор файлов '
+                         'тех.страниц. Только открытие/рендер, ничего не меняется. '
+                         'Отдельный лист «Настройки в админке».')
+            with _amc2:
+                st.checkbox('↳ писать в БД (с откатом)',
+                            key='c30_adm_execute',
+                            help='Подпункт CRUD-проверок ниже. ВКЛ (рекомендуется): '
+                                 'реально создаёт-правит-скрывает-удаляет временный '
+                                 'СКРЫТЫЙ раздел «[ТЕСТ ЧЕКЕРА]» (без товаров, '
+                                 'удаляется сразу) и прогоняет симуляцию поддомена '
+                                 '- аудит «было → стало». ВЫКЛ: только наличие '
+                                 'CRUD-функций (формы/кнопки), ничего не пишется.')
+            _ck_crud = st.checkbox(
+                'Создание, массовая загрузка, правка, удаление, скрытие – поддомены и категории',
+                key='c30_check_admin_crud',
+                help='CRUD-функции. Поддомены: создание (симуляция-dry-run, на '
+                     'сайте ничего не создаётся), массовая загрузка (CSV), правка/'
+                     'удаление/скрытие - наличие функции. Категории: полный CRUD '
+                     'на временном разделе «[ТЕСТ ЧЕКЕРА]» (создать скрытым → '
+                     'правка → скрытие → удаление, чистится в конце) + массовая '
+                     'загрузка (импорт). Пишет в БД только при включённом подпункте '
+                     '«писать в БД». В отчёт идёт аудит «было → стало».')
+            _ck_pcrud = st.checkbox(
+                'CRUD + сортировка + вывод в разные категории – товары (опционально по CMS)',
+                key='c30_check_admin_product_crud',
+                help='CRUD товаров, если товары в CMS - элементы каталога. На '
+                     'временном СКРЫТОМ товаре «[ТЕСТ ЧЕКЕРА]» (без реальной цены, '
+                     'удаляется в конце): создание → сортировка (поле SORT) → '
+                     'вывод в разные категории (привязка к 2+ разделам) → правка → '
+                     'удаление. Пишет в БД только при включённом подпункте «писать '
+                     'в БД». Если товары в вашей CMS не элементы каталога - пункт '
+                     'помечается «неприменимо». Аудит «было → стало».')
+            _ck_tcrud = st.checkbox(
+                'Создание, массовая загрузка, правка, удаление, скрытие – технические страницы',
+                key='c30_check_admin_tech_crud',
+                help='CRUD техстраниц (файлы в «Структуре сайта»). Проверяется '
+                     'НАЛИЧИЕ функций: форма нового файла (имя/заголовок/сохранить), '
+                     'загрузчик файлов, редактор существующего файла, управление в '
+                     'структуре (удаление/скрытие). Реально файлы НЕ создаём/не '
+                     'удаляем: техстраница - публичный файл в корне сайта, на боевом '
+                     'проекте это небезопасно (в отличие от скрытых записей БД у '
+                     'категорий/товаров). Подпункт «писать в БД» тут не применяется.')
+            _ck_cnt = st.checkbox(
+                'Добавление счётчиков аналитики',
+                key='c30_check_admin_counters',
+                help='Проверяет, что в админке есть где добавлять/править счётчики '
+                     'аналитики (Метрика/GA/GTM/Mail.ru). Для СМУ - файл '
+                     '«Структуры сайта» /localviews/layout/counters.php (открываем '
+                     'в редакторе fileman, показываем какие счётчики в нём). Для '
+                     'других CMS с самописным модулем - путь настраивается '
+                     '(секрет admin_settings → counters). Ничего не пишем.')
 
-        # ── Автокликер (локальный Chrome или облако с сессией) ──────
-        _ck_ac = st.checkbox(
-            'Запустить автокликер после проверки',
-            key='c30_autoclick',
-            help='Перекликивает «Проверить» по ошибкам в Вебмастере/ГСК. '
-                 'Локально - через залогиненный Chrome (CDP 9222); в облаке - '
-                 'headless-браузер с сессией из Secrets (autoclick_session, '
-                 'экспортируется на вкладке «Автокликеры»). Чек-лист '
-                 'завершится ТОЛЬКО когда все ошибки прокликаны.')
-        if _ck_ac:
-            _ac1, _ac2 = st.columns(2)
-            with _ac1:
-                st.checkbox('Прокликать Вебмастер', key='c30_ac_wm')
-            with _ac2:
-                st.checkbox('Прокликать ГСК', key='c30_ac_gsc')
-            if st.button('🌐 Открыть браузер для входа', key='c30_ac_browser',
-                         use_container_width=True):
-                try:
-                    subprocess.Popen([sys.executable, 'open_browser.py'],
-                                     cwd=str(PROJECT_ROOT))
-                    st.info('Открываю Chrome. Войди в Google (GSC) и Yandex '
-                            '(Вебмастер) под аккаунтами проекта, окно не закрывай, '
-                            'затем запускай проверку.')
-                except Exception as _e:
-                    st.error(f'Не удалось открыть браузер: {_e}')
-            if _secret('autoclick_session'):
-                st.caption('Локальный Chrome (9222) в приоритете; без него - '
-                           'облачный режим (сессия autoclick_session найдена в '
-                           'Secrets ✓).')
-            else:
-                st.caption('Нужен залогиненный Chrome (CDP 9222) или сессия в '
-                           'Secrets (autoclick_session - экспорт на вкладке '
-                           '«Автокликеры»). Без них автокликер пропускается '
-                           'с пометкой в отчёте.')
-        st.checkbox('Добавить свой список URL', key='c30_use_custom_urls',
-                    help='Кроме обычной выборки проекта проверит и ваши URL - '
-                         'вставьте список ниже (по одному в строке). Удобно точечно '
-                         'перепроверить конкретные страницы.')
-        if st.session_state.c30_use_custom_urls:
-            st.caption('Ссылки - по одной на строку. Тип по адресу: /catalog/x/ - '
-                       'категория, /catalog/x/y/ - товар, …/filter/… - фильтр, / - главная.')
-            _up = st.file_uploader('Загрузить .txt / .csv', type=['txt', 'csv'],
-                                   label_visibility='collapsed', key='c30_custom_file')
-            if _up is not None:
-                try:
-                    _txt = _up.read().decode('utf-8', errors='replace')
-                    if _up.name.lower().endswith('.csv'):
-                        _txt = '\n'.join(
-                            (ln.split(',') if ',' in ln else ln.split(';'))[0].strip().strip('"\'')
-                            for ln in _txt.splitlines())
-                    _ex = st.session_state.c30_custom_urls_text.strip()
-                    st.session_state.c30_custom_urls_text = (_ex + '\n' + _txt) if _ex else _txt
-                except Exception as _e:
-                    st.error(f'Не удалось прочитать файл: {_e}')
-            st.text_area('URLs', height=160, key='c30_custom_urls_text',
-                         label_visibility='collapsed',
-                         placeholder='https://stalmetural.ru/catalog/armatura/\n'
-                                     'https://orenburg.stalmetural.ru/catalog/truby/truba-20x20/')
-            _typed = build_custom_tasks_typed(
-                st.session_state.c30_custom_urls_text.split('\n'), src)
-            if _typed:
-                from collections import Counter as _Counter
-                _bt = ', '.join(f'{lbl}: {n}' for lbl, n
-                                in _Counter(t.type_label for t in _typed).items())
-                st.success(f'Будет добавлено {len(_typed)} URL - {_bt}')
-        # ── Уникальность контента через text.ru (самый нижний пункт) ──
-        st.checkbox(
-            'Уникальность контента через text.ru (с каким сайтом пересечение)',
-            key='c30_check_uniqueness',
-            help='Проверяет через text.ru, насколько уникален SEO-текст страниц '
-                 'и с какими ЧУЖИМИ сайтами он пересекается. Берём небольшую '
-                 'выборку ГЛАВНОГО домена (главная + каталог + N категорий + N '
-                 'товаров) - города-поддомены не трогаем (дубли). Свои домены '
-                 'исключаются из сравнения. Ключ и объём - в блоке ниже. '
-                 'Каждая страница тратит символы аккаунта text.ru. Отдельный лист '
-                 '«Уникальность».')
-        if st.session_state.get('c30_check_uniqueness'):
-            with st.expander('text.ru: ключ и объём проверки', expanded=True):
-                st.text_input(
-                    'API-ключ text.ru', key='c30_textru_key', type='password',
-                    placeholder='вставь ключ (личный кабинет text.ru → раздел «API»)',
-                    help='Обязателен, если галочка включена. Берётся из этого поля '
-                         'или из секрета textru_key. В git/отчёты не попадает.')
-                _uq1, _uq2, _uq3 = st.columns(3)
-                with _uq1:
-                    st.number_input('Категорий', 0, 30, key='c30_uniq_cats',
-                                    help='Случайные категории каталога (главный домен).')
-                with _uq2:
-                    st.number_input('Товаров', 0, 30, key='c30_uniq_prods',
-                                    help='В товарах текст генерится через переменные '
-                                         '- по умолчанию 0 (не проверяем). Можно '
-                                         'включить, если где-то есть ручной текст.')
-                with _uq3:
-                    st.number_input('Порог, %', 50, 100, key='c30_uniq_threshold',
-                                    help='Ниже порога - красным. Сайты-источники '
-                                         'пересечения показываем всегда, если они есть.')
-                if not (st.session_state.get('c30_textru_key', '').strip()
-                        or _secret_pid('textru_key', pid) or _secret('textru_key')):
-                    st.warning('⚠ Вставьте ключ text.ru - без него проверка '
-                               'уникальности пропустится (остальной прогон пройдёт).')
-                st.caption('Проверяем SEO-текст КАТЕГОРИЙ главного домена (+ главная и '
-                           'каталог): берём связный текст внизу страницы, не карточки/'
-                           'меню. Товары по умолчанию не берём (там текст по '
-                           'переменным). В отчёте, кроме % уникальности, - список '
-                           'конкурентов, с чьим сайтом пересекается контент, и на '
-                           'скольких наших страницах (сигнал «скопировали каталог»). '
-                           'Свои домены исключаются. Идёт в конце прогона (несколько минут).')
-        # ── Бесплатное 1-к-1 сравнение двух страниц (без text.ru и ключей) ──
-        if st.checkbox('🆚 Разово сравнить 2 страницы (бесплатно, без text.ru)',
-                       key='c30_cmp_pages_on',
-                       help='Мгновенно сравнивает SEO-текст двух страниц между '
-                            'собой. В общем прогоне НЕ участвует - работает по '
-                            'своей кнопке «Сравнить».'):
-            st.caption('Сравнивает SEO-текст ДВУХ конкретных страниц между собой '
-                       '(как бесплатный copyscape.com/compare, но вырезает шапку/'
-                       'меню - без «0% из 1134 слов меню»). Ключи и сервисы не '
-                       'нужны. Удобно проверить, скопировал ли КОНКРЕТНЫЙ конкурент '
-                       'нашу страницу. Ищет только точные совпадения фраз.')
-            _cmp_a = st.text_input('Наша страница (URL)', key='c30_cmp_a',
-                                   placeholder='https://stalmetural.ru/catalog/setka/')
-            _cmp_b = st.text_input('Страница конкурента (URL)', key='c30_cmp_b',
-                                   placeholder='https://konkurent.ru/catalog/setka/')
-            if st.button('Сравнить', key='c30_cmp_go',
-                         disabled=not ((_cmp_a or '').strip() and (_cmp_b or '').strip())):
-                try:
-                    import uniqueness_checker as _UCcmp
-                    with st.spinner('Скачиваю обе страницы и сравниваю…'):
-                        _cr = _UCcmp.compare_urls(_cmp_a.strip(), _cmp_b.strip())
-                    _cc = st.columns(3)
-                    _cc[0].metric('Нашего текста у них', f'{_cr["a_in_b"]:.0f}%',
-                                  help='Сколько % нашего SEO-текста есть на их странице.')
-                    _cc[1].metric('Наш текст, симв.', _cr['chars_a'])
-                    _cc[2].metric('Их текст, симв.', _cr['chars_b'])
-                    if _cr['a_in_b'] >= 30:
-                        st.error(f'⚠ {_cr["a_in_b"]:.0f}% нашего текста есть у них – '
-                                 'похоже на копию.')
-                    elif _cr['a_in_b'] >= 10:
-                        st.warning(f'{_cr["a_in_b"]:.0f}% совпадения – частичное пересечение.')
-                    else:
-                        st.success('Существенных совпадений нет.')
-                    if _cr['samples']:
-                        st.caption('Совпавшие фразы: '
-                                   + '; '.join(f'«{s}»' for s in _cr['samples']))
-                except Exception as _ce:
-                    st.error(f'Не удалось сравнить: {_ce}')
-        # ── Бесплатная сверка СТРУКТУРЫ каталога с конкурентом (без text.ru) ──
-        if st.checkbox('🗂 Сравнить структуру каталога с конкурентом (бесплатно)',
-                       key='c30_cmp_struct_on',
-                       help='Сверяет наши категории с sitemap конкурента. В общем '
-                            'прогоне НЕ участвует - работает по своей кнопке '
-                            '«Сравнить структуру».'):
-            st.caption('Берёт наши категории и sitemap конкурента и считает, '
-                       'сколько НАШИХ категорий (по слагу) есть у него. Высокая '
-                       'доля - вероятно, скопировали структуру каталога целиком. '
-                       'Без ключей и text.ru.')
-            _st_dom = st.text_input('Домен конкурента', key='c30_struct_dom',
-                                    placeholder='konkurent.ru')
-            if st.button('Сравнить структуру', key='c30_struct_go',
-                         disabled=not (_st_dom or '').strip()):
-                try:
-                    import uniqueness_checker as _UCst
-                    with st.spinner('Читаю sitemap конкурента и сверяю категории…'):
-                        _sr = _UCst.compare_catalog_structure(
-                            list(src.categories), _st_dom.strip())
-                    if _sr.get('error'):
-                        st.warning(f'Структуру сверить не вышло: {_sr["error"]}')
-                    else:
-                        _op = _sr['overlap_pct']
-                        st.metric('Наших категорий есть у конкурента',
-                                  f'{_sr["matched_count"]} из {_sr["our_count"]} ({_op:.0f}%)',
-                                  help='Совпадение по слагу категории.')
-                        if _op >= 50:
-                            st.error(f'⚠ {_op:.0f}% наших категорий есть у него – '
-                                     'похоже на копию структуры каталога.')
-                        elif _op >= 20:
-                            st.warning(f'{_op:.0f}% совпадения категорий – частичное.')
-                        else:
-                            st.success('Существенного совпадения структуры нет.')
-                        if _sr.get('matched'):
-                            st.caption('Совпавшие категории: '
-                                       + ', '.join(_sr['matched'][:40]))
-                except Exception as _se:
-                    st.error(f'Не удалось сравнить структуру: {_se}')
-
-    # БЛОК 4 - Админка: браузерная проверка функций настройки (нужны креды).
-    # Отдельный блок-аккордеон (цветная плашка) сразу под «Что проверяем».
-    _sec_adm = st.container(key='c30_sec_adm')
-    with _sec_adm.expander('🛠️  Админка – настройки, CRUD, счётчики (нужны креды)',
-                           expanded=False):
-        _amc1, _amc2 = st.columns([3, 2])
-        with _amc1:
-            _ck_adm = st.checkbox(
-                'Работают функции настройки (поддомены/категории/товары/тех.страницы)',
-                key='c30_check_admin_settings',
-                help='Браузер заходит в админку Bitrix и проверяет, что разделы '
-                     'настройки открываются и работают: мастер поддоменов, '
-                     'разделы каталога, товарная подсистема (HL-блок '
-                     '«Ассортимент»), структура сайта и редактор файлов '
-                     'тех.страниц. Только открытие/рендер, ничего не меняется. '
-                     'Отдельный лист «Настройки в админке».')
-        with _amc2:
-            st.checkbox('↳ писать в БД (с откатом)',
-                        key='c30_adm_execute',
-                        help='Подпункт CRUD-проверок ниже. ВКЛ (рекомендуется): '
-                             'реально создаёт-правит-скрывает-удаляет временный '
-                             'СКРЫТЫЙ раздел «[ТЕСТ ЧЕКЕРА]» (без товаров, '
-                             'удаляется сразу) и прогоняет симуляцию поддомена '
-                             '- аудит «было → стало». ВЫКЛ: только наличие '
-                             'CRUD-функций (формы/кнопки), ничего не пишется.')
-        _ck_crud = st.checkbox(
-            'Создание, массовая загрузка, правка, удаление, скрытие – поддомены и категории',
-            key='c30_check_admin_crud',
-            help='CRUD-функции. Поддомены: создание (симуляция-dry-run, на '
-                 'сайте ничего не создаётся), массовая загрузка (CSV), правка/'
-                 'удаление/скрытие - наличие функции. Категории: полный CRUD '
-                 'на временном разделе «[ТЕСТ ЧЕКЕРА]» (создать скрытым → '
-                 'правка → скрытие → удаление, чистится в конце) + массовая '
-                 'загрузка (импорт). Пишет в БД только при включённом подпункте '
-                 '«писать в БД». В отчёт идёт аудит «было → стало».')
-        _ck_pcrud = st.checkbox(
-            'CRUD + сортировка + вывод в разные категории – товары (опционально по CMS)',
-            key='c30_check_admin_product_crud',
-            help='CRUD товаров, если товары в CMS - элементы каталога. На '
-                 'временном СКРЫТОМ товаре «[ТЕСТ ЧЕКЕРА]» (без реальной цены, '
-                 'удаляется в конце): создание → сортировка (поле SORT) → '
-                 'вывод в разные категории (привязка к 2+ разделам) → правка → '
-                 'удаление. Пишет в БД только при включённом подпункте «писать '
-                 'в БД». Если товары в вашей CMS не элементы каталога - пункт '
-                 'помечается «неприменимо». Аудит «было → стало».')
-        _ck_tcrud = st.checkbox(
-            'Создание, массовая загрузка, правка, удаление, скрытие – технические страницы',
-            key='c30_check_admin_tech_crud',
-            help='CRUD техстраниц (файлы в «Структуре сайта»). Проверяется '
-                 'НАЛИЧИЕ функций: форма нового файла (имя/заголовок/сохранить), '
-                 'загрузчик файлов, редактор существующего файла, управление в '
-                 'структуре (удаление/скрытие). Реально файлы НЕ создаём/не '
-                 'удаляем: техстраница - публичный файл в корне сайта, на боевом '
-                 'проекте это небезопасно (в отличие от скрытых записей БД у '
-                 'категорий/товаров). Подпункт «писать в БД» тут не применяется.')
-        _ck_cnt = st.checkbox(
-            'Добавление счётчиков аналитики',
-            key='c30_check_admin_counters',
-            help='Проверяет, что в админке есть где добавлять/править счётчики '
-                 'аналитики (Метрика/GA/GTM/Mail.ru). Для СМУ - файл '
-                 '«Структуры сайта» /localviews/layout/counters.php (открываем '
-                 'в редакторе fileman, показываем какие счётчики в нём). Для '
-                 'других CMS с самописным модулем - путь настраивается '
-                 '(секрет admin_settings → counters). Ничего не пишем.')
-
-        if _ck_adm or _ck_crud or _ck_pcrud or _ck_tcrud or _ck_cnt:
-            # Дефолты полей: секрет admin_settings_<pid> (JSON) →
-            # локальный admin.local.json → admin.test.local.json.
-            if not st.session_state.get('c30_adm_prefilled'):
-                _pre = {}
-                try:
-                    _raw = _secret_pid('admin_settings', pid)
-                    if _raw:
-                        _pre = json.loads(_raw) if isinstance(_raw, str) \
-                            else dict(_raw)
-                except Exception:
+            if _ck_adm or _ck_crud or _ck_pcrud or _ck_tcrud or _ck_cnt:
+                # Дефолты полей: секрет admin_settings_<pid> (JSON) →
+                # локальный admin.local.json → admin.test.local.json.
+                if not st.session_state.get('c30_adm_prefilled'):
                     _pre = {}
-                if not _pre:
                     try:
-                        from admin_settings_check import load_admin_creds
-                        _pdir = PROJECT_ROOT / 'forms_tester' / 'projects' / pid
-                        _pre = (load_admin_creds(_pdir)
-                                or load_admin_creds(_pdir, test=True) or {})
+                        _raw = _secret_pid('admin_settings', pid)
+                        if _raw:
+                            _pre = json.loads(_raw) if isinstance(_raw, str) \
+                                else dict(_raw)
                     except Exception:
                         _pre = {}
-                for _f, _k in (('domain', 'c30_adm_domain'),
-                               ('login', 'c30_adm_login'),
-                               ('password', 'c30_adm_password'),
-                               ('basic_login', 'c30_adm_basic_login'),
-                               ('basic_password', 'c30_adm_basic_password')):
-                    if _pre.get(_f) and not st.session_state.get(_k):
-                        st.session_state[_k] = _pre[_f]
-                st.session_state['c30_adm_prefilled'] = True
-            st.text_input('Домен админки (https://…)', key='c30_adm_domain',
-                          placeholder='https://test.stalmetural.ru')
-            _adm1, _adm2 = st.columns(2)
-            with _adm1:
-                st.text_input('Логин Bitrix', key='c30_adm_login')
-            with _adm2:
-                st.text_input('Пароль Bitrix', key='c30_adm_password',
-                              type='password')
-            _adm3, _adm4 = st.columns(2)
-            with _adm3:
-                st.text_input('Basic-логин (если есть заглушка)',
-                              key='c30_adm_basic_login')
-            with _adm4:
-                st.text_input('Basic-пароль', key='c30_adm_basic_password',
-                              type='password')
-            if _ck_crud or _ck_pcrud:
-                st.caption('CRUD категорий/товаров выполняется на временных '
-                           'СКРЫТЫХ разделе/товаре и откатывается; поддомены '
-                           'реально не создаются (симуляция) и не удаляются '
-                           '(наличие функции). Обкатано на тестовом контуре.')
+                    if not _pre:
+                        try:
+                            from admin_settings_check import load_admin_creds
+                            _pdir = PROJECT_ROOT / 'forms_tester' / 'projects' / pid
+                            _pre = (load_admin_creds(_pdir)
+                                    or load_admin_creds(_pdir, test=True) or {})
+                        except Exception:
+                            _pre = {}
+                    for _f, _k in (('domain', 'c30_adm_domain'),
+                                   ('login', 'c30_adm_login'),
+                                   ('password', 'c30_adm_password'),
+                                   ('basic_login', 'c30_adm_basic_login'),
+                                   ('basic_password', 'c30_adm_basic_password')):
+                        if _pre.get(_f) and not st.session_state.get(_k):
+                            st.session_state[_k] = _pre[_f]
+                    st.session_state['c30_adm_prefilled'] = True
+                st.text_input('Домен админки (https://…)', key='c30_adm_domain',
+                              placeholder='https://test.stalmetural.ru')
+                _adm1, _adm2 = st.columns(2)
+                with _adm1:
+                    st.text_input('Логин Bitrix', key='c30_adm_login')
+                with _adm2:
+                    st.text_input('Пароль Bitrix', key='c30_adm_password',
+                                  type='password')
+                _adm3, _adm4 = st.columns(2)
+                with _adm3:
+                    st.text_input('Basic-логин (если есть заглушка)',
+                                  key='c30_adm_basic_login')
+                with _adm4:
+                    st.text_input('Basic-пароль', key='c30_adm_basic_password',
+                                  type='password')
+                if _ck_crud or _ck_pcrud:
+                    st.caption('CRUD категорий/товаров выполняется на временных '
+                               'СКРЫТЫХ разделе/товаре и откатывается; поддомены '
+                               'реально не создаются (симуляция) и не удаляются '
+                               '(наличие функции). Обкатано на тестовом контуре.')
+
+        # Дополнительно - тяжёлые/точечные проверки; свёрнуто, по умолчанию выкл
+        _sec_dop = st.container(key='c30_sec_dop')
+        with _sec_dop.expander(f'➕  Дополнительно  {_sec_n(_SEC_DOP)}/{len(_SEC_DOP)}  – уведомления, 404 из Метрики, Арсенкин, нагрузка, свои URL, уникальность', expanded=False):
+            _ck_notif = st.checkbox(
+                'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google)',
+                key='c30_fetch_notifications',
+                help='Собирает свежие уведомления из панелей вебмастера и сервисов '
+                     '(Яндекс.Вебмастер, Google Search Console, Яндекс.Бизнес, 2ГИС, '
+                     'Google) - чтобы не заходить в каждую панель вручную. Нужны '
+                     'настроенные доступы/токены; без них пункт пропускается.')
+            if _ck_notif:
+                # Без st.columns (пустая вторая колонка оставляла «призрачный»
+                # селектор при выключенном чекбоксе - как было у 404).
+                st.selectbox('За какой период',
+                             [1, 3, 7, 14, 30],
+                             format_func=lambda x: ('1 день' if x == 1 else f'{x} дней'),
+                             key='c30_notify_days', label_visibility='collapsed')
+            _ck_m404 = st.checkbox(
+                'Собрать 404 из Метрики',
+                key='c30_fetch_metrika_404',
+                help='Берёт 404-страницы напрямую из Метрики (API, по всем счётчикам '
+                     'проекта) за выбранный период. За день трафик на 404 мал - '
+                     'обычно нужен период 7+ дней.')
+            if _ck_m404:
+                from datetime import date as _date, timedelta as _td
+                # Селектор без обёртки в колонки (пустые колонки оставляли
+                # «призрачные» виджеты при выключении чекбокса). Поля даты -
+                # сразу под селектором, появляются в том же ране.
+                _m404_mode = st.selectbox(
+                    'Период 404',
+                    ['За день', 'За неделю', 'За 14 дней', 'За 30 дней', 'За период'],
+                    key='c30_m404_mode', label_visibility='collapsed')
+                if _m404_mode == 'За день':
+                    st.date_input('Дата', value=_date.today() - _td(days=1),
+                                  key='c30_m404_day', format='DD.MM.YYYY',
+                                  label_visibility='collapsed')
+                elif _m404_mode == 'За период':
+                    _pm2, _pm3 = st.columns(2)
+                    with _pm2:
+                        st.date_input('С', value=_date.today() - _td(days=7),
+                                      key='c30_m404_from', format='DD.MM.YYYY')
+                    with _pm3:
+                        st.date_input('По', value=_date.today(),
+                                      key='c30_m404_to', format='DD.MM.YYYY')
+            st.checkbox('Проверка индексации URL через Арсенкин (Яндекс + Google)',
+                        key='c30_check_arsenkin',
+                        help='Массово проверяет через API Арсенкина, есть ли страницы '
+                             '(категории, теги, подфильтры поддоменов и домена) в '
+                             'индексе Яндекса и Google. Без браузера, без блокировок. '
+                             'Токен и список URL вводятся в блоке ниже. Отдельный лист '
+                             '«Индексация (Арсенкин)».')
+            if st.session_state.get('c30_check_arsenkin'):
+                with st.container(border=True):
+                    st.markdown('**Арсенкин: токен и список URL**')
+                    st.text_input(
+                        'API-токен Арсенкина', key='c30_arsenkin_token',
+                        type='password',
+                        placeholder='вставь токен (профиль Арсенкина → API)',
+                        help='Токен берётся ТОЛЬКО из этого поля (не из Secrets). '
+                             'Один аккаунт СМУ подходит для СМУ / ИМП / МПЭ. '
+                             'Обязателен, если галочка включена.')
+                    st.text_area(
+                        'URL-адреса (по одному в строке, до 5000)',
+                        key='c30_arsenkin_urls', height=160,
+                        placeholder='https://site.ru/catalog/…\nhttps://city.site.ru/tag/…',
+                        help='Категории, отслеживаемые теги/подфильтры нужного '
+                             'поддомена и домена. Какие именно – уточняй у SEO-'
+                             'специалиста проекта.')
+                    _ac1, _ac2, _ac3, _ac4 = st.columns(4)
+                    with _ac1:
+                        st.checkbox('Яндекс', value=True, key='c30_arsenkin_yandex')
+                    with _ac2:
+                        st.checkbox('Google', value=True, key='c30_arsenkin_google')
+                    with _ac3:
+                        st.checkbox('http/https/www как один', value=True,
+                                    key='c30_arsenkin_search_all')
+                    with _ac4:
+                        st.checkbox('inurl-перепроверка', value=False,
+                                    key='c30_arsenkin_inurl',
+                                    help='Для Google: перепроверяет оператором inurl: '
+                                         'страницы, которых нет в индексе, чтобы меньше '
+                                         'ложных «не в индексе».')
+                    st.caption('1 URL × 1 поисковая система = 2 лимита Арсенкина. '
+                               'Проверка идёт в конце прогона, результат – в отчёте.')
+            _ck_stress = st.checkbox(
+                'Ошибки сервера: парсинг, нагрузка, дубли URL (по запросу)',
+                key='c30_check_stress',
+                help='В конце прогона гоняет три сетевые пробы на прод: (1) '
+                     'быстрый обход страниц парсингом; (2) параллельный залп '
+                     'по репрезентативным страницам; (3) кривые дубли адресов '
+                     'категорий/фильтров/товаров (сдвоенный сегмент, двойной '
+                     'слэш, глубокая пагинация). Ищем ошибки сервера (5xx), '
+                     'обрывы и деградацию скорости. При первых 5xx/обрывах проба '
+                     'сама останавливается (не добивает сервер); поймали бан на '
+                     'парсинге - нагрузку и дубли пропускаем. Создаёт реальную '
+                     'нагрузку на боевой сайт - по запросу. Результат: лист '
+                     '«Нагрузка и парсинг».')
+            if _ck_stress:
+                _sc1, _sc2 = st.columns(2)
+                with _sc1:
+                    st.slider('Параллельных запросов в залпе',
+                              min_value=10, max_value=50, value=30, step=5,
+                              key='c30_stress_concurrency',
+                              help='Сколько запросов летят к ОДНОЙ странице '
+                                   'одновременно. 15 - лёгкий безопасный всплеск; '
+                                   '30 (по умолчанию) - заметный, показательный; '
+                                   'выше - ближе к тому, что защита примет за '
+                                   'атаку (риск бана). Каждая страница получает '
+                                   'этот залп в 2 волны (итого запросов на '
+                                   'страницу = число × 2).')
+                with _sc2:
+                    st.slider('Сколько страниц под залпом',
+                              min_value=1, max_value=8, value=3, step=1,
+                              key='c30_stress_load_pages',
+                              help='На сколько разных страниц по очереди пойдёт '
+                                   'залп нагрузки. Сначала берутся разнотипные '
+                                   '(главная/категория/фильтр/товар), потом '
+                                   'добираются остальные из прогона. Больше '
+                                   'страниц - шире картина, но выше суммарная '
+                                   'нагрузка на сайт.')
+
+            # ── Автокликер (локальный Chrome или облако с сессией) ──────
+            _ck_ac = st.checkbox(
+                'Запустить автокликер после проверки',
+                key='c30_autoclick',
+                help='Перекликивает «Проверить» по ошибкам в Вебмастере/ГСК. '
+                     'Локально - через залогиненный Chrome (CDP 9222); в облаке - '
+                     'headless-браузер с сессией из Secrets (autoclick_session, '
+                     'экспортируется на вкладке «Автокликеры»). Чек-лист '
+                     'завершится ТОЛЬКО когда все ошибки прокликаны.')
+            if _ck_ac:
+                _ac1, _ac2 = st.columns(2)
+                with _ac1:
+                    st.checkbox('Прокликать Вебмастер', key='c30_ac_wm')
+                with _ac2:
+                    st.checkbox('Прокликать ГСК', key='c30_ac_gsc')
+                if st.button('🌐 Открыть браузер для входа', key='c30_ac_browser',
+                             use_container_width=True):
+                    try:
+                        subprocess.Popen([sys.executable, 'open_browser.py'],
+                                         cwd=str(PROJECT_ROOT))
+                        st.info('Открываю Chrome. Войди в Google (GSC) и Yandex '
+                                '(Вебмастер) под аккаунтами проекта, окно не закрывай, '
+                                'затем запускай проверку.')
+                    except Exception as _e:
+                        st.error(f'Не удалось открыть браузер: {_e}')
+                if _secret('autoclick_session'):
+                    st.caption('Локальный Chrome (9222) в приоритете; без него - '
+                               'облачный режим (сессия autoclick_session найдена в '
+                               'Secrets ✓).')
+                else:
+                    st.caption('Нужен залогиненный Chrome (CDP 9222) или сессия в '
+                               'Secrets (autoclick_session - экспорт на вкладке '
+                               '«Автокликеры»). Без них автокликер пропускается '
+                               'с пометкой в отчёте.')
+            st.checkbox('Добавить свой список URL', key='c30_use_custom_urls',
+                        help='Кроме обычной выборки проекта проверит и ваши URL - '
+                             'вставьте список ниже (по одному в строке). Удобно точечно '
+                             'перепроверить конкретные страницы.')
+            if st.session_state.c30_use_custom_urls:
+                st.caption('Ссылки - по одной на строку. Тип по адресу: /catalog/x/ - '
+                           'категория, /catalog/x/y/ - товар, …/filter/… - фильтр, / - главная.')
+                _up = st.file_uploader('Загрузить .txt / .csv', type=['txt', 'csv'],
+                                       label_visibility='collapsed', key='c30_custom_file')
+                if _up is not None:
+                    try:
+                        _txt = _up.read().decode('utf-8', errors='replace')
+                        if _up.name.lower().endswith('.csv'):
+                            _txt = '\n'.join(
+                                (ln.split(',') if ',' in ln else ln.split(';'))[0].strip().strip('"\'')
+                                for ln in _txt.splitlines())
+                        _ex = st.session_state.c30_custom_urls_text.strip()
+                        st.session_state.c30_custom_urls_text = (_ex + '\n' + _txt) if _ex else _txt
+                    except Exception as _e:
+                        st.error(f'Не удалось прочитать файл: {_e}')
+                st.text_area('URLs', height=160, key='c30_custom_urls_text',
+                             label_visibility='collapsed',
+                             placeholder='https://stalmetural.ru/catalog/armatura/\n'
+                                         'https://orenburg.stalmetural.ru/catalog/truby/truba-20x20/')
+                _typed = build_custom_tasks_typed(
+                    st.session_state.c30_custom_urls_text.split('\n'), src)
+                if _typed:
+                    from collections import Counter as _Counter
+                    _bt = ', '.join(f'{lbl}: {n}' for lbl, n
+                                    in _Counter(t.type_label for t in _typed).items())
+                    st.success(f'Будет добавлено {len(_typed)} URL - {_bt}')
+            # ── Уникальность контента через text.ru (самый нижний пункт) ──
+            st.checkbox(
+                'Уникальность контента через text.ru (с каким сайтом пересечение)',
+                key='c30_check_uniqueness',
+                help='Проверяет через text.ru, насколько уникален SEO-текст страниц '
+                     'и с какими ЧУЖИМИ сайтами он пересекается. Берём небольшую '
+                     'выборку ГЛАВНОГО домена (главная + каталог + N категорий + N '
+                     'товаров) - города-поддомены не трогаем (дубли). Свои домены '
+                     'исключаются из сравнения. Ключ и объём - в блоке ниже. '
+                     'Каждая страница тратит символы аккаунта text.ru. Отдельный лист '
+                     '«Уникальность».')
+            if st.session_state.get('c30_check_uniqueness'):
+                with st.container(border=True):
+                    st.markdown('**text.ru: ключ и объём проверки**')
+                    st.text_input(
+                        'API-ключ text.ru', key='c30_textru_key', type='password',
+                        placeholder='вставь ключ (личный кабинет text.ru → раздел «API»)',
+                        help='Обязателен, если галочка включена. Берётся из этого поля '
+                             'или из секрета textru_key. В git/отчёты не попадает.')
+                    _uq1, _uq2, _uq3 = st.columns(3)
+                    with _uq1:
+                        st.number_input('Категорий', 0, 30, key='c30_uniq_cats',
+                                        help='Случайные категории каталога (главный домен).')
+                    with _uq2:
+                        st.number_input('Товаров', 0, 30, key='c30_uniq_prods',
+                                        help='В товарах текст генерится через переменные '
+                                             '- по умолчанию 0 (не проверяем). Можно '
+                                             'включить, если где-то есть ручной текст.')
+                    with _uq3:
+                        st.number_input('Порог, %', 50, 100, key='c30_uniq_threshold',
+                                        help='Ниже порога - красным. Сайты-источники '
+                                             'пересечения показываем всегда, если они есть.')
+                    if not (st.session_state.get('c30_textru_key', '').strip()
+                            or _secret_pid('textru_key', pid) or _secret('textru_key')):
+                        st.warning('⚠ Вставьте ключ text.ru - без него проверка '
+                                   'уникальности пропустится (остальной прогон пройдёт).')
+                    st.caption('Проверяем SEO-текст КАТЕГОРИЙ главного домена (+ главная и '
+                               'каталог): берём связный текст внизу страницы, не карточки/'
+                               'меню. Товары по умолчанию не берём (там текст по '
+                               'переменным). В отчёте, кроме % уникальности, - список '
+                               'конкурентов, с чьим сайтом пересекается контент, и на '
+                               'скольких наших страницах (сигнал «скопировали каталог»). '
+                               'Свои домены исключаются. Идёт в конце прогона (несколько минут).')
+            # ── Бесплатное 1-к-1 сравнение двух страниц (без text.ru и ключей) ──
+            if st.checkbox('🆚 Разово сравнить 2 страницы (бесплатно, без text.ru)',
+                           key='c30_cmp_pages_on',
+                           help='Мгновенно сравнивает SEO-текст двух страниц между '
+                                'собой. В общем прогоне НЕ участвует - работает по '
+                                'своей кнопке «Сравнить».'):
+                st.caption('Сравнивает SEO-текст ДВУХ конкретных страниц между собой '
+                           '(как бесплатный copyscape.com/compare, но вырезает шапку/'
+                           'меню - без «0% из 1134 слов меню»). Ключи и сервисы не '
+                           'нужны. Удобно проверить, скопировал ли КОНКРЕТНЫЙ конкурент '
+                           'нашу страницу. Ищет только точные совпадения фраз.')
+                _cmp_a = st.text_input('Наша страница (URL)', key='c30_cmp_a',
+                                       placeholder='https://stalmetural.ru/catalog/setka/')
+                _cmp_b = st.text_input('Страница конкурента (URL)', key='c30_cmp_b',
+                                       placeholder='https://konkurent.ru/catalog/setka/')
+                if st.button('Сравнить', key='c30_cmp_go',
+                             disabled=not ((_cmp_a or '').strip() and (_cmp_b or '').strip())):
+                    try:
+                        import uniqueness_checker as _UCcmp
+                        with st.spinner('Скачиваю обе страницы и сравниваю…'):
+                            _cr = _UCcmp.compare_urls(_cmp_a.strip(), _cmp_b.strip())
+                        _cc = st.columns(3)
+                        _cc[0].metric('Нашего текста у них', f'{_cr["a_in_b"]:.0f}%',
+                                      help='Сколько % нашего SEO-текста есть на их странице.')
+                        _cc[1].metric('Наш текст, симв.', _cr['chars_a'])
+                        _cc[2].metric('Их текст, симв.', _cr['chars_b'])
+                        if _cr['a_in_b'] >= 30:
+                            st.error(f'⚠ {_cr["a_in_b"]:.0f}% нашего текста есть у них – '
+                                     'похоже на копию.')
+                        elif _cr['a_in_b'] >= 10:
+                            st.warning(f'{_cr["a_in_b"]:.0f}% совпадения – частичное пересечение.')
+                        else:
+                            st.success('Существенных совпадений нет.')
+                        if _cr['samples']:
+                            st.caption('Совпавшие фразы: '
+                                       + '; '.join(f'«{s}»' for s in _cr['samples']))
+                    except Exception as _ce:
+                        st.error(f'Не удалось сравнить: {_ce}')
+            # ── Бесплатная сверка СТРУКТУРЫ каталога с конкурентом (без text.ru) ──
+            if st.checkbox('🗂 Сравнить структуру каталога с конкурентом (бесплатно)',
+                           key='c30_cmp_struct_on',
+                           help='Сверяет наши категории с sitemap конкурента. В общем '
+                                'прогоне НЕ участвует - работает по своей кнопке '
+                                '«Сравнить структуру».'):
+                st.caption('Берёт наши категории и sitemap конкурента и считает, '
+                           'сколько НАШИХ категорий (по слагу) есть у него. Высокая '
+                           'доля - вероятно, скопировали структуру каталога целиком. '
+                           'Без ключей и text.ru.')
+                _st_dom = st.text_input('Домен конкурента', key='c30_struct_dom',
+                                        placeholder='konkurent.ru')
+                if st.button('Сравнить структуру', key='c30_struct_go',
+                             disabled=not (_st_dom or '').strip()):
+                    try:
+                        import uniqueness_checker as _UCst
+                        with st.spinner('Читаю sitemap конкурента и сверяю категории…'):
+                            _sr = _UCst.compare_catalog_structure(
+                                list(src.categories), _st_dom.strip())
+                        if _sr.get('error'):
+                            st.warning(f'Структуру сверить не вышло: {_sr["error"]}')
+                        else:
+                            _op = _sr['overlap_pct']
+                            st.metric('Наших категорий есть у конкурента',
+                                      f'{_sr["matched_count"]} из {_sr["our_count"]} ({_op:.0f}%)',
+                                      help='Совпадение по слагу категории.')
+                            if _op >= 50:
+                                st.error(f'⚠ {_op:.0f}% наших категорий есть у него – '
+                                         'похоже на копию структуры каталога.')
+                            elif _op >= 20:
+                                st.warning(f'{_op:.0f}% совпадения категорий – частичное.')
+                            else:
+                                st.success('Существенного совпадения структуры нет.')
+                            if _sr.get('matched'):
+                                st.caption('Совпавшие категории: '
+                                           + ', '.join(_sr['matched'][:40]))
+                    except Exception as _se:
+                        st.error(f'Не удалось сравнить структуру: {_se}')
 
     # «Подпись прогона» - проект + объём выборки + что проверяем. По ней решаем,
     # показывать ли блок результатов/лог: показываем только для прогона, который
