@@ -245,6 +245,7 @@ pages = [
     st.Page('checklists/goals_check.py', title='Проверка целей', icon='🎯'),
     st.Page('checklists/variables_check.py', title='Проверка КП', icon='🗺️'),
     st.Page('checklists/pagespeed_check.py', title='Скорость страниц', icon='⚡'),
+    st.Page('checklists/uniqueness_check.py', title='Уникальность', icon='📄'),
 ]
 
 st.navigation(pages).run()
