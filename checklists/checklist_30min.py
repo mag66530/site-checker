@@ -1266,38 +1266,49 @@ if pid:
             '.st-key-c30_sec_ana [data-testid="stExpander"]{border-left:5px solid #1F9D2F !important}'
             '.st-key-c30_sec_adm [data-testid="stExpander"]{border-left:5px solid #5A6B7B !important}'
             '.st-key-c30_sec_dop [data-testid="stExpander"]{border-left:5px solid #C77D2E !important}'
+            # Счётчик «выбрано/всего» в шапке раздела - как отдельная «пилюля»
+            # справа. В подписи он обёрнут в `код`, поэтому в разметке это <code>:
+            # позиционируем его абсолютно по правому краю summary, а тексту слева
+            # даём отступ, чтобы он не залезал под пилюлю.
+            '[data-testid="stExpander"] summary{position:relative}'
+            '[data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] p{padding-right:4.5rem;margin:0}'
+            '[data-testid="stExpander"] summary code{'
+            'position:absolute;right:1rem;top:50%;transform:translateY(-50%);'
+            'font-size:.8em;padding:1px 9px;border-radius:999px;white-space:nowrap;'
+            'background:rgba(128,128,128,.16);color:inherit;'
+            'font-variant-numeric:tabular-nums;font-family:inherit}'
             '</style>', unsafe_allow_html=True)
         _sec_teh = st.container(key='c30_sec_teh')
-        with _sec_teh.expander(f'⚙️  Техничка  {_sec_n(_SEC_TEH)}/{len(_SEC_TEH)}  – доступность, индексация, дубли, метаданные, 404, скорость', expanded=True):
-            st.checkbox('1.1  Главная', key='c30_check_main',
+        with _sec_teh.expander(f'⚙️  Техничка – доступность, индексация, дубли, метаданные, 404, скорость  `{_sec_n(_SEC_TEH)}/{len(_SEC_TEH)}`', expanded=True):
+            st.checkbox('Главная', key='c30_check_main',
                         help='Проверяем главную страницу: открывается ли (код 200), '
                              'есть ли H1, Title, телефон и основные блоки. С неё '
                              'начинается проверка сайта.')
-            st.checkbox('1.2  Каталог', key='c30_check_catalog',
+            st.checkbox('Каталог', key='c30_check_catalog',
                         help='Проверяем страницу каталога (список разделов/товаров): '
                              'открывается, есть заголовок, ссылки и товары на месте.')
-            st.checkbox('1.3  Категории всех уровней вложенности',
+            st.checkbox('Категории всех уровней вложенности',
                         key='c30_check_categories',
                         help='Проверяем категории и подкатегории вглубь: у каждой '
                              'есть заголовок, товары, текст и метатеги - не только у '
                              'верхних, но и у вложенных.')
             if stats['has_filters']:
-                st.checkbox('1.4  Фильтры', key='c30_check_filters',
+                st.checkbox('Фильтры', key='c30_check_filters',
                             help='Проверяем страницы фильтров (например «швеллер '
                                  'оцинкованный»): открываются, не отдают 404/пустоту, '
                                  'у них свой заголовок и метатеги.')
             else:
                 st.markdown('<span style="color:#9A958C">1.4  Фильтры (нет в каталоге)</span>',
                             unsafe_allow_html=True)
-            st.checkbox('1.5  Товары', key='c30_check_products',
+            st.checkbox('Товары', key='c30_check_products',
                         help='Проверяем карточки товаров: есть название, цена, кнопка '
                              'заказа, изображение и описание.')
-            st.checkbox('1.6  Текстовые блоки категорий/фильтров/товаров и переменные',
+            st.checkbox('Текстовые блоки категорий/фильтров/товаров и переменные',
                         key='c30_check_text',
                         help='Проверяем SEO-тексты категорий/фильтров/товаров и что в '
                              'них подставились переменные (город, телефон) - нет '
                              '«пустых скобок» вроде {city} или незаполненных шаблонов.')
-            st.checkbox('1.7  Индексация страниц (robots.txt, sitemap, noindex, canonical)',
+            st.checkbox('Индексация страниц (robots.txt, sitemap, noindex, canonical)',
                         key='c30_check_indexing',
                         help='Эталон - robots.txt. Ошибка = расхождение сигналов '
                              'страницы с robots: noindex на открытой в robots '
@@ -1308,7 +1319,7 @@ if pid:
                              'теги есть - валидируем (коды языков, URL, '
                              'self-reference); нет - не ошибка. '
                              'Плюс сверка всех путей каталога (sitemap) с robots.txt.')
-            st.checkbox('1.8  Корректность вывода и дубли (заголовки, метаданные, урлы)',
+            st.checkbox('Корректность вывода и дубли (заголовки, метаданные, урлы)',
                         key='c30_check_meta',
                         help='Наличие и непустота title/description/H1, город '
                              'поддомена в title/description, длины. Дубли: '
@@ -1319,7 +1330,7 @@ if pid:
                              'тегов (ровно один title/description/H1, дубли H2) '
                              'и «текстовость» заголовков: h2-h6 не должны быть '
                              'в шапке/подвале/меню/сайдбаре.')
-            st.checkbox('1.16  Валидация W3C (HTML/CSS) + скорость ресурсов',
+            st.checkbox('Валидация W3C (HTML/CSS) + скорость ресурсов',
                         key='c30_check_w3c',
                         help='По выборке страниц (главная/категория/товар): HTML '
                              'через W3C Nu, CSS через W3C CSS Validator, время '
@@ -1330,7 +1341,7 @@ if pid:
                              'тогда валидность не проверится (в отчёте «повторить '
                              'позже»), а скорость ресурсов измерится в любом '
                              'случае.')
-            st.checkbox('1.17  Сжатие (Gzip/Brotli) и кеширование статики',
+            st.checkbox('Сжатие (Gzip/Brotli) и кеширование статики',
                         key='c30_check_static',
                         help='Проверяем, что CSS/JS сайта отдаются сжатыми (Gzip/'
                              'Brotli) и с кешем (Cache-Control/ETag/Expires) - иначе '
@@ -1339,7 +1350,7 @@ if pid:
                              'страницу → кликнуть по .css или .js → в Response Headers '
                              'смотреть Content-Encoding (сжатие) и Cache-Control '
                              '(кеш). Проще - прогнать через PageSpeed Insights.')
-            st.checkbox('1.18  Страница 404 (код ответа, дизайн, тексты, навигация)',
+            st.checkbox('Страница 404 (код ответа, дизайн, тексты, навигация)',
                         key='c30_check_404',
                         help='Запрашиваем заведомо несуществующий адрес: код '
                              'ответа ровно 404 (200 = soft-404 шаблон, баг), '
@@ -1350,7 +1361,7 @@ if pid:
                              'фильтр тоже отдают 404. '
                              'Главный домен + один поддомен (шаблон сквозной). '
                              'Отдельный лист «Страница 404».')
-            st.checkbox('1.19  Фильтры поисковых систем (санкции)',
+            st.checkbox('Фильтры поисковых систем (санкции)',
                         key='c30_check_ps_filters',
                         help='Яндекс: санкционные сигналы (угрозы, качество, '
                              'реклама) из диагностики Вебмастера - надёжный '
@@ -1359,7 +1370,7 @@ if pid:
                              'дней по маркерам («ручные меры», «security '
                              'issue») + ссылка на ручную сверку в Search '
                              'Console. Отдельный лист «Фильтры ПС».')
-            st.checkbox('1.20  Ссылочный профиль (беклинки, lite)',
+            st.checkbox('Ссылочный профиль (беклинки, lite)',
                         key='c30_check_link_profile',
                         help='Беклинки по официальным данным Яндекс.Вебмастера '
                              '(тот же OAuth-токен, что и диагностика): объём '
@@ -1411,8 +1422,8 @@ if pid:
                              'проект в catalogs/filters-<проект>.json.')
 
         _sec_ver = st.container(key='c30_sec_ver')
-        with _sec_ver.expander(f'🎨  Вёрстка  {_sec_n(_SEC_VER)}/{len(_SEC_VER)}  – адаптивность, микроразметка, изображения', expanded=True):
-            st.checkbox('1.11  Вёрстка, адаптивность и навигация (viewport, стили, меню)',
+        with _sec_ver.expander(f'🎨  Вёрстка – адаптивность, микроразметка, изображения  `{_sec_n(_SEC_VER)}/{len(_SEC_VER)}`', expanded=True):
+            st.checkbox('Вёрстка, адаптивность и навигация (viewport, стили, меню)',
                         key='c30_check_layout',
                         help='ТЗ 2.1/2.1.1: задан тег viewport (мобильная версия '
                              'масштабируется), каждый подключённый CSS-файл реально '
@@ -1429,7 +1440,7 @@ if pid:
                              '(большие inline-блоки) и async/defer у скриптов '
                              'в <head>. '
                              'Визуальный рендер не заменяет - ручной просмотр остаётся.')
-            st.checkbox('1.12  Микроразметка и OpenGraph (Schema.org, og:*)',
+            st.checkbox('Микроразметка и OpenGraph (Schema.org, og:*)',
                         key='c30_check_markup',
                         help='ТЗ 3.5: OpenGraph (og:url/title/description/image/type) '
                              'на основных страницах; Schema.org - данные компании '
@@ -1439,7 +1450,7 @@ if pid:
                              'PostalAddress. Основной формат microdata: тип '
                              'только в JSON-LD = предупреждение. Валидность '
                              'полей - инструментами Яндекса/Google вручную.')
-            st.checkbox('1.15  Изображения (alt, webp/avif, вес, имена файлов)',
+            st.checkbox('Изображения (alt, webp/avif, вес, имена файлов)',
                         key='c30_check_images',
                         help='Alt у всех <img> (пустой alt="" ок; баг - полное '
                              'отсутствие). Современные форматы webp/avif (иначе '
@@ -1461,8 +1472,8 @@ if pid:
                              'проход - по запросу.')
 
         _sec_sec = st.container(key='c30_sec_sec')
-        with _sec_sec.expander(f'🔒  Безопасность  {_sec_n(_SEC_SEC)}/{len(_SEC_SEC)}  – заголовки ответа сервера', expanded=True):
-            st.checkbox('1.13  Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
+        with _sec_sec.expander(f'🔒  Безопасность – заголовки ответа сервера  `{_sec_n(_SEC_SEC)}/{len(_SEC_SEC)}`', expanded=True):
+            st.checkbox('Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
                         key='c30_check_security',
                         help='Доп. чек-лист: HTTP-заголовки безопасности ответа. '
                              'Мягко - нет HSTS / CSP / X-Content-Type-Options / '
@@ -1471,13 +1482,13 @@ if pid:
                              'конфликт дублей) = баг.')
 
         _sec_kp = st.container(key='c30_sec_kp')
-        with _sec_kp.expander(f'🗺️  Данные по городам  {_sec_n(_SEC_KP)}/{len(_SEC_KP)}', expanded=True):
-            st.checkbox('1.9  Переменные города (город, телефон, почта - по КП)',
+        with _sec_kp.expander(f'🗺️  Данные по городам  `{_sec_n(_SEC_KP)}/{len(_SEC_KP)}`', expanded=True):
+            st.checkbox('Переменные города (город, телефон, почта - по КП)',
                         key='c30_check_region',
                         help='На странице города не должно быть подстановок другого '
                              'города: чужой город в title/description/H1, телефон '
                              'или почта другого города (сверка со справочником КП).')
-            st.checkbox('1.10  СНГ-домены: нет упоминаний РФ, СНГ и чужих стран',
+            st.checkbox('СНГ-домены: нет упоминаний РФ, СНГ и чужих стран',
                         key='c30_check_cis',
                         help='На сайте страны СНГ (домены .kz/.by/.uz/…) в текстах, '
                              'заголовках, метаданных и контактах не должно быть: '
@@ -1499,8 +1510,8 @@ if pid:
                              'когда дадут доступ, перейдём на него.')
 
         _sec_ana = st.container(key='c30_sec_ana')
-        with _sec_ana.expander(f'📊  Аналитика  {_sec_n(_SEC_ANA)}/{len(_SEC_ANA)}  – аномалии Вебмастера', expanded=True):
-            st.checkbox('1.21  Нет аномалий: Вебмастер + внезапные мусорные ссылки',
+        with _sec_ana.expander(f'📊  Аналитика – аномалии Вебмастера  `{_sec_n(_SEC_ANA)}/{len(_SEC_ANA)}`', expanded=True):
+            st.checkbox('Нет аномалий: Вебмастер + внезапные мусорные ссылки',
                         key='c30_check_anomaly',
                         help='Мониторинг резких отклонений «от себя-прошлого» - '
                              'Вебмастер часто сигналит раньше, чем просядут '
@@ -1565,7 +1576,7 @@ if pid:
 
         # Админка - отдельный аккордеон (нужны креды); свёрнута, галочки вручную
         _sec_adm = st.container(key='c30_sec_adm')
-        with _sec_adm.expander(f'🛠️  Админка  {_sec_n(_SEC_ADM)}/{len(_SEC_ADM)}  – настройки, CRUD, счётчики (нужны креды)',
+        with _sec_adm.expander(f'🛠️  Админка – настройки, CRUD, счётчики (нужны креды)  `{_sec_n(_SEC_ADM)}/{len(_SEC_ADM)}`',
                                expanded=False):
             _amc1, _amc2 = st.columns([3, 2])
             with _amc1:
@@ -1678,7 +1689,7 @@ if pid:
 
         # Дополнительно - тяжёлые/точечные проверки; свёрнуто, по умолчанию выкл
         _sec_dop = st.container(key='c30_sec_dop')
-        with _sec_dop.expander(f'➕  Дополнительно  {_sec_n(_SEC_DOP)}/{len(_SEC_DOP)}  – уведомления, 404 из Метрики, Арсенкин, нагрузка, свои URL, уникальность', expanded=False):
+        with _sec_dop.expander(f'➕  Дополнительно – уведомления, 404 из Метрики, Арсенкин, нагрузка, свои URL, уникальность  `{_sec_n(_SEC_DOP)}/{len(_SEC_DOP)}`', expanded=False):
             _ck_notif = st.checkbox(
                 'Собрать уведомления (Вебмастер, GSC, Я.Бизнес, 2ГИС, Google)',
                 key='c30_fetch_notifications',
