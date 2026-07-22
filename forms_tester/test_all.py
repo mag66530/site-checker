@@ -4801,6 +4801,19 @@ def _снять_size_with_cells(path: str) -> None:
             pass
 
 
+def _excel_имя_листа(name, default: str = "Город") -> str:
+    """Валидное имя листа Excel. Excel/openpyxl запрещают в имени листа символы
+    \\ / ? * [ ] : — при попытке создать лист с таким именем openpyxl падает
+    («Invalid character … found in sheet title»), и матрица НЕ строится целиком
+    (как на городе «Астана/Нур-Султан» с «/»). Заменяем запрещённые символы на
+    «-», режем до 31 символа. ЧИСТАЯ функция (юнит-тест без Excel)."""
+    s = str(name or "")
+    for ch in "\\/?*[]:":
+        s = s.replace(ch, "-")
+    s = s.strip().strip("'")
+    return s[:31] or default
+
+
 def построить_матрицу_проверок(path: str) -> None:
     """Наглядный отчёт поверх консолидированных «Логов»: по листу на домен/город
     («Москва», «Алматы», …, без слова «Матрица» в названии) - проверки строками,
@@ -4908,7 +4921,7 @@ def построить_матрицу_проверок(path: str) -> None:
     matrix_titles = []
     pos = 1
     for город, forms in by_city.items():
-        title = str(город)[:31] or "Город"
+        title = _excel_имя_листа(город)
         n, base = 2, title
         while title in wb.sheetnames or title in matrix_titles:
             suf = f" {n}"
