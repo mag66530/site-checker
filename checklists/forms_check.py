@@ -396,9 +396,19 @@ with _qh:
 
 # ── Выбор проекта ────────────────────────────────────────────────────
 # По умолчанию проект НЕ выбран - чтобы ничего не запускалось случайно.
-pid_key = st.selectbox('Проект', list(PROJECTS.keys()),
+# ПЕРСИСТ между вкладками: Streamlit при уходе на другую страницу чистит
+# состояние виджетов, поэтому раньше проект «сбрасывался» при возврате (и с ним
+# исчезали лог/отчёт/прогресс). Держим выбор в ПОСТОЯННОМ ключе session_state
+# (его Streamlit не трогает - это не ключ виджета) и восстанавливаем как index
+# при каждом заходе. Виджет - без key, чтобы не попасть под чистку. Смена проекта
+# сама переключает лог/отчёт - они per-проектные (cache/forms/<pid>/…).
+_proj_opts = list(PROJECTS.keys())
+_proj_saved = st.session_state.get('fc_project_sel')
+_proj_idx = _proj_opts.index(_proj_saved) if _proj_saved in _proj_opts else None
+pid_key = st.selectbox('Проект', _proj_opts,
                        format_func=lambda k: PROJECTS[k]['name'],
-                       index=None, placeholder='- выберите проект -')
+                       index=_proj_idx, placeholder='- выберите проект -')
+st.session_state['fc_project_sel'] = pid_key   # запоминаем для возврата на вкладку
 if not pid_key:
     st.info('Выберите проект, чтобы настроить и запустить проверку форм.')
     st.stop()
@@ -1174,8 +1184,16 @@ if _alive and not _done_by_log:
     if _total and _done > _total:
         _total = _done
 
+    # Финальная стадия: формы отработали, идут доводочные проверки (cookie 2.12,
+    # мобильная вёрстка) и СБОРКА отчёта. Раньше прогресс «висел» на 99% с текстом
+    # «Идёт проверка», будто зависло, - показываем честно «формирую отчёт».
+    _finalizing = any(m in _log_txt for m in (
+        '🧹 Отчёт сведён', '🗂️ Матрица проверок построена',
+        'Проверка 2.12', 'Мобильная вёрстка'))
     _eta_txt = ''
-    if _total:
+    if _finalizing:
+        st.progress(0.98, text='Почти готово: формирую отчёт…')
+    elif _total:
         st.progress(min(_done / max(_total, 1), 0.99),
                     text=f'Проверено форм: {_done} из ~{_total}')
         # Живая оценка остатка по фактическому темпу - честнее фиксированных

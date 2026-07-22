@@ -311,9 +311,15 @@ st.caption('Google PageSpeed / Lighthouse: оценка скорости (deskto
            'перезапуске приложения история сбрасывается (выгружайте её, '
            'чтобы не потерять сравнение периодов).')
 
-pid = st.selectbox('Проект', list(PROJECTS.keys()),
-                   format_func=lambda k: PROJECTS[k], index=None,
+# Персист выбора проекта между вкладками (Streamlit чистит состояние виджета при
+# уходе на другую страницу). Держим в постоянном ключе session_state.
+_ps_opts = list(PROJECTS.keys())
+_ps_saved = st.session_state.get('ps_project_sel')
+_ps_idx = _ps_opts.index(_ps_saved) if _ps_saved in _ps_opts else None
+pid = st.selectbox('Проект', _ps_opts,
+                   format_func=lambda k: PROJECTS[k], index=_ps_idx,
                    placeholder='- выберите проект -')
+st.session_state['ps_project_sel'] = pid
 if not pid:
     st.info('Выберите проект, чтобы запустить проверку скорости.')
     st.stop()

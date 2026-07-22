@@ -94,8 +94,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-_base = st.selectbox('Проект', list(PROJECTS), format_func=lambda k: PROJECTS[k],
-                     index=None, placeholder='- выберите проект -')
+# Персист выбора проекта между вкладками (Streamlit чистит состояние виджета при
+# уходе на другую страницу). Держим в постоянном ключе session_state.
+_g_opts = list(PROJECTS)
+_g_saved = st.session_state.get('goals_project_sel')
+_g_idx = _g_opts.index(_g_saved) if _g_saved in _g_opts else None
+_base = st.selectbox('Проект', _g_opts, format_func=lambda k: PROJECTS[k],
+                     index=_g_idx, placeholder='- выберите проект -')
+st.session_state['goals_project_sel'] = _base
 if not _base:
     st.info('Выберите проект, чтобы запустить проверку целей.')
     st.stop()

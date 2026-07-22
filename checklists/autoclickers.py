@@ -174,8 +174,14 @@ if not _playwright_ok():
         '```\npip install -r requirements-local.txt\nplaywright install chromium\n```'
     )
 
-pid = st.selectbox('Проект', list(PROJECTS.keys()),
-                   format_func=lambda k: PROJECTS[k]['name'])
+# Персист выбора проекта между вкладками (Streamlit чистит состояние виджета при
+# уходе на другую страницу). Держим в постоянном ключе session_state.
+_ac_opts = list(PROJECTS.keys())
+_ac_saved = st.session_state.get('ac_project_sel')
+_ac_idx = _ac_opts.index(_ac_saved) if _ac_saved in _ac_opts else 0
+pid = st.selectbox('Проект', _ac_opts,
+                   format_func=lambda k: PROJECTS[k]['name'], index=_ac_idx)
+st.session_state['ac_project_sel'] = pid
 proj = PROJECTS[pid]
 st.markdown(
     f"Войди в браузере в аккаунты проекта **{proj['name']}**:\n"
