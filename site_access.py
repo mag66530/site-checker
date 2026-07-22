@@ -119,6 +119,10 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
         st.session_state[_ip_key] = outbound_ip(None)
     _ip, _ms, _err = st.session_state[_ip_key]
 
+    # Отступ СВЕРХУ: отделяем рамку прокси от галочек проверок над ней (иначе
+    # блок «слипается» с чекбоксами и читается как их продолжение).
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+
     # ── Весь блок - в одной рамке (st.container(border)): поле прокси, чекбокс и
     #    диагностика читаются как единый компонент, а не два разных пункта. ──
     with st.container(border=True):
@@ -232,5 +236,9 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
                                  f"{site['ms']} мс"
                                  + (" · возможно блок по IP/региону, включите прокси"
                                     if effective is None else ""))
+
+    # Отступ СНИЗУ: отделяем рамку прокси от кнопки «Запустить проверку» под ней
+    # (иначе рамка и чёрная кнопка «слипаются»).
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 
     return effective
