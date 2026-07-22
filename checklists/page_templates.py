@@ -74,10 +74,21 @@ def render_panel(scope, pid, *, on_apply=None, help_text=None):
     k = f'{scope}_{pid}'
     just_saved = st.session_state.pop(f'tpl_saved_{k}', '')
     open_flag = bool(st.session_state.pop(f'tpl_open_{k}', False))
+    # После сохранения ЧИСТИМ поле имени - чтобы было ВИДНО, что сработало.
+    # Раньше поле оставалось заполненным, зелёное подтверждение мигало один раз -
+    # и казалось, что «ничего не поменялось». Чистим ДО отрисовки text_input.
+    if st.session_state.pop(f'tpl_clear_name_{k}', False):
+        st.session_state[f'tpl_name_{k}'] = ''
     with st.expander('📁 Проектные шаблоны (сохранить/загрузить настройки страницы)',
                      expanded=open_flag):
         if just_saved:
-            st.success(f'Шаблон «{just_saved}» сохранён — теперь он в списке ниже.')
+            st.toast(f'Шаблон «{just_saved}» сохранён', icon='✅')
+            st.success(f'✓ Готово! Шаблон «{just_saved}» сохранён и появился в '
+                       'списке «Загрузить шаблон» ниже - его можно применить одной '
+                       'кнопкой.')
+        st.caption('Как это работает: **1)** настройте страницу как нужно → '
+                   '**2)** впишите название внизу → **3)** нажмите «💾 Сохранить». '
+                   'Потом эти же настройки вернёте кнопкой «Загрузить».')
         tpls = load_all(scope, pid)
         if tpls:
             c1, c2, c3 = st.columns([3, 1, 1], vertical_alignment='bottom')
@@ -91,6 +102,7 @@ def render_panel(scope, pid, *, on_apply=None, help_text=None):
                     st.session_state[_key] = _val
                 if on_apply:
                     on_apply(tpl)
+                st.toast(f'Шаблон «{pick}» загружен', icon='📥')
                 st.rerun()
             if c3.button('Удалить', use_container_width=True, disabled=not pick,
                          key=f'tpl_del_{k}'):
@@ -98,13 +110,13 @@ def render_panel(scope, pid, *, on_apply=None, help_text=None):
                 save_all(scope, pid, tpls)
                 st.rerun()
         else:
-            st.caption('Пока нет сохранённых шаблонов. Настройте страницу как нужно '
-                       'и сохраните текущие настройки ниже.')
+            st.caption('Пока сохранённых шаблонов нет - создайте первый ниже.')
+        st.markdown('**Сохранить текущие настройки как новый шаблон**')
         s1, s2 = st.columns([3, 1], vertical_alignment='bottom')
-        new_name = s1.text_input('Сохранить текущие настройки как шаблон',
-                                 key=f'tpl_name_{k}',
+        new_name = s1.text_input('Название шаблона', key=f'tpl_name_{k}',
+                                 label_visibility='collapsed',
                                  placeholder='Например: быстрая проверка')
-        if s2.button('Сохранить', use_container_width=True,
+        if s2.button('💾 Сохранить', use_container_width=True, type='primary',
                      disabled=not (new_name or '').strip(), key=f'tpl_save_{k}'):
             st.session_state[f'tpl_pending_{k}'] = new_name.strip()
             st.rerun()
@@ -130,4 +142,6 @@ def commit_pending(scope, pid, keys, *, extra=None):
     save_all(scope, pid, all_t)
     st.session_state[f'tpl_saved_{k}'] = pending
     st.session_state[f'tpl_open_{k}'] = True
+    st.session_state[f'tpl_clear_name_{k}'] = True   # очистить поле имени - видно,
+    #                                    что сохранилось, и не путается с новым
     st.rerun()
