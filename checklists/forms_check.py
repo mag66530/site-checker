@@ -469,24 +469,70 @@ def _tpl_save_all(data: dict):
 
 
 def _tpl_apply(tpl: dict):
-    """Проставляет в session_state ВСЕ настройки страницы из шаблона: города, формы
-    и галочки/режимы блоков «Запуск/Админка/Почта». Режимы городов и форм
-    переключает на «Выбрать …», чтобы отрисовался именно сохранённый набор.
-    Вызывается ДО отрисовки этих виджетов + rerun."""
-    cities = [c for c in (tpl.get('cities') or []) if c in _all_names]
-    forms = [f for f in (tpl.get('forms') or []) if f in _all_form_names]
-    if _cities:
-        st.session_state[f'fc_mode_{pid_key}'] = 'Выбрать города'
-        st.session_state[f'fc_init_osn_{pid_key}'] = True
+    """Проставляет в session_state ВСЕ настройки страницы из шаблона, ВОЗВРАЩАЯ
+    ИМЕННО тот режим, что был сохранён (город: основные домены / выбор городов /
+    случайные; формы: все / выбор). Логин и пароль админки НЕ трогаем - их всегда
+    вводят вручную. Вызывается ДО отрисовки этих виджетов + rerun.
+
+    Раньше загрузка ВСЕГДА переключала на «Выбрать города» и проставляла галочки
+    городов - поэтому после загрузки «зачем-то нажимались» галочки городов, даже
+    если сохраняли режим «Основные домены». Теперь режим и выбор возвращаются как
+    были."""
+    # Режимы (город + формы) - вернуть сохранённые.
+    _m = tpl.get('mode')
+    if _m in _MODE_OPTIONS:
+        st.session_state[f'fc_mode_{pid_key}'] = _m
+    _fm = tpl.get('forms_mode')
+    if _fm in _FORMS_MODE_OPTIONS:
+        st.session_state[f'fc_forms_mode_{pid_key}'] = _fm
+
+    # Режим «Основные домены»: какие СТРАНЫ отмечены.
+    _countries = tpl.get('countries') or {}
+    for c in _mains:
+        if c['country'] in _countries:
+            st.session_state[f'fc_main_{pid_key}_{c["country"]}'] = \
+                bool(_countries[c['country']])
+
+    # Режим «Выбрать города»: какие ГОРОДА отмечены. Ставим init-флаг, чтобы дефолт
+    # (основные домены каждой страны) не перетёр наш выбор. Применяем ТОЛЬКО если в
+    # шаблоне реально что-то выбрано - иначе (шаблон сохранён в режиме «Основные
+    # домены», где список городов пустой) при переключении на «Выбрать города»
+    # показался бы пустой список вместо привычного дефолта.
+    _city_cb = tpl.get('city_cb')
+    if _city_cb and any(_city_cb.values()):
         for nm in _all_names:
-            st.session_state[f'fc_cb_{pid_key}_{nm}'] = (nm in cities)
-    if _all_forms:
-        st.session_state[f'fc_forms_mode_{pid_key}'] = 'Выбрать формы'
-        st.session_state[f'ff_init_{pid_key}'] = True
+            st.session_state[f'fc_cb_{pid_key}_{nm}'] = bool(_city_cb.get(nm, False))
+        st.session_state[f'fc_init_osn_{pid_key}'] = True
+    elif tpl.get('cities'):                  # старый формат шаблона: только список
+        _cset = {c for c in (tpl.get('cities') or []) if c in _all_names}
+        for nm in _all_names:
+            st.session_state[f'fc_cb_{pid_key}_{nm}'] = (nm in _cset)
+        st.session_state[f'fc_init_osn_{pid_key}'] = True
+
+    # Режим «Случайные города»: числа по странам + общее.
+    _rnd = tpl.get('random') or {}
+    if _rnd:
+        _per = _rnd.get('per') or {}
+        for c in _groups:
+            if c in _per:
+                st.session_state[f'fc_rnd_{pid_key}_{c}'] = \
+                    max(0, min(int(_per[c] or 0), len(_groups[c])))
+        if 'total' in _rnd:
+            st.session_state[f'fc_rnd_total_{pid_key}'] = int(_rnd.get('total') or 0)
+
+    # Режим «Выбрать формы»: какие ФОРМЫ отмечены.
+    _form_cb = tpl.get('form_cb')
+    if _form_cb is not None:
         for nm in _all_form_names:
-            st.session_state[f'ff_cb_{pid_key}_{nm}'] = (nm in forms)
-    # Остальные настройки страницы (галочки/режимы запуска, админки, почты).
-    # Логин и пароль админки в шаблон не пишутся - их всегда вводят вручную.
+            st.session_state[f'ff_cb_{pid_key}_{nm}'] = bool(_form_cb.get(nm, True))
+        st.session_state[f'ff_init_{pid_key}'] = True
+    elif tpl.get('forms') is not None:       # старый формат шаблона: только список
+        _fset = {f for f in (tpl.get('forms') or []) if f in _all_form_names}
+        for nm in _all_form_names:
+            st.session_state[f'ff_cb_{pid_key}_{nm}'] = (nm in _fset)
+        st.session_state[f'ff_init_{pid_key}'] = True
+
+    # Настройки запуска (галочки/режимы запуска, админки, почты).
     for _k, _v in (tpl.get('options') or {}).items():
         st.session_state[_k] = _v
 
@@ -871,14 +917,39 @@ if _all_forms:
 # Логин и пароль админки в шаблон НЕ пишем.
 _tpl_pending = st.session_state.pop(f'tpl_pending_{pid_key}', '')
 if _tpl_pending:
+    # Сохраняем ИМЕННО тот режим и выбор, что сейчас на странице - чтобы загрузка
+    # вернула всё как было (а не переключала на «Выбрать города» с галочками).
+    _sv_mode = st.session_state.get(f'fc_mode_{pid_key}', _MODE_OPTIONS[0])
+    _sv_fmode = st.session_state.get(f'fc_forms_mode_{pid_key}',
+                                     _FORMS_MODE_OPTIONS[0])
+    # Основные домены: какие страны отмечены.
+    _sv_countries = {
+        c['country']: bool(st.session_state.get(
+            f'fc_main_{pid_key}_{c["country"]}', True)) for c in _mains}
+    # Выбрать города: какие города отмечены.
+    _sv_city_cb = {nm: bool(st.session_state.get(f'fc_cb_{pid_key}_{nm}', False))
+                   for nm in _all_names}
+    # Случайные города: числа по странам + общее.
+    _sv_rnd = {
+        'total': int(st.session_state.get(f'fc_rnd_total_{pid_key}', 0) or 0),
+        'per': {c: int(st.session_state.get(f'fc_rnd_{pid_key}_{c}', 0) or 0)
+                for c in _groups}}
+    # Выбрать формы: какие формы отмечены.
+    _sv_form_cb = {nm: bool(st.session_state.get(f'ff_cb_{pid_key}_{nm}', True))
+                   for nm in _all_form_names}
+    # Настройки запуска (галочки/режимы). Логин и пароль админки НЕ сохраняем.
     _opt_keys = [f'fc_admin_on_{pid_key}', f'fc_mail_mode_{pid_key}',
                  f'fc_mail_own_{pid_key}', f'fc_clear_{pid_key}',
                  f'fc_fileprobe_{pid_key}', f'fc_xss_{pid_key}',
                  f'fc_srvval_{pid_key}', f'fc_ratelimit_{pid_key}']
     _opts = {k: st.session_state[k] for k in _opt_keys if k in st.session_state}
     _all_t = _tpl_load_all()
-    _all_t[_tpl_pending] = {'cities': list(_chosen_cities),
-                            'forms': list(_chosen_forms), 'options': _opts}
+    _all_t[_tpl_pending] = {
+        'mode': _sv_mode, 'forms_mode': _sv_fmode,
+        'countries': _sv_countries, 'city_cb': _sv_city_cb,
+        'random': _sv_rnd, 'form_cb': _sv_form_cb, 'options': _opts,
+        # Итоговые списки - для читаемости файла и совместимости со старым чтением.
+        'cities': list(_chosen_cities), 'forms': list(_chosen_forms)}
     _tpl_save_all(_all_t)
     st.session_state[f'tpl_saved_{pid_key}'] = _tpl_pending
     st.session_state[f'tpl_open_{pid_key}'] = True
