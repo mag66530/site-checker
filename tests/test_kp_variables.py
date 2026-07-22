@@ -122,6 +122,29 @@ def test_check_variables_address_from_contacts():
     assert by1["Почта"]["status"] == "ok"
 
 
+def test_только_почта_для_перевода():
+    """Переводная копия сайта (город «… (перевод)», напр. steelgroup.az): в отчёте
+    проверяем ТОЛЬКО «Почту», остальные колонки → «–». Обычный город не трогаем."""
+    import variables_run as vr
+    fields = [
+        {"field": "Город", "status": "bug", "found": "не найден на странице"},
+        {"field": "Тел. поиск", "status": "ok", "found": "есть"},
+        {"field": "Почта", "status": "bug", "found": "другая почта"},
+        {"field": "WhatsApp", "status": "ok", "found": "есть"},
+    ]
+    out = vr._только_почта_для_перевода("Азербайджан (перевод)", [dict(f) for f in fields])
+    by = {f["field"]: f for f in out}
+    assert by["Город"]["status"] == "na" and by["Город"]["found"] == "–"
+    assert by["Тел. поиск"]["status"] == "na"
+    assert by["WhatsApp"]["status"] == "na"
+    assert by["Почта"]["status"] == "bug"            # почту проверяем как обычно
+
+    # Обычный город (без «(перевод)») остаётся как есть.
+    out2 = vr._только_почта_для_перевода("Баку", [dict(f) for f in fields])
+    assert {f["field"]: f["status"] for f in out2} == \
+        {"Город": "bug", "Тел. поиск": "ok", "Почта": "bug", "WhatsApp": "ok"}
+
+
 def test_find_contacts_path():
     """variables_run находит ссылку «Контакты» на том же хосте (для догрузки)."""
     import variables_run as vr
