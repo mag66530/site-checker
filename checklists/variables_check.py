@@ -206,8 +206,11 @@ def _vc_tpl_apply(_tpl_data):
         st.session_state[f'vc_cities_{pid_key}'] = [c for c in _cur if c in _valid]
 
 
+# save_keys - те же ключи, что раньше собирал commit_pending внизу; сохраняем
+# ПРЯМО по клику «Сохранить» (значения виджетов уже в session_state).
 _tpl.render_panel(
     'variables', pid_key, on_apply=_vc_tpl_apply,
+    save_keys=[f'vc_mode_{pid_key}', f'vc_cities_{pid_key}'],
     help_text='Шаблон запоминает охват (все домены / выбранные города) и список '
               'выбранных городов. Хранится на сервере проекта **до перезапуска '
               'приложения** - после может сброситься.')
@@ -424,8 +427,5 @@ else:
         st.caption('Отчёт появится после запуска.')
 
 
-# ── Сохранение шаблона (кнопка «Сохранить» - в блоке вверху) ──────────
-# Ставим В КОНЦЕ: к этому моменту виджеты охвата/городов отрисованы, их значения
-# уже в session_state.
-_tpl.commit_pending('variables', pid_key,
-                    [f'vc_mode_{pid_key}', f'vc_cities_{pid_key}'])
+# Сохранение шаблона происходит ПРЯМО по клику «Сохранить» вверху
+# (render_panel(save_keys=...)) - не зависит от того, дошла ли отрисовка до низа.

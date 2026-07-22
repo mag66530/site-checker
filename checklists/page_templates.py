@@ -63,9 +63,40 @@ def _json_ok(value) -> bool:
         return False
 
 
-def render_panel(scope, pid, *, on_apply=None, help_text=None):
+def _collect_opts(key_list, extra=None) -> dict:
+    """Собирает {ключ: значение} из session_state по списку ключей (или callable,
+    его возвращающему), сохраняя только JSON-безопасные значения. + extra."""
+    kl = key_list() if callable(key_list) else (key_list or [])
+    opts = {kk: st.session_state[kk] for kk in kl
+            if kk in st.session_state and _json_ok(st.session_state[kk])}
+    if extra:
+        opts.update({kk: vv for kk, vv in extra.items() if _json_ok(vv)})
+    return opts
+
+
+def _do_save(scope, pid, name, key_list, extra=None):
+    """Пишет шаблон name и ставит флаги подтверждения (успех/раскрыть/очистить)."""
+    k = f'{scope}_{pid}'
+    all_t = load_all(scope, pid)
+    all_t[name] = {'options': _collect_opts(key_list, extra)}
+    save_all(scope, pid, all_t)
+    st.session_state[f'tpl_saved_{k}'] = name
+    st.session_state[f'tpl_open_{k}'] = True
+    st.session_state[f'tpl_clear_name_{k}'] = True
+
+
+def render_panel(scope, pid, *, on_apply=None, help_text=None,
+                 save_keys=None, save_extra=None):
     """Верхний блок «Проектные шаблоны». Ставить ПОСЛЕ выбора проекта и ДО
     отрисовки настроек страницы.
+
+    save_keys — список ключей session_state (или callable, его возвращающий),
+    которые надо СОХРАНИТЬ. Если задан — шаблон пишется ПРЯМО по клику «Сохранить»
+    (надёжно: значения виджетов уже лежат в session_state с прошлой отрисовки, и
+    не важно, дойдёт ли выполнение до commit_pending внизу — раньше во время
+    прогона / зависшего PID низ страницы не рисовался и шаблон молча не
+    сохранялся). Если save_keys не задан — старая двухфазная схема (commit_pending
+    внизу). save_extra — доп. пары для сохранения.
 
     on_apply(tpl: dict) — необязательный колбэк; вызывается при «Загрузить» ПОСЛЕ
     того, как сохранённые значения проставлены в session_state (для страничных
@@ -118,7 +149,13 @@ def render_panel(scope, pid, *, on_apply=None, help_text=None):
                                  placeholder='Например: быстрая проверка')
         if s2.button('💾 Сохранить', use_container_width=True, type='primary',
                      disabled=not (new_name or '').strip(), key=f'tpl_save_{k}'):
-            st.session_state[f'tpl_pending_{k}'] = new_name.strip()
+            if save_keys is not None:
+                # Надёжный путь: сохраняем ПРЯМО тут. Значения виджетов уже лежат
+                # в session_state с прошлой отрисовки - не ждём низа страницы.
+                _do_save(scope, pid, new_name.strip(), save_keys, extra=save_extra)
+            else:
+                # Старая двухфазная схема - собираем внизу в commit_pending().
+                st.session_state[f'tpl_pending_{k}'] = new_name.strip()
             st.rerun()
         st.caption(help_text or _HELP_DEFAULT)
 
@@ -132,16 +169,5 @@ def commit_pending(scope, pid, keys, *, extra=None):
     pending = st.session_state.pop(f'tpl_pending_{k}', '')
     if not pending:
         return
-    key_list = keys() if callable(keys) else keys
-    opts = {kk: st.session_state[kk] for kk in key_list
-            if kk in st.session_state and _json_ok(st.session_state[kk])}
-    if extra:
-        opts.update({kk: vv for kk, vv in extra.items() if _json_ok(vv)})
-    all_t = load_all(scope, pid)
-    all_t[pending] = {'options': opts}
-    save_all(scope, pid, all_t)
-    st.session_state[f'tpl_saved_{k}'] = pending
-    st.session_state[f'tpl_open_{k}'] = True
-    st.session_state[f'tpl_clear_name_{k}'] = True   # очистить поле имени - видно,
-    #                                    что сохранилось, и не путается с новым
+    _do_save(scope, pid, pending, keys, extra=extra)  # ставит флаги очистки/успеха
     st.rerun()
