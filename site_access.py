@@ -153,7 +153,16 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
                      "прокси)", expanded=False):
         url = st.text_input("URL для проверки", value=default_url or "",
                             key=f"{key_prefix}_probe_url",
-                            placeholder="https://example.ru/")
+                            placeholder="https://example.ru/",
+                            help="Быстрая разовая проверка: открывается ли сайт с "
+                                 "ТЕКУЩИМИ настройками прокси выше - тем же способом, "
+                                 "каким пойдёт основная проверка. Шлём один запрос к "
+                                 "указанному адресу и показываем: доступен ли "
+                                 "(HTTP 200), какой сервер (Server) и сколько заняло "
+                                 "(мс) - либо причину, почему не открылся. Нужно, "
+                                 "чтобы заранее понять, не блокирует ли сайт наш "
+                                 "IP/регион и нужен ли прокси, не запуская полный "
+                                 "прогон.")
         if st.button("Запустить проверку", key=f"{key_prefix}_probe_btn"):
             _u = url.strip()
             if not _u:
