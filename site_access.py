@@ -117,12 +117,8 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
     if _ip_key not in st.session_state:
         st.session_state[_ip_key] = outbound_ip(None)
     _ip, _ms, _err = st.session_state[_ip_key]
-    if _ip:
-        st.markdown(f"🌐 **ВАШ IP (НАПРЯМУЮ):** `{_ip}`  ·  {_ms} мс")
-    else:
-        st.caption(f"🌐 IP напрямую определить не удалось ({_err})")
 
-    # ── Поле прокси + чекбокс ──
+    # ── Поле прокси + чекбокс (управление прогоном - остаётся на виду) ──
     c1, c2 = st.columns([4, 1])
     proxy_field = c1.text_input(
         "Прокси", key=f"{key_prefix}_proxy_field",
@@ -148,9 +144,37 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
     else:
         st.caption("Прокси выключен - запросы напрямую.")
 
-    # ── Блок проверки доступа ──
-    with st.expander("🔒 Проверка доступа к сайту (по текущим настройкам "
-                     "прокси)", expanded=False):
+    # ── IP через прокси: кэш по значению эффективного прокси (один запрос на
+    #    прокси за сессию). Позволяет увидеть, реально ли прокси подменяет адрес. ──
+    _pip = _pms = _perr = None
+    if effective:
+        _pip_key = f"{key_prefix}_proxy_ip::{effective}"
+        if _pip_key not in st.session_state:
+            st.session_state[_pip_key] = outbound_ip(effective)
+        _pip, _pms, _perr = st.session_state[_pip_key]
+
+    # ── Блок диагностики доступа (свёрнут по умолчанию): IP напрямую, IP через
+    #    прокси и разовая проба сайта - всё про «доступ» в одном месте. ──
+    with st.expander("🔒 Диагностика доступа к сайту", expanded=False):
+        if _ip:
+            st.markdown(f"🌐 **IP напрямую:**  `{_ip}`  ·  {_ms} мс")
+        else:
+            st.caption(f"🌐 IP напрямую определить не удалось ({_err})")
+
+        if effective:
+            if _pip:
+                _same = ("  ·  ⚠ совпадает с прямым - прокси не подменяет адрес"
+                         if _pip == _ip else "")
+                st.markdown(f"🛡 **IP через прокси:**  `{_pip}`  ·  {_pms} мс{_same}")
+            else:
+                st.caption(f"🛡 IP через прокси определить не удалось ({_perr})")
+            st.caption("Если оба IP совпадают - прокси фактически не меняет адрес "
+                       "выхода (проверьте строку прокси/секрет).")
+        else:
+            st.caption("🛡 Прокси выключен - запросы идут напрямую (адрес выше).")
+
+        st.divider()
+
         url = st.text_input("URL для проверки", value=default_url or "",
                             key=f"{key_prefix}_probe_url",
                             placeholder="https://example.ru/",
