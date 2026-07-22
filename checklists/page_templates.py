@@ -74,15 +74,17 @@ def _collect_opts(key_list, extra=None) -> dict:
     return opts
 
 
-def _do_save(scope, pid, name, key_list, extra=None):
-    """Пишет шаблон name и ставит флаги подтверждения (успех/раскрыть/очистить)."""
-    k = f'{scope}_{pid}'
+def _do_save(scope, pid, name, key_list, extra=None) -> bool:
+    """Пишет шаблон name на диск. Возвращает True при успехе.
+
+    ВАЖНО: НЕ трогает виджеты и НЕ делает st.rerun(). rerun из верхнего блока
+    (render_panel стоит ВВЕРХУ страницы) прервал бы прогон ДО отрисовки галочек,
+    которые идут НИЖЕ - а Streamlit чистит состояние виджетов, не отрисованных в
+    прерванном прогоне. Из-за этого после «Сохранить» все галочки слетали в
+    дефолт. Поэтому пишем файл здесь же (синхронно, надёжно) и rerun не делаем."""
     all_t = load_all(scope, pid)
     all_t[name] = {'options': _collect_opts(key_list, extra)}
-    save_all(scope, pid, all_t)
-    st.session_state[f'tpl_saved_{k}'] = name
-    st.session_state[f'tpl_open_{k}'] = True
-    st.session_state[f'tpl_clear_name_{k}'] = True
+    return save_all(scope, pid, all_t)
 
 
 def render_panel(scope, pid, *, on_apply=None, help_text=None,
@@ -105,21 +107,42 @@ def render_panel(scope, pid, *, on_apply=None, help_text=None,
     k = f'{scope}_{pid}'
     just_saved = st.session_state.pop(f'tpl_saved_{k}', '')
     open_flag = bool(st.session_state.pop(f'tpl_open_{k}', False))
-    # После сохранения ЧИСТИМ поле имени - чтобы было ВИДНО, что сработало.
-    # Раньше поле оставалось заполненным, зелёное подтверждение мигало один раз -
-    # и казалось, что «ничего не поменялось». Чистим ДО отрисовки text_input.
-    if st.session_state.pop(f'tpl_clear_name_{k}', False):
-        st.session_state[f'tpl_name_{k}'] = ''
     with st.expander('📁 Проектные шаблоны (сохранить/загрузить настройки страницы)',
                      expanded=open_flag):
-        if just_saved:
+        if just_saved:      # для старой двухфазной схемы (commit_pending с rerun)
             st.toast(f'Шаблон «{just_saved}» сохранён', icon='✅')
-            st.success(f'✓ Готово! Шаблон «{just_saved}» сохранён и появился в '
-                       'списке «Загрузить шаблон» ниже - его можно применить одной '
-                       'кнопкой.')
         st.caption('Как это работает: **1)** настройте страницу как нужно → '
-                   '**2)** впишите название внизу → **3)** нажмите «💾 Сохранить». '
+                   '**2)** впишите название → **3)** нажмите «💾 Сохранить». '
                    'Потом эти же настройки вернёте кнопкой «Загрузить».')
+
+        # ── СОХРАНИТЬ (идёт ПЕРВЫМ: файл пишется прямо здесь, поэтому список
+        # «Загрузить» ниже сразу видит новый шаблон - без перезагрузки). ──
+        st.markdown('**Сохранить текущие настройки как новый шаблон**')
+        s1, s2 = st.columns([3, 1], vertical_alignment='bottom')
+        new_name = s1.text_input('Название шаблона', key=f'tpl_name_{k}',
+                                 label_visibility='collapsed',
+                                 placeholder='Например: быстрая проверка')
+        _saved_now = ''
+        if s2.button('💾 Сохранить', use_container_width=True, type='primary',
+                     disabled=not (new_name or '').strip(), key=f'tpl_save_{k}'):
+            _nm = new_name.strip()
+            if save_keys is not None:
+                # Сохраняем СРАЗУ и БЕЗ st.rerun() - иначе галочки, отрисованные
+                # ниже по странице, слетали бы в дефолт (см. _do_save).
+                if _do_save(scope, pid, _nm, save_keys, extra=save_extra):
+                    _saved_now = _nm
+            else:                       # старая двухфазная схема (commit_pending)
+                st.session_state[f'tpl_pending_{k}'] = _nm
+                st.rerun()
+        if _saved_now:
+            st.success(f'✓ Готово! Шаблон «{_saved_now}» сохранён - он уже в списке '
+                       '«Загрузить шаблон» ниже. Настройки на странице НЕ '
+                       'изменились, галочки на месте.')
+        st.caption(help_text or _HELP_DEFAULT)
+
+        st.divider()
+
+        # ── ЗАГРУЗИТЬ (список читаем ПОСЛЕ сохранения - уже с новым шаблоном). ──
         tpls = load_all(scope, pid)
         if tpls:
             c1, c2, c3 = st.columns([3, 1, 1], vertical_alignment='bottom')
@@ -141,23 +164,7 @@ def render_panel(scope, pid, *, on_apply=None, help_text=None,
                 save_all(scope, pid, tpls)
                 st.rerun()
         else:
-            st.caption('Пока сохранённых шаблонов нет - создайте первый ниже.')
-        st.markdown('**Сохранить текущие настройки как новый шаблон**')
-        s1, s2 = st.columns([3, 1], vertical_alignment='bottom')
-        new_name = s1.text_input('Название шаблона', key=f'tpl_name_{k}',
-                                 label_visibility='collapsed',
-                                 placeholder='Например: быстрая проверка')
-        if s2.button('💾 Сохранить', use_container_width=True, type='primary',
-                     disabled=not (new_name or '').strip(), key=f'tpl_save_{k}'):
-            if save_keys is not None:
-                # Надёжный путь: сохраняем ПРЯМО тут. Значения виджетов уже лежат
-                # в session_state с прошлой отрисовки - не ждём низа страницы.
-                _do_save(scope, pid, new_name.strip(), save_keys, extra=save_extra)
-            else:
-                # Старая двухфазная схема - собираем внизу в commit_pending().
-                st.session_state[f'tpl_pending_{k}'] = new_name.strip()
-            st.rerun()
-        st.caption(help_text or _HELP_DEFAULT)
+            st.caption('Пока сохранённых шаблонов нет - создайте первый выше.')
 
 
 def commit_pending(scope, pid, keys, *, extra=None):
@@ -169,5 +176,10 @@ def commit_pending(scope, pid, keys, *, extra=None):
     pending = st.session_state.pop(f'tpl_pending_{k}', '')
     if not pending:
         return
-    _do_save(scope, pid, pending, keys, extra=extra)  # ставит флаги очистки/успеха
+    _do_save(scope, pid, pending, keys, extra=extra)
+    # commit_pending вызывается ВНИЗУ страницы (все виджеты уже отрисованы),
+    # поэтому здесь rerun безопасен - галочки не слетят. Ставим флаг для верхнего
+    # подтверждения на следующем прогоне.
+    st.session_state[f'tpl_saved_{k}'] = pending
+    st.session_state[f'tpl_open_{k}'] = True
     st.rerun()
