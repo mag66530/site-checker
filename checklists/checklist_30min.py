@@ -662,8 +662,29 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
 
 # Версия набора дефолтов галочек «Что проверять». Поднимать при добавлении
 # нового пункта или смене дефолта, чтобы автовыбор применился и к уже
-# открытым (сохранённым) сессиям (см. init_session).
-_C30_CHECKS_DEFAULTS_VER = 14
+# открытым (сохранённым) сессиям (см. _apply_page_check_defaults).
+_C30_CHECKS_DEFAULTS_VER = 15
+
+# Галочки разделов 1-5 (Техничка/Вёрстка/Безопасность/Данные по городам/
+# Аналитика) - включены по умолчанию. «Дополнительно» и «Админка» сюда НЕ входят
+# (они по умолчанию выключены). Держим единым списком: им и force-set при заходе
+# на проект, и разовый автовыбор при новой версии дефолтов - оба из ГЛАВНОГО
+# потока страницы (в init_session присвоение не подхватывалось виджетами чекбоксов,
+# показывая «снятые» галочки при полном счётчике). c30_check_filters включаем
+# безусловно - если фильтров у проекта нет, чекбокс просто не рисуется.
+_C30_PAGE_CHECKS = (
+    'c30_check_main', 'c30_check_catalog', 'c30_check_categories',
+    'c30_check_filters', 'c30_check_products', 'c30_check_text',
+    'c30_check_indexing', 'c30_check_meta', 'c30_check_w3c', 'c30_check_static',
+    'c30_check_404', 'c30_check_ps_filters', 'c30_check_link_profile',
+    'c30_check_links', 'c30_check_index_404', 'c30_check_home_dupes',
+    'c30_check_filter_fn',
+    'c30_check_layout', 'c30_check_markup', 'c30_check_images', 'c30_check_console',
+    'c30_check_security',
+    'c30_check_region', 'c30_check_cis', 'c30_check_yabusiness',
+    'c30_check_anomaly', 'c30_check_traffic', 'c30_check_review_priority',
+    'c30_check_anomalies', 'c30_check_trust', 'c30_check_calltracking',
+)
 
 
 def init_session():
@@ -740,19 +761,25 @@ def init_session():
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
-    # Одноразовое обновление дефолтов галочек при выкатке новой версии блока
-    # «Что проверять». Без него в уже открытой (сохранённой) сессии остаются
-    # СТАРЫЕ значения ключей - init выше их не трогает (k уже в session_state),
-    # и новые пункты/включённые по умолчанию проверки выглядят «снятыми».
-    # Бампаем версию - при следующем открытии страницы блок выбран целиком.
-    if st.session_state.get('c30_checks_defaults_ver') != _C30_CHECKS_DEFAULTS_VER:
-        for k, v in defaults.items():
-            if k.startswith('c30_check_'):
-                st.session_state[k] = v
-        st.session_state['c30_checks_defaults_ver'] = _C30_CHECKS_DEFAULTS_VER
+    # ВНИМАНИЕ: разовый автовыбор галочек при новой версии дефолтов делаем НЕ здесь,
+    # а в главном потоке страницы (_apply_page_check_defaults): присвоение
+    # st.session_state[...] из init_session не подхватывалось виджетами чекбоксов -
+    # галочки выходили «снятыми» при полном счётчике. См. _C30_PAGE_CHECKS.
 
 
 init_session()
+
+
+def _apply_page_check_defaults():
+    """Разовый (на новую версию дефолтов) автовыбор всех галочек разделов 1-5.
+    Вызывать из ГЛАВНОГО потока страницы ДО отрисовки чекбоксов - только так
+    присвоение подхватывается виджетами (из init_session не срабатывало: счётчик
+    показывал «17/17», а часть галочек рисовалась снятой). После применения ставим
+    метку версии - дальше пользователь свободно снимает/ставит галочки."""
+    if st.session_state.get('c30_checks_defaults_ver') != _C30_CHECKS_DEFAULTS_VER:
+        for _k in _C30_PAGE_CHECKS:
+            st.session_state[_k] = True
+        st.session_state['c30_checks_defaults_ver'] = _C30_CHECKS_DEFAULTS_VER
 
 
 @st.cache_data(ttl=3600, show_spinner='Загружается каталог проекта…')
@@ -1006,14 +1033,11 @@ with st.container(border=True):
         # Поля выборки перечитаются под новый проект (свои лимиты городов).
         for _k in ('c30_in_cities', 'c30_in_cats', 'c30_in_filters', 'c30_in_products'):
             st.session_state.pop(_k, None)
-        # Галочки «Что проверять» при заходе на проект - все включены (дефолт).
-        # Ставим ЯВНО здесь (до отрисовки чекбоксов), иначе значение из init_session
-        # не подхватывалось виджетом и галочки выходили пустыми, а кнопка врала.
-        for _k in ('c30_check_main', 'c30_check_catalog', 'c30_check_categories',
-                   'c30_check_filters', 'c30_check_products', 'c30_check_text',
-                   'c30_check_indexing', 'c30_check_meta',
-                   'c30_check_region', 'c30_check_cis', 'c30_check_layout',
-                   'c30_check_markup', 'c30_check_security', 'c30_check_images'):
+        # Галочки «Что проверять» при заходе на проект - ВСЕ разделы 1-5 включены
+        # (дефолт). Ставим ЯВНО здесь (до отрисовки чекбоксов), иначе значение из
+        # init_session не подхватывалось виджетом и галочки выходили пустыми, а
+        # счётчик/кнопка врали. Единый список - _C30_PAGE_CHECKS.
+        for _k in _C30_PAGE_CHECKS:
             st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
@@ -1201,7 +1225,11 @@ if pid:
     }
     budget['per_city'] = 2 + budget['cats'] + budget['filters'] + budget['products']
 
-    # БЛОК 2 - Что проверять на страницах (1.1-1.21)
+    # БЛОК 2 - Что проверять на страницах
+    # Разовый автовыбор всех галочек разделов 1-5 при новой версии дефолтов -
+    # из главного потока (до отрисовки чекбоксов), чтобы значение подхватилось
+    # виджетами и счётчик совпадал с реально отмеченными пунктами.
+    _apply_page_check_defaults()
     with st.container(border=True):
         # Учитываем только РЕАЛЬНО показанные галочки: фильтры есть не у всех
         # проектов (если их нет - чекбокс не рисуется, и его нельзя учитывать в
