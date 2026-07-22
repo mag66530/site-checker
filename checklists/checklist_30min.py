@@ -1233,10 +1233,22 @@ if pid:
             st.button('Снять все' if _all_on else 'Выбрать все',
                       key='c30_select_all', on_click=_c30_toggle_all,
                       use_container_width=True)
-        st.caption('Пункты те же, что и раньше — просто разложены по разделам, '
+        st.caption('Пункты те же, что и раньше – просто разложены по разделам, '
                    'чтобы не потерялись. Наведи курсор на пункт (или заголовок), '
                    'чтобы прочитать, что и как проверяется.')
-        with st.expander('⚙️  Техничка — доступность, индексация, дубли, метаданные, 404, скорость', expanded=True):
+        # Цветные плашки-разделы: тонкая полоса слева у каждого аккордеона. Тему
+        # сайта не меняем (остаётся светлой) - красим только левую границу.
+        st.markdown(
+            '<style>'
+            '.st-key-c30_sec_teh [data-testid="stExpander"]{border-left:5px solid #3A5BD9 !important}'
+            '.st-key-c30_sec_ver [data-testid="stExpander"]{border-left:5px solid #8A6BD0 !important}'
+            '.st-key-c30_sec_sec [data-testid="stExpander"]{border-left:5px solid #D03B3B !important}'
+            '.st-key-c30_sec_kp [data-testid="stExpander"]{border-left:5px solid #0F9C8E !important}'
+            '.st-key-c30_sec_ana [data-testid="stExpander"]{border-left:5px solid #1F9D2F !important}'
+            '.st-key-c30_sec_adm [data-testid="stExpander"]{border-left:5px solid #5A6B7B !important}'
+            '</style>', unsafe_allow_html=True)
+        _sec_teh = st.container(key='c30_sec_teh')
+        with _sec_teh.expander('⚙️  Техничка – доступность, индексация, дубли, метаданные, 404, скорость', expanded=True):
             st.checkbox('1.1  Главная', key='c30_check_main',
                         help='Проверяем главную страницу: открывается ли (код 200), '
                              'есть ли H1, Title, телефон и основные блоки. С неё '
@@ -1341,7 +1353,8 @@ if pid:
                              '(webmaster_oauth). Отдельный лист «Ссылочный '
                              'профиль».')
 
-        with st.expander('🎨  Вёрстка — адаптивность, микроразметка, изображения', expanded=True):
+        _sec_ver = st.container(key='c30_sec_ver')
+        with _sec_ver.expander('🎨  Вёрстка – адаптивность, микроразметка, изображения', expanded=True):
             st.checkbox('1.11  Вёрстка, адаптивность и навигация (viewport, стили, меню)',
                         key='c30_check_layout',
                         help='ТЗ 2.1/2.1.1: задан тег viewport (мобильная версия '
@@ -1379,7 +1392,8 @@ if pid:
                              'транслит из alt (хеши CMS - одно предупреждение). '
                              'Lazy loading. Отдельный лист «Изображения».')
 
-        with st.expander('🔒  Безопасность — заголовки ответа сервера', expanded=True):
+        _sec_sec = st.container(key='c30_sec_sec')
+        with _sec_sec.expander('🔒  Безопасность – заголовки ответа сервера', expanded=True):
             st.checkbox('1.13  Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
                         key='c30_check_security',
                         help='Доп. чек-лист: HTTP-заголовки безопасности ответа. '
@@ -1388,7 +1402,8 @@ if pid:
                              'значение (HSTS max-age=0, ALLOW-FROM, не-nosniff, '
                              'конфликт дублей) = баг.')
 
-        with st.expander('🗺️  Данные по городам (КП) — переменные города и СНГ-чистота', expanded=True):
+        _sec_kp = st.container(key='c30_sec_kp')
+        with _sec_kp.expander('🗺️  Данные по городам (КП) – переменные города и СНГ-чистота', expanded=True):
             st.checkbox('1.9  Переменные города (город, телефон, почта - по КП)',
                         key='c30_check_region',
                         help='На странице города не должно быть подстановок другого '
@@ -1405,7 +1420,8 @@ if pid:
                              'если встречается «Россия»/«РФ»/«СНГ» или чужая страна, '
                              'это ошибка.')
 
-        with st.expander('📊  Аналитика — аномалии Вебмастера', expanded=True):
+        _sec_ana = st.container(key='c30_sec_ana')
+        with _sec_ana.expander('📊  Аналитика – аномалии Вебмастера', expanded=True):
             st.checkbox('1.21  Нет аномалий: Вебмастер + внезапные мусорные ссылки',
                         key='c30_check_anomaly',
                         help='Мониторинг резких отклонений «от себя-прошлого» - '
@@ -1536,15 +1552,6 @@ if pid:
                          'Ahrefs/Semrush не подключены (Ahrefs free-чекер за '
                          'капчей). Отдельный лист «Траст проекта». Нужен '
                          'webmaster_oauth_<проект>; для DR - секрет openpagerank_key.')
-        st.checkbox('Количество страниц в ГСК (индексировано / не индексировано / сумма)',
-                    key='c30_check_gsc_pages',
-                    help='Снимает из отчёта Google Search Console «Индексирование '
-                         '→ Страницы» три числа: «Проиндексировано», '
-                         '«Просканировано, но пока не проиндексировано» и их сумму '
-                         '(+ сравнение с прошлым снятием). API этих счётчиков не '
-                         'отдаёт - берём браузером. Нужна сохранённая сессия Google '
-                         'в Secrets (ключ autoclick_session_<проект>). Нет сессии - '
-                         'пункт пропустится с пометкой, прогон не упадёт.')
         st.checkbox('Проверка дублей главной страницы',
                     key='c30_check_home_dupes',
                     help='Проверяет, не открывается ли главная по разным адресам с '
@@ -1793,10 +1800,10 @@ if pid:
                     _cc[1].metric('Наш текст, симв.', _cr['chars_a'])
                     _cc[2].metric('Их текст, симв.', _cr['chars_b'])
                     if _cr['a_in_b'] >= 30:
-                        st.error(f'⚠ {_cr["a_in_b"]:.0f}% нашего текста есть у них — '
+                        st.error(f'⚠ {_cr["a_in_b"]:.0f}% нашего текста есть у них – '
                                  'похоже на копию.')
                     elif _cr['a_in_b'] >= 10:
-                        st.warning(f'{_cr["a_in_b"]:.0f}% совпадения — частичное пересечение.')
+                        st.warning(f'{_cr["a_in_b"]:.0f}% совпадения – частичное пересечение.')
                     else:
                         st.success('Существенных совпадений нет.')
                     if _cr['samples']:
@@ -1831,10 +1838,10 @@ if pid:
                                   f'{_sr["matched_count"]} из {_sr["our_count"]} ({_op:.0f}%)',
                                   help='Совпадение по слагу категории.')
                         if _op >= 50:
-                            st.error(f'⚠ {_op:.0f}% наших категорий есть у него — '
+                            st.error(f'⚠ {_op:.0f}% наших категорий есть у него – '
                                      'похоже на копию структуры каталога.')
                         elif _op >= 20:
-                            st.warning(f'{_op:.0f}% совпадения категорий — частичное.')
+                            st.warning(f'{_op:.0f}% совпадения категорий – частичное.')
                         else:
                             st.success('Существенного совпадения структуры нет.')
                         if _sr.get('matched'):
@@ -1844,8 +1851,10 @@ if pid:
                     st.error(f'Не удалось сравнить структуру: {_se}')
 
     # БЛОК 4 - Админка: браузерная проверка функций настройки (нужны креды).
-    with st.container(border=True):
-        st.markdown('### Админка')
+    # Отдельный блок-аккордеон (цветная плашка) сразу под «Что проверяем».
+    _sec_adm = st.container(key='c30_sec_adm')
+    with _sec_adm.expander('🛠️  Админка – настройки, CRUD, счётчики (нужны креды)',
+                           expanded=False):
         _amc1, _amc2 = st.columns([3, 2])
         with _amc1:
             _ck_adm = st.checkbox(
