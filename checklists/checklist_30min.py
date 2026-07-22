@@ -752,6 +752,24 @@ def c30_load_sources(project_id: str):
     return cfg, src
 
 
+@st.cache_data(ttl=3600)
+def c30_checklist_projects():
+    """Проекты, пригодные для чек-листа. Чек-лист гоняет выборку по каталогу
+    проекта (категории/фильтры/товары), поэтому проекту нужны catalog_csv и
+    subdomains_csv. Проекты без каталога (напр. АПС - Авиапромсталь: оба поля
+    не заданы) проверять нечем - не показываем их в списке, иначе выбор такого
+    проекта падал с «Не удалось загрузить каталог»."""
+    out = []
+    for p in list_projects():
+        try:
+            cfg = load_project_config(p['id'])
+        except Exception:  # noqa: BLE001
+            continue
+        if cfg.get('catalog_csv') and cfg.get('subdomains_csv'):
+            out.append(p)
+    return out
+
+
 # ── Распределение бюджета выборки ──────────────────────────────────
 
 
@@ -955,7 +973,7 @@ def _c30_sub(text: str):
 
 with st.container(border=True):
     st.markdown('### Какой сайт проверяем')
-    projects = list_projects()
+    projects = c30_checklist_projects()
     options = ['- выберите -'] + [p['name'] for p in projects]
     name_to_id = {p['name']: p['id'] for p in projects}
 
