@@ -1791,6 +1791,41 @@ if pid:
                                    + '; '.join(f'«{s}»' for s in _cr['samples']))
                 except Exception as _ce:
                     st.error(f'Не удалось сравнить: {_ce}')
+        # ── Бесплатная сверка СТРУКТУРЫ каталога с конкурентом (без text.ru) ──
+        with st.expander('🗂 Сравнить структуру каталога с конкурентом (бесплатно)',
+                         expanded=False):
+            st.caption('Берёт наши категории и sitemap конкурента и считает, '
+                       'сколько НАШИХ категорий (по слагу) есть у него. Высокая '
+                       'доля - вероятно, скопировали структуру каталога целиком. '
+                       'Без ключей и text.ru.')
+            _st_dom = st.text_input('Домен конкурента', key='c30_struct_dom',
+                                    placeholder='konkurent.ru')
+            if st.button('Сравнить структуру', key='c30_struct_go',
+                         disabled=not (_st_dom or '').strip()):
+                try:
+                    import uniqueness_checker as _UCst
+                    with st.spinner('Читаю sitemap конкурента и сверяю категории…'):
+                        _sr = _UCst.compare_catalog_structure(
+                            list(src.categories), _st_dom.strip())
+                    if _sr.get('error'):
+                        st.warning(f'Структуру сверить не вышло: {_sr["error"]}')
+                    else:
+                        _op = _sr['overlap_pct']
+                        st.metric('Наших категорий есть у конкурента',
+                                  f'{_sr["matched_count"]} из {_sr["our_count"]} ({_op:.0f}%)',
+                                  help='Совпадение по слагу категории.')
+                        if _op >= 50:
+                            st.error(f'⚠ {_op:.0f}% наших категорий есть у него — '
+                                     'похоже на копию структуры каталога.')
+                        elif _op >= 20:
+                            st.warning(f'{_op:.0f}% совпадения категорий — частичное.')
+                        else:
+                            st.success('Существенного совпадения структуры нет.')
+                        if _sr.get('matched'):
+                            st.caption('Совпавшие категории: '
+                                       + ', '.join(_sr['matched'][:40]))
+                except Exception as _se:
+                    st.error(f'Не удалось сравнить структуру: {_se}')
 
     # БЛОК 4 - Админка: браузерная проверка функций настройки (нужны креды).
     with st.container(border=True):

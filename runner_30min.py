@@ -1789,8 +1789,22 @@ def run_check(pid, params, creds, log, progress):
                     except Exception as _de:  # noqa: BLE001
                         log(f'  углубление пропущено: {_de}')
                     _usum = _UC.summarize(_ures, threshold=_uthr)
+                    # Структура каталога: у ТОП-конкурента (кто пересекается с
+                    # большинством наших страниц) смотрим, сколько НАШИХ категорий
+                    # есть в его sitemap - сигнал «скопировали каталог целиком».
+                    _ustructure = None
+                    _ucomps = _usum.get('competitors') or []
+                    if _ucomps and src.categories:
+                        try:
+                            log('Уникальность: сверяю структуру каталога с '
+                                f'{_ucomps[0]["domain"]}…')
+                            _ustructure = _UC.compare_catalog_structure(
+                                list(src.categories), _ucomps[0]['domain'], log=log)
+                        except Exception as _se:  # noqa: BLE001
+                            log(f'  структура пропущена: {_se}')
                     _uniqueness = {
                         'threshold': _uthr, 'summary': _usum,
+                        'structure': _ustructure,
                         'rows': [{'url': r.url, 'type': r.type_code,
                                   'unique': r.unique, 'chars': r.chars,
                                   'error': r.error, 'sources': r.sources[:10],

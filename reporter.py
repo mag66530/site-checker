@@ -6693,6 +6693,39 @@ def _build_uniqueness_sheet(wb, uniqueness):
             row += 1
         row += 1
 
+    # ── Структура каталога у топ-конкурента ──
+    _struct = uniqueness.get('structure') or {}
+    if _struct.get('competitor'):
+        c = ws.cell(row=row, column=2)
+        c.value = f'Структура каталога у конкурента {_struct["competitor"]}'
+        c.font = _font(size=12, bold=True)
+        row += 1
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        if _struct.get('error'):
+            c.value = f'Не удалось сверить структуру: {_struct["error"]}'
+            c.font = _font(size=10, italic=True, color=C.text_muted)
+        else:
+            _op = _struct.get('overlap_pct', 0)
+            c.value = (f'{_struct.get("matched_count", 0)} из {_struct.get("our_count", 0)} '
+                       f'наших категорий (по слагу) есть у него - совпадение структуры '
+                       f'{_op:.0f}%. У конкурента всего {_struct.get("their_count", 0)} '
+                       'адресов в sitemap. Высокая доля = вероятно, скопировали каталог.')
+            c.font = _font(size=11, bold=True, color=(C.err if _op >= 50 else C.text))
+        c.alignment = _align(wrap=True, vertical='top')
+        ws.row_dimensions[row].height = 30
+        row += 1
+        _mt = _struct.get('matched') or []
+        if _mt:
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = 'Совпавшие категории: ' + ', '.join(_mt[:60])
+            c.font = _font(size=10, color=C.text_soft)
+            c.alignment = _align(wrap=True, vertical='top')
+            ws.row_dimensions[row].height = 44
+            row += 1
+        row += 1
+
     heads = ['Страница', 'Тип', 'Уникальность', 'С каким сайтом пересекается (совпадение %)']
     for j, h in enumerate(heads, start=2):
         c = ws.cell(row=row, column=j)

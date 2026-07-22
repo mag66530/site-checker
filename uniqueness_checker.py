@@ -392,6 +392,109 @@ def compare_urls(url_a: str, url_b: str, *, fetcher=None, n: int = 4) -> dict:
     return r
 
 
+_LOC_RE = re.compile(r"<loc>\s*(.*?)\s*</loc>", re.I | re.S)
+
+
+def _slug_of(url_or_path: str) -> str:
+    """Последний значимый сегмент пути (слаг категории), в нижнем регистре."""
+    path = urlparse(url_or_path).path.rstrip("/")
+    seg = path.rsplit("/", 1)[-1] if path else ""
+    return seg.lower()
+
+
+def catalog_slugs_from_sitemap(domain: str, *, fetcher=None, log=None,
+                               max_sitemaps: int = 25, max_urls: int = 100_000) -> set:
+    """Собрать слаги всех URL из sitemap конкурента (для сравнения структуры).
+    Ищем sitemap в robots.txt, затем /sitemap.xml; разворачиваем sitemap-индекс на
+    один уровень. .gz-карты пропускаем."""
+    fetch = fetcher or _default_fetch
+
+    def _log(m):
+        if log:
+            log(m)
+
+    host = urlparse(domain if "://" in domain else "https://" + domain).netloc
+    if not host:
+        return set()
+    root = f"https://{host}"
+
+    maps = []
+    try:
+        for line in fetch(f"{root}/robots.txt").splitlines():
+            if line.lower().startswith("sitemap:"):
+                maps.append(line.split(":", 1)[1].strip())
+    except Exception:
+        pass
+    if not maps:
+        maps = [f"{root}/sitemap.xml"]
+
+    slugs, seen, urls_seen = set(), set(), 0
+
+    def _collect(xml):
+        nonlocal urls_seen
+        for u in _LOC_RE.findall(xml):
+            if urls_seen >= max_urls:
+                return
+            urls_seen += 1
+            sl = _slug_of(u)
+            if len(sl) >= 3 and not sl.isdigit():
+                slugs.add(sl)
+
+    for m in maps[:max_sitemaps]:
+        if m in seen or m.lower().endswith(".gz"):
+            continue
+        seen.add(m)
+        try:
+            xml = fetch(m)
+        except Exception:
+            continue
+        locs = _LOC_RE.findall(xml)
+        # sitemap-индекс: <loc> ведут на другие .xml
+        subs = [x for x in locs if x.lower().split("?")[0].endswith(".xml")]
+        if subs and len(subs) >= len(locs) * 0.5:
+            for s in subs[:max_sitemaps]:
+                if s in seen or s.lower().endswith(".gz"):
+                    continue
+                seen.add(s)
+                try:
+                    _collect(fetch(s))
+                except Exception:
+                    continue
+                if urls_seen >= max_urls:
+                    break
+        else:
+            _collect(xml)
+        if urls_seen >= max_urls:
+            break
+
+    _log(f"  структура конкурента: {len(slugs)} слагов из sitemap "
+         f"({urls_seen} URL)")
+    return slugs
+
+
+def compare_catalog_structure(our_category_paths, competitor_domain, *,
+                              fetcher=None, log=None) -> dict:
+    """Сравнить структуру каталога: сколько НАШИХ категорий (по слагу) есть у
+    конкурента. Высокая доля = вероятно, скопировали структуру каталога."""
+    our = {_slug_of(p) for p in (our_category_paths or [])}
+    our = {s for s in our if len(s) >= 3 and not s.isdigit()}
+    if not our:
+        return {"competitor": competitor_domain, "error": "нет наших категорий"}
+    theirs = catalog_slugs_from_sitemap(competitor_domain, fetcher=fetcher, log=log)
+    if not theirs:
+        return {"competitor": competitor_domain, "our_count": len(our),
+                "error": "не удалось прочитать sitemap конкурента"}
+    matched = sorted(our & theirs)
+    return {
+        "competitor": competitor_domain,
+        "our_count": len(our),
+        "their_count": len(theirs),
+        "matched_count": len(matched),
+        "matched": matched[:200],
+        "overlap_pct": round(100 * len(matched) / len(our), 1),
+    }
+
+
 def enrich_with_deep_compare(results, *, fetcher=None, log=None):
     """Авто-углубление: text.ru уже нашёл, С КЕМ пересекается каждая наша страница
     (r.sources). Берём ТОП-источник (макс. совпадение), скачиваем его и БЕСПЛАТНО
