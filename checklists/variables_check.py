@@ -206,8 +206,17 @@ def _vc_tpl_apply(_tpl_data):
 
 # save_keys - те же ключи, что раньше собирал commit_pending внизу; сохраняем
 # ПРЯМО по клику «Сохранить» (значения виджетов уже в session_state).
+def _vc_tpl_reset():
+    # Сброс к стандартным: охват → «Все домены+поддомены», выбор городов заново
+    # (снимаем флаг инициализации и чистим галочки городов).
+    for _k in ([f'vc_mode_{pid_key}', f'vc_init_{pid_key}']
+               + [_kk for _kk in list(st.session_state.keys())
+                  if _kk.startswith(f'vc_cb_{pid_key}_')]):
+        st.session_state.pop(_k, None)
+
+
 _tpl.render_panel(
-    'variables', pid_key, on_apply=_vc_tpl_apply,
+    'variables', pid_key, on_apply=_vc_tpl_apply, on_reset=_vc_tpl_reset,
     save_keys=lambda: [f'vc_mode_{pid_key}'] + [
         _k for _k in list(st.session_state.keys())
         if _k.startswith(f'vc_cb_{pid_key}_')],

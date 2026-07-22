@@ -352,8 +352,16 @@ key = _api_key(pid)
 # save_keys - те же ключи, что раньше собирал commit_pending внизу; сохраняем
 # ПРЯМО по клику «Сохранить» (значения виджетов уже в session_state с прошлой
 # отрисовки). Ключ PageSpeed API (ps_key_input_*) сюда НЕ входит - пароли не пишем.
+def _ps_tpl_reset():
+    # Сброс к стандартным: убираем ключи виджетов - они переотрисуются со своими
+    # дефолтами (выборка по типам, 5 страниц, товары вкл., сравнение с прошлым).
+    for _k in (f'ps_scope_{pid}', f'ps_pertype_{pid}', f'ps_wantprod_{pid}',
+               f'ps_urls_{pid}', f'ps_compare_{pid}'):
+        st.session_state.pop(_k, None)
+
+
 _tpl.render_panel(
-    'pagespeed', pid,
+    'pagespeed', pid, on_reset=_ps_tpl_reset,
     save_keys=[f'ps_scope_{pid}', f'ps_pertype_{pid}', f'ps_wantprod_{pid}',
                f'ps_urls_{pid}', f'ps_compare_{pid}'],
     help_text='Шаблон запоминает охват, число страниц каждого типа, включение '

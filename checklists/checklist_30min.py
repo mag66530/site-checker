@@ -1042,8 +1042,23 @@ if pid:
         return [_k for _k in list(st.session_state.keys())
                 if _k.startswith(_allow_prefix) or _k in _allow_exact]
 
+    def _c30_tpl_reset():
+        # Сброс к стандартным: сбрасываем метку версии дефолтов галочек - тогда
+        # init_session() наверху страницы переставит ВСЕ c30_check_* в дефолт.
+        # Остальные под-настройки убираем - init переставит их своими дефолтами.
+        st.session_state.pop('c30_checks_defaults_ver', None)
+        for _k in list(st.session_state.keys()):
+            if (_k.startswith(('c30_ac_', 'c30_stress_', 'c30_fetch_'))
+                    or _k in ('c30_preset', 'c30_notify_days', 'c30_m404_mode',
+                              'c30_use_custom_urls', 'c30_autoclick',
+                              'c30_adm_execute', 'c30_arsenkin_yandex',
+                              'c30_arsenkin_google', 'c30_arsenkin_search_all',
+                              'c30_arsenkin_inurl')):
+                st.session_state.pop(_k, None)
+
     _tpl.render_panel(
         'checklist', pid, on_apply=_c30_tpl_apply, save_keys=_c30_tpl_keys,
+        on_reset=_c30_tpl_reset,
         help_text='Шаблон запоминает объём (быстрая/стандартная/полная), все '
                   'галочки «что проверять» и под-настройки (кроме логинов, '
                   'паролей и API-токенов). Хранится на сервере проекта **до '

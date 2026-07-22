@@ -87,7 +87,7 @@ def _do_save(scope, pid, name, key_list, extra=None) -> bool:
     return save_all(scope, pid, all_t)
 
 
-def render_panel(scope, pid, *, on_apply=None, help_text=None,
+def render_panel(scope, pid, *, on_apply=None, on_reset=None, help_text=None,
                  save_keys=None, save_extra=None):
     """Верхний блок «Проектные шаблоны». Ставить ПОСЛЕ выбора проекта и ДО
     отрисовки настроек страницы.
@@ -103,7 +103,13 @@ def render_panel(scope, pid, *, on_apply=None, help_text=None,
     on_apply(tpl: dict) — необязательный колбэк; вызывается при «Загрузить» ПОСЛЕ
     того, как сохранённые значения проставлены в session_state (для страничных
     нюансов — напр., отфильтровать невалидные города или сбросить флаг пресета).
-    После него делается st.rerun()."""
+    После него делается st.rerun().
+
+    on_reset() — необязательный колбэк «вернуть страницу к стандартным настройкам».
+    Вызывается, когда пользователь ОЧИЩАЕТ выбор шаблона крестиком (×) в поле
+    «Загрузить шаблон». Должен сбросить настройки страницы к дефолту (обычно —
+    удалить из session_state ключи-виджеты / флаги инициализации, чтобы дефолты
+    проставились заново). После него делается st.rerun()."""
     k = f'{scope}_{pid}'
     just_saved = st.session_state.pop(f'tpl_saved_{k}', '')
     open_flag = bool(st.session_state.pop(f'tpl_open_{k}', False))
@@ -149,6 +155,16 @@ def render_panel(scope, pid, *, on_apply=None, help_text=None,
             pick = c1.selectbox('Загрузить шаблон', list(tpls.keys()), index=None,
                                 placeholder='— выберите шаблон —',
                                 key=f'tpl_pick_{k}')
+            # Крестик (×) в поле «Загрузить шаблон» = «вернуть к стандартным
+            # настройкам». Ловим переход «был выбран шаблон → стало пусто» и зовём
+            # on_reset. (_prev - что было в поле на прошлом прогоне.)
+            _prevk = f'tpl_pick_prev_{k}'
+            if on_reset is not None and st.session_state.get(_prevk) and not pick:
+                st.session_state[_prevk] = None
+                on_reset()
+                st.toast('Настройки страницы сброшены к стандартным', icon='🔄')
+                st.rerun()
+            st.session_state[_prevk] = pick
             if c2.button('Загрузить', use_container_width=True, disabled=not pick,
                          key=f'tpl_apply_{k}'):
                 tpl = tpls.get(pick) or {}
@@ -163,6 +179,9 @@ def render_panel(scope, pid, *, on_apply=None, help_text=None,
                 tpls.pop(pick, None)
                 save_all(scope, pid, tpls)
                 st.rerun()
+            if on_reset is not None:
+                st.caption('💡 Крестик (×) в поле «Загрузить шаблон» вернёт страницу '
+                           'к стандартным настройкам.')
         else:
             st.caption('Пока сохранённых шаблонов нет - создайте первый выше.')
 

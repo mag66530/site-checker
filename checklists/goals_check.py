@@ -117,6 +117,9 @@ _tpl.render_panel(
     'goals', _base,
     save_keys=lambda: [k for k in list(st.session_state.keys())
                        if k.startswith(f'gc_cb_{_base}_')],
+    # Сброс к стандартным: убираем метку «проект уже инициализирован» - тогда ниже
+    # сработает дефолт «отметить все доступные сайты».
+    on_reset=lambda: st.session_state.pop('gc_last_base', None),
     help_text='Шаблон запоминает, какие сайты/страны отмечены для проверки '
               'целей. Хранится на сервере проекта **до перезапуска приложения** - '
               'после может сброситься.')
