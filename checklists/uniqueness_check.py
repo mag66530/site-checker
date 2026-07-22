@@ -49,12 +49,16 @@ def _secret(key: str, default: str = '') -> str:
     return default
 
 
-def _textru_key(pid: str) -> str:
-    """Ключ text.ru: сперва per-project (textru_key_<pid>), затем общий
-    (textru_key), затем то, что введено в поле на этой сессии."""
+def _textru_secret(pid: str) -> str:
+    """Ключ text.ru из секретов/окружения (без введённого в поле)."""
     return (_secret(f'textru_key_{pid}') or _secret('textru_key')
-            or os.environ.get('TEXTRU_KEY', '')
-            or st.session_state.get(f'uniq_key_{pid}', '')).strip()
+            or os.environ.get('TEXTRU_KEY', '')).strip()
+
+
+def _textru_key(pid: str) -> str:
+    """Итоговый ключ: введённое в поле имеет приоритет, иначе - из секретов."""
+    typed = (st.session_state.get(f'uniq_key_{pid}', '') or '').strip()
+    return typed or _textru_secret(pid)
 
 
 # ── Фоновый процесс ──────────────────────────────────────────────────
@@ -140,22 +144,22 @@ if not pid:
 
 OUT_DIR = OUT_ROOT / pid
 
-# ── Ключ text.ru ─────────────────────────────────────────────────────
+# ── Ключ text.ru (поле прямо в проверке, как токен Арсенкина; обязателен) ──
+st.markdown('**🔑 Ключ text.ru (API-token)** — обязателен для запуска')
+_has_secret = bool(_textru_secret(pid))
+st.text_input(
+    'Ключ text.ru', type='password', key=f'uniq_key_{pid}',
+    label_visibility='collapsed',
+    placeholder=('ключ уже задан в секретах проекта — можно оставить пусто'
+                 if _has_secret
+                 else 'вставь ключ text.ru (личный кабинет text.ru → раздел «API»)'),
+    help='Личный userkey из личного кабинета text.ru → раздел «API».')
 key = _textru_key(pid)
-with st.expander('🔑 Ключ text.ru', expanded=not key):
-    if key:
-        st.success('Ключ найден в секретах проекта — можно запускать.')
-    else:
-        st.warning('Ключ text.ru не найден в секретах. Добавьте `textru_key` в '
-                   '`.streamlit/secrets.toml` (или введите ниже — только на эту '
-                   'сессию, никуда не сохранится).')
-        _k = st.text_input('Ключ text.ru (userkey)', type='password',
-                           key=f'uniq_key_{pid}',
-                           help='Личный ключ из личного кабинета text.ru → API.')
-        key = (_k or '').strip()
-    st.caption('Ключ берётся из секрета `textru_key` (или `textru_key_<проект>`) и '
-               'передаётся фоновому процессу через окружение — в отчёты и git не '
-               'попадает.')
+st.caption('Где взять: личный кабинет text.ru → раздел «API» (там ваш userkey). '
+           'Ключ в git и в отчёты не попадает. Чтобы не вводить каждый раз — можно '
+           'прописать его в секрет `textru_key` проекта.')
+if not key:
+    st.warning('⚠ Вставьте ключ text.ru — без него проверку не запустить.')
 
 # ── Настройки выборки ────────────────────────────────────────────────
 st.divider()
@@ -203,8 +207,6 @@ with c2:
         except Exception:
             pass
         st.rerun()
-if not key:
-    st.warning('Без ключа text.ru запустить нельзя — добавьте ключ выше.')
 
 # ── Прогресс ─────────────────────────────────────────────────────────
 st.divider()
