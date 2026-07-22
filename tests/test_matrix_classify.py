@@ -575,6 +575,45 @@ def test_предустановлены_пусто_даёт_прочерк():
     assert t._матрица_классифицировать("Чек боксы согласия не предустановлены", "НЕТ - стоят по умолчанию")[0] == "✗"
 
 
+def test_excel_имя_листа_убирает_запрещённые():
+    # «/» в «Астана/Нур-Султан» ломал openpyxl → матрица не строилась вовсе.
+    from openpyxl import Workbook
+    assert t._excel_имя_листа("Астана/Нур-Султан") == "Астана-Нур-Султан"
+    assert t._excel_имя_листа("") == "Город"
+    assert len(t._excel_имя_листа("я" * 40)) == 31
+    for ch in "\\/?*[]:":
+        assert ch not in t._excel_имя_листа(f"a{ch}b")
+    # openpyxl принимает результат как имя листа (не бросает)
+    for name in ("Астана/Нур-Султан", "A:B*C?[D]/E"):
+        Workbook().active.title = t._excel_имя_листа(name)
+
+
+def test_матрица_строится_с_городом_со_слэшем(tmp_path):
+    # Регрессия: город с «/» больше не роняет ВСЮ матрицу («Invalid character /
+    # found in sheet title»); лист именуется безопасно, форма в нём есть.
+    from openpyxl import Workbook, load_workbook
+    old = t.MATRIX_DETAILS_FILE
+    t.MATRIX_DETAILS_FILE = str(tmp_path / "matrix_details.json")
+    try:
+        path = tmp_path / "log_forms.xlsx"
+        wb = Workbook(); wb.active.title = "Сводка"
+        ws = wb.create_sheet("Логи"); ws.append(list(t.LOG_HEADERS))
+        row = {h: "" for h in t.LOG_HEADERS}
+        row.update({"Дата": "22.07.2026", "Город": "Астана/Нур-Султан",
+                    "Страница": "Товар", "URL": "https://aviastal.kz/t/",
+                    "Название": "Оформить заявку", "Где находится": "Оформление",
+                    "Статус": "УСПЕШНО (Playwright - как ручная отправка)"})
+        ws.append([row[h] for h in t.LOG_HEADERS])
+        wb.save(str(path))
+
+        t.построить_матрицу_проверок(str(path))   # раньше падало на «/»
+        names = load_workbook(str(path)).sheetnames
+        assert "Астана-Нур-Султан" in names
+        assert "Астана/Нур-Султан" not in names
+    finally:
+        t.MATRIX_DETAILS_FILE = old
+
+
 def test_без_согласия_0_чекбоксов_пишет_что_галочки_нет(tmp_path):
     # «Без согласия не отправить» ✗ + на форме 0 чекбоксов → в ячейке КОНКРЕТНО:
     # галочки согласия нет вообще, отметить нечего (а не «забыли галочку»).
