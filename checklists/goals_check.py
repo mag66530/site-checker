@@ -18,6 +18,9 @@ from pathlib import Path
 import streamlit as st
 
 ROOT = Path(__file__).parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from checklists import page_templates as _tpl
 PY = sys.executable
 
 PROJECTS = {
@@ -105,6 +108,13 @@ st.session_state['goals_project_sel'] = _base
 if not _base:
     st.info('Выберите проект, чтобы запустить проверку целей.')
     st.stop()
+
+# ── Проектные шаблоны ────────────────────────────────────────────────
+_tpl.render_panel(
+    'goals', _base,
+    help_text='Шаблон запоминает, какие сайты/страны отмечены для проверки '
+              'целей. Хранится на сервере проекта **до перезапуска приложения** - '
+              'после может сброситься.')
 
 _варианты = СТРАНЫ.get(_base, [(_base, PROJECTS[_base])])
 
@@ -415,6 +425,11 @@ if not _running and log_txt.strip():
         mime='text/plain',
         use_container_width=True,
     )
+
+# ── Сохранение шаблона (кнопка «Сохранить» - в блоке вверху) ──────────
+# Ставим до финального авто-rerun: галочки сайтов уже отрисованы. Набор ключей
+# зависит от проекта, поэтому передаём вычислением.
+_tpl.commit_pending('goals', _base, lambda: [_ck(p) for p, _ in _варианты])
 
 if _running:
     time.sleep(3)

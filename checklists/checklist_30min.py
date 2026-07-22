@@ -53,6 +53,9 @@ from webmaster_notify import (
 )
 
 PROJECT_ROOT = Path(__file__).parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from checklists import page_templates as _tpl
 REPORTS_DIR = PROJECT_ROOT / 'reports'
 REPORTS_DIR.mkdir(exist_ok=True)
 
@@ -1015,6 +1018,21 @@ if pid:
         st.error(f'Не удалось загрузить каталог: {e}')
         st.stop()
     stats = src.stats
+
+    # ── Проектные шаблоны ──────────────────────────────────────────
+    def _c30_tpl_apply(_tpl_data):
+        # Пусть пресет «Объём» пере-применится под текущий проект: числа выборки
+        # (города/категории/фильтры/товары) возьмутся из пресета и точно попадут
+        # в пределы каталога. Галочки «что проверять» приходят из шаблона и не
+        # трогаются.
+        st.session_state.pop('_c30_applied', None)
+
+    _tpl.render_panel(
+        'checklist', pid, on_apply=_c30_tpl_apply,
+        help_text='Шаблон запоминает объём (быстрая/стандартная/полная), все '
+                  'галочки «что проверять» и под-настройки (кроме логинов, '
+                  'паролей и API-токенов). Хранится на сервере проекта **до '
+                  'перезапуска приложения** - после может сброситься.')
 
     # ── Каталог проекта: метрики + сброс кэша ──────────────────────
     with st.container(border=True):
@@ -2157,6 +2175,23 @@ if pid:
                     data=_log_txt.encode('utf-8'),
                     file_name=f'{pid}-run.log', mime='text/plain',
                     use_container_width=True, key='c30_dl_log')
+
+    # ── Сохранение шаблона (кнопка «Сохранить» - в блоке вверху) ────
+    # В КОНЦЕ страницы: все галочки/режимы уже отрисованы, значения в session_state.
+    # Разрешённый список (allowlist) - сохраняем ТОЛЬКО безопасные ключи; логины,
+    # пароли, токены, домен админки и «выполнять запись в БД» сюда не попадают.
+    # Числа выборки (c30_in_*) намеренно не сохраняем - их задаёт пресет при
+    # загрузке шаблона (всегда в пределах текущего каталога).
+    def _c30_tpl_keys():
+        _allow_prefix = ('c30_check_', 'c30_ac_', 'c30_stress_', 'c30_fetch_')
+        _allow_exact = {'c30_preset', 'c30_notify_days', 'c30_m404_mode',
+                        'c30_use_custom_urls', 'c30_arsenkin_yandex',
+                        'c30_arsenkin_google', 'c30_arsenkin_search_all',
+                        'c30_arsenkin_inurl'}
+        return [_k for _k in list(st.session_state.keys())
+                if _k.startswith(_allow_prefix) or _k in _allow_exact]
+
+    _tpl.commit_pending('checklist', pid, _c30_tpl_keys)
 
 else:
     st.info('Выберите проект, чтобы начать еженедельную проверку.')
