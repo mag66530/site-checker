@@ -34,10 +34,16 @@ catalogs/filters-<pid>.json:
 фильтр → применить/дождаться → счётчик снова. Вердикт:
   ok           - 0 < после < база (фильтр сузил выдачу);
   empty        - после = 0 или текст «ничего не найдено» = фильтр ломает выдачу;
-  not_narrowed - после = база (фильтр не применился, дубль категории);
+  not_narrowed - фильтр применён (адрес → /filter/), но выдача та же = баг сайта;
+  apply_failed - не удалось применить автоматически (адрес/выдача не сдвинулись)
+                 = не подтверждённый баг, «проверить вручную» (не красим красным);
   http_error   - категория/выдача отдала 4xx/5xx;
   no_cards     - карточки не распознаны на базовой категории (проверить card);
   filter_absent- селектор фильтра не найден на странице.
+
+После применения выдачу перечитываем НЕСКОЛЬКО раз (медленный AJAX на
+зарубежных зеркалах, напр. .az): изменение засчитываем, как только увидим,
+и не спешим с «не применился».
 
 Локально - обычный headless Chromium; в облаке (env CCR_AGENT_PROXY_ENABLED)
 трафик идёт через сетевой стек драйвера (route.fetch). Логина не требует -
@@ -256,6 +262,14 @@ def _apply_filter(page, idx, filt, apply_sel, wait_ms, pre_apply_ms):
     except Exception:
         pass
     page.wait_for_timeout(pre_apply_ms)
+    # Дать AJAX-пересчёту смарт-фильтра (Битрикс: «Показать (N)») завершиться
+    # ДО клика по кнопке применения - иначе на медленных зеркалах (напр. .az)
+    # ссылка/форма «Показать» ещё держит старый, несуженный набор, и переход
+    # уводит на ту же категорию → ложное «фильтр не применился».
+    try:
+        page.wait_for_load_state('networkidle', timeout=6000)
+    except Exception:
+        pass
     nav = {'code': None}
 
     def _on(r):
@@ -392,25 +406,43 @@ def run_case(page, case: dict, log) -> dict:
         _lbl = _clicked_label(page, idx, filt)   # подпись ДО клика (пока видна)
         if _lbl:
             _clicked.append(_lbl)
+        _url_before = page.url
         nav_code = _apply_filter(page, idx, filt, apply_sel, wait_ms, _pre)
         if nav_code and nav_code >= 400:
             _hint = ' – отфильтрованной страницы нет (404)' if nav_code == 404 else ''
             last = ('http_error', f'после применения фильтра HTTP {nav_code}{_hint}')
             break
-        after, _ = _best_card_count(page, used_sel)
+        # Пул: выдача может обновиться НЕ мгновенно (медленный AJAX/навигация на
+        # зарубежных зеркалах). Перечитываем набор товаров несколько раз и
+        # выходим сразу, как только увидим РЕАЛЬНОЕ изменение - так ловим
+        # позднее применение и не даём ложное «не применился». Условия успеха
+        # те же (набор/счётчик/«найдено N»), поэтому ложных зелёных не добавляем:
+        # первый замер уже после networkidle, а изменение засчитываем только
+        # при фактическом расхождении с базой.
+        after, after_ids, total_after = baseline, base_ids, total_before
+        _applied = _empty = False
+        for _poll in range(6):        # до ~6 замеров с паузой 700мс поверх ожиданий
+            after, _ = _best_card_count(page, used_sel)
+            after_ids = _card_ids(page, used_sel)
+            total_after = _read_total(page, total_sel)
+            _total_dropped = (total_before is not None and total_after is not None
+                              and total_after < total_before)
+            _ids_changed = bool(base_ids) and bool(after_ids) and \
+                (set(after_ids) != set(base_ids))
+            _count_dropped = after > 0 and after < baseline
+            if _total_dropped or _ids_changed or _count_dropped:
+                _applied = True
+                break
+            if after <= 0 and _has_empty_text(page):   # фильтр сломал листинг
+                _empty = True
+                break
+            page.wait_for_timeout(700)
         out['after'] = after
-        after_ids = _card_ids(page, used_sel)
-        total_after = _read_total(page, total_sel)
-        if after <= 0 or _has_empty_text(page):
+        _url_after = page.url
+        if _empty or after <= 0 or _has_empty_text(page):
             last = ('empty', 'после фильтра нет товаров / «ничего не найдено»')
             break
-        # Признаки, что фильтр РЕАЛЬНО применился (сравниваем URL товаров).
-        _total_dropped = (total_before is not None and total_after is not None
-                          and total_after < total_before)
-        _ids_changed = bool(base_ids) and bool(after_ids) and \
-            (set(after_ids) != set(base_ids))
-        _count_dropped = after < baseline
-        if _total_dropped or _ids_changed or _count_dropped:
+        if _applied:
             _d = 'фильтр применился: набор товаров изменился'
             if _lbl:
                 _d += f'; нажат фильтр «{_lbl}»'
@@ -420,11 +452,22 @@ def run_case(page, case: dict, log) -> dict:
                 _d += f'; найдено {total_before}→{total_after}'
             last = ('ok', _d)
             break
-        # не изменилось - пробуем следующую группу фильтра (если есть)
+        # Не изменилось - пробуем следующую группу фильтра (если есть). Честно
+        # различаем два случая: URL сменился на /filter/ (применение прошло, но
+        # выдача та же - это реальная находка) vs URL/выдача не сдвинулись
+        # (кнопку «Показать» не удалось отработать автоматически - мягче).
         _spis = '; '.join(f'«{x}»' for x in _clicked) or 'значение фильтра'
-        last = ('not_narrowed',
-                f'выдача не изменилась - товары те же. Нажато ({_tries}): '
-                f'{_spis}. Проверить эти фильтры вручную')
+        _url_moved = ('/filter/' in _url_after) or (_url_after != _url_before)
+        if _url_moved:
+            last = ('not_narrowed',
+                    f'фильтр применён (адрес сменился на /filter/…), но набор '
+                    f'товаров тот же - возможно, фильтр не сужает выдачу. '
+                    f'Нажато ({_tries}): {_spis}. Проверить вручную')
+        else:
+            last = ('apply_failed',
+                    f'не удалось применить фильтр автоматически (после клика '
+                    f'«Показать» адрес и выдача не изменились). Нажато ({_tries}): '
+                    f'{_spis}. Проверить вручную')
 
     out['verdict'], out['detail'] = last
     return out
