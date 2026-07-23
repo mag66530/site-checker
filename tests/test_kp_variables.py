@@ -121,6 +121,35 @@ def test_kp_empty_and_site_empty_is_dash():
         (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones) = saved
 
 
+def test_empty_slot_site_shows_common_is_dash_not_bug():
+    """Правило заказчика: если в КП для слота (SEO/Реклама) номера НЕТ, а на сайте
+    стоит ОБЩИЙ номер города (он же есть в КП) - это НЕ баг, а прочерк «–»:
+    отдельного SEO/рекламного номера просто нет, сайт показывает общий. Баг
+    (✗) - только если на сайте НОВЫЙ номер, которого в КП города нет вообще."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones)
+    row.phone_common = "+7 (495) 111-22-33"      # в КП только общий
+    row.phone_seo = row.phone_ad = ""            # SEO/Реклама пусто
+    row.all_phones = "4951112233"
+    try:
+        # На сайте стоит общий номер → SEO/Реклама прочерк, Общий ✓.
+        html = '<header><a href="tel:+74951112233">+7 (495) 111-22-33</a></header>'
+        by = {f["field"]: f for f in kp.check_variables(html, "stalmetural.ru")["fields"]}
+        assert by["Тел. Общий Город"]["status"] == "ok"
+        assert by["Тел. SEO Город"]["status"] == "na"       # пусто в КП + общий на сайте → –
+        assert by["Тел. Реклама Город"]["status"] == "na"
+
+        # На сайте НОВЫЙ номер, которого в КП нет → все слоты ✗ и виден номер сайта.
+        html2 = '<header><a href="tel:+74959998877">+7 (495) 999-88-77</a></header>'
+        by2 = {f["field"]: f for f in kp.check_variables(html2, "stalmetural.ru")["fields"]}
+        assert by2["Тел. SEO Город"]["status"] == "bug"
+        assert "999" in (by2["Тел. SEO Город"]["found"] or "")
+    finally:
+        (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones) = saved
+
+
 def test_foreign_phone_formatted_with_country_code():
     """Иностранные нац. номера (9 цифр) в отчёте показываем с кодом страны
     (+375/+996/+994/+998), а не «голыми» цифрами (выглядело как мусор:
