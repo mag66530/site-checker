@@ -30,10 +30,24 @@ def test_normalize_phone_countries_and_float():
     # Казахстан (+7 → 10 цифр)
     assert normalize_phone('7 (727) 354-08-98') == '7273540898'
     assert normalize_phone('8-708-987-98-15') == '7089879815'
+    # Киргизия (+996 → 9 цифр) - и текст, и «голый» из tel:
+    assert normalize_phone('+996 221 31 88 82') == '221318882'
+    assert normalize_phone('tel:+996221318882'.replace('tel:', '')) == '221318882'
+    # Азербайджан (+994 → 9 цифр)
+    assert normalize_phone('+994 12 345 67 89') == '123456789'
 
 
 def test_split_phones_uzbek_tel_link():
     assert split_phones('tel:998900068448') == ['900068448']
+
+
+def test_split_phones_kyrgyz_azerbaijan():
+    # Киргизия/Азербайджан из ВИДИМОГО текста (раньше не находились: в _PHONE_FIND
+    # не было +996/+994, и «+996 221 31 88 82» пропускалось).
+    assert split_phones('звоните +996 221 31 88 82 сейчас') == ['221318882']
+    assert split_phones('+994 12 345 67 89') == ['123456789']
+    # и «голый» из tel:-ссылки
+    assert split_phones('tel:+996221318882') == ['221318882']
 
 
 # ── Мягкое сравнение адреса ──────────────────────────────────────────
