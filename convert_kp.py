@@ -236,6 +236,21 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     no_phone = sum(1 for r in rows_out if not (r['phone_seo'] or r['phone_ad'] or r['phone_common']))
     with_addr = sum(1 for r in rows_out if r['address'])
     print(f'  без телефона в КП: {no_phone}, с адресом: {with_addr}')
+    # Диагностика «съехавших» колонок: ячейки телефонов НЕ пустые, но НИ ОДНОГО
+    # валидного номера не разобралось (напр. везде «2»/«2.0» - в колонку телефона
+    # попало что-то не то). Если таких почти вся таблица - структура КП, скорее
+    # всего, сломана: громко предупреждаем, чтобы это не выглядело как «сайт не
+    # виден» в отчёте.
+    _garbage = sum(1 for r in rows_out
+                   if (r['phone_seo'] or r['phone_ad'] or r['phone_common'])
+                   and not r['all_phones'])
+    if rows_out and _garbage >= max(3, len(rows_out) // 2):
+        print(f'  ⚠️ ВНИМАНИЕ: у {_garbage} из {len(rows_out)} городов в колонках '
+              f'телефона стоит НЕ номер (не разобрался ни один). Похоже, в таблице '
+              f'КП съехали/переименовались колонки - проверьте лист '
+              f'«{layout["sheet"]}»: телефоны/почта/адрес должны быть в своих '
+              f'столбцах, а не, например, «2». Иначе в отчёте всё уйдёт в ✗ '
+              f'«в КП не распознан», хотя на сайте данные есть.')
     return out
 
 
