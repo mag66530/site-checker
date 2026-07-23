@@ -96,6 +96,27 @@ def test_check_variables_garbage_kp_values_are_flagged():
         row.phone_seo, row.phone_common, row.email, row.address = saved
 
 
+def test_garbage_kp_address_still_shows_site_address():
+    """Если в КП адрес — мусор («1.0»), но на сайте по метке «Адрес:» есть
+    нормальный адрес, показываем его в «На сайте» (а не «–»): видно, что адрес на
+    странице ЕСТЬ (кейс «Не нашёл адрес на сайте»). Баг «проверьте КП» остаётся."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = row.address
+    row.address = "1.0"          # сломанное значение из КП (как в реальном прогоне)
+    try:
+        html = ('<main><div class="card"><h3>Стальметурал в Калуге</h3>'
+                'Адрес: Калуга, улица Ленина, 102а '
+                'Телефон 8 (484) 259-58-86</div></main>')
+        r = kp.check_variables(html, "stalmetural.ru")
+        by = {f["field"]: f for f in r["fields"]}
+        assert by["Адрес"]["status"] == "bug"                  # КП сломана → ✗
+        assert "Ленина, 102" in (by["Адрес"]["found"] or "")   # адрес с сайта показан
+    finally:
+        row.address = saved
+
+
 def test_check_variables_address_from_contacts():
     """Адрес на «Контактах», а не в подвале главной (кейс МПЭ/mepen): по одной
     главной адрес не находится (⚠), с переданным html «Контактов» - находится."""
