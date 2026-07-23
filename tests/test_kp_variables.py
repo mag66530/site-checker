@@ -122,6 +122,28 @@ def test_check_variables_address_from_contacts():
     assert by1["Почта"]["status"] == "ok"
 
 
+def test_check_variables_different_address_is_bug():
+    """На сайте найден ДРУГОЙ адрес (с номером дома), не совпадающий с КП →
+    расхождение ✗ (bug), а не ⚠ (по просьбе заказчика: адрес крестом).
+    «Не найден вовсе» остаётся ⚠ (см. test_check_variables_address_from_contacts)."""
+    m = kp.load_kp("smu")
+    row = m.get("stalmetural.ru")
+    assert row and row.address, "нужна строка КП с адресом"
+    saved = row.address
+    try:
+        row.address = "проспект Богдана Хмельницкого, 102"
+        html = ('<header><a href="tel:+74991303669">+7 (499) 130-36-69</a> '
+                '<a href="mailto:msk@stalmetural.ru">msk@stalmetural.ru</a></header>'
+                '<footer>Адрес: проспект Мира, 17 '
+                'Телефон 8 (499) 130-36-69</footer>')
+        r = kp.check_variables(html, "stalmetural.ru", row=row)
+        by = {f["field"]: f for f in r["fields"]}
+        assert by["Адрес"]["status"] == "bug"         # другой адрес = ✗
+        assert "Мира" in (by["Адрес"]["found"] or "")  # показываем реальный адрес сайта
+    finally:
+        row.address = saved
+
+
 def test_только_почта_для_перевода():
     """Переводная копия сайта (город «… (перевод)», напр. steelgroup.az): в отчёте
     проверяем ТОЛЬКО «Почту», остальные колонки → «–». Обычный город не трогаем."""
