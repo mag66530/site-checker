@@ -699,16 +699,43 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
     _написать_легенду(wb.active)
     wb.active.title = "Как читать результат"
     ws = wb.create_sheet("Проверка КП")
+    from openpyxl.styles import Border, Side
     hdr_fill = PatternFill("solid", fgColor="EEF3FB")
-    # Порядок по просьбе заказчика: Страна(КП), затем Город(КП) со ссылкой на
-    # домен/поддомен, дальше проверяемые переменные.
-    headers = ["Страна(КП)", "Город(КП)"] + VAR_COLUMNS
-    for c, t in enumerate(headers, 1):
-        cell = ws.cell(1, c, t)
-        cell.font = Font(bold=True)
-        cell.fill = hdr_fill
+    # Единый НЕЯРКИЙ цвет границ по всему отчёту (просьба заказчика: везде
+    # одинаковый и не сильно яркий).
+    _thin = Side(style="thin", color="C9CFDB")
+
+    # Колонки отчёта: (заголовок, ключ поля из check_variables). «Тел.» в подписи
+    # телефонов не пишем - над ними стоит групповой заголовок «Телефония/Почта».
+    _ID = ["Страна(КП)", "Город(КП)"]
+    _VARS = [("Город", "Город"), ("Адрес", "Адрес"),
+             ("Общий Город", "Тел. Общий Город"),
+             ("Реклама Город", "Тел. Реклама Город"),
+             ("SEO Город", "Тел. SEO Город"),
+             ("Почта", "Почта"),
+             ("Telegram", "Telegram"), ("WhatsApp", "WhatsApp")]
+    n_cols = len(_ID) + len(_VARS)                       # 10
+    _GROUPS = [("Телефония/Почта", 5, 8), ("Мессенджеры", 9, 10)]
+    _SEP_AFTER = {4, 8}   # вертикальный разделитель после «Адрес» и после «Почта»
+
+    def _bdr(col, bottom=False):
+        return Border(right=_thin if col in _SEP_AFTER else None,
+                      bottom=_thin if bottom else None)
+
+    # Строка 1 - групповые заголовки (объединённые ячейки над своими колонками).
+    for c in range(1, n_cols + 1):
+        gc = ws.cell(1, c); gc.fill = hdr_fill; gc.border = _bdr(c)
+    for txt, c1, c2 in _GROUPS:
+        ws.merge_cells(start_row=1, start_column=c1, end_row=1, end_column=c2)
+        gc = ws.cell(1, c1, txt)
+        gc.font = Font(bold=True); gc.alignment = Alignment(horizontal="center")
+    # Строка 2 - заголовки колонок (нижняя граница отделяет шапку от данных).
+    for c, t in enumerate(_ID + [d for d, _ in _VARS], 1):
+        cell = ws.cell(2, c, t)
+        cell.font = Font(bold=True); cell.fill = hdr_fill
         cell.alignment = Alignment(horizontal="center")
-    ws.freeze_panes = "C2"
+        cell.border = _bdr(c, bottom=True)
+    ws.freeze_panes = "C3"
 
     from openpyxl.comments import Comment
     LINK_FONT = Font(color="1155CC", underline="single")
@@ -719,38 +746,42 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
     _FIRST_VAR_COL = 3   # A=Страна(КП), B=Город(КП), переменные с C
 
     расхождения = []
-    r = 2
+    r = 3
     for res in результаты:
-        ws.cell(r, 1, res.get("country", ""))
+        cc = ws.cell(r, 1, res.get("country", "")); cc.border = _bdr(1)
         # Город(КП) - текст города, кликом ведёт на домен/поддомен.
         gcell = ws.cell(r, 2, res.get("city", "") or res["domain"])
         gcell.hyperlink = f'https://{res["domain"]}'
-        gcell.font = LINK_FONT
+        gcell.font = LINK_FONT; gcell.border = _bdr(2)
         by = {f["field"]: f for f in res.get("fields", [])}
         if res.get("error"):
             # Сайт не загрузился - ✗ по ВСЕМ колонкам + причина в примечании
             # каждой ячейки (не путаем с «телефон ✓, адрес ⚠» у частично
             # загруженной страницы: тут упал весь сайт).
             reason = f"Сайт не загрузился: {res['error']}"
-            for c in range(_FIRST_VAR_COL, _FIRST_VAR_COL + len(VAR_COLUMNS)):
+            for c in range(_FIRST_VAR_COL, _FIRST_VAR_COL + len(_VARS)):
                 cell = ws.cell(r, c, "✗")
                 cell.font = Font(color=_COLOR.get("bug", "C62828"), bold=True)
                 cell.alignment = Alignment(horizontal="center")
-                cell.fill = BUG_FILL
+                cell.fill = BUG_FILL; cell.border = _bdr(c)
                 cm = Comment(reason, "1.4")
                 cm.width, cm.height = 340, 90
                 cell.comment = cm
             r += 1
             continue
-        for c, name in enumerate(VAR_COLUMNS, _FIRST_VAR_COL):
+        for i, (_disp, name) in enumerate(_VARS):
+            c = _FIRST_VAR_COL + i
             f = by.get(name)
             if not f:
-                ws.cell(r, c, "–")
+                cell = ws.cell(r, c, "–")
+                cell.alignment = Alignment(horizontal="center")
+                cell.border = _bdr(c)
                 continue
             status = f["status"]
             cell = ws.cell(r, c, _SYMBOL.get(status, "?"))
             cell.font = Font(color=_COLOR.get(status, "000000"), bold=True)
             cell.alignment = Alignment(horizontal="center")
+            cell.border = _bdr(c)
             # Примечание + заливку вешаем ТОЛЬКО на проблемные ячейки (✗ и ⚠) -
             # тогда зелёные ✓ чистые, а красные сразу видно (красная заливка +
             # уголок-примечание с деталями). Просьба заказчика.
@@ -768,16 +799,15 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
                 cm.width, cm.height = 340, 170   # чтобы текст влезал в окошко
                 cell.comment = cm
                 cell.fill = BUG_FILL if status == "bug" else WARN_FILL
-            # На лист «Расхождения» выводим И красные (✗ bug), И жёлтые (⚠ warn) -
-            # по просьбе заказчика: жёлтые «проверьте» тоже нужно видеть списком,
-            # а не только уголком-примечанием в ячейке.
-            if status in ("bug", "warn"):
+                # На лист «Расхождения» - И красные (✗), И жёлтые (⚠).
                 расхождения.append((res["domain"], res.get("city", ""), name,
                                     f["expected"], f["found"], f.get("note", "")))
         r += 1
 
-    ws.column_dimensions["A"].width = 16   # Страна(КП)
-    ws.column_dimensions["B"].width = 26   # Город(КП) со ссылкой
+    # Ширины колонок (как в согласованном образце).
+    for _col, _w in (("A", 16), ("B", 26), ("C", 9), ("D", 13), ("E", 18),
+                     ("F", 19.5), ("G", 19), ("H", 12), ("I", 9.5), ("J", 10.5)):
+        ws.column_dimensions[_col].width = _w
 
     # Лист «Расхождения» - только проблемные ячейки, для быстрого разбора.
     ws2 = wb.create_sheet("Расхождения")
