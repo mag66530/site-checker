@@ -68,16 +68,20 @@ def test_check_variables_bug_wrong_phone():
     assert by["Тел. Общий Город"]["status"] in ("bug", "warn")
 
 
-def test_check_variables_garbage_kp_values_are_flagged():
-    """Правка КП не должна проходить мимо проверки. Если в ячейке телефона или
-    адреса лежит не номер/не адрес, а мусор («2»), это ошибка КП (✗), а не «нет
-    в КП» (–). Раньше ловилась только почта - телефон показывал «–», адрес мог
-    дать ложное ✓."""
+def test_check_variables_garbage_phone_recovered_from_kp_set():
+    """Если в конкретной колонке телефона КП мусор («2»/«2.0» из-за съехавших
+    столбцов), НО номер города есть в КП в другом месте (all_phones/другая
+    колонка) и он же показан на сайте - это НЕ ошибка, а ✓: номер по факту
+    совпадает. Не сыпем «проверьте КП» там, где телефон верный (просьба
+    заказчика: «Номера везде есть, они адекватные - не пишите, что ошибка»)."""
     m = kp.load_kp("smu")
     kp._KP_CACHE["smu"] = m
     row = m["stalmetural.ru"]
     saved = (row.phone_seo, row.phone_common, row.email, row.address)
-    row.phone_seo = row.phone_common = row.email = row.address = "2"
+    # SEO и Общий колонки сломаны, но phone_ad (реальный номер) остаётся - он в
+    # наборе КП города, значит номер восстановим.
+    row.phone_seo = row.phone_common = "2"
+    row.email = row.address = "2"
     try:
         html = (
             '<header>'
@@ -87,16 +91,56 @@ def test_check_variables_garbage_kp_values_are_flagged():
             '</header>')
         r = kp.check_variables(html, "stalmetural.ru")
         by = {f["field"]: f for f in r["fields"]}
-        assert by["Тел. SEO Город"]["status"] == "bug"    # было «na» («–»)
-        assert by["Тел. Общий Город"]["status"] == "bug"    # было «na» («–»)
-        # При сломанном КП телефон С САЙТА всё равно виден (не «–») - чтобы было
-        # понятно, что сайт в порядке, а сломан именно КП.
+        # Номер города совпадает с КП (взят из набора) → ✓, а не ✗ «проверьте КП».
+        assert by["Тел. SEO Город"]["status"] == "ok_set"
+        assert by["Тел. Общий Город"]["status"] == "ok_set"
         assert by["Тел. Общий Город"]["found"] not in ("–", "")
-        assert by["Почта"]["status"] == "bug"         # ловилось и раньше
-        assert by["Адрес"]["status"] == "bug"         # было ложное «ok» (✓)
-        assert by["Тел. Реклама Город"]["status"] == "ok"   # реальный номер по-прежнему ✓
+        assert by["Тел. Реклама Город"]["status"] == "ok"   # реальный номер ✓
+        # Почта и адрес мусор, а на сайте другие/нет - остаётся ошибка КП (✗).
+        assert by["Почта"]["status"] == "bug"
+        assert by["Адрес"]["status"] == "bug"
     finally:
         row.phone_seo, row.phone_common, row.email, row.address = saved
+
+
+def test_check_variables_garbage_phone_not_in_kp_is_bug():
+    """Колонка телефона КП - мусор И номера города в КП больше нигде нет: тогда
+    честно ✗ «в КП не распознан - проверьте КП» (колонку надо чинить). Телефон с
+    сайта при этом показываем - видно, что сайт в порядке."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_seo, row.phone_common, row.phone_ad, row.all_phones)
+    # ВСЕ источники номера города в КП сломаны - восстановить номер неоткуда.
+    row.phone_seo = row.phone_common = row.phone_ad = "2"
+    row.all_phones = ""
+    try:
+        html = ('<header><a href="tel:+74991300786">+7 (499) 130-07-86</a></header>')
+        r = kp.check_variables(html, "stalmetural.ru")
+        by = {f["field"]: f for f in r["fields"]}
+        assert by["Тел. Общий Город"]["status"] == "bug"
+        assert "проверьте КП" in by["Тел. Общий Город"]["note"]
+        assert by["Тел. Общий Город"]["found"] not in ("–", "")   # сайт виден
+    finally:
+        (row.phone_seo, row.phone_common, row.phone_ad, row.all_phones) = saved
+
+
+def test_foreign_phone_formatted_with_country_code():
+    """Иностранные нац. номера (9 цифр) в отчёте показываем с кодом страны
+    (+375/+996/+994/+998), а не «голыми» цифрами (выглядело как мусор:
+    447666258, 221318882, 123110138). Просьба заказчика."""
+    assert kp._fmt("447666258", "375") == "+375 (44) 766-62-58"
+    assert kp._fmt("221318882", "996") == "+996 (221) 31-88-82"
+    assert kp._fmt("123110138", "994") == "+994 (12) 311-01-38"
+    assert kp._fmt("900112688", "998") == "+998 (90) 011-26-88"
+    assert kp._fmt("4991306028", "7") == "+7 (499) 130-60-28"
+    # Код страны определяется по стране КП и по домену (.by/.kg/.uz/.az).
+    assert kp._dial_for(kp.KPRow(domain="stalmetural.by", city="Минск",
+                                 country="Беларусь")) == "375"
+    assert kp._dial_for(kp.KPRow(domain="stalmetural.kg", city="Бишкек",
+                                 country="")) == "996"
+    assert kp._dial_for(kp.KPRow(domain="smg.az", city="Баку",
+                                 country="Азербайджан")) == "994"
 
 
 def test_garbage_kp_address_still_shows_site_address():
