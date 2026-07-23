@@ -244,7 +244,24 @@ st.markdown(
 # (кто я / выйти / кабинет руководителя / админ-панель). См. auth/INSTRUCTIONS.md.
 import auth
 
-if not auth.require_login():
+try:
+    _logged_in = auth.require_login()
+except Exception as _auth_err:  # noqa: BLE001
+    # Понятное сообщение вместо трейсбека, если секреты/подключение не настроены
+    # (самая частая причина - неверная строка подключения). Так апп не пугает
+    # пользователя стеком и подсказывает, что именно проверить.
+    st.error(
+        "⚠️ Авторизация не поднялась — проверьте секреты приложения "
+        "(Streamlit Cloud → Manage app → Settings → Secrets):\n\n"
+        "• `[supabase] db_url` — строка **Transaction pooler** "
+        "(хост …pooler.supabase.com, порт **6543**) с реальным паролем базы "
+        "вместо `[YOUR-PASSWORD]`;\n"
+        "• блоки `[seed_admin]` и `[app]` присутствуют.\n\n"
+        f"Тех. детали: `{_auth_err}`"
+    )
+    st.stop()
+
+if not _logged_in:
     st.stop()
 
 auth.render_account_ui()
