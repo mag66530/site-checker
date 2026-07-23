@@ -6,7 +6,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from calltracking_browser import _nat, _read_ct_numbers, check_city, AD_PARAM
+from calltracking_browser import (_nat, _read_ct_numbers, check_city,
+                                   check_city_seo, AD_PARAM, SEO_REFERER)
 
 
 def test_nat():
@@ -25,6 +26,7 @@ class _StubPage:
 
     def goto(self, url, **kw):
         self.last_url = url
+        self.last_referer = kw.get('referer')
 
     def wait_for_timeout(self, ms):
         pass
@@ -67,10 +69,32 @@ def test_check_city_no_element():
     print('✓ нет .ct_phone → no_element')
 
 
+def test_check_city_seo_replaced_ok():
+    # SEO-подмена: открываем БЕЗ метки, но с реферрером органики; на странице
+    # показан поисковый номер → сработала.
+    pg = _StubPage(['+7 (499) 130-60-28'])
+    r = check_city_seo(pg, 'https://x.ru/', _nat('7 (499) 130-60-28'))
+    assert r['status'] == 'replaced_ok', r
+    assert pg.last_referer == SEO_REFERER            # передан реферрер поиска
+    assert AD_PARAM not in (pg.last_url or '')       # рекламной метки НЕТ
+    print('✓ SEO: поисковый номер + реферрер органики → replaced_ok, без метки')
+
+
+def test_check_city_seo_not_replaced():
+    # Показан общий номер, поискового нет → SEO-подмена не сработала.
+    pg = _StubPage(['+7 (499) 130-36-69'])
+    r = check_city_seo(pg, 'https://x.ru/', _nat('7 (499) 130-60-28'))
+    assert r['status'] == 'not_replaced', r
+    assert '4991303669' in r['shown']
+    print('✓ SEO: остался общий номер → not_replaced')
+
+
 if __name__ == '__main__':
     test_nat()
     test_read_ct_numbers()
     test_check_city_replaced_ok()
     test_check_city_not_replaced()
     test_check_city_no_element()
+    test_check_city_seo_replaced_ok()
+    test_check_city_seo_not_replaced()
     print('Все тесты calltracking_browser пройдены.')

@@ -5806,7 +5806,8 @@ _CT_CFG = {'ok': ('✓ совпал с КП', 'ok'), 'bug': ('БАГ ≠ КП', 
 _CT_BROW = {'replaced_ok': ('✅ работает', 'ok'),
             'not_replaced': ('❌ не работает', 'err'),
             'no_element': ('⚠ номер не найден', 'warn'),
-            'error': ('⚠ ошибка загрузки', 'warn')}
+            'error': ('⚠ ошибка загрузки', 'warn'),
+            'na': ('–', 'text_muted')}   # номера этого типа в КП нет
 
 
 def _build_calltracking_sheet(wb, results, calltracking_check):
@@ -5843,45 +5844,59 @@ def _build_calltracking_sheet(wb, results, calltracking_check):
     brow_bad = sum(1 for h in hosts
                    if (brow.get(h) or {}).get('status') == 'not_replaced')
     brow_used = bool(brow)
+    # SEO-подмена: колонки показываем, только если браузерная проверка вернула
+    # блок 'seo' хоть по одному городу (у avia/mpe поискового номера нет).
+    seo_used = any('seo' in (b or {}) for b in brow.values())
+    seo_bad = sum(1 for h in hosts
+                  if (brow.get(h, {}).get('seo') or {}).get('status') == 'not_replaced')
 
     ws = wb.create_sheet('Замена рекл. номера')
     ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if (cfg_bad or brow_bad) else C.ok
+    ws.sheet_properties.tabColor = C.err if (cfg_bad or brow_bad or seo_bad) else C.ok
     ws.column_dimensions['A'].width = 3
     ws.column_dimensions['B'].width = 22   # Город
     ws.column_dimensions['C'].width = 9    # Открыть
-    ws.column_dimensions['D'].width = 16   # Рекл. номер (КП)
-    ws.column_dimensions['E'].width = 20   # В конфиге сайта
-    ws.column_dimensions['F'].width = 24   # Подмена (браузер)
-    ws.column_dimensions['G'].width = 30   # Показал сайт (браузер)
+    ws.column_dimensions['D'].width = 15   # Рекл. номер (КП)
+    ws.column_dimensions['E'].width = 18   # В конфиге сайта
+    ws.column_dimensions['F'].width = 20   # Подмена реклама
+    ws.column_dimensions['G'].width = 24   # Показал (реклама)
+    if seo_used:
+        ws.column_dimensions['H'].width = 15   # Поиск. номер (КП)
+        ws.column_dimensions['I'].width = 20   # Подмена поиск
+        ws.column_dimensions['J'].width = 24   # Показал (поиск)
+    _last = 'J' if seo_used else 'G'
 
-    ws.merge_cells('B2:G2')
+    ws.merge_cells(f'B2:{_last}2')
     c = ws['B2']
-    c.value = 'Замена рекламного номера (коллтрекинг)'
+    c.value = 'Замена номера (коллтрекинг)'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 24
 
-    ws.merge_cells('B3:G3')
+    ws.merge_cells(f'B3:{_last}3')
     c = ws['B3']
-    c.value = ('Реклама подменяет номер в шапке на отдельный (для отслеживания '
-               'звонков с рекламы). «В конфиге» - СТАТИЧЕСКИ, в каждом прогоне: '
-               'рекламный номер в коде коллтрекинга (Sipuni) совпадает с '
-               'phone_ad из КП. «Подмена (браузер)» - по галочке: открываем '
-               'главную с меткой ?utm_source=yandex и проверяем, реально ли '
-               'номер подменяется (JS выполняется). ✅/✓ - ок, ❌/БАГ - '
-               'проблема, «нет подмены» - коллтрекинг не найден.')
+    c.value = ('Коллтрекинг подменяет номер в шапке под источник визита - чтобы '
+               'отслеживать, откуда звонок. «В конфиге» - СТАТИЧЕСКИ, в каждом '
+               'прогоне: рекламный номер в коде Sipuni совпадает с phone_ad из '
+               'КП. «Подмена реклама/поиск» - по галочке, в браузере: открываем '
+               'главную с меткой ?utm_source=yandex (реклама) и с реферрером '
+               'органической выдачи (поиск) и проверяем, стал ли номер равен '
+               'phone_ad / phone_seo из КП. ✅/✓ - ок, ❌/БАГ - проблема.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 44
+    ws.row_dimensions[3].height = 56
 
     # Плитки сводки
     tiles = [('Проверено городов', len(hosts), C.accent, C.accent_soft),
              ('В конфиге ≠ КП', cfg_bad, C.err if cfg_bad else C.ok,
               C.err_soft if cfg_bad else C.ok_soft)]
     if brow_used:
-        tiles.append(('Подмена не работает', brow_bad,
+        tiles.append(('Реклама не работает', brow_bad,
                       C.err if brow_bad else C.ok,
                       C.err_soft if brow_bad else C.ok_soft))
+    if seo_used:
+        tiles.append(('Поиск не работает', seo_bad,
+                      C.err if seo_bad else C.ok,
+                      C.err_soft if seo_bad else C.ok_soft))
     col = 2
     for label, value, color, bg in tiles:
         vc = ws.cell(row=5, column=col, value=value)
@@ -5901,17 +5916,22 @@ def _build_calltracking_sheet(wb, results, calltracking_check):
             return f'{n[:3]}-{n[3:6]}-{n[6:8]}-{n[8:]}'
         return n or '–'
 
-    # Сортировка: сначала проблемные (браузер не работает / конфиг ≠ КП).
+    # Сортировка: сначала проблемные (браузер реклама/поиск не работает / конфиг ≠ КП).
     def _rank(h):
-        b = (brow.get(h) or {}).get('status')
+        bb = brow.get(h) or {}
+        b = bb.get('status')
+        ss = (bb.get('seo') or {}).get('status')
         cfgs = (stat.get(h, {}).get('ad') or {}).get('status')
-        return (0 if b == 'not_replaced' else 1 if cfgs == 'bug' else 2,
-                (stat.get(h, {}).get('city') or brow.get(h, {}).get('city') or h))
+        pri = 0 if (b == 'not_replaced' or ss == 'not_replaced') else \
+            1 if cfgs == 'bug' else 2
+        return (pri, (stat.get(h, {}).get('city') or bb.get('city') or h))
     hosts.sort(key=_rank)
 
     hdr_row = 8
     hdrs = ['Город', 'Открыть', 'Рекл. номер (КП)', 'В конфиге сайта',
-            'Подмена (браузер)', 'Показал сайт']
+            'Подмена реклама', 'Показал (реклама)']
+    if seo_used:
+        hdrs += ['Поиск. номер (КП)', 'Подмена поиск', 'Показал (поиск)']
     for ci, h in enumerate(hdrs, start=2):
         cell = ws.cell(row=hdr_row, column=ci, value=h)
         cell.font = _font(size=10, bold=True, color=C.text_muted)
@@ -5921,11 +5941,40 @@ def _build_calltracking_sheet(wb, results, calltracking_check):
     ws.row_dimensions[hdr_row].height = 24
     ws.freeze_panes = f'B{hdr_row + 1}'
 
+    def _num_cell(col, val):
+        kc = ws.cell(row=row, column=col, value=_fmt_num(val))
+        kc.font = _font(size=10, color=C.text_soft)
+        kc.alignment = _align(horizontal='center')
+        kc.border = _border(color=C.border_light)
+
+    def _brow_cell(col, res):
+        """Ячейка статуса браузерной подмены - одинаково для рекламы и поиска."""
+        if res is None:
+            bl, bck = ('не проверяли', 'text_muted')
+        else:
+            bl, bck = _CT_BROW.get(res.get('status'),
+                                   (res.get('status', ''), 'text_muted'))
+        cc = ws.cell(row=row, column=col, value=bl)
+        cc.font = _font(size=10, bold=(bck in ('ok', 'err')),
+                        color=getattr(C, bck, C.text_muted))
+        if bck in ('ok', 'err'):
+            cc.fill = _fill(C.ok_soft if bck == 'ok' else C.err_soft)
+        cc.alignment = _align(horizontal='center')
+        cc.border = _border(color=C.border_light)
+
+    def _shown_cell(col, res):
+        shown = ', '.join(_fmt_num(n) for n in ((res or {}).get('shown') or [])) or '–'
+        gc = ws.cell(row=row, column=col, value=shown if res is not None else '–')
+        gc.font = _font(size=9, color=C.text_muted)
+        gc.alignment = _align(horizontal='center')
+        gc.border = _border(color=C.border_light)
+
     row = hdr_row + 1
     for h in hosts:
         s = stat.get(h, {})
         b = brow.get(h)
         ad = s.get('ad') or {}
+        seo = (b or {}).get('seo')
         city = s.get('city') or (b or {}).get('city') or h
         url = s.get('url') or (b or {}).get('url') or ''
         kp_ad = ad.get('kp') or (b or {}).get('kp') or ''
@@ -5940,10 +5989,7 @@ def _build_calltracking_sheet(wb, results, calltracking_check):
         uc.alignment = _align(horizontal='center')
         uc.border = _border(color=C.border_light)
 
-        kc = ws.cell(row=row, column=4, value=_fmt_num(kp_ad))
-        kc.font = _font(size=10, color=C.text_soft)
-        kc.alignment = _align(horizontal='center')
-        kc.border = _border(color=C.border_light)
+        _num_cell(4, kp_ad)
 
         # В конфиге (статически)
         cfg_label, cfg_ck = _CT_CFG.get(ad.get('status'), ('–', 'text_muted'))
@@ -5957,24 +6003,16 @@ def _build_calltracking_sheet(wb, results, calltracking_check):
         if ad.get('comment'):
             fc.comment = Comment(ad['comment'], 'Site Checker', height=90, width=280)
 
-        # Подмена (браузер)
-        if b is None:
-            bl, bck = ('не проверяли', 'text_muted')
-        else:
-            bl, bck = _CT_BROW.get(b.get('status'), (b.get('status', ''), 'text_muted'))
-        bc = ws.cell(row=row, column=6, value=bl)
-        bc.font = _font(size=10, bold=(bck in ('ok', 'err')),
-                        color=getattr(C, bck, C.text_muted))
-        if bck in ('ok', 'err'):
-            bc.fill = _fill(C.ok_soft if bck == 'ok' else C.err_soft)
-        bc.alignment = _align(horizontal='center')
-        bc.border = _border(color=C.border_light)
+        # Подмена реклама (браузер) + что показал сайт
+        _brow_cell(6, b)
+        _shown_cell(7, b)
 
-        shown = ', '.join(_fmt_num(n) for n in ((b or {}).get('shown') or [])) or '–'
-        gc = ws.cell(row=row, column=7, value=shown if b is not None else '–')
-        gc.font = _font(size=9, color=C.text_muted)
-        gc.alignment = _align(horizontal='center')
-        gc.border = _border(color=C.border_light)
+        # SEO-подмена (колонки есть, только если у проекта есть поисковый номер)
+        if seo_used:
+            _num_cell(8, (seo or {}).get('kp') or '')
+            _brow_cell(9, seo)
+            _shown_cell(10, seo)
+
         ws.row_dimensions[row].height = 20
         row += 1
 
