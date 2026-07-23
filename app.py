@@ -233,6 +233,14 @@ st.markdown(
     }
     [data-testid="stSidebarNav"] a:hover { background-color: rgba(26,26,26,.06) !important; }
     [data-testid="stSidebarNav"] a[aria-current="page"] { background-color: rgba(26,26,26,.10) !important; }
+
+    /* Мультиселект (напр. «Проекты» в форме входа): не обрезать названия в
+       плашках-тегах - показываем целиком, переносим при нехватке места. */
+    [data-baseweb="tag"] { max-width: none !important; height: auto !important; }
+    [data-baseweb="tag"] span {
+        max-width: none !important; overflow: visible !important;
+        text-overflow: clip !important; white-space: normal !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,

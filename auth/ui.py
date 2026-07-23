@@ -297,6 +297,7 @@ def _register_form() -> None:
     projects = st.multiselect(
         proj_label, _proj_opts, key="reg_projects",
         format_func=project_label,
+        placeholder="Выберите проекты",
     )
 
     if st.button("ЗАРЕГИСТРИРОВАТЬСЯ", type="primary", use_container_width=True, key="reg_btn"):
@@ -676,6 +677,7 @@ def _admin_panel(user: dict) -> None:
         _prune_ms("adm_projects", all_projects)
         projects = st.multiselect("Проекты", all_projects, key="adm_projects",
                                   format_func=project_label,
+                                  placeholder="Выберите проекты",
                                   disabled=(new_role == "admin"),
                                   help="Админ видит все проекты — выбор не нужен.")
         if st.button("Создать", key="adm_create"):
@@ -715,7 +717,8 @@ def _admin_panel(user: dict) -> None:
                 st.caption("Желает проекты: " + ", ".join(project_label(p) for p in want))
             _want_default = [p for p in want if p in all_projects]
             sel = st.multiselect("Выдать доступ к проектам", all_projects, default=_want_default,
-                                 format_func=project_label, key=f"mgr_pj_{uid}")
+                                 format_func=project_label, key=f"mgr_pj_{uid}",
+                                 placeholder="Выберите проекты")
             pc = st.columns([1, 1, 4])
             if pc[0].button("Одобрить", key=f"mgr_appr_{uid}", type="primary",
                             use_container_width=True):
