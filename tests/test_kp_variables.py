@@ -55,7 +55,7 @@ def test_check_variables_ok():
     assert by["Почта"]["status"] == "ok"
     assert by["Telegram"]["status"] == "ok"
     assert by["WhatsApp"]["status"] == "ok"
-    assert by["Тел. общий"]["status"] in ("ok", "ok_set")
+    assert by["Общий Город"]["status"] in ("ok", "ok_set")
 
 
 def test_check_variables_bug_wrong_phone():
@@ -65,7 +65,7 @@ def test_check_variables_bug_wrong_phone():
     r = kp.check_variables(html, "stalmetural.ru")
     by = {f["field"]: f for f in r["fields"]}
     # общий телефон Москвы точно есть в КП; на сайте его нет и номер чужой
-    assert by["Тел. общий"]["status"] in ("bug", "warn")
+    assert by["Общий Город"]["status"] in ("bug", "warn")
 
 
 def test_check_variables_garbage_kp_values_are_flagged():
@@ -87,11 +87,11 @@ def test_check_variables_garbage_kp_values_are_flagged():
             '</header>')
         r = kp.check_variables(html, "stalmetural.ru")
         by = {f["field"]: f for f in r["fields"]}
-        assert by["Тел. поиск"]["status"] == "bug"    # было «na» («–»)
-        assert by["Тел. общий"]["status"] == "bug"    # было «na» («–»)
+        assert by["SEO Город"]["status"] == "bug"    # было «na» («–»)
+        assert by["Общий Город"]["status"] == "bug"    # было «na» («–»)
         assert by["Почта"]["status"] == "bug"         # ловилось и раньше
         assert by["Адрес"]["status"] == "bug"         # было ложное «ok» (✓)
-        assert by["Тел. реклама"]["status"] == "ok"   # реальный номер по-прежнему ✓
+        assert by["Реклама Город"]["status"] == "ok"   # реальный номер по-прежнему ✓
     finally:
         row.phone_seo, row.phone_common, row.email, row.address = saved
 
@@ -150,21 +150,21 @@ def test_только_почта_для_перевода():
     import variables_run as vr
     fields = [
         {"field": "Город", "status": "bug", "found": "не найден на странице"},
-        {"field": "Тел. поиск", "status": "ok", "found": "есть"},
+        {"field": "SEO Город", "status": "ok", "found": "есть"},
         {"field": "Почта", "status": "bug", "found": "другая почта"},
         {"field": "WhatsApp", "status": "ok", "found": "есть"},
     ]
     out = vr._только_почта_для_перевода("Азербайджан (перевод)", [dict(f) for f in fields])
     by = {f["field"]: f for f in out}
     assert by["Город"]["status"] == "na" and by["Город"]["found"] == "–"
-    assert by["Тел. поиск"]["status"] == "na"
+    assert by["SEO Город"]["status"] == "na"
     assert by["WhatsApp"]["status"] == "na"
     assert by["Почта"]["status"] == "bug"            # почту проверяем как обычно
 
     # Обычный город (без «(перевод)») остаётся как есть.
     out2 = vr._только_почта_для_перевода("Баку", [dict(f) for f in fields])
     assert {f["field"]: f["status"] for f in out2} == \
-        {"Город": "bug", "Тел. поиск": "ok", "Почта": "bug", "WhatsApp": "ok"}
+        {"Город": "bug", "SEO Город": "ok", "Почта": "bug", "WhatsApp": "ok"}
 
 
 def test_find_contacts_path():
