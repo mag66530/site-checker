@@ -741,9 +741,11 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     site_phones = {p for p in (normalize_phone(x) for x in site.get("phones", [])) if p}
     site_ph_fmt = ", ".join(_fmt(p) for p in sorted(site_phones)) or "–"
 
-    for label, val in (("Тел. поиск", row.phone_seo),
-                       ("Тел. реклама", row.phone_ad),
-                       ("Тел. общий", row.phone_common)):
+    # Подписи колонок телефонов - как в КП («SEO Город» / «Реклама Город» /
+    # «Общий Город»), чтобы отчёт и «Карта присутствия» назывались одинаково.
+    for label, val in (("SEO Город", row.phone_seo),
+                       ("Реклама Город", row.phone_ad),
+                       ("Общий Город", row.phone_common)):
         _exps = phones_in_cell(val)         # первый = текущий номер (не «стар.»)
         exp = _exps[0] if _exps else ''
         raw = str(val).strip() if val is not None else ""
