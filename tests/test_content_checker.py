@@ -315,6 +315,19 @@ def test_form_nf_required_only_on_smu():
     assert 'form_nf' not in _by_key(r_other)
 
 
+def test_form_nf_detected_when_translated():
+    """Баку (.az) и др. зеркала: заголовок формы переведён
+    («Axtardığınızı tapmadınız?»), но вёрстка/класс те же - находим по
+    class="find-form", а не по русскому тексту."""
+    az_form = ('<form class="find-form" action="/local/ajax/form.php">'
+               '<h3>Axtardığınızı tapmadınız?</h3>'
+               '<input placeholder="Məhsul təsviri"></form>')
+    html = COMMON + CARD_WITH_PRICE + SMU_MARKER + az_form
+    r = check_content(html, 'category')
+    assert _by_key(r)['form_nf'].present            # форма найдена, несмотря на az
+    assert not any(bug.key == 'form_nf' for bug in r.bugs)
+
+
 def test_project_absent_elements_not_shown():
     """У ИМП нет «Заказать звонок», у МПЭ - ещё и «Написать нам»:
     этих столбцов в отчёте быть не должно (не ложный баг)."""

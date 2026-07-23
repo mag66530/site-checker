@@ -773,9 +773,15 @@ def _d_pagination(c: _Ctx):
 
 
 def _d_form_not_found(c: _Ctx):
+    # Ищем по СТРУКТУРНОМУ признаку (class="find-form" - тот же, по которому
+    # форму находит форм-тестер), а НЕ по русскому тексту: на зарубежных
+    # зеркалах (Баку .az, УЗ, КЗ…) заголовок переведён
+    # («Axtardığınızı tapmadınız?»), но вёрстка и класс формы те же.
     present = (
-        'не нашли что искали' in c.text_lower
+        'find-form' in c.html_lower
+        or 'не нашли что искали' in c.text_lower
         or 'подберем нужную продукцию' in c.text_lower
+        or 'axtardığınızı tapmad' in c.text_lower          # az
     )
     return present, None
 
