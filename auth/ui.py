@@ -211,14 +211,20 @@ def _ensure_cookie() -> None:
     """Держит cookie сессии записанным: пишем на КАЖДОМ залогиненном ране.
     Идемпотентно (тот же токен), гарантирует запись даже если какой-то ран
     оборвался до монтирования компонента, и заодно продлевает срок — скользящие
-    SESSION_TTL_DAYS (30) дней от последнего визита, как в GAR."""
+    SESSION_TTL_DAYS (30) дней от последнего визита, как в GAR.
+
+    ВАЖНО: срок квантуем до ДНЯ. С «сырым» datetime.now() аргументы компонента
+    менялись каждый ран → компонент бесконечно перемонтировался и своими
+    ответами провоцировал каскад rerun'ов (подвисания). Стабильные аргументы =
+    компонент монтируется один раз и живёт."""
     token = st.session_state.get("_auth_token")
     if not token:
         return
+    _day = datetime.now().date() + timedelta(days=SESSION_TTL_DAYS)
     try:
         _cookie_manager().set(
             _SESSION_COOKIE, token,
-            expires_at=datetime.now() + timedelta(days=SESSION_TTL_DAYS),
+            expires_at=datetime.combine(_day, datetime.min.time()),
         )
     except Exception as e:
         print(f"[auth] cookie set failed: {e}")
@@ -235,12 +241,17 @@ def _request_cookies():
 
 
 def _restore_session_from_cookie() -> bool:
-    """Живой токен в cookie → восстанавливаем сессию без формы входа."""
-    ctx_cookies = _request_cookies()
-    if ctx_cookies is not None:
-        token = ctx_cookies.get(_SESSION_COOKIE)
-    else:
-        # Fallback (старый Streamlit): компонентное чтение с probe-циклом.
+    """Живой токен в cookie → восстанавливаем сессию без формы входа.
+
+    Два источника, по очереди:
+      1) st.context.cookies — из HTTP-запроса, мгновенно. Но на Streamlit Cloud
+         прокси может НЕ пробрасывать cookie в запрос (контекст пуст, хотя в
+         браузере cookie есть!) — поэтому пустой контекст НЕ значит «нет сессии»;
+      2) stx-компонент (document.cookie из браузера) — источник истины;
+         на первом ране его ответа ещё нет → probe: st.stop() и ждём ответа
+         компонента (он сам перезапустит скрипт со значениями)."""
+    token = (_request_cookies() or {}).get(_SESSION_COOKIE)
+    if not token:
         mgr = _cookie_manager()
         cookies = mgr.get_all()
         if (cookies is None or cookies == {}) and not st.session_state.get("_cookie_probed"):
