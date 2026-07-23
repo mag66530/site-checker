@@ -1239,18 +1239,20 @@ if pid:
         # есть в каталоге (иначе чекбокс не рисуется). Порядок = как в разделе.
         _SEC_TEH = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
                     'c30_check_products', 'c30_check_text', 'c30_check_indexing',
-                    'c30_check_meta', 'c30_check_w3c', 'c30_check_static',
-                    'c30_check_404', 'c30_check_ps_filters', 'c30_check_link_profile',
+                    'c30_check_meta', 'c30_check_markup', 'c30_check_w3c',
+                    'c30_check_static', 'c30_check_404', 'c30_check_ps_filters',
                     'c30_check_links', 'c30_check_index_404', 'c30_check_home_dupes',
-                    'c30_check_filter_fn']
+                    'c30_check_console']
         if stats['has_filters']:
             _SEC_TEH.insert(3, 'c30_check_filters')
-        _SEC_VER = ['c30_check_layout', 'c30_check_markup', 'c30_check_images',
-                    'c30_check_console']
+        _SEC_VER = ['c30_check_layout', 'c30_check_filter_fn']
+        _SEC_CON = ['c30_check_images']
         _SEC_SEC = ['c30_check_security']
-        _SEC_KP = ['c30_check_region', 'c30_check_cis', 'c30_check_yabusiness']
-        _SEC_ANA = ['c30_check_anomaly', 'c30_check_traffic', 'c30_check_review_priority',
-                    'c30_check_anomalies', 'c30_check_trust', 'c30_check_calltracking']
+        _SEC_KP = ['c30_check_region', 'c30_check_cis']
+        _SEC_YAB = ['c30_check_yabusiness']
+        _SEC_ANA = ['c30_check_link_profile', 'c30_check_anomaly', 'c30_check_traffic',
+                    'c30_check_review_priority', 'c30_check_anomalies',
+                    'c30_check_trust', 'c30_check_calltracking']
         _SEC_ADM = ['c30_check_admin_settings', 'c30_check_admin_crud',
                     'c30_check_admin_product_crud', 'c30_check_admin_tech_crud',
                     'c30_check_admin_counters']
@@ -1262,7 +1264,8 @@ if pid:
             return sum(1 for _k in _keys if st.session_state.get(_k, False))
         # «Выбрать/Снять все» - только страничные проверки (5 разделов), без
         # Админки (ручная) и Дополнительно (точечное, по умолчанию выкл).
-        _CHK_KEYS = _SEC_TEH + _SEC_VER + _SEC_SEC + _SEC_KP + _SEC_ANA
+        _CHK_KEYS = (_SEC_TEH + _SEC_VER + _SEC_CON + _SEC_SEC + _SEC_KP
+                     + _SEC_YAB + _SEC_ANA)
         # Подпись кнопки берём из session_state ДО отрисовки галочек: в одном
         # прогоне session_state консистентен (галочки покажут ровно эти значения),
         # поэтому подпись всегда совпадает. Обычную кнопку (не в st.empty) - иначе
@@ -1289,8 +1292,10 @@ if pid:
             '<style>'
             '.st-key-c30_sec_teh [data-testid="stExpander"]{border-left:5px solid #3A5BD9 !important}'
             '.st-key-c30_sec_ver [data-testid="stExpander"]{border-left:5px solid #8A6BD0 !important}'
+            '.st-key-c30_sec_con [data-testid="stExpander"]{border-left:5px solid #C85C9E !important}'
             '.st-key-c30_sec_sec [data-testid="stExpander"]{border-left:5px solid #D03B3B !important}'
             '.st-key-c30_sec_kp [data-testid="stExpander"]{border-left:5px solid #0F9C8E !important}'
+            '.st-key-c30_sec_yab [data-testid="stExpander"]{border-left:5px solid #B5842A !important}'
             '.st-key-c30_sec_ana [data-testid="stExpander"]{border-left:5px solid #1F9D2F !important}'
             '.st-key-c30_sec_adm [data-testid="stExpander"]{border-left:5px solid #5A6B7B !important}'
             '.st-key-c30_sec_dop [data-testid="stExpander"]{border-left:5px solid #C77D2E !important}'
@@ -1358,6 +1363,16 @@ if pid:
                              'тегов (ровно один title/description/H1, дубли H2) '
                              'и «текстовость» заголовков: h2-h6 не должны быть '
                              'в шапке/подвале/меню/сайдбаре.')
+            st.checkbox('Микроразметка и OpenGraph (Schema.org, og:*)',
+                        key='c30_check_markup',
+                        help='ТЗ 3.5: OpenGraph (og:url/title/description/image/type) '
+                             'на основных страницах; Schema.org - данные компании '
+                             'везде, крошки BreadcrumbList, листинги, на товаре '
+                             'Product + характеристики + фото + цены. Условно: '
+                             'видео → VideoObject, FAQ-блок → FAQPage, адрес → '
+                             'PostalAddress. Основной формат microdata: тип '
+                             'только в JSON-LD = предупреждение. Валидность '
+                             'полей - инструментами Яндекса/Google вручную.')
             st.checkbox('Валидация W3C (HTML/CSS) + скорость ресурсов',
                         key='c30_check_w3c',
                         help='По выборке страниц (главная/категория/товар): HTML '
@@ -1398,19 +1413,6 @@ if pid:
                              'дней по маркерам («ручные меры», «security '
                              'issue») + ссылка на ручную сверку в Search '
                              'Console. Отдельный лист «Фильтры ПС».')
-            st.checkbox('Ссылочный профиль (беклинки, lite)',
-                        key='c30_check_link_profile',
-                        help='Беклинки по официальным данным Яндекс.Вебмастера '
-                             '(тот же OAuth-токен, что и диагностика): объём '
-                             '(всего внешних ссылок и доноров), динамика '
-                             '(резкий обвал = потеря ссылок, всплеск = '
-                             'возможный спам/накрутка) и подозрительные доноры '
-                             '(мусорные зоны, gambling/adult). Глубокий аудит '
-                             '(Ahrefs/Majestic) платный - здесь его нет. У '
-                             'Google API беклинков нет - ссылка на ручную '
-                             'сверку в GSC. Нужен настроенный токен Вебмастера '
-                             '(webmaster_oauth). Отдельный лист «Ссылочный '
-                             'профиль».')
             st.checkbox('Проверять, что ссылки на страницах реально открываются (404)',
                         key='c30_check_links',
                         help='Прозваниваем внутренние ссылки ВСЕХ страниц прогона - '
@@ -1441,16 +1443,20 @@ if pid:
                              'редирект и тег canonical. Редирект на главную или '
                              'canonical → главная = склеено (ок); 200 без этого = дубль. '
                              'Быстро, без браузера. Отдельный лист «Дубли главной».')
-            st.checkbox('Проверять фильтрацию товаров (браузер)',
-                        key='c30_check_filter_fn',
-                        help='Открывает категорию в браузере и применяет фильтр по '
-                             'заданным селекторам, проверяя что выдача сужается '
-                             '(не пусто, не дубль категории, без ошибок). Тяжёлый '
-                             'браузерный тест - по запросу. Селекторы задаются на '
-                             'проект в catalogs/filters-<проект>.json.')
+            st.checkbox('Ошибки JavaScript в консоли + адаптивность (браузер)',
+                        key='c30_check_console',
+                        help='Открывает в браузере КАЖДУЮ страницу прогона (главная, '
+                             'каталог, категории, фильтры, товары, тех.) и ловит '
+                             'ошибки JS в консоли (console.error + исключения). Шум '
+                             'аналитики/виджетов отсеивается. Той же поездкой - '
+                             'адаптивность на ширинах 1440/768/390: нет '
+                             'горизонтального скролла, блоки не накладываются при '
+                             'ресайзе (масштаб Ctrl+/- покрыт той же сеткой), на '
+                             'мобильном шрифт минимум 14px. Тяжёлый браузерный '
+                             'проход - по запросу.')
 
         _sec_ver = st.container(key='c30_sec_ver')
-        with _sec_ver.expander(f'🎨  Вёрстка – адаптивность, микроразметка, изображения  `{_sec_n(_SEC_VER)}/{len(_SEC_VER)}`', expanded=True):
+        with _sec_ver.expander(f'🎨  Вёрстка – адаптивность, навигация, фильтрация  `{_sec_n(_SEC_VER)}/{len(_SEC_VER)}`', expanded=True):
             st.checkbox('Вёрстка, адаптивность и навигация (viewport, стили, меню)',
                         key='c30_check_layout',
                         help='ТЗ 2.1/2.1.1: задан тег viewport (мобильная версия '
@@ -1468,16 +1474,16 @@ if pid:
                              '(большие inline-блоки) и async/defer у скриптов '
                              'в <head>. '
                              'Визуальный рендер не заменяет - ручной просмотр остаётся.')
-            st.checkbox('Микроразметка и OpenGraph (Schema.org, og:*)',
-                        key='c30_check_markup',
-                        help='ТЗ 3.5: OpenGraph (og:url/title/description/image/type) '
-                             'на основных страницах; Schema.org - данные компании '
-                             'везде, крошки BreadcrumbList, листинги, на товаре '
-                             'Product + характеристики + фото + цены. Условно: '
-                             'видео → VideoObject, FAQ-блок → FAQPage, адрес → '
-                             'PostalAddress. Основной формат microdata: тип '
-                             'только в JSON-LD = предупреждение. Валидность '
-                             'полей - инструментами Яндекса/Google вручную.')
+            st.checkbox('Проверять фильтрацию товаров (браузер)',
+                        key='c30_check_filter_fn',
+                        help='Открывает категорию в браузере и применяет фильтр по '
+                             'заданным селекторам, проверяя что выдача сужается '
+                             '(не пусто, не дубль категории, без ошибок). Тяжёлый '
+                             'браузерный тест - по запросу. Селекторы задаются на '
+                             'проект в catalogs/filters-<проект>.json.')
+
+        _sec_con = st.container(key='c30_sec_con')
+        with _sec_con.expander(f'🖼️  Контент – изображения  `{_sec_n(_SEC_CON)}/{len(_SEC_CON)}`', expanded=True):
             st.checkbox('Изображения (alt, webp/avif, вес, имена файлов)',
                         key='c30_check_images',
                         help='Alt у всех <img> (баг - и пустой alt="", и полное '
@@ -1487,17 +1493,6 @@ if pid:
                              'тяжелее 300 КБ = не оптимизировано. Имена файлов - '
                              'транслит из alt (хеши CMS - одно предупреждение). '
                              'Lazy loading. Отдельный лист «Изображения».')
-            st.checkbox('Ошибки JavaScript в консоли + адаптивность (браузер)',
-                        key='c30_check_console',
-                        help='Открывает в браузере КАЖДУЮ страницу прогона (главная, '
-                             'каталог, категории, фильтры, товары, тех.) и ловит '
-                             'ошибки JS в консоли (console.error + исключения). Шум '
-                             'аналитики/виджетов отсеивается. Той же поездкой - '
-                             'адаптивность на ширинах 1440/768/390: нет '
-                             'горизонтального скролла, блоки не накладываются при '
-                             'ресайзе (масштаб Ctrl+/- покрыт той же сеткой), на '
-                             'мобильном шрифт минимум 14px. Тяжёлый браузерный '
-                             'проход - по запросу.')
 
         _sec_sec = st.container(key='c30_sec_sec')
         with _sec_sec.expander(f'🔒  Безопасность – заголовки ответа сервера  `{_sec_n(_SEC_SEC)}/{len(_SEC_SEC)}`', expanded=True):
@@ -1526,6 +1521,9 @@ if pid:
                              'пройдитесь по главной, каталогу, контактам и подвалу - '
                              'если встречается «Россия»/«РФ»/«СНГ» или чужая страна, '
                              'это ошибка.')
+
+        _sec_yab = st.container(key='c30_sec_yab')
+        with _sec_yab.expander(f'🏢  Я.Бизнес/GMB – карточки поддоменов под свой регион  `{_sec_n(_SEC_YAB)}/{len(_SEC_YAB)}`', expanded=True):
             st.checkbox('Я.Бизнес: каждый поддомен под свой регион',
                         key='c30_check_yabusiness',
                         help='Тянет организации аккаунта из кабинета Яндекс.Справочника '
@@ -1538,7 +1536,20 @@ if pid:
                              'когда дадут доступ, перейдём на него.')
 
         _sec_ana = st.container(key='c30_sec_ana')
-        with _sec_ana.expander(f'📊  Аналитика – аномалии Вебмастера  `{_sec_n(_SEC_ANA)}/{len(_SEC_ANA)}`', expanded=True):
+        with _sec_ana.expander(f'📊  Аналитика – ссылочный профиль, аномалии, трафик, траст  `{_sec_n(_SEC_ANA)}/{len(_SEC_ANA)}`', expanded=True):
+            st.checkbox('Ссылочный профиль (беклинки, lite)',
+                        key='c30_check_link_profile',
+                        help='Беклинки по официальным данным Яндекс.Вебмастера '
+                             '(тот же OAuth-токен, что и диагностика): объём '
+                             '(всего внешних ссылок и доноров), динамика '
+                             '(резкий обвал = потеря ссылок, всплеск = '
+                             'возможный спам/накрутка) и подозрительные доноры '
+                             '(мусорные зоны, gambling/adult). Глубокий аудит '
+                             '(Ahrefs/Majestic) платный - здесь его нет. У '
+                             'Google API беклинков нет - ссылка на ручную '
+                             'сверку в GSC. Нужен настроенный токен Вебмастера '
+                             '(webmaster_oauth). Отдельный лист «Ссылочный '
+                             'профиль».')
             st.checkbox('Нет аномалий: Вебмастер + внезапные мусорные ссылки',
                         key='c30_check_anomaly',
                         help='Мониторинг резких отклонений «от себя-прошлого» - '
