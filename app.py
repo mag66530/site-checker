@@ -241,6 +241,17 @@ st.markdown(
         max-width: none !important; overflow: visible !important;
         text-overflow: clip !important; white-space: normal !important;
     }
+    /* Плейсхолдер/значение селекта не должны подрезаться сверху ("текст не
+       влазит"): достаточная высота, вертикальное центрирование, нормальный
+       интерлиньяж и без обрезки по высоте. */
+    div[data-baseweb="select"] > div {
+        min-height: 50px !important; height: auto !important;
+        align-items: center !important; overflow: visible !important;
+        padding-top: 4px !important; padding-bottom: 4px !important;
+    }
+    div[data-baseweb="select"] > div > div {
+        overflow: visible !important; line-height: 1.6 !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
