@@ -194,11 +194,10 @@ def _cookie_manager() -> stx.CookieManager:
 
 
 def _start_persistent_session(user: dict) -> None:
-    """Создаёт серверную сессию и ПЛАНИРУЕТ запись cookie.
-
-    Сам cookie тут НЕ пишем: _login_form сразу делает st.rerun(), а он сбрасывает
-    дельту stx-компонента → запись cookie теряется. Ставим флаг, а cookie пишем в
-    _flush_pending_cookie() на ране, который завершается без немедленного rerun."""
+    """Создаёт серверную сессию (запись в БД). Сам cookie пишет _ensure_cookie()
+    на каждом залогиненном ране — разовая запись через stx-компонент терялась,
+    если ран обрывался rerun'ом до монтирования компонента (из-за этого F5
+    выкидывал на вход)."""
     token = security.gen_session_token()
     try:
         db.session_create(str(user["id"]), security.hash_token(token), ttl_days=SESSION_TTL_DAYS)
@@ -206,12 +205,14 @@ def _start_persistent_session(user: dict) -> None:
         print(f"[auth] session_create failed: {e}")
         return
     st.session_state["_auth_token"] = token
-    st.session_state["_pending_cookie_token"] = token
 
 
-def _flush_pending_cookie() -> None:
-    """Если запланирована запись cookie — пишем её сейчас (ран без rerun после)."""
-    token = st.session_state.pop("_pending_cookie_token", None)
+def _ensure_cookie() -> None:
+    """Держит cookie сессии записанным: пишем на КАЖДОМ залогиненном ране.
+    Идемпотентно (тот же токен), гарантирует запись даже если какой-то ран
+    оборвался до монтирования компонента, и заодно продлевает срок — скользящие
+    SESSION_TTL_DAYS (30) дней от последнего визита, как в GAR."""
+    token = st.session_state.get("_auth_token")
     if not token:
         return
     try:
@@ -223,14 +224,29 @@ def _flush_pending_cookie() -> None:
         print(f"[auth] cookie set failed: {e}")
 
 
+def _request_cookies():
+    """Cookie из HTTP-запроса браузера (st.context) — читаются мгновенно на
+    первом же ране, без компонентов и пустых экранов. dict (возможно пустой) =
+    ответ получен; None = st.context недоступен (очень старый Streamlit)."""
+    try:
+        return dict(st.context.cookies)
+    except Exception:
+        return None
+
+
 def _restore_session_from_cookie() -> bool:
     """Живой токен в cookie → восстанавливаем сессию без формы входа."""
-    mgr = _cookie_manager()
-    cookies = mgr.get_all()
-    if (cookies is None or cookies == {}) and not st.session_state.get("_cookie_probed"):
-        st.session_state["_cookie_probed"] = True
-        st.stop()
-    token = (cookies or {}).get(_SESSION_COOKIE)
+    ctx_cookies = _request_cookies()
+    if ctx_cookies is not None:
+        token = ctx_cookies.get(_SESSION_COOKIE)
+    else:
+        # Fallback (старый Streamlit): компонентное чтение с probe-циклом.
+        mgr = _cookie_manager()
+        cookies = mgr.get_all()
+        if (cookies is None or cookies == {}) and not st.session_state.get("_cookie_probed"):
+            st.session_state["_cookie_probed"] = True
+            st.stop()
+        token = (cookies or {}).get(_SESSION_COOKIE)
     if not token:
         return False
     try:
@@ -240,7 +256,7 @@ def _restore_session_from_cookie() -> bool:
         return False
     if not user or user.get("status") != "active":
         try:
-            mgr.delete(_SESSION_COOKIE)
+            _cookie_manager().delete(_SESSION_COOKIE)
         except Exception:
             pass
         return False
@@ -443,10 +459,11 @@ def require_login() -> bool:
         return False
 
     if current_user():
-        _flush_pending_cookie()  # дописываем cookie после входа (ран без rerun)
+        _ensure_cookie()   # cookie пишется каждый ран: надёжно + скользящие 30 дней
         return True
 
     if _restore_session_from_cookie():
+        _ensure_cookie()
         return True
 
     _center_logo()
