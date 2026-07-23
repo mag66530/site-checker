@@ -810,6 +810,15 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     site_phones = set(_site_ph_ordered)
     site_ph_primary = fmt(_site_ph_ordered[0]) if _site_ph_ordered else "–"
 
+    # Рекламный номер («Реклама Город») подменяется коллтрекингом ТОЛЬКО при
+    # рекламном визите (?utm_source=yandex) - в обычной выдаче/инкогнито на
+    # странице стоит обычный (SEO/общий) номер. Поэтому сверять его с ВИДИМЫМ
+    # номером нельзя (всегда «не совпадает»). Берём пул подменных номеров из
+    # конфига коллтрекинга (Sipuni) прямо в HTML - тот же, что JS показывает
+    # рекламе, - и сверяем с ним. None, если в КП нет рекл. номера.
+    from calltracking_checker import check_ad_number
+    _ad = check_ad_number(html, row.phone_ad)
+
     # Колонки телефонов - с префиксом «Тел.», чтобы не путать с колонкой «Город»
     # (проверка города). Порядок как в КП: общий → реклама → SEO.
     for label, val in (("Тел. Общий Город", row.phone_common),
@@ -818,6 +827,16 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         _exps = phones_in_cell(val)         # первый = текущий номер (не «стар.»)
         exp = _exps[0] if _exps else ''
         raw = str(val).strip() if val is not None else ""
+        if label == "Тел. Реклама Город" and _ad and _ad["status"] in ("ok", "bug"):
+            # Есть коллтрекинг и рекламный номер в КП - сверяем с пулом подмены.
+            if _ad["status"] == "ok":
+                add(label, fmt(exp), fmt(exp), "ok",
+                    "рекламный номер (подмена коллтрекинга) совпадает с КП")
+            else:
+                _cfg = ", ".join(fmt(n) for n in _ad["configured"]) or "–"
+                add(label, fmt(exp), _cfg, "bug",
+                    "рекламный номер подмены не совпадает с КП")
+            continue
         if not exp:
             # В ЭТОЙ ячейке КП валидного телефона нет. Правило заказчика:
             #   • на сайте номер ЕСТЬ, а в КП нет → ошибка ✗ (показываем номер сайта);
