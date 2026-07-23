@@ -83,8 +83,19 @@ def outbound_ip(proxy: str | None = None, timeout: int = 7):
     return None, None, last_err
 
 
+# Известные анти-DDoS/WAF: если блок (403) отдаёт ОН, а не origin сайта, то и
+# whitelist IP надо ставить на нём, а не в nginx (и наоборот). Ключ - маркер в
+# заголовках/теле ответа, значение - человекочитаемое имя.
+_WAF_MARKERS = {
+    "ddos-guard": "DDoS-Guard", "qrator": "Qrator", "cloudflare": "Cloudflare",
+    "stormwall": "StormWall", "incapsula": "Imperva/Incapsula",
+    "variti": "Variti", "servicepipe": "ServicePipe", "ochrana": "Ochrana",
+}
+
+
 def probe_site(url: str, proxy: str | None = None, timeout: int = 12) -> dict:
-    """Прямой GET к сайту. Возвращает {status, ms, size, server, error}."""
+    """Прямой GET к сайту. Возвращает {status, ms, size, server, waf, snippet,
+    error}. На не-200 waf/snippet помогают понять, КТО режет (origin/WAF)."""
     import requests
     proxies = {"http": proxy, "https": proxy} if proxy else None
     t0 = time.monotonic()
@@ -92,13 +103,24 @@ def probe_site(url: str, proxy: str | None = None, timeout: int = 12) -> dict:
         r = requests.get(url, proxies=proxies, timeout=timeout,
                          allow_redirects=True, headers={"User-Agent": _UA})
         ms = int((time.monotonic() - t0) * 1000)
+        srv = r.headers.get("Server", "")
+        body = ""
+        try:
+            body = (r.text or "")[:3000]
+        except Exception:  # noqa: BLE001
+            body = ""
+        hay = (srv + " " + " ".join(r.headers.keys()) + " " + body).lower()
+        waf = next((name for key, name in _WAF_MARKERS.items() if key in hay), "")
+        snippet = re.sub(r"<[^>]+>", " ", body)
+        snippet = re.sub(r"\s+", " ", snippet).strip()[:160]
         return {"status": r.status_code, "ms": ms, "size": len(r.content),
-                "server": r.headers.get("Server", ""), "error": None}
+                "server": srv, "waf": waf,
+                "snippet": snippet if r.status_code != 200 else "", "error": None}
     except Exception as e:  # noqa: BLE001
         ms = int((time.monotonic() - t0) * 1000)
         kind = "таймаут" if "timeout" in str(e).lower() else "соединение не установлено"
-        return {"status": None, "ms": ms, "size": 0, "server": "",
-                "error": f"{kind} ({e})"}
+        return {"status": None, "ms": ms, "size": 0, "server": "", "waf": "",
+                "snippet": "", "error": f"{kind} ({e})"}
 
 
 def render_proxy_access(key_prefix: str, default_url: str = "",
@@ -232,20 +254,32 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
                         st.success(f"✅ Доступен – HTTP 200 ({_pm}) · "
                                    f"Server {site['server'] or '–'} · {site['ms']} мс")
                     else:
-                        # Server и подсказку показываем и на не-200: по «Server:
-                        # nginx» видно, что 403 отдаёт САМ САЙТ (его сервер), а не
-                        # прокси/тул. 403/401/451 - это блок по IP.
-                        _srv = f" · Server {site['server']}" if site.get('server') else ""
-                        if site["status"] in (401, 403, 451):
-                            _hint = (" · сайт блокирует этот IP - включите прокси"
-                                     if effective is None else
-                                     " · сайт блокирует и IP прокси - нужен ДРУГОЙ "
-                                     "прокси с российским IP (зарубежные/дата-"
-                                     "центровые адреса такие сайты режут)")
-                        else:
-                            _hint = ""
+                        # На не-200 показываем Server и слой защиты (WAF): по ним
+                        # видно, КТО режет - origin nginx сайта или анти-DDoS перед
+                        # ним. Это подсказывает, ГДЕ должен стоять whitelist IP.
+                        _srv = f" · Server {site['server']}" if site.get("server") else ""
+                        _waf = f" · защита: {site['waf']}" if site.get("waf") else ""
                         st.error(f"❌ Не доступен – HTTP {site['status']} ({_pm})"
-                                 f"{_srv} · {site['ms']} мс{_hint}")
+                                 f"{_srv}{_waf} · {site['ms']} мс")
+                        if site["status"] in (401, 403, 451):
+                            if effective is None:
+                                st.caption("Сайт блокирует этот IP — включите прокси.")
+                            elif site.get("waf"):
+                                st.caption(
+                                    f"Режет защита {site['waf']} ПЕРЕД сайтом, а не "
+                                    f"origin. Если IP прокси в белом списке — "
+                                    f"whitelist надо ставить на {site['waf']}, а не "
+                                    f"только в nginx сайта.")
+                            else:
+                                st.caption(
+                                    "IP прокси блокируется даже при whitelist. "
+                                    "Частые причины: прокси палится заголовками "
+                                    "Via / X-Forwarded-For (нужен анонимный/elite "
+                                    "или SOCKS5-прокси), либо whitelist добавлен не "
+                                    "на том слое (CDN/WAF перед сайтом), либо exit-IP "
+                                    "прокси не тот, что внесли (прокси ротирует IP).")
+                        if site.get("snippet"):
+                            st.caption(f"Ответ сайта: {site['snippet']}")
 
     # Отступ СНИЗУ: отделяем рамку прокси от кнопки «Запустить проверку» под ней
     # (иначе рамка и чёрная кнопка «слипаются»).
