@@ -241,6 +241,18 @@ st.markdown(
         max-width: none !important; overflow: visible !important;
         text-overflow: clip !important; white-space: normal !important;
     }
+    /* Читаемость плашек: вместо синих с белым текстом - светлые в тон темы
+       с тёмным текстом и тёмным крестиком. */
+    [data-baseweb="tag"] {
+        background: #E3E0D9 !important;
+        border: 1px solid rgba(26,26,26,.14) !important;
+    }
+    [data-baseweb="tag"], [data-baseweb="tag"] * {
+        color: #1A1A1A !important;
+    }
+    [data-baseweb="tag"] svg, [data-baseweb="tag"] svg path {
+        fill: #1A1A1A !important;
+    }
     /* Плейсхолдер/значение селекта не должны подрезаться сверху ("текст не
        влазит"): достаточная высота, вертикальное центрирование, нормальный
        интерлиньяж и без обрезки по высоте. */
@@ -281,17 +293,50 @@ except Exception as _auth_err:  # noqa: BLE001
     st.stop()
 
 if not _logged_in:
+    # Экран входа: НЕ оставляем боковое меню страниц от прошлого рана (после
+    # выхода из аккаунта оно продолжало висеть). Пустая скрытая навигация
+    # заменяет прежнюю и прячет сайдбар-меню целиком.
+    def _login_screen() -> None:
+        pass  # формы входа уже нарисовал require_login()
+
+    st.navigation([st.Page(_login_screen, title='Вход')], position='hidden').run()
     st.stop()
 
 auth.render_account_ui()
 
-pages = [
-    st.Page('checklists/checklist_30min.py', title='Чек-лист', icon='🔎', default=True),
-    st.Page('checklists/autoclickers.py', title='Автокликеры', icon='🖱'),
-    st.Page('checklists/forms_check.py', title='Проверка форм', icon='📝'),
-    st.Page('checklists/goals_check.py', title='Проверка целей', icon='🎯'),
-    st.Page('checklists/variables_check.py', title='Проверка КП', icon='🗺️'),
-    st.Page('checklists/pagespeed_check.py', title='Скорость страниц', icon='⚡'),
-]
+_user = auth.current_user()
 
-st.navigation(pages).run()
+# Вкладки панели по правам юзера (настраиваются в админке/кабинете; пусто в
+# БД = все). Ключи и порядок — auth.APP_TABS.
+_PAGE_DEFS = {
+    'checklist':    ('checklists/checklist_30min.py', 'Чек-лист', '🔎'),
+    'autoclickers': ('checklists/autoclickers.py', 'Автокликеры', '🖱'),
+    'forms':        ('checklists/forms_check.py', 'Проверка форм', '📝'),
+    'goals':        ('checklists/goals_check.py', 'Проверка целей', '🎯'),
+    'kp':           ('checklists/variables_check.py', 'Проверка КП', '🗺️'),
+    'pagespeed':    ('checklists/pagespeed_check.py', 'Скорость страниц', '⚡'),
+}
+_allowed = set(auth.live_allowed_tabs(_user))
+pages = []
+for _key in auth.APP_TAB_KEYS:
+    if _key in _allowed and _key in _PAGE_DEFS:
+        _path, _title, _icon = _PAGE_DEFS[_key]
+        pages.append(st.Page(_path, title=_title, icon=_icon, default=not pages))
+if not pages:   # подстраховка: совсем без страниц не оставляем
+    pages = [st.Page(_PAGE_DEFS['checklist'][0], title='Чек-лист', icon='🔎',
+                     default=True)]
+
+# Кабинеты — обычные страницы навигации (переключение работает в обе стороны).
+_mgmt_pages = []
+if _user and _user.get('role') in ('manager', 'admin'):
+    _mgmt_pages.append(st.Page(auth.manager_cabinet_page,
+                               title='Кабинет руководителя', icon='🗂',
+                               url_path='cabinet'))
+if _user and _user.get('role') == 'admin':
+    _mgmt_pages.append(st.Page(auth.admin_panel_page, title='Админ-панель',
+                               icon='⚙️', url_path='admin'))
+
+if _mgmt_pages:
+    st.navigation({'Проверки': pages, 'Управление': _mgmt_pages}).run()
+else:
+    st.navigation(pages).run()

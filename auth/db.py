@@ -299,6 +299,70 @@ def set_user_projects(user_id: str, project_keys: list[str]) -> None:
             cur.execute("DELETE FROM user_projects WHERE user_id = %s", (user_id,))
 
 
+# ---------- вкладки (доступ к разделам бокового меню) ----------
+# Пустой набор = ВСЕ вкладки (дефолт: никого не ограничиваем). Таблицу создаёт
+# сам код при первом обращении (как sessions) — ручной SQL не нужен.
+
+_TABS_TABLE_READY = False
+
+
+def _ensure_tabs_table() -> None:
+    global _TABS_TABLE_READY
+    if _TABS_TABLE_READY:
+        return
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_tabs (
+                user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                tab_key text NOT NULL,
+                PRIMARY KEY (user_id, tab_key)
+            );
+            """
+        )
+    _TABS_TABLE_READY = True
+
+
+@_retry
+def get_user_tabs(user_id: str) -> list[str]:
+    _ensure_tabs_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT tab_key FROM user_tabs WHERE user_id = %s", (user_id,))
+        return [r[0] for r in cur.fetchall()]
+
+
+@_retry
+def get_all_user_tabs() -> dict[str, list[str]]:
+    """Вкладки сразу по всем юзерам — один запрос (админка/кабинет)."""
+    _ensure_tabs_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT user_id, tab_key FROM user_tabs")
+        out: dict[str, list[str]] = {}
+        for uid, tk in cur.fetchall():
+            out.setdefault(str(uid), []).append(tk)
+        return out
+
+
+@_retry
+def set_user_tabs(user_id: str, tab_keys: list[str]) -> None:
+    _ensure_tabs_table()
+    keys = list(dict.fromkeys(tab_keys or []))
+    with _conn() as c, c.cursor() as cur:
+        if keys:
+            cur.execute(
+                """WITH d AS (
+                       DELETE FROM user_tabs
+                       WHERE user_id = %s AND tab_key <> ALL(%s::text[])
+                   )
+                   INSERT INTO user_tabs (user_id, tab_key)
+                   SELECT %s, x FROM unnest(%s::text[]) AS x
+                   ON CONFLICT DO NOTHING""",
+                (user_id, keys, user_id, keys),
+            )
+        else:
+            cur.execute("DELETE FROM user_tabs WHERE user_id = %s", (user_id,))
+
+
 # ---------- invite codes ----------
 
 @_retry

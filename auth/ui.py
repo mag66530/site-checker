@@ -34,6 +34,24 @@ STATUS_LABELS = {
 }
 ALL_ROLES = ["admin", "manager", "specialist"]  # для смены роли в админке
 
+# Вкладки панели проверок (ключ → название в меню). app.py строит st.Page по
+# этим ключам; здесь — реестр для настраиваемого доступа (как с проектами).
+# Пустой набор у юзера в БД = ВСЕ вкладки (по умолчанию не ограничиваем).
+APP_TABS = [
+    ("checklist", "Чек-лист"),
+    ("autoclickers", "Автокликеры"),
+    ("forms", "Проверка форм"),
+    ("goals", "Проверка целей"),
+    ("kp", "Проверка КП"),
+    ("pagespeed", "Скорость страниц"),
+]
+APP_TAB_KEYS = [k for k, _ in APP_TABS]
+_TAB_LABELS = dict(APP_TABS)
+
+
+def tab_label(key: str) -> str:
+    return _TAB_LABELS.get(key, key)
+
 
 # ---------- проекты (JSON-файлы в projects/*.json, ключ = "id" внутри файла) ----------
 
@@ -115,6 +133,27 @@ def live_user_projects(user_id: str) -> list[str]:
     return _c_user_projects_live(str(user_id))
 
 
+@st.cache_data(ttl=20, show_spinner=False)
+def _c_user_tabs_live(uid: str) -> list:
+    return db.get_user_tabs(uid)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _c_all_tabs() -> dict:
+    return db.get_all_user_tabs()
+
+
+def live_allowed_tabs(user: dict) -> list[str]:
+    """Ключи вкладок панели, доступных юзеру (в порядке APP_TABS). Пустой набор
+    в БД = все вкладки; админ всегда видит всё. Кеш ~20с — смена прав
+    подхватывается без перелогина."""
+    if not user or user.get("role") == "admin":
+        return list(APP_TAB_KEYS)
+    rows = set(_c_user_tabs_live(str(user["id"])))
+    allowed = [k for k in APP_TAB_KEYS if k in rows]
+    return allowed or list(APP_TAB_KEYS)
+
+
 def _invalidate() -> None:
     """Сбросить кеши после мутации (одобрение/проекты/статус/удаление/инвайт)."""
     _c_team.clear()
@@ -122,6 +161,8 @@ def _invalidate() -> None:
     _c_mgr_projects.clear()
     _c_all_users.clear()
     _c_user_projects_live.clear()
+    _c_user_tabs_live.clear()
+    _c_all_tabs.clear()
 
 
 # ---------- session ----------
@@ -250,7 +291,18 @@ def _login_form() -> None:
         _forgot_form()
 
 
+def _smtp_configured() -> bool:
+    try:
+        return bool(st.secrets["smtp"]["user"]) and bool(st.secrets["smtp"]["app_password"])
+    except Exception:
+        return False
+
+
 def _forgot_form() -> None:
+    if not _smtp_configured():
+        st.info("📮 Отправка писем ещё не настроена (блок [smtp] в секретах). "
+                "Пока пароль сбрасывает руководитель или админ из своего "
+                "кабинета — кнопка «Сбросить пароль» покажет ссылку на экране.")
     email = st.text_input("Ваш email", key="forgot_email")
     if st.button("Прислать ссылку для сброса", key="forgot_btn"):
         user = db.get_user_by_email(email)
@@ -416,11 +468,13 @@ def _center_logo() -> None:
 # ---------- account / dashboards (вызывать из app после require_login) ----------
 
 def render_account_ui() -> None:
-    """Блок аккаунта в сайдбаре: кто я, выход, кабинет руководителя, админ-панель.
+    """Блок аккаунта в сайдбаре: кто я + выход.
 
-    В отличие от OpenGAR тут НЕТ вложенной навигации по рабочим вкладкам — эту
-    роль в site-checker уже играет st.navigation() в app.py. Модуль только
-    добавляет свой блок сверху/снизу того же сайдбара."""
+    Кабинет руководителя и админ-панель — ОБЫЧНЫЕ страницы st.navigation()
+    (manager_cabinet_page / admin_panel_page добавляет app.py по роли), а не
+    полноэкранный перехват со st.stop(): раньше из-за него клики по боковому
+    меню не работали («не могу уйти с админ-панели») и после выхода оставалось
+    меню страниц."""
     user = current_user()
     if not user:
         return
@@ -429,28 +483,9 @@ def render_account_ui() -> None:
         st.caption(f"{user['email']} · {ROLE_LABELS.get(user['role'], user['role'])}")
         if user["projects"]:
             st.caption("Проекты: " + ", ".join(project_label(p) for p in user["projects"]))
-        _is_mgr = user["role"] in ("manager", "admin")
-
-        if _is_mgr:
-            if st.button("🗂 Кабинет руководителя", key="open_mgr_cab", use_container_width=True):
-                st.session_state["_show_dashboard"] = True
-                st.rerun()
-        if user["role"] == "admin":
-            if st.button("⚙️ Админ-панель", key="open_admin", use_container_width=True):
-                st.session_state["_show_admin"] = True
-                st.rerun()
         if st.button("Выйти", key="logout_btn", use_container_width=True):
             logout()
             st.rerun()
-
-    # Полноэкранный режим: пока панель открыта — рисуем только её и обрываем
-    # скрипт (st.stop), чтобы страницы site-checker снизу не рендерились.
-    if st.session_state.get("_show_admin") and user["role"] == "admin":
-        _admin_panel(user)
-        st.stop()
-    if st.session_state.get("_show_dashboard") and user["role"] in ("manager", "admin"):
-        _manager_dashboard(user)
-        st.stop()
 
 
 def render_manager_team(user: dict) -> None:
@@ -473,6 +508,9 @@ def render_manager_team(user: dict) -> None:
 
     team_all = _c_team(mid)
     invites = _c_invites(mid)
+    tabsmap = _c_all_tabs()
+    # Руководитель может выдавать только вкладки, доступные ему самому.
+    mgr_tabs = live_allowed_tabs(user)
 
     st.markdown("### 🎟 Инвайт-коды")
     st.caption("Код действует 10 минут, потом сбрасывается. Использованный — пропадает.")
@@ -522,11 +560,15 @@ def render_manager_team(user: dict) -> None:
             token = db.create_reset(uid)
             base = _app_base_url()
             link = f"{base}/?reset={token}" if base else f"?reset={token}"
-            ok, err = email_utils.send_reset_email(u["email"], link)
-            if ok:
-                st.success(f"Письмо со ссылкой отправлено на {u['email']}")
+            if not _smtp_configured():
+                st.info(f"📮 Почта не настроена — передайте сотруднику ссылку "
+                        f"сами (действует 1 час): {link}")
             else:
-                st.error(f"Письмо не ушло: {err}. Ссылка: {link}")
+                ok, err = email_utils.send_reset_email(u["email"], link)
+                if ok:
+                    st.success(f"Письмо со ссылкой отправлено на {u['email']}")
+                else:
+                    st.error(f"Письмо не ушло: {err}. Ссылка: {link}")
         if u["status"] == "active":
             if tc[3].button("Отключить аккаунт", key=f"dis_{uid}",
                             use_container_width=True):
@@ -545,30 +587,51 @@ def render_manager_team(user: dict) -> None:
             db.delete_user(uid)
             _invalidate()
             st.rerun()
+        # Вкладки панели для сотрудника (пусто = все доступные). Чужие вкладки
+        # (выданные админом вне ваших) сохраняем нетронутыми - как с проектами.
+        cur_tabs = tabsmap.get(uid, [])
+        tab_managed = [k for k in cur_tabs if k in mgr_tabs]
+        tab_foreign = [k for k in cur_tabs if k not in mgr_tabs]
+        tt = st.columns([3, 1.6, 4.6], vertical_alignment="bottom")
+        tsel = tt[0].multiselect("Вкладки", mgr_tabs, default=tab_managed,
+                                 format_func=tab_label,
+                                 key=f"team_tb_{uid}", label_visibility="collapsed",
+                                 placeholder="все вкладки")
+        if tt[1].button("Сохранить вкладки", key=f"team_tbsave_{uid}",
+                        use_container_width=True):
+            db.set_user_tabs(uid, tsel + tab_foreign)
+            _invalidate()
+            st.rerun()
+        tt[2].caption("какие разделы меню видит · пусто = все вкладки")
         if cur_foreign:
             _grey("🔒 вне вашего управления (выдано админом): "
                   + ", ".join(project_label(p) for p in cur_foreign))
         st.markdown("<div style='height:1.2rem'></div>", unsafe_allow_html=True)
 
 
-def _manager_dashboard(user: dict) -> None:
+def manager_cabinet_page() -> None:
+    """Страница «Кабинет руководителя» (st.Page в навигации app.py)."""
+    user = current_user()
+    if not user or user["role"] not in ("manager", "admin"):
+        st.error("Доступ только для руководителей.")
+        return
     st.markdown("## 🗂 Кабинет руководителя")
-    if st.button("🏠 В приложение", key="close_mgr", type="primary"):
-        st.session_state["_show_dashboard"] = False
-        st.rerun()
     render_manager_team(user)
 
 
-def _admin_panel(user: dict) -> None:
+def admin_panel_page() -> None:
+    """Страница «Админ-панель» (st.Page в навигации app.py)."""
+    user = current_user()
+    if not user or user["role"] != "admin":
+        st.error("Доступ только для администраторов.")
+        return
     st.markdown("## ⚙️ Админ-панель")
-    if st.button("🏠 В приложение", key="close_admin", type="primary"):
-        st.session_state["_show_admin"] = False
-        st.rerun()
 
     all_projects = project_keys()
     me = str(user["id"])
     users = _c_all_users()
     projmap = {str(u["id"]): list(u.get("projects") or []) for u in users}
+    tabsmap = _c_all_tabs()
 
     def _prune_ms(key: str, options) -> None:
         cur = st.session_state.get(key)
@@ -648,6 +711,20 @@ def _admin_panel(user: dict) -> None:
                 st.rerun()
             _status_btn(u, c[2])
             _delete_ctrl(u, c[3], c[4])
+            # Доступ к вкладкам панели (разделам бокового меню). Пусто = все.
+            t = st.columns([3, 1.6, 4.6], vertical_alignment="bottom")
+            _tb_default = [k for k in tabsmap.get(uid, []) if k in APP_TAB_KEYS]
+            _prune_ms(f"tbedit_{uid}", APP_TAB_KEYS)
+            tsel = t[0].multiselect("Вкладки", APP_TAB_KEYS, default=_tb_default,
+                                    format_func=tab_label,
+                                    key=f"tbedit_{uid}", label_visibility="collapsed",
+                                    placeholder="все вкладки")
+            if t[1].button("Сохранить вкладки", key=f"tbsave_{uid}",
+                           use_container_width=True):
+                db.set_user_tabs(uid, tsel)
+                _invalidate()
+                st.rerun()
+            t[2].caption("какие разделы меню видит · пусто = все вкладки")
 
     emps_by_mgr: dict[str, list] = {}
     for u in users:
