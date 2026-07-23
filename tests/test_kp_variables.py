@@ -89,6 +89,9 @@ def test_check_variables_garbage_kp_values_are_flagged():
         by = {f["field"]: f for f in r["fields"]}
         assert by["Тел. SEO Город"]["status"] == "bug"    # было «na» («–»)
         assert by["Тел. Общий Город"]["status"] == "bug"    # было «na» («–»)
+        # При сломанном КП телефон С САЙТА всё равно виден (не «–») - чтобы было
+        # понятно, что сайт в порядке, а сломан именно КП.
+        assert by["Тел. Общий Город"]["found"] not in ("–", "")
         assert by["Почта"]["status"] == "bug"         # ловилось и раньше
         assert by["Адрес"]["status"] == "bug"         # было ложное «ok» (✓)
         assert by["Тел. Реклама Город"]["status"] == "ok"   # реальный номер по-прежнему ✓
