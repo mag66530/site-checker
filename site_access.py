@@ -232,10 +232,20 @@ def render_proxy_access(key_prefix: str, default_url: str = "",
                         st.success(f"✅ Доступен – HTTP 200 ({_pm}) · "
                                    f"Server {site['server'] or '–'} · {site['ms']} мс")
                     else:
-                        st.error(f"❌ Не доступен – HTTP {site['status']} ({_pm}) · "
-                                 f"{site['ms']} мс"
-                                 + (" · возможно блок по IP/региону, включите прокси"
-                                    if effective is None else ""))
+                        # Server и подсказку показываем и на не-200: по «Server:
+                        # nginx» видно, что 403 отдаёт САМ САЙТ (его сервер), а не
+                        # прокси/тул. 403/401/451 - это блок по IP.
+                        _srv = f" · Server {site['server']}" if site.get('server') else ""
+                        if site["status"] in (401, 403, 451):
+                            _hint = (" · сайт блокирует этот IP - включите прокси"
+                                     if effective is None else
+                                     " · сайт блокирует и IP прокси - нужен ДРУГОЙ "
+                                     "прокси с российским IP (зарубежные/дата-"
+                                     "центровые адреса такие сайты режут)")
+                        else:
+                            _hint = ""
+                        st.error(f"❌ Не доступен – HTTP {site['status']} ({_pm})"
+                                 f"{_srv} · {site['ms']} мс{_hint}")
 
     # Отступ СНИЗУ: отделяем рамку прокси от кнопки «Запустить проверку» под ней
     # (иначе рамка и чёрная кнопка «слипаются»).
