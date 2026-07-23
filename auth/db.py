@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import datetime as _dt
 import functools
+import re
 import time
 from contextlib import contextmanager
 from typing import Optional
+from urllib.parse import quote
 
 import psycopg
 import streamlit as st
@@ -33,7 +35,20 @@ def _db_url() -> str:
     # пул, idle-клиент НЕ держит серверный коннект. Session pooler (5432) в session
     # mode даёт мало клиентов (каждый держит backend всю жизнь) → лимит упирается
     # при переиспользовании коннекта и оборванных сессиях.
-    return st.secrets["supabase"]["db_url"].replace(":5432/", ":6543/")
+    raw = st.secrets["supabase"]["db_url"].strip().replace(":5432/", ":6543/")
+    # Пароль в строке подключения часто содержит спецсимволы URI (?, [], @, #, /,
+    # : и т.п.) — без экранирования драйвер не парсит URL ("missing key/value
+    # separator" и подобное). Percent-энкодим ТОЛЬКО пароль (между первым ":"
+    # после пользователя и последним "@"); заодно снимаем случайные скобки, если
+    # пароль скопировали прямо из шаблона [YOUR-PASSWORD]. Простые пароли
+    # (буквы/цифры) при этом не меняются.
+    m = re.match(r"^(postgres(?:ql)?://[^:@/]+:)(.*)(@[^@]+)$", raw)
+    if m:
+        head, password, tail = m.groups()
+        if len(password) >= 2 and password[0] == "[" and password[-1] == "]":
+            password = password[1:-1]
+        raw = head + quote(password, safe="") + tail
+    return raw
 
 
 # Транзиентные ошибки связи: обрыв pooler'а/сети/SSL.
