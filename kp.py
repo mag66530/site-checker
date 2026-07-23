@@ -737,22 +737,25 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         fields.append({"field": field, "expected": expected or "–",
                        "found": found or "–", "status": status, "note": note})
 
-    kp_phones = row.phone_set()
-    # Телефоны сайта В ПОРЯДКЕ появления (первый = основной номер шапки). В
-    # колонку «На сайте» кладём ОДИН номер (site_ph_primary), а не свалку всех
-    # найденных (включая сотовый/WhatsApp) - по просьбе: в ячейке одно значение.
+    def _is_mobile(n: str) -> bool:
+        # Российский мобильный: 10 цифр, начинается на 9. По просьбе заказчика
+        # сотовые в проверке телефонов НЕ учитываем (ни в КП, ни на сайте) -
+        # сверяем только городские (стационарные) номера.
+        return len(n) == 10 and n.startswith("9")
+
+    kp_phones = {p for p in row.phone_set() if not _is_mobile(p)}
+    # Телефоны сайта В ПОРЯДКЕ появления, БЕЗ сотовых и БЕЗ номера WhatsApp (он
+    # утекает в список из ссылки wa.me). В «На сайте» кладём ОДИН - первый
+    # городской номер из шапки, а не свалку всех найденных.
+    _wa_nums = set(site.get("whatsapp", []))
     _site_ph_ordered = []
     for x in site.get("phones", []):
         p = normalize_phone(x)
-        if p and p not in _site_ph_ordered:
+        if (p and not _is_mobile(p) and p not in _wa_nums
+                and p not in _site_ph_ordered):
             _site_ph_ordered.append(p)
     site_phones = set(_site_ph_ordered)
-    # Для показа в «На сайте» берём номер из шапки, но НЕ номер WhatsApp: он часто
-    # утекает в список телефонов из ссылки wa.me и «подтягивался» в ячейку
-    # телефона (жалоба заказчика). Матчинг это не трогает - там полный набор.
-    _wa_nums = set(site.get("whatsapp", []))
-    _display = [p for p in _site_ph_ordered if p not in _wa_nums] or _site_ph_ordered
-    site_ph_primary = _fmt(_display[0]) if _display else "–"
+    site_ph_primary = _fmt(_site_ph_ordered[0]) if _site_ph_ordered else "–"
 
     # Колонки телефонов - с префиксом «Тел.», чтобы не путать с колонкой «Город»
     # (проверка города). Порядок как в КП: общий → реклама → SEO.
@@ -770,14 +773,20 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                 add(label, raw, "–", "bug", "телефон в КП не распознан - проверьте КП")
             else:
                 add(label, "–", "–", "na", "нет в КП")
+        elif _is_mobile(exp):
+            # В этой ячейке КП - сотовый: по просьбе заказчика не проверяем.
+            add(label, _fmt(exp), "–", "na", "сотовый - не проверяем")
         elif exp in site_phones:
             add(label, _fmt(exp), _fmt(exp), "ok", "совпадает с КП")
         elif site_phones & kp_phones:
-            # На сайте другой номер ТОГО ЖE города из КП - засчитываем (✓), в
-            # «На сайте» показываем именно этот один совпавший номер.
+            # На сайте другой ГОРОДСКОЙ номер того же города из КП - засчитываем
+            # (✓): значит номер города верный, просто в другой слот. В «На сайте»
+            # показываем именно этот совпавший номер.
             add(label, _fmt(exp), _fmt(sorted(site_phones & kp_phones)[0]), "ok_set",
                 "на сайте другой номер этого же города из КП")
         elif site_phones:
+            # На сайте городской номер, которого НЕТ в КП (номер сменили/опечатка) -
+            # это расхождение ✗.
             add(label, _fmt(exp), site_ph_primary, "bug",
                 "телефон на сайте не совпадает с КП")
         else:
