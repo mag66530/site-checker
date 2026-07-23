@@ -382,6 +382,13 @@ def _norm_host(url_or_host: str) -> str:
 # ── Извлечение контактов с самой страницы (шапка+подвал) ──────────────
 
 
+# WhatsApp-ссылки (wa.me / api.whatsapp.com / chat.whatsapp.com / whatsapp://) -
+# вырезаем перед извлечением телефонов, чтобы номер вотсапа не попадал в телефоны.
+_WA_URL_RE = re.compile(
+    r'(?:https?:)?//(?:wa\.me|api\.whatsapp\.com|chat\.whatsapp\.com)[^"\'\s>]*'
+    r'|whatsapp://[^"\'\s>]*', re.I)
+
+
 def extract_site_contacts(html: str) -> dict:
     """Достать из шапки+подвала телефоны, почты и текст адреса."""
     from content_checker import _extract_region
@@ -390,9 +397,14 @@ def extract_site_contacts(html: str) -> dict:
     region_html = (_extract_region(html, 'header', 'top') + '\n'
                    + _extract_region(html, 'footer', 'bottom'))
     text = html_to_visible_text(region_html)
+    # Телефоны берём БЕЗ WhatsApp-ссылок (wa.me/…): номер вотсапа не должен
+    # утекать в список телефонов. Если этот же номер показан ещё и как телефон
+    # (tel:/видимый текст) - он всё равно попадёт (из tel:/текста), поэтому
+    # города, где телефон = вотсап (напр. Бишкек), не теряют номер.
+    _region_no_wa = _WA_URL_RE.sub(' ', region_html)
     # Маски ввода телефона («+7 (000) 000-00-00») и заглушки с кодом 000 -
     # не настоящие номера, отбрасываем, чтобы не считать их расхождением.
-    phones = [p for p in (split_phones(text) + split_phones(region_html))
+    phones = [p for p in (split_phones(text) + split_phones(_region_no_wa))
               if not p.startswith('000')]
     emails = [e.lower() for e in re.findall(
         r'[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}', region_html, re.IGNORECASE)]
@@ -746,15 +758,15 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         return len(n) == 10 and n.startswith("9")
 
     kp_phones = {p for p in row.phone_set() if not _is_mobile(p)}
-    # Телефоны сайта В ПОРЯДКЕ появления, БЕЗ сотовых и БЕЗ номера WhatsApp (он
-    # утекает в список из ссылки wa.me). В «На сайте» кладём ОДИН - первый
-    # городской номер из шапки, а не свалку всех найденных.
-    _wa_nums = set(site.get("whatsapp", []))
+    # Телефоны сайта В ПОРЯДКЕ появления, БЕЗ сотовых. Номер WhatsApp в этот
+    # список уже не утекает (wa.me-ссылки вырезаны в extract_site_contacts), но
+    # если ТОТ ЖЕ номер показан ещё и как телефон (tel:/текст) - он остаётся:
+    # города, где телефон = вотсап (напр. Бишкек), номер не теряют. В «На сайте»
+    # кладём ОДИН - первый городской номер, а не свалку всех найденных.
     _site_ph_ordered = []
     for x in site.get("phones", []):
         p = normalize_phone(x)
-        if (p and not _is_mobile(p) and p not in _wa_nums
-                and p not in _site_ph_ordered):
+        if p and not _is_mobile(p) and p not in _site_ph_ordered:
             _site_ph_ordered.append(p)
     site_phones = set(_site_ph_ordered)
     site_ph_primary = _fmt(_site_ph_ordered[0]) if _site_ph_ordered else "–"
@@ -792,7 +804,9 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             add(label, _fmt(exp), site_ph_primary, "bug",
                 "телефон на сайте не совпадает с КП")
         else:
-            add(label, _fmt(exp), "–", "warn", "телефон на сайте не найден")
+            # В КП номер есть, а на сайте его нет - это расхождение ✗ (красное),
+            # а не «проверьте вручную»: сайт должен показывать номер из КП.
+            add(label, _fmt(exp), "–", "bug", "телефон на сайте не найден")
 
     exp_mail = (row.email or "").strip().lower()
     site_mails = [e.lower() for e in site.get("emails", [])]
@@ -804,7 +818,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         add("Почта", exp_mail, ", ".join(site_mails[:3]), "bug",
             "почта на сайте не совпадает с КП")
     else:
-        add("Почта", exp_mail, "–", "warn", "почта на сайте не найдена")
+        add("Почта", exp_mail, "–", "bug", "почта на сайте не найдена")
 
     # Адрес сверяем по ВСЕМУ тексту шапки+подвала главной (там на сайтах СМУ и
     # лежит адрес города), А ТАКЖЕ по странице «Контакты», если её передали: у
@@ -860,9 +874,11 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             add("Адрес", row.address, site_addr, "bug",
                 "адрес на сайте не совпадает с КП")
         else:
-            # Адрес из КП на странице не нашли вовсе - как «не найдено» у
-            # телефона/почты, это ⚠ (может лежать не там / другой формат).
-            add("Адрес", row.address, "–", "warn",
+            # Адрес из КП на странице не нашли вовсе - это расхождение ✗
+            # (единообразно с телефоном/почтой: в КП есть, на сайте нет).
+            # Сначала (на главной) тул ещё догрузит «Контакты» и пересверит -
+            # если адрес там, станет ✓; если и там нет - остаётся ✗.
+            add("Адрес", row.address, "–", "bug",
                 "адрес на сайте не найден")
 
     # Telegram: СТРОГО сверяем аккаунт из КП с аккаунтом на сайте (по просьбе
@@ -887,7 +903,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             ", ".join("@" + t for t in sorted(site_tg)[:2]),
             "bug", "Telegram на сайте не совпадает с КП")
     else:
-        add("Telegram", "@" + exp_tg, "–", "warn", "Telegram на сайте не найден")
+        add("Telegram", "@" + exp_tg, "–", "bug", "Telegram на сайте не найден")
 
     # WhatsApp: СТРОГО сверяем номер из КП с номером в ссылке на сайте. Номер в
     # wa.me/<number> нормализуем к 10 цифрам. Если кнопка есть, но номер в
@@ -918,7 +934,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             "кнопка WhatsApp есть, номер скрыт - проверьте вручную")
         fields[-1]["check_url"] = wa_anchor[0]
     else:
-        add("WhatsApp", _fmt(exp_wa), "–", "warn", "WhatsApp на сайте не найден")
+        add("WhatsApp", _fmt(exp_wa), "–", "bug", "WhatsApp на сайте не найден")
 
     return out
 

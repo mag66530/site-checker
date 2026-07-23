@@ -117,9 +117,58 @@ def test_garbage_kp_address_still_shows_site_address():
         row.address = saved
 
 
+def test_not_found_on_site_is_bug():
+    """«В КП есть, на сайте нет» = расхождение ✗ (не ⚠), единообразно для
+    телефона/почты/Telegram (по просьбе заказчика: не совпадение - красное)."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_common, row.phone_ad, row.phone_seo,
+             row.email, row.telegram)
+    row.phone_common = "7 (495) 123-45-67"
+    row.phone_ad = row.phone_seo = ""
+    row.email = "msk@stalmetural.ru"
+    row.telegram = "smu_manager"
+    try:
+        # Пустая страница - ни телефона, ни почты, ни Telegram на сайте нет.
+        html = "<header>Стальметурал</header><footer>© 2026</footer>"
+        by = {f["field"]: f for f in kp.check_variables(html, "stalmetural.ru")["fields"]}
+        assert by["Тел. Общий Город"]["status"] == "bug"   # телефона нет → ✗
+        assert by["Почта"]["status"] == "bug"              # почты нет → ✗
+        assert by["Telegram"]["status"] == "bug"           # Telegram нет → ✗
+    finally:
+        (row.phone_common, row.phone_ad, row.phone_seo,
+         row.email, row.telegram) = saved
+
+
+def test_phone_equals_whatsapp_not_dropped():
+    """Город, где телефон = номер WhatsApp (напр. Бишкек): номер показан и как
+    tel:, и как wa.me. Раньше исключение WhatsApp роняло телефон в «не найден» -
+    теперь номер остаётся (из tel:) и сходится с КП → ✓."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_common, row.phone_ad, row.phone_seo, row.whatsapp)
+    row.phone_common = "996 (221) 31-88-82"
+    row.phone_ad = row.phone_seo = ""
+    row.whatsapp = "996 221 31 88 82"
+    try:
+        html = ('<header>'
+                '<a class="ct_phone" href="tel:+996221318882">+996 221 31 88 82</a> '
+                '<a href="https://wa.me/996221318882">WhatsApp</a>'
+                '</header>')
+        by = {f["field"]: f for f in kp.check_variables(html, "stalmetural.ru")["fields"]}
+        assert by["Тел. Общий Город"]["status"] == "ok"   # телефон НЕ потерян
+        assert by["Тел. Общий Город"]["found"] != "–"
+        assert by["WhatsApp"]["status"] == "ok"           # и WhatsApp сходится
+    finally:
+        (row.phone_common, row.phone_ad, row.phone_seo, row.whatsapp) = saved
+
+
 def test_check_variables_address_from_contacts():
     """Адрес на «Контактах», а не в подвале главной (кейс МПЭ/mepen): по одной
-    главной адрес не находится (⚠), с переданным html «Контактов» - находится."""
+    главной адрес не находится (✗ «не найден»), с переданным html «Контактов» -
+    находится (✓). «Не найден» = ✗ (в КП есть, на сайте нет), а не ⚠."""
     m = kp.load_kp("smu")
     row = m.get("stalmetural.ru")
     assert row and row.address, "нужна строка КП с адресом"
@@ -130,7 +179,8 @@ def test_check_variables_address_from_contacts():
             '<footer>Стальметурал политика конфиденциальности</footer>')
     r0 = kp.check_variables(home, "stalmetural.ru")
     by0 = {f["field"]: f for f in r0["fields"]}
-    assert by0["Адрес"]["status"] == "warn"      # без «Контактов» - не найден
+    assert by0["Адрес"]["status"] == "bug"       # без «Контактов» - не найден = ✗
+    assert by0["Адрес"]["found"] in ("–", "")    # на сайте не нашли
     assert by0["Почта"]["status"] == "ok"        # почта из шапки не пострадала
 
     # Страница «Контакты» с карточкой «Адрес: …» (формат mepen: «улица …, дом N»).
