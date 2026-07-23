@@ -142,9 +142,48 @@ _RE_CHAIN_INNER = re.compile(r'/sprav/chain/(\d+)')
 # Предохранитель на пагинацию списка организаций (?page=N).
 _MAX_LIST_PAGES = 80
 _RE_REGION = re.compile(r'"region_code"\s*:\s*"([^"]+)"')
+# Город (locality) из адреса карточки. ВАЖНО: между "kind":"locality" и его
+# "name" у Яндекса бывают вложенные объекты ("translated_name":{...} и т.п.).
+# Старый [^}]*? обрывался на первом же "}" такого объекта, НЕ доходил до
+# своего name и хватал ЧУЖОЙ город из блока другой организации на странице
+# (из-за этого карточки Москвы/СПб/… уезжали в «нет карточки»). Пропускаем
+# любые символы, но ОГРАНИЧЕННО (в пределах своего компонента, ≤260 симв.) -
+# чтобы пройти сквозь вложенность и НЕ перескочить на соседнюю организацию.
 _RE_LOCALITY = re.compile(
-    r'"kind"\s*:\s*"locality"[^}]*?"name"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"')
+    r'"kind"\s*:\s*"locality"[\s\S]{0,260}?"name"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"')
+# Обратный порядок ключей (name раньше kind) - тоже валидный JSON.
+_RE_LOCALITY_REV = re.compile(
+    r'"name"\s*:\s*\{\s*"value"\s*:\s*"([^"]+)"[\s\S]{0,120}?"kind"\s*:\s*"locality"')
 _RE_ADDR = re.compile(r'"formatted"\s*:\s*\{\s*"value"\s*:\s*"([^"]{3,120})"')
+
+# Слова-признаки улицы/дома - чтобы фолбэком по адресу не принять их за город.
+_RE_STREET_WORD = re.compile(
+    r'улиц|проспект|переул|шоссе|бульвар|площад|набереж|\bнаб\b|\bпер\b|'
+    r'\bдом\b|\bд\b|\bстр\b|микрорайон|\bмкр\b|тупик|проезд|аллея|\bкв\b',
+    re.I)
+
+
+def _city_from_addr(addr: str):
+    """Город из отформатированного адреса «[Россия,] [область,] Город, улица…».
+    Отсекаем ведущие страну/регион и берём первый «городской» сегмент.
+    Надёжно, т.к. это СОБСТВЕННЫЙ адрес карточки (а не «первый locality на
+    странице», который может оказаться чужим)."""
+    if not addr:
+        return None
+    parts = [p.strip() for p in addr.split(',') if p.strip()]
+    # Отбрасываем ведущие «Россия» и регион (область/край/округ/республика).
+    while parts and (parts[0] in ('Россия', 'Российская Федерация')
+                     or re.search(r'област|\bкра[йя]\b|округ|респ[уо]блик',
+                                  parts[0], re.I)):
+        parts.pop(0)
+    if not parts:
+        return None
+    first = parts[0]
+    if (2 <= len(first) <= 40
+            and re.match(r'^[А-ЯЁ][А-Яа-яЁё\- ]+$', first)
+            and not _RE_STREET_WORD.search(first)):
+        return first
+    return None
 
 # Поля профиля Я.Бизнеса: (ключ находки, подпись, regex непустого наличия).
 # Проверяем, что массив/поле НЕ пустое (есть хотя бы один элемент).
@@ -162,17 +201,32 @@ PROFILE_FIELDS = [
 
 
 def _org_card_from_html(html: str, permalink: str) -> dict:
-    m_city = _RE_LOCALITY.search(html)
     m_reg = _RE_REGION.search(html)
     m_addr = _RE_ADDR.search(html)
+    addr = m_addr.group(1) if m_addr else None
+    # Город. «Первый locality на странице» ненадёжен: у карточки в вёрстке
+    # бывают чужие блоки (филиалы сети/похожие), и regex может схватить их
+    # город. Поэтому locality ПОДТВЕРЖДАЕМ собственным адресом карточки:
+    #   • locality есть И встречается в адресе  → берём locality (совпали);
+    #   • иначе, если город выводится из адреса   → берём его (адрес - свой);
+    #   • иначе                                    → что распозналось.
+    m_city = _RE_LOCALITY.search(html) or _RE_LOCALITY_REV.search(html)
+    loc_city = m_city.group(1) if m_city else None
+    addr_city = _city_from_addr(addr)
+    if loc_city and addr and _norm_city(loc_city) in _norm_city(addr):
+        city = loc_city
+    elif addr_city:
+        city = addr_city
+    else:
+        city = loc_city
     profile = {key: bool(rx.search(html)) for key, _lbl, rx in PROFILE_FIELDS}
     # регион/город тоже часть «заполненности».
     profile['region'] = bool(m_reg)
     return {
         'permalink': permalink,
-        'city': m_city.group(1) if m_city else None,
+        'city': city,
         'region': m_reg.group(1) if m_reg else None,
-        'addr': m_addr.group(1) if m_addr else None,
+        'addr': addr,
         'profile': profile,
     }
 
@@ -261,7 +315,11 @@ async def _afetch_orgs(state: dict, proxy_url: str, log):
                 *[_acard(ctx, csem, p, ic) for p, ic in _cards]))
             if log:
                 active = [o for o in orgs if o.get('city')]
-                log(f'Я.Бизнес: карточек {len(orgs)}, активных {len(active)}')
+                _no_city = len(orgs) - len(active)
+                _sample = ', '.join(sorted({o['city'] for o in active})[:12])
+                log(f'Я.Бизнес: карточек {len(orgs)}, активных {len(active)}, '
+                    f'без города {_no_city}. Города: {_sample}'
+                    + (' …' if len(active) > 12 else ''))
             return True, {'chains': sorted(chains), 'companies': orgs}
         finally:
             await br.close()
