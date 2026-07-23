@@ -2,8 +2,9 @@
 image_checker.py - проверка изображений (пункт 1.15).
 
 Всё про картинки одним пунктом, отдельным листом «Изображения»:
-  • Alt: у каждого <img> есть атрибут alt (пустой alt="" легален -
-    декоративные картинки; баг только ПОЛНОЕ отсутствие атрибута).
+  • Alt: у каждого <img> есть СОДЕРЖАТЕЛЬНЫЙ alt. По требованию НЕ
+    допустим и пустой alt="", и полное отсутствие атрибута (оба = баг);
+    пустой alt помечаем отдельно, чтобы было видно, что дозаполнить.
   • Современные форматы: используются webp/avif (а не только jpg/png/gif).
     Легаси-картинки есть, а webp/avif нет = предупреждение.
   • Оптимизация (вес): порог чек-листа 150 КБ. Два порога: тяжелее
@@ -28,6 +29,11 @@ _RE_ALT_ATTR = re.compile(r'(?<![\w-])alt\s*(?==|\s|/|>)', re.I)
 _RE_IMG_SRC = re.compile(
     r'(?:data-src|src)\s*=\s*(?:["\']([^"\']+)["\']|([^\s>"\']+))', re.I)
 _RE_ALT_VAL = re.compile(r'\balt\s*=\s*["\']([^"\']*)["\']', re.I)
+# Значение alt в любом виде (кавычки/без кавычек) - чтобы отличить пустой
+# alt="" (и голый alt без значения) от содержательного. data-alt не ловим
+# (перед alt не должно быть буквы/дефиса).
+_RE_ALT_FULL = re.compile(
+    r'(?<![\w-])alt\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))', re.I)
 _RE_SOURCE = re.compile(r'<source\b[^>]*>', re.I)
 _RE_TYPE = re.compile(r'type\s*=\s*["\']image/(webp|avif)["\']', re.I)
 _RE_SRCSET = re.compile(r'srcset\s*=\s*["\']([^"\']+)["\']', re.I)
@@ -228,14 +234,24 @@ def product_image_dups(prods, category_of=None) -> dict:
 
 
 def imgs_no_alt(html: str) -> list:
-    """src всех <img> БЕЗ атрибута alt (пустой alt="" - ок)."""
+    """src всех <img> без СОДЕРЖАТЕЛЬНОГО alt. По требованию (Максим) НЕ
+    допустим не только полное отсутствие атрибута, но и пустой alt="" -
+    у каждой картинки должно быть описание. Пустой alt помечаем
+    «(alt пустой)», чтобы в отчёте было видно, что просто дозаполнить."""
     out = []
     for tag in _RE_IMG_TAG.findall(_RE_HTML_COMMENT.sub(' ', html or '')):
-        if _RE_ALT_ATTR.search(tag[4:]):
-            continue
+        empty = False
+        if _RE_ALT_ATTR.search(tag[4:]):          # атрибут alt присутствует
+            m = _RE_ALT_FULL.search(tag)
+            val = (next((g for g in m.groups() if g is not None), '').strip()
+                   if m else '')
+            if val:
+                continue                          # есть текст в alt - ок
+            empty = True                          # alt="" или голый alt
         m = _RE_IMG_SRC.search(tag)
         src = ((m.group(1) or m.group(2) or '').strip() if m else '') or '[без src]'
-        out.append(_short(src))
+        src = _short(src)
+        out.append(f'{src} (alt пустой)' if empty else src)
     return out
 
 
@@ -250,7 +266,7 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
     # (сколько картинок без alt - в детализации по строке).
     no_alt = imgs_no_alt(html)
     if no_alt:
-        issues.append('есть картинки без атрибута alt')
+        issues.append('есть картинки без alt или с пустым alt=""')
 
     # ── Современные форматы (webp/avif) ──
     clean = _RE_HTML_COMMENT.sub(' ', html)
