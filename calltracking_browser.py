@@ -38,12 +38,12 @@ SWAP_STEP_MS = 500
 
 
 def _nat(num) -> str:
-    """Национальный номер (10 цифр РФ/КЗ, 9 - BY/UZ) для сверки вне формата."""
+    """Национальный номер (10 цифр РФ/КЗ, 9 - BY/UZ/KG/AZ) для сверки вне формата."""
     d = re.sub(r'\D', '', str(num or ''))
     if not d:
         return ''
-    if d.startswith(('998', '375')) and len(d) >= 12:
-        return d[-9:]
+    if d.startswith(('998', '375', '996', '994')) and len(d) >= 12:
+        return d[-9:]                 # Узбекистан/Беларусь/Киргизия/Азербайджан
     if len(d) >= 11 and d[0] in '78':
         return d[-10:]
     if len(d) == 10:
