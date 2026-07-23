@@ -497,13 +497,15 @@ def _d_breadcrumbs(c: _Ctx):
     return bool(_RE_BREADCRUMB.search(c.html_lower)), None
 
 
-# Все <img> страницы должны иметь атрибут alt. Пустой alt="" – легален
-# (стандарт: декоративные картинки помечают именно пустым alt). Баг – только
-# полное ОТСУТСТВИЕ атрибута. data-alt= и т.п. не считаются (перед alt не
-# должно быть буквы/дефиса). Комментарии вырезаем – в них бывает вёрстка.
+# Все <img> страницы должны иметь СОДЕРЖАТЕЛЬНЫЙ alt. По требованию НЕ
+# допустим и пустой alt="", и полное отсутствие атрибута (оба – баг): у
+# каждой картинки должно быть описание. data-alt= и т.п. не считаются (перед
+# alt не должно быть буквы/дефиса). Комментарии вырезаем – в них бывает вёрстка.
 _RE_IMG_TAG = re.compile(r'<img\b[^>]*>', re.I)
 _RE_HTML_COMMENT = re.compile(r'<!--.*?-->', re.S)
 _RE_ALT_ATTR = re.compile(r'(?<![\w-])alt\s*(?==|\s|/|>)', re.I)
+_RE_ALT_FULL = re.compile(
+    r'(?<![\w-])alt\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]+))', re.I)
 
 
 _RE_IMG_SRC = re.compile(
@@ -511,11 +513,16 @@ _RE_IMG_SRC = re.compile(
 
 
 def _imgs_no_alt_srcs(html: str) -> list:
-    """Адреса (src) всех <img> БЕЗ атрибута alt - для списка в отчёте."""
+    """Адреса (src) всех <img> без содержательного alt - для списка в отчёте.
+    Пустой alt="" тоже баг (не только полное отсутствие атрибута)."""
     out = []
     for tag in _RE_IMG_TAG.findall(_RE_HTML_COMMENT.sub(' ', html or '')):
         if _RE_ALT_ATTR.search(tag[4:]):         # [4:] отрезает сам «<img»
-            continue
+            m = _RE_ALT_FULL.search(tag)
+            val = (next((g for g in m.groups() if g is not None), '').strip()
+                   if m else '')
+            if val:
+                continue                         # есть текст в alt - ок
         m = _RE_IMG_SRC.search(tag)
         src = ((m.group(1) or m.group(2) or '').strip() if m else '') or '[без src]'
         if src.startswith('data:'):
@@ -534,7 +541,8 @@ def _imgs_no_alt_srcs(html: str) -> list:
 
 
 def _d_img_alt(c: _Ctx):
-    """present = у всех <img> есть alt; count = сколько картинок БЕЗ alt."""
+    """present = у всех <img> есть содержательный alt; count = сколько
+    картинок без alt ИЛИ с пустым alt="" (по требованию оба - баг)."""
     missing = len(_imgs_no_alt_srcs(c.html))
     return missing == 0, (missing or None)
 
@@ -765,9 +773,15 @@ def _d_pagination(c: _Ctx):
 
 
 def _d_form_not_found(c: _Ctx):
+    # Ищем по СТРУКТУРНОМУ признаку (class="find-form" - тот же, по которому
+    # форму находит форм-тестер), а НЕ по русскому тексту: на зарубежных
+    # зеркалах (Баку .az, УЗ, КЗ…) заголовок переведён
+    # («Axtardığınızı tapmadınız?»), но вёрстка и класс формы те же.
     present = (
-        'не нашли что искали' in c.text_lower
+        'find-form' in c.html_lower
+        or 'не нашли что искали' in c.text_lower
         or 'подберем нужную продукцию' in c.text_lower
+        or 'axtardığınızı tapmad' in c.text_lower          # az
     )
     return present, None
 
@@ -1034,7 +1048,7 @@ BLOCK_DESCRIPTIONS = {
     'tech_links':    'Рабочие ссылки в контенте (настоящие адреса, не «#» / javascript:void). Число = сколько.',
     'h1':            'Непустой тег <h1>. Проверяется наличие, не текст. Число = сколько H1 на странице.',
     'breadcrumbs':   'Хлебные крошки: микроразметка BreadcrumbList или класс breadcrumb в вёрстке.',
-    'img_alt':       'У всех <img> страницы есть атрибут alt. Пустой alt="" допустим (декоративные картинки). Число = сколько картинок БЕЗ атрибута alt.',
+    'img_alt':       'У всех <img> страницы есть содержательный alt. Пустой alt="" НЕ допустим наравне с полным отсутствием атрибута. Число = сколько картинок без alt или с пустым alt="".',
     'hdr_phone':     'Телефон в шапке: номер +7… внутри региона <header>. Обязателен.',
     'hdr_callback':  'Кнопка «Заказать звонок» (или «обратный звонок») в шапке. Обязательна.',
     'hdr_request':   'Запрос-CTA в шапке: «Оставить заявку» / «Заявка» / «Быстрый заказ». Обязателен.',

@@ -315,6 +315,19 @@ def test_form_nf_required_only_on_smu():
     assert 'form_nf' not in _by_key(r_other)
 
 
+def test_form_nf_detected_when_translated():
+    """Баку (.az) и др. зеркала: заголовок формы переведён
+    («Axtardığınızı tapmadınız?»), но вёрстка/класс те же - находим по
+    class="find-form", а не по русскому тексту."""
+    az_form = ('<form class="find-form" action="/local/ajax/form.php">'
+               '<h3>Axtardığınızı tapmadınız?</h3>'
+               '<input placeholder="Məhsul təsviri"></form>')
+    html = COMMON + CARD_WITH_PRICE + SMU_MARKER + az_form
+    r = check_content(html, 'category')
+    assert _by_key(r)['form_nf'].present            # форма найдена, несмотря на az
+    assert not any(bug.key == 'form_nf' for bug in r.bugs)
+
+
 def test_project_absent_elements_not_shown():
     """У ИМП нет «Заказать звонок», у МПЭ - ещё и «Написать нам»:
     этих столбцов в отчёте быть не должно (не ложный баг)."""
@@ -650,15 +663,23 @@ def test_tech_per_page_profiles():
 
 
 def test_img_alt_moved_to_image_checker():
-    """Alt у картинок теперь проверяет image_checker (п.1.15), не content."""
+    """Alt у картинок проверяет image_checker (п.1.15). По требованию
+    (Максим: «поправить на не допустим») и ПУСТОЙ alt="", и полное
+    отсутствие атрибута = баг; содержательный alt - ок."""
     from image_checker import check_images
-    html = ('<img src="a.jpg" alt="Фото"><img src="b.jpg" alt="">'
-            '<img src="c.jpg"><img src="d.jpg" data-alt="x">'
-            '<!-- <img src="e.jpg"> -->')
+    html = ('<img src="a.jpg" alt="Фото">'          # ок - есть описание
+            '<img src="b.jpg" alt="">'               # пустой alt - баг
+            '<img src="c.jpg">'                      # нет атрибута - баг
+            '<img src="d.jpg" data-alt="x">'         # data-alt ≠ alt - баг
+            '<img alt src="f.jpg">'                  # голый alt без значения - баг
+            '<!-- <img src="e.jpg"> -->')            # в комментарии - игнор
     res = check_images(html, base_url='https://x.ru/p/')
-    assert len(res['no_alt']) == 2                 # c.jpg и d.jpg - без alt
+    assert len(res['no_alt']) == 4                 # b, c, d, f
     assert res['issues']                           # баг про alt есть
-    ok = check_images('<img src="a.jpg" alt="Фото"><img alt src="b.jpg">',
+    # пустой/голый alt помечается отдельно - видно, что дозаполнить
+    assert sum('alt пустой' in x for x in res['no_alt']) == 2   # b и f
+    # только содержательные alt → без замечаний
+    ok = check_images('<img src="a.jpg" alt="Фото"><img src="b.jpg" alt="Схема">',
                       base_url='https://x.ru/p/')
     assert not ok['no_alt'] and not ok['issues']
 
