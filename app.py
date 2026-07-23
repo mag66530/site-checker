@@ -238,6 +238,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ── Личный кабинет: вход обязателен перед доступом к панели проверок ──
+# require_login() рисует экран логина/регистрации и возвращает False, пока
+# пользователь не вошёл; render_account_ui() добавляет в сайдбар блок аккаунта
+# (кто я / выйти / кабинет руководителя / админ-панель). См. auth/INSTRUCTIONS.md.
+import auth
+
+if not auth.require_login():
+    st.stop()
+
+auth.render_account_ui()
+
 pages = [
     st.Page('checklists/checklist_30min.py', title='Чек-лист', icon='🔎', default=True),
     st.Page('checklists/autoclickers.py', title='Автокликеры', icon='🖱'),

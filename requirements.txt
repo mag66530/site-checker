@@ -11,3 +11,11 @@ beautifulsoup4>=4.12.0
 
 # Чтение приватных Google-таблиц КП через сервисный аккаунт (пункт 1.4).
 google-auth>=2.20.0
+
+# ── Личный кабинет / авторизация (auth/, Supabase Postgres) ──
+# psycopg — драйвер Postgres; bcrypt — хеши паролей; extra-streamlit-components —
+# cookie-менеджер для persistent-login; cryptography — Fernet-шифрование.
+psycopg[binary]
+bcrypt
+extra-streamlit-components
+cryptography
