@@ -6002,7 +6002,21 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         last = None
         for i in range(attempts):
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                _resp = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                # 403/4xx-5xx: страница «загрузилась», но это заглушка блокировки
+                # (сайт режет IP проверки - зарубежный/дата-центровый). goto не
+                # падает, а дальше ВСЕ селекторы форм находят 0 → всё красное.
+                # Один раз явно предупреждаем, чтобы причина была видна в логе.
+                _code = getattr(_resp, "status", None)
+                if _code in (403, 429, 451) and not _домен_нестабилен.get("блок"):
+                    _домен_нестабилен["блок"] = _code
+                    print(f"   ⛔ Сайт вернул HTTP {_code} на {url} - похоже, "
+                          f"БЛОКИРУЕТ IP проверки (зарубежный/дата-центровый адрес "
+                          f"сервера или прокси). Страницы приходят пустыми, поэтому "
+                          f"формы «не находятся» и всё красное. Нужен доступ с "
+                          f"РАЗРЕШЁННОГО (российского) IP: смените прокси на "
+                          f"российский (вкладка «Настройки проекта») - зарубежный "
+                          f"такие сайты режут.", flush=True)
                 return
             except Exception as e:  # noqa: BLE001
                 last = e
