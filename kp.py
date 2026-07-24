@@ -728,8 +728,9 @@ def _fmt(nat: str, dial: str = '7') -> str:
 # Плюс азербайджанские метки переводного сайта: «İş saatları» (часы работы),
 # «Əlaqə» (контакты).
 _ADDR_TAIL_RE = re.compile(
-    r'\s*(?:контакт\w*[:\s]|время работы|режим работы|часы работы|график|'
-    r'телефон\w*[:\s]|тел\.|e-?mail|почта[:\s]|whatsapp|телеграм|telegram|'
+    r'\s*(?:контакт\w*|время работы|режим работы|часы работы|график\w*|режим\w*|'
+    r'реквизит\w*|прайс\w*|скачать|наш телефон|наша почта|наш адрес|карт[ае]\b|'
+    r'телефон\w*|тел\.|e-?mail|почт\w*[:\s]|почта\b|whatsapp|телеграм|telegram|'
     r'i[şs]\s*saat\w*|əlaqə|elaqe|iş\s*vaxt\w*|'
     r'\+?[78][\s(]?\d{3}|\+?\d{11,}|[a-z0-9._%+-]+@).*$', re.I | re.S | re.U)
 
@@ -755,12 +756,14 @@ def _site_address_full(html: str) -> str:
     except Exception:
         txt = html or ''
     # Метка адреса: «Адрес:» (рус) или «Ünvan:» (азерб. переводного сайта).
-    m = re.search(r'(?:адрес|[uü]nvan)[:\s]+(.{6,90}?)(?:\s*(?:телефон|тел\.|e-?mail|'
-                  r'почт|часы|режим|график|индекс|контакт|время работы|'
-                  r'i[şs]\s*saat|əlaqə|elaqe|\+?[78][\s(]?\d{3}|'
-                  r'\d{1,2}:\d{2})|$)', txt, re.IGNORECASE | re.U)
+    # Захватываем кусок ПОСЛЕ метки (не требуем стоп-маркера справа - иначе
+    # адрес, за которым сразу идёт «Реквизиты»/«Скачать» без телефона/почты,
+    # вообще не находился, напр. СПб «набережная Обводного канала, 64к2»).
+    m = re.search(r'(?:адрес|[uü]nvan)[:\s]+(.{4,120})', txt, re.IGNORECASE | re.U)
     if not m:
         return ''
+    # Обрезаем на первом «не-адресном» маркере (следующее поле карточки/меню:
+    # «Реквизиты», «Скачать», «Контакты», «Время работы», телефон, почта…).
     cap = _обрезать_хвост_адреса(m.group(1).strip(' ,;·|'))
     # В адресе ОБЯЗАТЕЛЬНО номер дома (цифра) И похожесть на адрес: слово-маркер
     # улицы (рус/азерб) ЛИБО форма «Название, номер» («Ярмарочная, 55»,
@@ -1069,28 +1072,23 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     exp_tg = row.telegram_norm()
     site_tg = set(site.get("telegram", []))
     _tg_raw = (row.telegram or "").strip()
-    # В «На сайте» - только фактическое значение (без приписки «есть:»).
     _tg_found = (", ".join("@" + t for t in sorted(site_tg)[:2]) if site_tg else "–")
-    if not exp_tg:
-        _kp_tg_show = _tg_raw if _tg_raw and _tg_raw not in ("–", "-") else "–"
-        if _kp_tg_show != "–":
-            # В КП стоит значение, но это не Telegram-ник («2»/мусор) - это ИНФА,
-            # и она заведомо не совпадает → всегда ✗.
-            add("Telegram", _kp_tg_show, _tg_found, "bug",
-                "Telegram на сайте не совпадает с КП")
-        elif site_tg:
-            add("Telegram", "–", _tg_found, "bug",
-                "Telegram на сайте не совпадает с КП")
+    # Значение КП для показа: ник (@…) либо сырой мусор («2»), либо «–» если пусто.
+    _tg_kp_show = ("@" + exp_tg) if exp_tg else (_tg_raw if _tg_raw
+                                                 and _tg_raw not in ("–", "-") else "–")
+    if not site_tg:
+        # На сайте Telegram НЕТ (в шапке нет значка). Если в КП значение есть -
+        # это ✗ «Telegram на сайте отсутствует» (просьба заказчика: так и писать,
+        # с крестиком и значением из КП). Если и в КП нет - прочерк.
+        if _tg_kp_show != "–":
+            add("Telegram", _tg_kp_show, "–", "bug", "Telegram на сайте отсутствует")
         else:
             add("Telegram", "–", "–", "na", "нет ни в КП, ни на сайте")
-    elif exp_tg in site_tg:
+    elif exp_tg and exp_tg in site_tg:
         add("Telegram", "@" + exp_tg, "@" + exp_tg, "ok", "совпадает с КП")
-    elif site_tg:
-        add("Telegram", "@" + exp_tg,
-            ", ".join("@" + t for t in sorted(site_tg)[:2]),
-            "bug", "Telegram на сайте не совпадает с КП")
     else:
-        add("Telegram", "@" + exp_tg, "–", "bug",
+        # На сайте Telegram ЕСТЬ, но другой (или в КП мусор) → не совпадает.
+        add("Telegram", _tg_kp_show, _tg_found, "bug",
             "Telegram на сайте не совпадает с КП")
 
     # WhatsApp: СТРОГО сверяем номер из КП с номером в ссылке на сайте. Номер в
@@ -1101,33 +1099,28 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     wa_anchor = site.get("whatsapp_anchor_urls", [])    # <a> с текстом «вотсап»
     _wa_raw = (row.whatsapp or "").strip()
     _wa_valid = len(re.sub(r"\D", "", exp_wa)) >= 9     # настоящий номер, не «2»
-    # В «На сайте» - только фактическое значение (без приписки «есть:»).
     _wa_found = (", ".join(fmt(w) for w in sorted(site_wa)[:2]) if site_wa else "–")
-    if not _wa_valid:
-        _kp_wa_show = _wa_raw if _wa_raw and _wa_raw not in ("–", "-") else "–"
-        if _kp_wa_show != "–":
-            # В КП стоит значение, но это не номер («2»/мусор) - это ИНФА, и она
-            # заведомо не совпадает → всегда ✗.
-            add("WhatsApp", _kp_wa_show, _wa_found, "bug",
-                "WhatsApp на сайте не совпадает с КП")
-        elif site_wa:
-            add("WhatsApp", "–", _wa_found, "bug",
-                "WhatsApp на сайте не совпадает с КП")
+    # Значение КП для показа: читаемый номер, либо сырой мусор, либо «–».
+    _wa_kp_show = fmt(exp_wa) if _wa_valid else (_wa_raw if _wa_raw
+                                                 and _wa_raw not in ("–", "-") else "–")
+    if not site_wa:
+        # На сайте WhatsApp-номера НЕТ.
+        if wa_anchor and _wa_valid:
+            # Кнопка вотсапа в шапке есть, но номер в ссылке не читается - сверить
+            # нельзя (⚠, проверить вручную).
+            add("WhatsApp", fmt(exp_wa), "номер в ссылке не виден", "warn",
+                "кнопка WhatsApp есть, номер скрыт - проверьте вручную")
+            fields[-1]["check_url"] = wa_anchor[0]
+        elif _wa_kp_show != "–":
+            # В КП значение есть, а на сайте вотсапа нет → ✗ «отсутствует».
+            add("WhatsApp", _wa_kp_show, "–", "bug", "WhatsApp на сайте отсутствует")
         else:
             add("WhatsApp", "–", "–", "na", "нет ни в КП, ни на сайте")
-    elif exp_wa in site_wa:
+    elif _wa_valid and exp_wa in site_wa:
         add("WhatsApp", fmt(exp_wa), fmt(exp_wa), "ok", "совпадает с КП")
-    elif site_wa:
-        add("WhatsApp", fmt(exp_wa),
-            ", ".join(fmt(w) for w in sorted(site_wa)[:2]),
-            "bug", "WhatsApp на сайте не совпадает с КП")
-    elif wa_anchor:
-        add("WhatsApp", fmt(exp_wa),
-            "номер в ссылке не виден", "warn",
-            "кнопка WhatsApp есть, номер скрыт - проверьте вручную")
-        fields[-1]["check_url"] = wa_anchor[0]
     else:
-        add("WhatsApp", fmt(exp_wa), "–", "bug",
+        # На сайте вотсап ЕСТЬ, но другой (или в КП мусор) → не совпадает.
+        add("WhatsApp", _wa_kp_show, _wa_found, "bug",
             "WhatsApp на сайте не совпадает с КП")
 
     return out

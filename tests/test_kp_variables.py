@@ -607,3 +607,41 @@ def test_messenger_from_header_not_footer_global_channel():
     c2 = kp.extract_site_contacts(sng)
     assert c2["telegram"] == [], c2["telegram"]
     assert c2["whatsapp"] == []
+
+
+def test_messenger_absent_says_otsutstvuet():
+    """Если в КП мессенджер есть, а на сайте его НЕТ (нет значка в шапке) -
+    пишем «Telegram на сайте отсутствует» / «WhatsApp на сайте отсутствует»
+    (✗, значение КП показываем). Просьба заказчика. Если на сайте ДРУГОЙ -
+    «не совпадает с КП»."""
+    row = kp.KPRow(domain="inmetprom.by", city="Минск",
+                   phone_common="375 (44) 588-81-48", all_phones="",
+                   email="minsk@inmetprom.by", country="Беларусь",
+                   telegram="imp_by", whatsapp="375 (44) 588-81-48")
+    html = '<header>Минск <a href="tel:+375445888148">+375 (44) 588-81-48</a></header>'
+    by = {f["field"]: f for f in kp.check_variables(html, "inmetprom.by", row=row)["fields"]}
+    assert by["Telegram"]["status"] == "bug"
+    assert by["Telegram"]["note"] == "Telegram на сайте отсутствует"
+    assert by["Telegram"]["expected"] == "@imp_by"
+    assert by["Telegram"]["found"] == "–"
+    assert by["WhatsApp"]["status"] == "bug"
+    assert by["WhatsApp"]["note"] == "WhatsApp на сайте отсутствует"
+    assert by["WhatsApp"]["found"] == "–"
+
+    # На сайте ДРУГОЙ телеграм → «не совпадает».
+    row.telegram = "imp_by"
+    html2 = ('<header>Минск <a href="https://t.me/other_acc">TG</a></header>')
+    by2 = {f["field"]: f for f in kp.check_variables(html2, "inmetprom.by", row=row)["fields"]}
+    assert by2["Telegram"]["note"] == "Telegram на сайте не совпадает с КП"
+
+
+def test_site_address_without_trailing_marker():
+    """Адрес по метке «Адрес», за которым НЕ идёт телефон/почта, а сразу
+    «Реквизиты»/«Скачать» (кейс СПб: «набережная Обводного канала, 64к2
+    Реквизиты…»). Раньше без стоп-маркера справа адрес вообще не находился."""
+    html = ('<main>Адрес набережная Обводного канала, 64к2 '
+            'Реквизиты Скачать реквизиты</main>')
+    assert kp._site_address_full(html) == "набережная Обводного канала, 64к2"
+    # И «Скачать» сразу после адреса.
+    html2 = '<main>АДРЕС улица Мира, 5 Скачать прайс-лист</main>'
+    assert kp._site_address_full(html2) == "улица Мира, 5"
