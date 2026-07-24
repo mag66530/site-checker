@@ -99,6 +99,39 @@ def test_header_footer_all_present():
         'ftr_phone', 'ftr_email', 'ftr_writeus', 'ftr_address') for bug in r.bugs)
 
 
+def test_header_footer_translated_site():
+    """Зарубежное зеркало СМУ (Баку, .az): текст шапки/подвала переведён на
+    азербайджанский, но вёрстка/классы те же - элементы находятся по структуре
+    (call-back-form / txt-back-form / town-select / an-ico-mail) и az-адресу,
+    без ложных багов."""
+    az = (
+        '<header>'
+        '<a href="tel:+994505732867">+994-50-5732867</a>'
+        '<div class="thin" id="call-back-form">Zəng tələb edin</div>'
+        '<div class="make-request" id="txt-back-form">Ərizənizi təqdim edin</div>'
+        '<div class="header-town-selector"><div>Şəhər: Bakı '
+        '<span class="dashed a-town" id="town-select-btn">başqasını seçin</span></div></div>'
+        '</header>'
+        '<div class="breadcrumb">крошки</div><h1>Ana səhifə</h1>'
+        '<footer>'
+        '<a href="tel:+994505732867">+994-50-5732867</a>'
+        '<a href="mailto:info@steelgroup.az">info@steelgroup.az</a>'
+        '<a onclick="ym()"><i class="an-ico an-ico-mail"></i><span>Bizə yazın</span></a>'
+        '<div class="map-contacts"><div class="map-content-row">'
+        '<div class="map-row-title">Ünvan:</div>'
+        '<div class="map-row-content">23 İzmir küçəsi</div></div></div>'
+        '</footer>'
+    )
+    r = check_content(az + CARD_WITH_PRICE + SMU_MARKER, 'main')
+    b = _by_key(r)
+    for key in ('hdr_callback', 'hdr_request', 'hdr_city',
+                'ftr_writeus', 'ftr_address'):
+        assert b[key].present, f'{key} должен находиться по структуре на .az-зеркале'
+    assert not any(bug.key in (
+        'hdr_callback', 'hdr_request', 'hdr_city', 'ftr_writeus', 'ftr_address')
+        for bug in r.bugs)
+
+
 def test_header_missing_request_is_bug():
     """Нет «Оставить заявку» в шапке → красный баг именно по этому столбцу."""
     header_no_request = (

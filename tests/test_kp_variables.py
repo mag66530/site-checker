@@ -541,3 +541,47 @@ def test_any_nonempty_kp_value_is_value_shown_as_is():
     finally:
         (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
          row.email, row.address, row.telegram, row.whatsapp) = saved
+
+
+def test_site_address_azerbaijani_translated():
+    """Переводной сайт (steelgroup.az): адрес по метке «Ünvan:» латиницей/
+    азербайджанскими буквами - «Bakı, 23 İzmir küçəsi». Хвост «İş saatları»
+    обрезается. Раньше извлечение адреса было только под кириллицу → «Сайт: –»."""
+    html = ('<main><h2>Əlaqə məlumatları</h2>'
+            'Ünvan: Bakı, 23 İzmir küçəsi '
+            'İş saatları: Bazar ertəsi-cümə: 09:00-18:00 '
+            'Əlaqə: +994-50-5732867 info@steelgroup.az</main>')
+    got = kp._site_address_full(html)
+    assert got == "Bakı, 23 İzmir küçəsi", got
+    # Кириллица по-прежнему работает, мусор отсеивается.
+    assert kp._site_address_full('<main>Адрес: Самара, Ярмарочная, 55 '
+                                 'График работы: пн-пт</main>') == "Самара, Ярмарочная, 55"
+    assert kp._site_address_full('<main>адрес доставки. Уличные фонари, Урны</main>') == ""
+
+
+def test_mobile_city_number_is_compared():
+    """Города, где ОСНОВНОЙ номер - сотовый (Донецк/Севастополь: +7 903…):
+    сотовые больше НЕ выкидываются из сверки. Берём номер КП и сравниваем с
+    сайтом. КП 903… = сайт 903… → ✓ (раньше выходило ложное «нет ни в КП, ни
+    на сайте» и прочерк)."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_common, row.phone_ad, row.phone_seo, row.all_phones)
+    row.phone_common = "7 (903) 411-80-66"       # основной номер города - сотовый
+    row.phone_ad = row.phone_seo = ""
+    row.all_phones = "9034118066"
+    try:
+        # На сайте тот же сотовый → ✓.
+        html = '<header><a href="tel:+79034118066">+7 (903) 411-80-66</a></header>'
+        by = {f["field"]: f for f in kp.check_variables(html, "stalmetural.ru")["fields"]}
+        assert by["Тел. Общий Город"]["status"] == "ok"
+        assert "903" in by["Тел. Общий Город"]["found"]
+
+        # На сайте ДРУГОЙ сотовый (не из КП) → ✗ (сравнение работает и для сотовых).
+        html2 = '<header><a href="tel:+79991112233">+7 (999) 111-22-33</a></header>'
+        by2 = {f["field"]: f for f in kp.check_variables(html2, "stalmetural.ru")["fields"]}
+        assert by2["Тел. Общий Город"]["status"] == "bug"
+        assert "999" in by2["Тел. Общий Город"]["found"]
+    finally:
+        (row.phone_common, row.phone_ad, row.phone_seo, row.all_phones) = saved
