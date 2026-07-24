@@ -53,6 +53,24 @@ def tab_label(key: str) -> str:
     return _TAB_LABELS.get(key, key)
 
 
+# Настройки проекта (ключи/прокси, общие на команду): (имя, подпись, вид поля).
+# Имена совпадают с ключами секретов, которые читают проверки (_secret_pid):
+# значение из БД имеет ПРИОРИТЕТ над st.secrets.
+PROJECT_SETTING_FIELDS = [
+    ("proxy_url", "Прокси (http://user:pass@host:port)", "text"),
+    ("textru_key", "Ключ Text.ru (антиплагиат)", "password"),
+    ("arsenkin_token", "Токен Арсенкина", "password"),
+    ("pagespeed_api_key", "Ключ PageSpeed API", "password"),
+    ("telegram_bot_token", "Токен Telegram-бота (уведомления)", "password"),
+    ("metrika_counter", "Номер счётчика Метрики", "text"),
+    ("metrika_oauth", "OAuth-токен Метрики", "password"),
+    ("webmaster_oauth", "OAuth-токен Вебмастера", "password"),
+    ("yandex_oauth", "OAuth-токен Яндекса", "password"),
+    ("autoclick_session", "Сессия Яндекса (base64, автокликеры/Я.Бизнес)", "textarea"),
+    ("gsc_service_account", "Сервис-аккаунт GSC (JSON)", "textarea"),
+]
+
+
 # ---------- проекты (JSON-файлы в projects/*.json, ключ = "id" внутри файла) ----------
 
 def list_projects() -> list[dict]:
@@ -154,6 +172,43 @@ def live_allowed_tabs(user: dict) -> list[str]:
     return allowed or list(APP_TAB_KEYS)
 
 
+@st.cache_data(ttl=20, show_spinner=False)
+def _c_settings_rights_live(uid: str) -> list:
+    return db.get_settings_rights(uid)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _c_all_rights() -> dict:
+    return db.get_all_settings_rights()
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def _c_proj_settings(pk: str) -> dict:
+    return db.get_project_settings(pk)
+
+
+def live_settings_projects(user: dict) -> list[str]:
+    """Проекты, чьи НАСТРОЙКИ юзер вправе менять: админ — все, руководитель —
+    свои проекты, специалист — делегированные (settings_rights)."""
+    if not user:
+        return []
+    if user.get("role") == "admin":
+        return project_keys()
+    valid = set(project_keys())
+    if user.get("role") == "manager":
+        return [p for p in live_user_projects(user["id"]) if p in valid]
+    return [p for p in _c_settings_rights_live(str(user["id"])) if p in valid]
+
+
+def project_setting(project_id: str, name: str):
+    """Значение настройки проекта из БД (кеш ~20с) или None. Никогда не бросает
+    — проверки используют это как приоритетный источник ПЕРЕД st.secrets."""
+    try:
+        return _c_proj_settings(str(project_id)).get(name) or None
+    except Exception:
+        return None
+
+
 def _invalidate() -> None:
     """Сбросить кеши после мутации (одобрение/проекты/статус/удаление/инвайт)."""
     _c_team.clear()
@@ -163,6 +218,9 @@ def _invalidate() -> None:
     _c_user_projects_live.clear()
     _c_user_tabs_live.clear()
     _c_all_tabs.clear()
+    _c_settings_rights_live.clear()
+    _c_all_rights.clear()
+    _c_proj_settings.clear()
 
 
 # ---------- session ----------
@@ -537,6 +595,7 @@ def render_manager_team(user: dict) -> None:
     team_all = _c_team(mid)
     invites = _c_invites(mid)
     tabsmap = _c_all_tabs()
+    rightsmap = _c_all_rights()
     # Руководитель может выдавать только вкладки, доступные ему самому.
     mgr_tabs = live_allowed_tabs(user)
 
@@ -631,6 +690,22 @@ def render_manager_team(user: dict) -> None:
             _invalidate()
             st.rerun()
         tt[2].caption("какие разделы меню видит · пусто = все вкладки")
+        # Делегирование права менять настройки проекта — в рамках проектов
+        # самого руководителя; выданное админом вне их не трогаем.
+        cur_rights = rightsmap.get(uid, [])
+        rt_managed = [p for p in cur_rights if p in mgr_projects]
+        rt_foreign = [p for p in cur_rights if p not in mgr_projects]
+        rr = st.columns([3, 1.6, 4.6], vertical_alignment="bottom")
+        rsel = rr[0].multiselect("Право настроек", sorted(mgr_projects),
+                                 default=rt_managed, format_func=project_label,
+                                 key=f"team_rt_{uid}", label_visibility="collapsed",
+                                 placeholder="нет права настроек")
+        if rr[1].button("Сохранить права", key=f"team_rtsave_{uid}",
+                        use_container_width=True):
+            db.set_settings_rights(uid, rsel + rt_foreign)
+            _invalidate()
+            st.rerun()
+        rr[2].caption("⚙ право менять настройки проекта (ключи, прокси)")
         if cur_foreign:
             _grey("🔒 вне вашего управления (выдано админом): "
                   + ", ".join(project_label(p) for p in cur_foreign))
@@ -647,6 +722,46 @@ def manager_cabinet_page() -> None:
     render_manager_team(user)
 
 
+def project_settings_page() -> None:
+    """Страница «Настройки проекта»: ключи/прокси, общие на команду проекта.
+    Доступ: админ (все проекты), руководитель (свои), специалист — если
+    руководитель/админ делегировал право («Сохранить права» в кабинете)."""
+    user = current_user()
+    allowed = live_settings_projects(user) if user else []
+    if not allowed:
+        st.error("Нет прав на настройки проектов. Право выдаёт руководитель "
+                 "или администратор (кабинет → «Право менять настройки»).")
+        return
+    st.markdown("## 🔑 Настройки проекта")
+    st.caption("Ключи общие для проекта — их использует вся команда проекта. "
+               "Значение из настроек имеет приоритет над секретами приложения; "
+               "пустое поле = настройка удалена (используется секрет, если есть). "
+               "Хранится в базе в зашифрованном виде.")
+    pid = st.selectbox("Проект", allowed, format_func=project_label,
+                       key="ps_project")
+    cur = dict(_c_proj_settings(pid))
+    with st.form(key=f"ps_form_{pid}"):
+        vals = {}
+        for name, label, kind in PROJECT_SETTING_FIELDS:
+            if kind == "textarea":
+                vals[name] = st.text_area(label, value=cur.get(name, ""),
+                                          key=f"ps_{pid}_{name}", height=90)
+            elif kind == "password":
+                vals[name] = st.text_input(label, value=cur.get(name, ""),
+                                           type="password",
+                                           key=f"ps_{pid}_{name}")
+            else:
+                vals[name] = st.text_input(label, value=cur.get(name, ""),
+                                           key=f"ps_{pid}_{name}")
+        if st.form_submit_button("💾 Сохранить ключи"):
+            try:
+                db.set_project_settings(pid, vals)
+                _invalidate()
+                st.success(f"✅ Настройки проекта «{project_label(pid)}» сохранены")
+            except Exception as e:
+                st.error(f"❌ Не удалось сохранить: {e}")
+
+
 def admin_panel_page() -> None:
     """Страница «Админ-панель» (st.Page в навигации app.py)."""
     user = current_user()
@@ -660,6 +775,7 @@ def admin_panel_page() -> None:
     users = _c_all_users()
     projmap = {str(u["id"]): list(u.get("projects") or []) for u in users}
     tabsmap = _c_all_tabs()
+    rightsmap = _c_all_rights()
 
     def _prune_ms(key: str, options) -> None:
         cur = st.session_state.get(key)
@@ -753,6 +869,24 @@ def admin_panel_page() -> None:
                 _invalidate()
                 st.rerun()
             t[2].caption("какие разделы меню видит · пусто = все вкладки")
+            # Делегирование: право менять НАСТРОЙКИ выбранных проектов
+            # (ключи/прокси на странице «Настройки проекта»).
+            if u["role"] != "manager":   # у руководителя право уже есть на свои
+                r = st.columns([3, 1.6, 4.6], vertical_alignment="bottom")
+                _rt_default = [p for p in rightsmap.get(uid, []) if p in all_projects]
+                _prune_ms(f"rtedit_{uid}", all_projects)
+                rsel = r[0].multiselect("Право настроек", all_projects,
+                                        default=_rt_default,
+                                        format_func=project_label,
+                                        key=f"rtedit_{uid}",
+                                        label_visibility="collapsed",
+                                        placeholder="нет права настроек")
+                if r[1].button("Сохранить права", key=f"rtsave_{uid}",
+                               use_container_width=True):
+                    db.set_settings_rights(uid, rsel)
+                    _invalidate()
+                    st.rerun()
+                r[2].caption("⚙ право менять настройки проекта (ключи, прокси)")
 
     emps_by_mgr: dict[str, list] = {}
     for u in users:

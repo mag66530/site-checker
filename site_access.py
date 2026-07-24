@@ -41,9 +41,17 @@ def _secret(key):
 
 
 def secret_proxy(pid: str = "") -> str | None:
-    """Прокси из секретов: proxy_url_<pid> → proxy_url → env HTTP_PROXY."""
+    """Прокси: настройки проекта из кабинета (БД) → proxy_url_<pid> →
+    proxy_url → env HTTP_PROXY."""
     import os
     if pid:
+        try:
+            import auth
+            v = auth.project_setting(pid, "proxy_url")
+            if v:
+                return v
+        except Exception:
+            pass
         v = _secret(f"proxy_url_{pid}")
         if v:
             return v

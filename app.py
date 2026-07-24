@@ -332,6 +332,12 @@ if _user and _user.get('role') in ('manager', 'admin'):
     _mgmt_pages.append(st.Page(auth.manager_cabinet_page,
                                title='Кабинет руководителя', icon='🗂',
                                url_path='cabinet'))
+# «Настройки проекта» видят админ, руководители и специалисты с делегированным
+# правом (страница сама ре-проверяет права по живым данным).
+if _user and auth.live_settings_projects(_user):
+    _mgmt_pages.append(st.Page(auth.project_settings_page,
+                               title='Настройки проекта', icon='🔑',
+                               url_path='project-settings'))
 if _user and _user.get('role') == 'admin':
     _mgmt_pages.append(st.Page(auth.admin_panel_page, title='Админ-панель',
                                icon='⚙️', url_path='admin'))
