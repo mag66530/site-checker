@@ -102,14 +102,13 @@ def test_site_has_kp_empty_is_bug_and_shows_site():
 
 
 def test_kp_empty_and_site_empty_is_dash():
-    """Если НИ в КП, ни на сайте значения нет (КП = «2»/пусто, на сайте номера
-    тоже нет) - это прочерк «–», а не ошибка (правило заказчика: «ни там, ни
-    там → прочерк»)."""
+    """Прочерк «–» - ТОЛЬКО когда ни в КП, ни на сайте значения нет ВООБЩЕ
+    (ячейка КП пустая И на сайте номера нет). Правило заказчика."""
     m = kp.load_kp("smu")
     kp._KP_CACHE["smu"] = m
     row = m["stalmetural.ru"]
     saved = (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones)
-    row.phone_seo = row.phone_ad = row.phone_common = "2"
+    row.phone_seo = row.phone_ad = row.phone_common = ""    # КП реально ПУСТАЯ
     row.all_phones = ""
     try:
         html = "<header>Стальметурал</header><footer>© 2026</footer>"  # телефона нет
@@ -119,6 +118,42 @@ def test_kp_empty_and_site_empty_is_dash():
             assert by[label]["status"] == "na", label       # ни там ни там → –
     finally:
         (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones) = saved
+
+
+def test_garbage_kp_value_is_info_always_bug():
+    """«2»/мусор в ячейке КП - это ИНФА в КП (заказчик ставит её нарочно, чтобы
+    проверить инструмент). Она заведомо не совпадает с сайтом → ВСЕГДА ✗, даже
+    если на сайте городского номера нет. Прочерк для непустой ячейки запрещён.
+    В «Сайт» показываем, что реально на сайте (городской, иначе сотовый)."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+             row.email, row.address)
+    row.phone_seo = row.phone_ad = row.phone_common = "2"
+    row.all_phones = ""
+    row.email = row.address = "2"
+    try:
+        # Город, где на сайте ТОЛЬКО сотовый (кейс Севастополя/Владимира):
+        html = '<header><a href="tel:+79030846889">+7 (903) 084-68-89</a></header>'
+        by = {f["field"]: f for f in kp.check_variables(html, "stalmetural.ru")["fields"]}
+        for label in ("Тел. Общий Город", "Тел. SEO Город"):
+            assert by[label]["status"] == "bug", label          # «2» = инфа → ✗
+            assert by[label]["expected"] == "2"
+            assert "903" in by[label]["found"], label           # сотовый виден в «Сайт»
+        # Почта «2», на сайте почты нет → всё равно ✗ (в КП инфа есть).
+        assert by["Почта"]["status"] == "bug"
+        # Адрес «2», на сайте адрес не вытащился → всё равно ✗.
+        assert by["Адрес"]["status"] == "bug"
+
+        # И совсем пустая страница: «2» в КП всё равно даёт ✗, не прочерк.
+        by2 = {f["field"]: f for f in
+               kp.check_variables("<p>пусто</p>", "stalmetural.ru")["fields"]}
+        assert by2["Тел. Общий Город"]["status"] == "bug"
+        assert by2["Почта"]["status"] == "bug"
+    finally:
+        (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+         row.email, row.address) = saved
 
 
 def test_empty_slot_site_shows_common_is_dash_not_bug():
@@ -306,26 +341,27 @@ def test_check_variables_different_address_is_bug():
 
 
 def test_только_почта_для_перевода():
-    """Переводная копия сайта (город «… (перевод)», напр. steelgroup.az): в отчёте
-    проверяем ТОЛЬКО «Почту», остальные колонки → «–». Обычный город не трогаем."""
+    """Переводная копия сайта (город «… (перевод)», напр. steelgroup.az): это
+    реальный сайт, контакты сверяем как обычно (телефон/почта/WhatsApp), гасим
+    ТОЛЬКО «Город» (это метка КП, не реальный город). Обычный город не трогаем."""
     import variables_run as vr
     fields = [
         {"field": "Город", "status": "bug", "found": "не найден на странице"},
-        {"field": "Тел. SEO Город", "status": "ok", "found": "есть"},
+        {"field": "Тел. SEO Город", "status": "bug", "found": "+7 (499) 130-07-86"},
         {"field": "Почта", "status": "bug", "found": "другая почта"},
         {"field": "WhatsApp", "status": "ok", "found": "есть"},
     ]
     out = vr._только_почта_для_перевода("Азербайджан (перевод)", [dict(f) for f in fields])
     by = {f["field"]: f for f in out}
-    assert by["Город"]["status"] == "na" and by["Город"]["found"] == "–"
-    assert by["Тел. SEO Город"]["status"] == "na"
-    assert by["WhatsApp"]["status"] == "na"
-    assert by["Почта"]["status"] == "bug"            # почту проверяем как обычно
+    assert by["Город"]["status"] == "na" and by["Город"]["found"] == "–"  # город - метка
+    assert by["Тел. SEO Город"]["status"] == "bug"   # контакты сверяем как обычно
+    assert by["Почта"]["status"] == "bug"
+    assert by["WhatsApp"]["status"] == "ok"
 
     # Обычный город (без «(перевод)») остаётся как есть.
     out2 = vr._только_почта_для_перевода("Баку", [dict(f) for f in fields])
     assert {f["field"]: f["status"] for f in out2} == \
-        {"Город": "bug", "Тел. SEO Город": "ok", "Почта": "bug", "WhatsApp": "ok"}
+        {"Город": "bug", "Тел. SEO Город": "bug", "Почта": "bug", "WhatsApp": "ok"}
 
 
 def test_find_contacts_path():
@@ -432,10 +468,12 @@ def test_mismatch_notes_are_uniform():
          row.email, row.address, row.telegram, row.whatsapp) = saved
 
 
-def test_empty_and_garbage_slot_behave_identically():
-    """Противоречие устранено: пустая ячейка слота и мусор «2» в ней ведут себя
-    ОДИНАКОВО. Если на сайте только известный номер города - оба дают «–»
-    (отдельного номера нет), а не «пусто → –, а 2 → баг»."""
+def test_empty_slot_dash_but_garbage_slot_bug():
+    """Пустая ячейка слота ≠ мусор «2» в ней (уточнение заказчика):
+      • ПУСТО в КП + на сайте известный (общий) номер города → «–» - отдельного
+        номера просто нет, это не ошибка;
+      • «2» в КП (ИНФА, поставленная нарочно) → всегда ✗, что бы ни было на
+        сайте - инфа в КП с сайтом не совпадает."""
     m = kp.load_kp("smu")
     kp._KP_CACHE["smu"] = m
     row = m["stalmetural.ru"]
@@ -445,11 +483,17 @@ def test_empty_and_garbage_slot_behave_identically():
     row.all_phones = "4951112233"
     html = '<header><a href="tel:+74951112233">+7 (495) 111-22-33</a></header>'
     try:
-        for slot_val in ("", "2"):
-            row.phone_seo = slot_val
-            by = {f["field"]: f for f in
-                  kp.check_variables(html, "stalmetural.ru")["fields"]}
-            assert by["Тел. SEO Город"]["status"] == "na", slot_val
+        row.phone_seo = ""                      # пусто → прочерк
+        by = {f["field"]: f for f in
+              kp.check_variables(html, "stalmetural.ru")["fields"]}
+        assert by["Тел. SEO Город"]["status"] == "na"
+
+        row.phone_seo = "2"                     # мусор-инфа → ✗
+        by = {f["field"]: f for f in
+              kp.check_variables(html, "stalmetural.ru")["fields"]}
+        assert by["Тел. SEO Город"]["status"] == "bug"
+        assert by["Тел. SEO Город"]["expected"] == "2"
+        assert "111-22-33" in by["Тел. SEO Город"]["found"]   # что на сайте - видно
     finally:
         (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones) = saved
 
@@ -469,3 +513,31 @@ def test_address_tail_trimmed():
             '+7 (903) 084-68-89 krym@stalmetural.ru Время работы: пн-пт</main>')
     got = kp._site_address_full(html)
     assert "Руднева, 35Д" in got and "Контакты" not in got and "работы" not in got
+
+
+def test_any_nonempty_kp_value_is_value_shown_as_is():
+    """Правило заказчика: ЛЮБОЕ непустое значение в КП («1», «.», «агркугш») -
+    это значение. Выводим в колонку «КП» КАК ЕСТЬ и сверяем с сайтом → ✗
+    (не совпадает). Пусто = нет значения (см. отдельные тесты). Проверяем все
+    поля, включая «Реклама Город» (там колонка КП раньше показывала «–»)."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+             row.email, row.address, row.telegram, row.whatsapp)
+    html = ('<header><a href="tel:+74991303669">+7 (499) 130-36-69</a> '
+            '<a href="mailto:msk@stalmetural.ru">msk@stalmetural.ru</a></header>')
+    try:
+        for junk in ("1", ".", "агркугш"):
+            (row.phone_seo, row.phone_ad, row.phone_common) = (junk, junk, junk)
+            row.all_phones = ""
+            row.email = row.address = row.telegram = row.whatsapp = junk
+            by = {f["field"]: f for f in
+                  kp.check_variables(html, "stalmetural.ru")["fields"]}
+            for label in ("Тел. Общий Город", "Тел. Реклама Город",
+                          "Тел. SEO Город", "Почта", "Адрес", "Telegram", "WhatsApp"):
+                assert by[label]["status"] == "bug", (junk, label)
+                assert by[label]["expected"] == junk, (junk, label)   # КП как есть
+    finally:
+        (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+         row.email, row.address, row.telegram, row.whatsapp) = saved
