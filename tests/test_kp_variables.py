@@ -341,26 +341,27 @@ def test_check_variables_different_address_is_bug():
 
 
 def test_только_почта_для_перевода():
-    """Переводная копия сайта (город «… (перевод)», напр. steelgroup.az): в отчёте
-    проверяем ТОЛЬКО «Почту», остальные колонки → «–». Обычный город не трогаем."""
+    """Переводная копия сайта (город «… (перевод)», напр. steelgroup.az): это
+    реальный сайт, контакты сверяем как обычно (телефон/почта/WhatsApp), гасим
+    ТОЛЬКО «Город» (это метка КП, не реальный город). Обычный город не трогаем."""
     import variables_run as vr
     fields = [
         {"field": "Город", "status": "bug", "found": "не найден на странице"},
-        {"field": "Тел. SEO Город", "status": "ok", "found": "есть"},
+        {"field": "Тел. SEO Город", "status": "bug", "found": "+7 (499) 130-07-86"},
         {"field": "Почта", "status": "bug", "found": "другая почта"},
         {"field": "WhatsApp", "status": "ok", "found": "есть"},
     ]
     out = vr._только_почта_для_перевода("Азербайджан (перевод)", [dict(f) for f in fields])
     by = {f["field"]: f for f in out}
-    assert by["Город"]["status"] == "na" and by["Город"]["found"] == "–"
-    assert by["Тел. SEO Город"]["status"] == "na"
-    assert by["WhatsApp"]["status"] == "na"
-    assert by["Почта"]["status"] == "bug"            # почту проверяем как обычно
+    assert by["Город"]["status"] == "na" and by["Город"]["found"] == "–"  # город - метка
+    assert by["Тел. SEO Город"]["status"] == "bug"   # контакты сверяем как обычно
+    assert by["Почта"]["status"] == "bug"
+    assert by["WhatsApp"]["status"] == "ok"
 
     # Обычный город (без «(перевод)») остаётся как есть.
     out2 = vr._только_почта_для_перевода("Баку", [dict(f) for f in fields])
     assert {f["field"]: f["status"] for f in out2} == \
-        {"Город": "bug", "Тел. SEO Город": "ok", "Почта": "bug", "WhatsApp": "ok"}
+        {"Город": "bug", "Тел. SEO Город": "bug", "Почта": "bug", "WhatsApp": "ok"}
 
 
 def test_find_contacts_path():
@@ -512,3 +513,31 @@ def test_address_tail_trimmed():
             '+7 (903) 084-68-89 krym@stalmetural.ru Время работы: пн-пт</main>')
     got = kp._site_address_full(html)
     assert "Руднева, 35Д" in got and "Контакты" not in got and "работы" not in got
+
+
+def test_any_nonempty_kp_value_is_value_shown_as_is():
+    """Правило заказчика: ЛЮБОЕ непустое значение в КП («1», «.», «агркугш») -
+    это значение. Выводим в колонку «КП» КАК ЕСТЬ и сверяем с сайтом → ✗
+    (не совпадает). Пусто = нет значения (см. отдельные тесты). Проверяем все
+    поля, включая «Реклама Город» (там колонка КП раньше показывала «–»)."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+             row.email, row.address, row.telegram, row.whatsapp)
+    html = ('<header><a href="tel:+74991303669">+7 (499) 130-36-69</a> '
+            '<a href="mailto:msk@stalmetural.ru">msk@stalmetural.ru</a></header>')
+    try:
+        for junk in ("1", ".", "агркугш"):
+            (row.phone_seo, row.phone_ad, row.phone_common) = (junk, junk, junk)
+            row.all_phones = ""
+            row.email = row.address = row.telegram = row.whatsapp = junk
+            by = {f["field"]: f for f in
+                  kp.check_variables(html, "stalmetural.ru")["fields"]}
+            for label in ("Тел. Общий Город", "Тел. Реклама Город",
+                          "Тел. SEO Город", "Почта", "Адрес", "Telegram", "WhatsApp"):
+                assert by[label]["status"] == "bug", (junk, label)
+                assert by[label]["expected"] == junk, (junk, label)   # КП как есть
+    finally:
+        (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+         row.email, row.address, row.telegram, row.whatsapp) = saved
