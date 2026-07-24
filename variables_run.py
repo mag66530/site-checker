@@ -926,7 +926,7 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
 
     # Лист «Расхождения» - только проблемные ячейки, для быстрого разбора.
     ws2 = wb.create_sheet("Расхождения")
-    for c, t in enumerate(["Поддомен", "Город", "Переменная", "КП",
+    for c, t in enumerate(["Поддомен", "Город", "Что проверяем", "КП",
                            "На сайте", "Примечание"], 1):
         cell = ws2.cell(1, c, t)
         cell.font = Font(bold=True)

@@ -988,12 +988,16 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     else:
         add("Почта", exp_mail, "–", "bug", "почта на сайте не совпадает с КП")
 
-    # Адрес сверяем по ВСЕМУ тексту шапки+подвала главной (там на сайтах СМУ и
-    # лежит адрес города), А ТАКЖЕ по странице «Контакты», если её передали: у
-    # части проектов (МПЭ/mepen) адрес только на «Контактах», в карточке
-    # «Адрес: …», а в подвале главной его нет - тогда сверка по одной главной
-    # давала ложное «адрес не найден». Точечный сниппет ловил не то место (напр.
-    # «Город: … изменить») - поэтому сверяем по всему тексту.
+    # Адрес ищем как «Ctrl+F по странице»: по ВСЕМУ видимому тексту ГЛАВНОЙ (не
+    # только шапка/подвал - адрес бывает и в блоке контактов посреди страницы),
+    # А ТАКЖЕ по странице «Контакты», если её передали (там адрес у части
+    # проектов - в карточке «Адрес: …»). Если на главной не нашли - variables_run
+    # догружает «Контакты» и пересверяет.
+    try:
+        from text_checker import html_to_visible_text
+        _main_text = html_to_visible_text(html)
+    except Exception:
+        _main_text = html or ""
     contacts_text = ""
     if contacts_html:
         try:
@@ -1001,8 +1005,8 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             contacts_text = html_to_visible_text(contacts_html)
         except Exception:
             contacts_text = contacts_html
-    haystack = " ".join(x for x in (site.get("full_text"),
-                                    site.get("address"), contacts_text) if x)
+    haystack = " ".join(x for x in (_main_text, site.get("address"),
+                                    contacts_text) if x)
 
     def _found_addr() -> str:
         # Чистый адрес «По факту» по метке «Адрес:»: сначала главная, потом
