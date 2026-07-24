@@ -541,3 +541,19 @@ def test_any_nonempty_kp_value_is_value_shown_as_is():
     finally:
         (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
          row.email, row.address, row.telegram, row.whatsapp) = saved
+
+
+def test_site_address_azerbaijani_translated():
+    """Переводной сайт (steelgroup.az): адрес по метке «Ünvan:» латиницей/
+    азербайджанскими буквами - «Bakı, 23 İzmir küçəsi». Хвост «İş saatları»
+    обрезается. Раньше извлечение адреса было только под кириллицу → «Сайт: –»."""
+    html = ('<main><h2>Əlaqə məlumatları</h2>'
+            'Ünvan: Bakı, 23 İzmir küçəsi '
+            'İş saatları: Bazar ertəsi-cümə: 09:00-18:00 '
+            'Əlaqə: +994-50-5732867 info@steelgroup.az</main>')
+    got = kp._site_address_full(html)
+    assert got == "Bakı, 23 İzmir küçəsi", got
+    # Кириллица по-прежнему работает, мусор отсеивается.
+    assert kp._site_address_full('<main>Адрес: Самара, Ярмарочная, 55 '
+                                 'График работы: пн-пт</main>') == "Самара, Ярмарочная, 55"
+    assert kp._site_address_full('<main>адрес доставки. Уличные фонари, Урны</main>') == ""
