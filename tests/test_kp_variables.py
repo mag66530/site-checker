@@ -353,3 +353,102 @@ if __name__ == "__main__":
             print(f"✗ {fn.__name__}"); traceback.print_exc()
     print(f"\n{ok}/{len(fns)} прошло")
     sys.exit(0 if ok == len(fns) else 1)
+
+
+def test_widget_url_digits_not_phone():
+    """Цифры из URL виджетов/картинок (напр. рейтинг-бейдж Яндекса
+    yandex.ru/sprav/widget/rating-badge/90492027885) - НЕ телефон. Раньше они
+    попадали в «телефоны с сайта» и давали ложное «на сайте другой номер»
+    (кейс Хабаровска: +7 (049) 202-78-85, которого на сайте нет). href="tel:…"
+    при этом остаётся источником номера."""
+    html = ('<footer>'
+            '<a href="tel:+74212680556">+7 (421) 268-05-56</a>'
+            '<iframe src="https://yandex.ru/sprav/widget/rating-badge/'
+            '90492027885?type=rating" width="150"></iframe>'
+            '</footer>')
+    c = kp.extract_site_contacts(html)
+    assert c["phones"] == ["4212680556"], c["phones"]   # только настоящий номер
+    # И на уровне split_phones: 10 цифр с ведущим 0 - не номер (кодов на 0 нет).
+    assert kp.split_phones("90492027885") == []
+
+
+def test_merge_podmena_wording_and_format():
+    """Живая проверка подмены: расхождение пишется ЕДИНООБРАЗНО «телефон на сайте
+    не совпадает с КП» (как все остальные поля), а номера ЧИТАЕМО
+    (+7 (800) 600-98-56, не голыми цифрами). Что в КП/на сайте - в колонках."""
+    import variables_run as vr
+    fld = {'field': 'Тел. Реклама Город', 'expected': '–', 'found': '–',
+           'status': 'na', 'note': ''}
+    vr._merge_подмена(fld, {'status': 'replaced_ok', 'shown': ['8006009856']},
+                      False, '8006009856', "рекламный номер",
+                      "с меткой ?utm_source=yandex", dial='7')
+    assert fld['status'] == 'bug'
+    assert fld['found'] == '+7 (800) 600-98-56'          # читаемый формат
+    assert fld['note'] == 'телефон на сайте не совпадает с КП'
+
+    fld2 = {'field': 'Тел. Реклама Город', 'expected': '–', 'found': '–',
+            'status': 'na', 'note': ''}
+    vr._merge_подмена(fld2, {'status': 'not_replaced', 'shown': ['4212680556']},
+                      False, '8006009856', "рекламный номер",
+                      "с меткой ?utm_source=yandex", dial='7')
+    assert fld2['status'] == 'bug'
+    assert fld2['found'] == '+7 (421) 268-05-56'
+    assert fld2['note'] == 'телефон на сайте не совпадает с КП'
+
+
+def test_mismatch_notes_are_uniform():
+    """Все расхождения (✗) пишутся ЕДИНООБРАЗНО: «<поле> на сайте не совпадает с
+    КП» - без разнобоя «в КП нет / на сайте нет / не распознан» (просьба
+    заказчика). КП и фактическое значение сайта видны в колонках «КП»/«На сайте»."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+             row.email, row.address, row.telegram, row.whatsapp)
+    # КП всё сломано («2»), на сайте - реальные данные, отличные от КП.
+    row.phone_seo = row.phone_ad = row.phone_common = "2"
+    row.all_phones = ""
+    row.email = row.address = row.telegram = row.whatsapp = "2"
+    try:
+        html = (
+            '<header>'
+            '<a href="tel:+74991303669">+7 (499) 130-36-69</a> '
+            '<a href="mailto:msk@stalmetural.ru">msk@stalmetural.ru</a> '
+            'Адрес: Москва, улица Полярная, 5 '
+            '<a href="https://t.me/some_manager">TG</a>'
+            '<a href="https://wa.me/79995553311">WA</a>'
+            '</header>')
+        by = {f["field"]: f for f in kp.check_variables(html, "stalmetural.ru")["fields"]}
+        assert by["Тел. Общий Город"]["note"] == "телефон на сайте не совпадает с КП"
+        assert by["Почта"]["note"] == "почта на сайте не совпадает с КП"
+        assert by["Адрес"]["note"] == "адрес на сайте не совпадает с КП"
+        assert by["Telegram"]["note"] == "Telegram на сайте не совпадает с КП"
+        assert by["WhatsApp"]["note"] == "WhatsApp на сайте не совпадает с КП"
+        # И везде видно фактическое значение с сайта.
+        for f in ("Тел. Общий Город", "Почта", "Адрес", "Telegram", "WhatsApp"):
+            assert by[f]["found"] not in ("–", ""), f
+    finally:
+        (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+         row.email, row.address, row.telegram, row.whatsapp) = saved
+
+
+def test_empty_and_garbage_slot_behave_identically():
+    """Противоречие устранено: пустая ячейка слота и мусор «2» в ней ведут себя
+    ОДИНАКОВО. Если на сайте только известный номер города - оба дают «–»
+    (отдельного номера нет), а не «пусто → –, а 2 → баг»."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones)
+    row.phone_common = "+7 (495) 111-22-33"
+    row.phone_ad = ""
+    row.all_phones = "4951112233"
+    html = '<header><a href="tel:+74951112233">+7 (495) 111-22-33</a></header>'
+    try:
+        for slot_val in ("", "2"):
+            row.phone_seo = slot_val
+            by = {f["field"]: f for f in
+                  kp.check_variables(html, "stalmetural.ru")["fields"]}
+            assert by["Тел. SEO Город"]["status"] == "na", slot_val
+    finally:
+        (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones) = saved

@@ -135,6 +135,10 @@ def split_phones(s: Optional[str]) -> list[str]:
     out = []
     for m in _PHONE_FIND.findall(str(s)):
         n = normalize_phone(m)
+        # 10-значный нац. номер РФ/КЗ не бывает с кода 0 (обрезки чужих чисел -
+        # ID виджетов и т.п., напр. «90492027885» → «0492027885» - не телефон).
+        if len(n) == 10 and n.startswith('0'):
+            continue
         if 9 <= len(n) <= 10 and n not in out:
             out.append(n)
     return out
@@ -394,6 +398,13 @@ _WA_URL_RE = re.compile(
 # Хабаровска). Номера из КОДА проверяем отдельно (коллтрекинг → check_ad_number).
 _SCRIPT_STYLE_RE = re.compile(r'<(script|style)\b[^>]*>[\s\S]*?</\1>', re.I)
 
+# Значения URL-атрибутов (src/href/… КРОМЕ href="tel:…"): цифры из адресов
+# виджетов/картинок (напр. yandex.ru/sprav/widget/rating-badge/90492027885) -
+# не телефоны, вырезаем перед поиском номеров.
+_URL_ATTR_RE = re.compile(
+    r'\b(?:src|data-src|srcset|action|poster|content)\s*=\s*["\'][^"\']*["\']'
+    r'|\bhref\s*=\s*["\'](?!tel:)[^"\']*["\']', re.I)
+
 
 def extract_site_contacts(html: str) -> dict:
     """Достать из шапки+подвала телефоны, почты и текст адреса."""
@@ -409,7 +420,12 @@ def extract_site_contacts(html: str) -> dict:
     # города, где телефон = вотсап (напр. Бишкек), не теряют номер.
     # Скрипты/стили вырезаем: их «голые» числа - не отображаемые телефоны.
     _region_novis = _SCRIPT_STYLE_RE.sub(' ', region_html)
-    _region_no_wa = _WA_URL_RE.sub(' ', _region_novis)
+    # Адреса ссылок/картинок/iframe (src=…, href=…) - НЕ телефоны: из URL вида
+    # yandex.ru/sprav/widget/rating-badge/90492027885 цифры попадали в «телефоны»
+    # и давали ложное «на сайте другой номер» (Хабаровск). href="tel:…" ОСТАВЛЯЕМ -
+    # это настоящий источник номера.
+    _region_no_url = _URL_ATTR_RE.sub(' ', _region_novis)
+    _region_no_wa = _WA_URL_RE.sub(' ', _region_no_url)
     # Маски ввода телефона («+7 (000) 000-00-00») и заглушки с кодом 000 -
     # не настоящие номера, отбрасываем, чтобы не считать их расхождением.
     phones = [p for p in (split_phones(text) + split_phones(_region_no_wa))
@@ -847,7 +863,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             if _ad and _ad["status"] == "bug":
                 _cfg = ", ".join(fmt(n) for n in _ad["configured"]) or "–"
                 add(label, fmt(exp), _cfg, "bug",
-                    f"в коде рекламный номер не совпадает с КП (в коде: {_cfg})")
+                    "телефон на сайте не совпадает с КП")
                 continue
             if not exp:
                 # В КП рекламного номера нет, но в КОДЕ подмена ЕСТЬ, и это номер,
@@ -859,32 +875,24 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                     continue
             # иначе (нет коллтрекинга / обычный номер) - общая логика ниже.
         if not exp:
-            if raw and raw not in ("–", "-"):
-                # В ячейке КП значение НЕ телефон (мусор/опечатка «2» - часто
-                # «съехали столбцы»). Если на сайте номер есть - показываем его и
-                # помечаем ошибку КП; если и на сайте номера нет - прочерк.
-                if site_phones:
-                    add(label, raw, site_ph_primary, "bug",
-                        "телефон в КП не распознан - проверьте КП")
-                else:
-                    add(label, raw, "–", "na", "нет ни в КП, ни на сайте")
+            # В КП для этого слота валидного номера нет: ячейка пустая ЛИБО в ней
+            # мусор/опечатка «2» (часто «съехали столбцы»). И то, и другое =
+            # «в КП номера нет» - обрабатываем ОДИНАКОВО (без разнобоя):
+            #   • на сайте НОВЫЙ номер, которого в КП города нет вообще → ✗
+            #     «телефон на сайте не совпадает с КП» (в «На сайте» - этот номер);
+            #   • на сайте только известные номера города (общий) → отдельного
+            #     номера для слота просто нет → прочерк «–» (НЕ баг);
+            #   • на сайте номера нет → «–».
+            _kp_show = raw if raw and raw not in ("–", "-") else "–"
+            _new = [p for p in _site_ph_ordered if p not in kp_phones]
+            if _new:
+                add(label, _kp_show, fmt(_new[0]), "bug",
+                    "телефон на сайте не совпадает с КП")
+            elif site_phones:
+                add(label, "–", "–", "na",
+                    "отдельного номера в КП нет - на сайте общий номер города")
             else:
-                # Ячейка КП пустая: отдельного номера для этого слота нет (у города
-                # только общий). Тогда, по правилу заказчика:
-                #   • на сайте стоит номер(а) города ИЗ КП (общий) и ничего нового -
-                #     отдельного номера просто нет → прочерк «–» (НЕ баг);
-                #   • на сайте НОВЫЙ номер, которого в КП города нет вообще → ✗
-                #     («на сайте такой-то, а в КП такого номера нет»);
-                #   • на сайте номера нет → «–».
-                _new = [p for p in _site_ph_ordered if p not in kp_phones]
-                if not site_phones:
-                    add(label, "–", "–", "na", "нет ни в КП, ни на сайте")
-                elif not _new:
-                    add(label, "–", "–", "na",
-                        "отдельного номера в КП нет - на сайте стоит общий номер города")
-                else:
-                    add(label, "–", fmt(_new[0]), "bug",
-                        "на сайте номер, которого нет в КП города")
+                add(label, "–", "–", "na", "нет ни в КП, ни на сайте")
         elif _is_mobile(exp):
             # В этой ячейке КП - сотовый: по просьбе заказчика не проверяем.
             add(label, fmt(exp), "–", "na", "сотовый - не проверяем")
@@ -904,7 +912,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         else:
             # В КП номер есть, а на сайте его нет - это расхождение ✗ (красное),
             # а не «проверьте вручную»: сайт должен показывать номер из КП.
-            add(label, fmt(exp), "–", "bug", "в КП есть номер, а на сайте нет")
+            add(label, fmt(exp), "–", "bug", "телефон на сайте не совпадает с КП")
 
     exp_mail = (row.email or "").strip().lower()
     # Реальная почта, а не «2»/мусор: есть «@» и точка в домене.
@@ -915,7 +923,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         # В КП почты нет (пусто/«2»/мусор). Правило: на сайте есть → ✗; нет → –.
         if site_mails:
             add("Почта", (exp_mail if exp_mail and exp_mail not in ("–", "-") else "–"),
-                _mail_found, "bug", "на сайте есть почта, а в КП нет")
+                _mail_found, "bug", "почта на сайте не совпадает с КП")
         else:
             add("Почта", "–", "–", "na", "нет ни в КП, ни на сайте")
     elif exp_mail in site_mails:
@@ -924,7 +932,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         add("Почта", exp_mail, _mail_found, "bug",
             "почта на сайте не совпадает с КП")
     else:
-        add("Почта", exp_mail, "–", "bug", "в КП есть почта, а на сайте нет")
+        add("Почта", exp_mail, "–", "bug", "почта на сайте не совпадает с КП")
 
     # Адрес сверяем по ВСЕМУ тексту шапки+подвала главной (там на сайтах СМУ и
     # лежит адрес города), А ТАКЖЕ по странице «Контакты», если её передали: у
@@ -958,7 +966,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         _site = _site_address_full(html) or _site_address_full(contacts_html or "")
         if _site:
             add("Адрес", (row.address if row.address and row.address not in ("–", "-")
-                          else "–"), _site, "bug", "на сайте есть адрес, а в КП нет")
+                          else "–"), _site, "bug", "адрес на сайте не совпадает с КП")
         else:
             add("Адрес", "–", "–", "na", "нет ни в КП, ни на сайте")
     elif address_match(haystack, row.address):
@@ -984,7 +992,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             # с телефоном/почтой). На главной тул ещё догрузит «Контакты» и
             # пересверит - если адрес там, станет ✓; если и там нет - остаётся ✗.
             add("Адрес", row.address, "–", "bug",
-                "в КП есть адрес, а на сайте нет")
+                "адрес на сайте не совпадает с КП")
 
     # Telegram: СТРОГО сверяем аккаунт из КП с аккаунтом на сайте (по просьбе
     # заказчика). Аккаунт в ссылке t.me/<username> нормализуем к username.
@@ -997,7 +1005,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         # В КП Telegram нет (пусто/«2»/мусор). На сайте есть → ✗; нет → –.
         if site_tg:
             add("Telegram", (_tg_raw if _tg_raw and _tg_raw not in ("–", "-") else "–"),
-                _tg_found, "bug", "на сайте есть Telegram, а в КП нет")
+                _tg_found, "bug", "Telegram на сайте не совпадает с КП")
         else:
             add("Telegram", "–", "–", "na", "нет ни в КП, ни на сайте")
     elif exp_tg in site_tg:
@@ -1008,7 +1016,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             "bug", "Telegram на сайте не совпадает с КП")
     else:
         add("Telegram", "@" + exp_tg, "–", "bug",
-            "в КП есть Telegram, а на сайте нет")
+            "Telegram на сайте не совпадает с КП")
 
     # WhatsApp: СТРОГО сверяем номер из КП с номером в ссылке на сайте. Номер в
     # wa.me/<number> нормализуем к 10 цифрам. Если кнопка есть, но номер в
@@ -1024,7 +1032,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         # В КП WhatsApp нет (пусто/«2»/мусор). На сайте есть → ✗; нет → –.
         if site_wa:
             add("WhatsApp", (_wa_raw if _wa_raw and _wa_raw not in ("–", "-") else "–"),
-                _wa_found, "bug", "на сайте есть WhatsApp, а в КП нет")
+                _wa_found, "bug", "WhatsApp на сайте не совпадает с КП")
         else:
             add("WhatsApp", "–", "–", "na", "нет ни в КП, ни на сайте")
     elif exp_wa in site_wa:
@@ -1040,7 +1048,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         fields[-1]["check_url"] = wa_anchor[0]
     else:
         add("WhatsApp", fmt(exp_wa), "–", "bug",
-            "в КП есть WhatsApp, а на сайте нет")
+            "WhatsApp на сайте не совпадает с КП")
 
     return out
 
