@@ -452,3 +452,20 @@ def test_empty_and_garbage_slot_behave_identically():
             assert by["Тел. SEO Город"]["status"] == "na", slot_val
     finally:
         (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones) = saved
+
+
+def test_address_tail_trimmed():
+    """К адресу с сайта не приклеивается хвост карточки «Контактов»:
+    «улица Руднева, 35Д Контакты: +7 (903)… krym@… Время работы: пн-пт» →
+    в отчёте только «улица Руднева, 35Д» (просьба заказчика)."""
+    assert kp._обрезать_хвост_адреса(
+        "улица Руднева, 35Д Контакты: +7 (903) 084-68-89 "
+        "krym@stalmetural.ru Время работы: пн-пт: с") == "улица Руднева, 35Д"
+    # Чистый адрес не трогаем.
+    assert kp._обрезать_хвост_адреса("улица Данилы Зверева, 31литS") == \
+        "улица Данилы Зверева, 31литS"
+    # И через _site_address_full (страница «Контакты»).
+    html = ('<main>Адрес: Севастополь, улица Руднева, 35Д Контакты: '
+            '+7 (903) 084-68-89 krym@stalmetural.ru Время работы: пн-пт</main>')
+    got = kp._site_address_full(html)
+    assert "Руднева, 35Д" in got and "Контакты" not in got and "работы" not in got
