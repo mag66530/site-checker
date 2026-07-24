@@ -353,3 +353,47 @@ if __name__ == "__main__":
             print(f"✗ {fn.__name__}"); traceback.print_exc()
     print(f"\n{ok}/{len(fns)} прошло")
     sys.exit(0 if ok == len(fns) else 1)
+
+
+def test_widget_url_digits_not_phone():
+    """Цифры из URL виджетов/картинок (напр. рейтинг-бейдж Яндекса
+    yandex.ru/sprav/widget/rating-badge/90492027885) - НЕ телефон. Раньше они
+    попадали в «телефоны с сайта» и давали ложное «на сайте другой номер»
+    (кейс Хабаровска: +7 (049) 202-78-85, которого на сайте нет). href="tel:…"
+    при этом остаётся источником номера."""
+    html = ('<footer>'
+            '<a href="tel:+74212680556">+7 (421) 268-05-56</a>'
+            '<iframe src="https://yandex.ru/sprav/widget/rating-badge/'
+            '90492027885?type=rating" width="150"></iframe>'
+            '</footer>')
+    c = kp.extract_site_contacts(html)
+    assert c["phones"] == ["4212680556"], c["phones"]   # только настоящий номер
+    # И на уровне split_phones: 10 цифр с ведущим 0 - не номер (кодов на 0 нет).
+    assert kp.split_phones("90492027885") == []
+
+
+def test_merge_podmena_wording_and_format():
+    """Формулировки живой проверки подмены - по просьбе заказчика, номера
+    ЧИТАЕМО (+7 (800) 600-98-56), не голыми цифрами:
+      • в коде И на сайте отображается, в КП нет → ✗ «в КП нет, на сайте такой: …»;
+      • в коде есть, на сайте НЕ отображается → ✗ «в КП и на сайте стоит общий
+        номер, но в коде сайта стоит другой рекламный номер: …»."""
+    import variables_run as vr
+    fld = {'field': 'Тел. Реклама Город', 'expected': '–', 'found': '–',
+           'status': 'na', 'note': ''}
+    vr._merge_подмена(fld, {'status': 'replaced_ok', 'shown': ['8006009856']},
+                      False, '8006009856', "рекламный номер",
+                      "с меткой ?utm_source=yandex", dial='7')
+    assert fld['status'] == 'bug'
+    assert fld['found'] == '+7 (800) 600-98-56'          # читаемый формат
+    assert fld['note'] == 'в КП нет, на сайте такой: +7 (800) 600-98-56'
+
+    fld2 = {'field': 'Тел. Реклама Город', 'expected': '–', 'found': '–',
+            'status': 'na', 'note': ''}
+    vr._merge_подмена(fld2, {'status': 'not_replaced', 'shown': ['4212680556']},
+                      False, '8006009856', "рекламный номер",
+                      "с меткой ?utm_source=yandex", dial='7')
+    assert fld2['status'] == 'bug'
+    assert fld2['found'] == '+7 (421) 268-05-56'
+    assert ('в КП и на сайте стоит общий номер, но в коде сайта стоит другой '
+            'рекламный номер: +7 (800) 600-98-56') == fld2['note']

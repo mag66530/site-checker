@@ -135,6 +135,10 @@ def split_phones(s: Optional[str]) -> list[str]:
     out = []
     for m in _PHONE_FIND.findall(str(s)):
         n = normalize_phone(m)
+        # 10-значный нац. номер РФ/КЗ не бывает с кода 0 (обрезки чужих чисел -
+        # ID виджетов и т.п., напр. «90492027885» → «0492027885» - не телефон).
+        if len(n) == 10 and n.startswith('0'):
+            continue
         if 9 <= len(n) <= 10 and n not in out:
             out.append(n)
     return out
@@ -394,6 +398,13 @@ _WA_URL_RE = re.compile(
 # Хабаровска). Номера из КОДА проверяем отдельно (коллтрекинг → check_ad_number).
 _SCRIPT_STYLE_RE = re.compile(r'<(script|style)\b[^>]*>[\s\S]*?</\1>', re.I)
 
+# Значения URL-атрибутов (src/href/… КРОМЕ href="tel:…"): цифры из адресов
+# виджетов/картинок (напр. yandex.ru/sprav/widget/rating-badge/90492027885) -
+# не телефоны, вырезаем перед поиском номеров.
+_URL_ATTR_RE = re.compile(
+    r'\b(?:src|data-src|srcset|action|poster|content)\s*=\s*["\'][^"\']*["\']'
+    r'|\bhref\s*=\s*["\'](?!tel:)[^"\']*["\']', re.I)
+
 
 def extract_site_contacts(html: str) -> dict:
     """Достать из шапки+подвала телефоны, почты и текст адреса."""
@@ -409,7 +420,12 @@ def extract_site_contacts(html: str) -> dict:
     # города, где телефон = вотсап (напр. Бишкек), не теряют номер.
     # Скрипты/стили вырезаем: их «голые» числа - не отображаемые телефоны.
     _region_novis = _SCRIPT_STYLE_RE.sub(' ', region_html)
-    _region_no_wa = _WA_URL_RE.sub(' ', _region_novis)
+    # Адреса ссылок/картинок/iframe (src=…, href=…) - НЕ телефоны: из URL вида
+    # yandex.ru/sprav/widget/rating-badge/90492027885 цифры попадали в «телефоны»
+    # и давали ложное «на сайте другой номер» (Хабаровск). href="tel:…" ОСТАВЛЯЕМ -
+    # это настоящий источник номера.
+    _region_no_url = _URL_ATTR_RE.sub(' ', _region_novis)
+    _region_no_wa = _WA_URL_RE.sub(' ', _region_no_url)
     # Маски ввода телефона («+7 (000) 000-00-00») и заглушки с кодом 000 -
     # не настоящие номера, отбрасываем, чтобы не считать их расхождением.
     phones = [p for p in (split_phones(text) + split_phones(_region_no_wa))

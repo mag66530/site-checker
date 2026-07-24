@@ -436,15 +436,20 @@ def _только_почта_для_перевода(city: str, fields: list) ->
     return fields
 
 
-def _merge_подмена(fld, r, from_kp, target, kind, метка) -> None:
+def _merge_подмена(fld, r, from_kp, target, kind, метка, dial='7') -> None:
     """Вписать результат браузерной пробы подмены в поле слота (реклама/SEO).
     r - {status, shown}; from_kp - номер брали из КП (True) или из кода (False);
     target - нац. номер, который ждём; kind - «рекламный»/«поисковый (SEO)»;
-    метка - «с меткой ?utm_source=yandex» / «из поиска (органика)»."""
+    метка - «с меткой ?utm_source=yandex» / «из поиска (органика)»;
+    dial - код страны города для читаемого показа номеров (7/375/996/994/998)."""
     import kp as kpmod
     st = r.get('status')
-    shown = ", ".join(r.get('shown') or []) or "–"
-    tgt = kpmod._fmt(target) if target else "–"
+
+    def _f(n):
+        return kpmod._fmt(n, dial)
+    # Номера везде показываем ЧИТАЕМО (+7 (800) 600-98-56), не голыми цифрами.
+    shown = ", ".join(_f(x) for x in (r.get('shown') or [])) or "–"
+    tgt = _f(target) if target else "–"
     if from_kp:
         if st == 'replaced_ok':
             fld['status'] = 'ok'
@@ -458,15 +463,17 @@ def _merge_подмена(fld, r, from_kp, target, kind, метка) -> None:
         # no_element/error - оставляем статический вердикт по коду.
     else:  # номер брали из КОДА (в КП его нет)
         if st == 'replaced_ok':
-            fld['status'] = 'warn'
+            # Номер отображается на сайте (и стоит в коде), а в КП его нет -
+            # по правилу заказчика это расхождение ✗, формулировка короткая.
+            fld['status'] = 'bug'
             fld['found'] = shown if shown != "–" else tgt
-            fld['note'] = (f"в КП этого номера нет, а на сайте {метка} показывается "
-                           f"{tgt} (настроен в коде) - впишите в КП")
+            fld['note'] = f"в КП нет, на сайте такой: {tgt}"
         elif st == 'not_replaced':
+            # В коде номер прописан, но на сайте НЕ отображается (показан общий).
             fld['status'] = 'bug'
             fld['found'] = shown
-            fld['note'] = (f"в КП номера нет, на сайте отображается общий номер, НО "
-                           f"в коде прописан {kind}: {tgt}")
+            fld['note'] = (f"в КП и на сайте стоит общий номер, но в коде сайта "
+                           f"стоит другой {kind}: {tgt}")
         # no_element/error - оставляем статический вердикт.
 
 
@@ -498,7 +505,8 @@ def _проверить_живую_подмену(domains, результаты,
                 ad_target, ad_from_kp = _extra[0], False
         if ad_target or kp_seo:
             targets[host] = dict(city=row.city or dom, url=f'https://{dom}',
-                                 ad=ad_target, ad_from_kp=ad_from_kp, seo=kp_seo)
+                                 ad=ad_target, ad_from_kp=ad_from_kp, seo=kp_seo,
+                                 dial=kpmod._dial_for(row))
     if not targets:
         return
     cities = [(t['city'], t['url'], t['ad'], t['seo']) for t in targets.values()]
@@ -522,12 +530,14 @@ def _проверить_живую_подмену(domains, результаты,
         _ad_fld = next((f for f in fields if f.get('field') == 'Тел. Реклама Город'), None)
         if _ad_fld is not None and t['ad']:
             _merge_подмена(_ad_fld, r, t['ad_from_kp'], t['ad'],
-                           "рекламный номер", "с меткой ?utm_source=yandex")
+                           "рекламный номер", "с меткой ?utm_source=yandex",
+                           dial=t.get('dial', '7'))
         _seo_fld = next((f for f in fields if f.get('field') == 'Тел. SEO Город'), None)
         _seo_r = r.get('seo')
         if _seo_fld is not None and _seo_r and t['seo']:
             _merge_подмена(_seo_fld, _seo_r, True, t['seo'],
-                           "поисковый (SEO) номер", "из поиска (органика)")
+                           "поисковый (SEO) номер", "из поиска (органика)",
+                           dial=t.get('dial', '7'))
 
 
 def main() -> int:
