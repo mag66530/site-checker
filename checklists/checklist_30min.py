@@ -78,7 +78,16 @@ _PID_ALIASES = {'imp': ('imp', 'inp')}
 
 
 def _secret_pid(base, project_id):
-    """Секрет вида base_<pid> с учётом алиасов pid и общим фоллбэком base."""
+    """Секрет вида base_<pid> с учётом алиасов pid и общим фоллбэком base.
+    ПРИОРИТЕТ: настройки проекта из личного кабинета (страница «Настройки
+    проекта», хранятся в БД) — потом st.secrets."""
+    try:
+        import auth
+        v = auth.project_setting(project_id, base)
+        if v:
+            return v
+    except Exception:
+        pass
     for p in _PID_ALIASES.get(project_id, (project_id,)):
         v = _secret(f'{base}_{p}')
         if v:

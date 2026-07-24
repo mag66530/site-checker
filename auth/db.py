@@ -363,6 +363,128 @@ def set_user_tabs(user_id: str, tab_keys: list[str]) -> None:
             cur.execute("DELETE FROM user_tabs WHERE user_id = %s", (user_id,))
 
 
+# ---------- настройки проекта (ключи/прокси, общие на команду) ----------
+# Значения храним ЗАШИФРОВАННЫМИ (Fernet, security.encrypt_secret) — утечка
+# таблицы не раскрывает API-ключи. Таблицы создаёт код сам (как sessions).
+
+_PROJ_SETTINGS_READY = False
+
+
+def _ensure_proj_settings_table() -> None:
+    global _PROJ_SETTINGS_READY
+    if _PROJ_SETTINGS_READY:
+        return
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS project_settings (
+                project_key text NOT NULL,
+                name        text NOT NULL,
+                value       text NOT NULL,
+                updated_at  timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (project_key, name)
+            );
+            """
+        )
+    _PROJ_SETTINGS_READY = True
+
+
+@_retry
+def get_project_settings(project_key: str) -> dict:
+    """{name: значение (расшифрованное)} настроек проекта."""
+    _ensure_proj_settings_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT name, value FROM project_settings WHERE project_key = %s",
+            (project_key,),
+        )
+        return {n: security.decrypt_secret(v) for n, v in cur.fetchall()}
+
+
+@_retry
+def set_project_settings(project_key: str, values: dict) -> None:
+    """Upsert настроек проекта; пустое значение = удалить настройку."""
+    _ensure_proj_settings_table()
+    with _conn() as c, c.cursor() as cur:
+        for name, val in (values or {}).items():
+            val = (val or "").strip()
+            if not val:
+                cur.execute(
+                    "DELETE FROM project_settings WHERE project_key = %s AND name = %s",
+                    (project_key, name),
+                )
+            else:
+                cur.execute(
+                    """INSERT INTO project_settings (project_key, name, value)
+                       VALUES (%s, %s, %s)
+                       ON CONFLICT (project_key, name)
+                       DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                    (project_key, name, security.encrypt_secret(val)),
+                )
+
+
+# ---------- делегирование права менять настройки проекта ----------
+
+_RIGHTS_TABLE_READY = False
+
+
+def _ensure_rights_table() -> None:
+    global _RIGHTS_TABLE_READY
+    if _RIGHTS_TABLE_READY:
+        return
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings_rights (
+                user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                project_key text NOT NULL,
+                PRIMARY KEY (user_id, project_key)
+            );
+            """
+        )
+    _RIGHTS_TABLE_READY = True
+
+
+@_retry
+def get_settings_rights(user_id: str) -> list[str]:
+    _ensure_rights_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT project_key FROM settings_rights WHERE user_id = %s",
+                    (user_id,))
+        return [r[0] for r in cur.fetchall()]
+
+
+@_retry
+def get_all_settings_rights() -> dict[str, list[str]]:
+    _ensure_rights_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT user_id, project_key FROM settings_rights")
+        out: dict[str, list[str]] = {}
+        for uid, pk in cur.fetchall():
+            out.setdefault(str(uid), []).append(pk)
+        return out
+
+
+@_retry
+def set_settings_rights(user_id: str, project_keys: list[str]) -> None:
+    _ensure_rights_table()
+    keys = list(dict.fromkeys(project_keys or []))
+    with _conn() as c, c.cursor() as cur:
+        if keys:
+            cur.execute(
+                """WITH d AS (
+                       DELETE FROM settings_rights
+                       WHERE user_id = %s AND project_key <> ALL(%s::text[])
+                   )
+                   INSERT INTO settings_rights (user_id, project_key)
+                   SELECT %s, x FROM unnest(%s::text[]) AS x
+                   ON CONFLICT DO NOTHING""",
+                (user_id, keys, user_id, keys),
+            )
+        else:
+            cur.execute("DELETE FROM settings_rights WHERE user_id = %s", (user_id,))
+
+
 # ---------- invite codes ----------
 
 @_retry
