@@ -442,9 +442,18 @@ def _merge_подмена(fld, r, from_kp, target, kind, метка) -> None:
     target - нац. номер, который ждём; kind - «рекламный»/«поисковый (SEO)»;
     метка - «с меткой ?utm_source=yandex» / «из поиска (органика)»."""
     import kp as kpmod
+
+    def _fmtnums(nums):
+        # Номера показываем в человеческом виде (+7 (800) 600-98-56), а не «голыми».
+        out = []
+        for n in (nums or []):
+            d = kpmod.normalize_phone(n)
+            out.append(kpmod._fmt(d) if d else str(n))
+        return ", ".join(out) or "–"
+
     st = r.get('status')
-    shown = ", ".join(r.get('shown') or []) or "–"
-    tgt = kpmod._fmt(target) if target else "–"
+    shown = _fmtnums(r.get('shown'))
+    tgt = kpmod._fmt(kpmod.normalize_phone(target)) if target else "–"
     if from_kp:
         if st == 'replaced_ok':
             fld['status'] = 'ok'
@@ -456,17 +465,20 @@ def _merge_подмена(fld, r, from_kp, target, kind, метка) -> None:
             fld['note'] = (f"{kind} не заменился: {метка} на сайте остаётся "
                            f"общий номер, а не {kind} из КП ({tgt})")
         # no_element/error - оставляем статический вердикт по коду.
-    else:  # номер брали из КОДА (в КП его нет)
+    else:  # номер только в КОДЕ (в КП его нет)
         if st == 'replaced_ok':
+            # И в коде, и на сайте (с меткой) номер РЕАЛЬНО показывается - просто в
+            # КП его нет. Пишем факт: в КП нет, на сайте такой-то. Всё.
+            _num = shown if shown != "–" else tgt
             fld['status'] = 'warn'
-            fld['found'] = shown if shown != "–" else tgt
-            fld['note'] = (f"в КП этого номера нет, а на сайте {метка} показывается "
-                           f"{tgt} (настроен в коде) - впишите в КП")
+            fld['found'] = _num
+            fld['note'] = f"в КП номера нет; на сайте показывается {_num}"
         elif st == 'not_replaced':
+            # В коде номер есть, но на сайте НЕ отображается (стоит общий).
             fld['status'] = 'bug'
             fld['found'] = shown
-            fld['note'] = (f"в КП номера нет, на сайте отображается общий номер, НО "
-                           f"в коде прописан {kind}: {tgt}")
+            fld['note'] = (f"в КП и на сайте стоит общий номер, но в коде сайта "
+                           f"прописан другой {kind}: {tgt}")
         # no_element/error - оставляем статический вердикт.
 
 
