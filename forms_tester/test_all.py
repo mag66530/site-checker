@@ -790,6 +790,12 @@ def стиль_формы(scope) -> dict:
     try:
         r = scope.evaluate(
             "el => {"
+            # Снять фокус с последнего заполненного поля: у многих тем поле в
+            # :focus/:active меняет цвет рамки (напр. mepen: обычная #ffeae8 →
+            # фокус #e83e3a). Тул заполняет поля по очереди, и последнее остаётся
+            # в фокусе - без blur оно «отличалось» от остальных → ложный «разнобой».
+            " try { if (document.activeElement && document.activeElement.blur)"
+            "   document.activeElement.blur(); } catch(_){}"
             " const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);"
             " const g = (e,p) => getComputedStyle(e)[p];"
             " const snap = e => ({"
@@ -6520,6 +6526,19 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # Пункт «Форма стилизована по макету»: консистентность полей + факт
             # стилизации (не браузерный дефолт). Чистое чтение стилей, без ввода.
             try:
+                # Увести мышь и фокус в нейтраль, чтобы hover/focus-состояние
+                # последнего поля не читалось как «другой стиль» (см. blur в
+                # стиль_формы). Иначе на темах с цветной рамкой в фокусе - ложный
+                # «разнобой».
+                try:
+                    page.mouse.move(0, 0)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    page.evaluate("() => { const a=document.activeElement;"
+                                  " if (a && a.blur) a.blur(); }")
+                except Exception:  # noqa: BLE001
+                    pass
                 _st = стиль_формы(form)
                 записать_в_excel({
                     "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
