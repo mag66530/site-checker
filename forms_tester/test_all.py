@@ -6137,25 +6137,55 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         закрыть_попап_региона(page)
                     except Exception:  # noqa: BLE001
                         pass
-                    for cand in _expand_form_selector_fallbacks(sel):
-                        try:
-                            page.wait_for_selector(cand, timeout=5000, state="attached")
-                        except Exception:  # noqa: BLE001
-                            continue
-                        try:
-                            loc_try = page.locator(cand)
-                            n_try = loc_try.count()
-                        except Exception:  # noqa: BLE001
-                            n_try = 0
-                        if n_try > 0:
-                            loc = loc_try
-                            n_match = n_try
-                            sel_desc = cand
-                            print(
-                                f"      Форма появилась после снятия попапа/ожидания: "
-                                f"{cand!r} (найдено {n_try})"
-                            )
+
+                    def _подождать_форму(таймаут_мс: int):
+                        for cand in _expand_form_selector_fallbacks(sel):
+                            try:
+                                page.wait_for_selector(cand, timeout=таймаут_мс,
+                                                       state="attached")
+                            except Exception:  # noqa: BLE001
+                                continue
+                            try:
+                                loc_try = page.locator(cand)
+                                n_try = loc_try.count()
+                            except Exception:  # noqa: BLE001
+                                n_try = 0
+                            if n_try > 0:
+                                return loc_try, n_try, cand
+                        return None, 0, None
+
+                    _loc, _n, _cand = _подождать_форму(5000)
+                    if _n > 0:
+                        loc, n_match, sel_desc = _loc, _n, _cand
+                        print(
+                            f"      Форма появилась после снятия попапа/ожидания: "
+                            f"{_cand!r} (найдено {_n})"
+                        )
+
+                # Форма так и не появилась, а перед ней в сценарии был клик
+                # (открытие AJAX-попапа): запрос за попапом мог не долететь -
+                # сайт периодически сбрасывает соединения. Повторяем клик
+                # (до 2 раз) и ждём форму заново, прежде чем сдаться.
+                if n_match == 0:
+                    _re_css = getattr(page, "_последний_клик", None)
+                    for _попытка in (1, 2):
+                        if not _re_css or n_match > 0:
                             break
+                        print(f"      Форма не появилась - повторяю клик {_re_css!r} "
+                              f"(попытка {_попытка}/2) и жду ещё раз")
+                        try:
+                            page.locator(_re_css).first.click(timeout=5000)
+                        except Exception:  # noqa: BLE001
+                            try:
+                                page.locator(_re_css).first.click(timeout=5000, force=True)
+                            except Exception:  # noqa: BLE001
+                                pass
+                        page.wait_for_timeout(1500)
+                        _loc, _n, _cand = _подождать_форму(6000)
+                        if _n > 0:
+                            loc, n_match, sel_desc = _loc, _n, _cand
+                            print(f"      Форма появилась после повторного клика: "
+                                  f"{_cand!r} (найдено {_n})")
 
             print(
                 f"      Селектор: {sel_desc!r} - найдено форм: {n_match}, берём №{idx + 1}"
@@ -8105,6 +8135,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
         if True:  # общий браузер (пул): новая вкладка вместо запуска нового Chromium
             page = _open_page()
+            page._последний_клик = None   # для повторного клика, если форма не появится
             _тек_шаг_инфо = ""
             _scn_t0 = _time.time()   # цели Метрики считаем с начала сценария
             _scn_цели_seen = set()   # уже записанные цели этого сценария (без дублей)
@@ -8191,6 +8222,11 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         try:
                             _to = 6000 if _необяз else 15000
                             page.locator(css_norm).first.click(timeout=_to)
+                            # Запомнить последний успешный клик: если следующий шаг
+                            # «форма» не найдёт форму (AJAX-попап не долетел - сайт
+                            # иногда сбрасывает соединение), обработчик формы
+                            # повторит этот клик и подождёт ещё раз.
+                            page._последний_клик = css_norm
                         except Exception as _e_click:  # noqa: BLE001
                             if _on_resp is not None:
                                 try:
