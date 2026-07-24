@@ -436,31 +436,73 @@ def _только_почта_для_перевода(city: str, fields: list) ->
     return fields
 
 
-def _проверить_живую_подмену(domains, результаты, proxy, log) -> None:
-    """Браузерная проверка РЕКЛАМНОЙ подмены номера (?utm_source=yandex): реально
-    ли коллтрекинг меняет номер в браузере (а не только «настроен в коде»). У
-    городов с рекламным номером в КП открываем главную с меткой в реальном
-    браузере; если подмена НЕ сработала (стоит общий) - помечаем «Тел. Реклама
-    Город» ошибкой ✗. Ошибки/недоступность браузера отчёт НЕ ломают - остаётся
-    статическая проверка по коду."""
+def _merge_подмена(fld, r, from_kp, target, kind, метка) -> None:
+    """Вписать результат браузерной пробы подмены в поле слота (реклама/SEO).
+    r - {status, shown}; from_kp - номер брали из КП (True) или из кода (False);
+    target - нац. номер, который ждём; kind - «рекламный»/«поисковый (SEO)»;
+    метка - «с меткой ?utm_source=yandex» / «из поиска (органика)»."""
+    import kp as kpmod
+    st = r.get('status')
+    shown = ", ".join(r.get('shown') or []) or "–"
+    tgt = kpmod._fmt(target) if target else "–"
+    if from_kp:
+        if st == 'replaced_ok':
+            fld['status'] = 'ok'
+            fld['found'] = shown if shown != "–" else fld.get('found', '')
+            fld['note'] = f"подмена работает: {метка} показывается {kind} из КП"
+        elif st == 'not_replaced':
+            fld['status'] = 'bug'
+            fld['found'] = shown
+            fld['note'] = (f"{kind} не заменился: {метка} на сайте остаётся "
+                           f"общий номер, а не {kind} из КП ({tgt})")
+        # no_element/error - оставляем статический вердикт по коду.
+    else:  # номер брали из КОДА (в КП его нет)
+        if st == 'replaced_ok':
+            fld['status'] = 'warn'
+            fld['found'] = shown if shown != "–" else tgt
+            fld['note'] = (f"в КП этого номера нет, а на сайте {метка} показывается "
+                           f"{tgt} (настроен в коде) - впишите в КП")
+        elif st == 'not_replaced':
+            fld['status'] = 'bug'
+            fld['found'] = shown
+            fld['note'] = (f"в КП номера нет, на сайте отображается общий номер, НО "
+                           f"в коде прописан {kind}: {tgt}")
+        # no_element/error - оставляем статический вердикт.
+
+
+def _проверить_живую_подмену(domains, результаты, html_map, proxy, log) -> None:
+    """Браузерная проверка ЖИВОЙ подмены номера (реклама - ?utm_source=yandex;
+    SEO - реферрер органики): реально ли коллтрекинг меняет номер, а не только
+    «настроен в коде». Проверяем номер из КП, а если его нет - «лишний» номер из
+    кода (коллтрекинга). Обновляем «Тел. Реклама Город» и «Тел. SEO Город».
+    Ошибки/недоступность браузера отчёт НЕ ломают - остаётся проверка по коду."""
     import os as _os
     import kp as kpmod
-    # Города с валидным (не сотовым) рекламным номером в КП. Один город на хост.
-    cities, seen = [], set()
+    from calltracking_checker import parse_config
+    targets, seen = {}, set()
     for dom, row in domains:
         host = kpmod._norm_host(dom)
         if host in seen:
             continue
-        # Рекламный подменный номер часто МОБИЛЬНЫЙ (962/903…) - здесь сотовые НЕ
-        # исключаем (в отличие от сверки видимого номера): подмену проверяем как есть.
-        _exp = kpmod.phones_in_cell(row.phone_ad)
-        if _exp:
-            seen.add(host)
-            cities.append((row.city or dom, f'https://{dom}', row.phone_ad, row.phone_seo))
-    if not cities:
+        seen.add(host)
+        html = (html_map.get(dom) or ('', ''))[0]
+        pool = set(parse_config(html).get('ad_numbers', set()))
+        kp_all = set(row.phone_set())
+        kp_ad = (kpmod.phones_in_cell(row.phone_ad) or [''])[0]
+        kp_seo = (kpmod.phones_in_cell(row.phone_seo) or [''])[0]
+        # Рекламная цель: номер из КП, иначе «лишний» подменный номер из кода.
+        ad_target, ad_from_kp = kp_ad, True
+        if not ad_target:
+            _extra = sorted(pool - kp_all)
+            if _extra:
+                ad_target, ad_from_kp = _extra[0], False
+        if ad_target or kp_seo:
+            targets[host] = dict(city=row.city or dom, url=f'https://{dom}',
+                                 ad=ad_target, ad_from_kp=ad_from_kp, seo=kp_seo)
+    if not targets:
         return
-    log(f'☎ Живая проверка рекламной подмены: {len(cities)} город(ов) в браузере '
-        f'(метка ?utm_source=yandex) …')
+    cities = [(t['city'], t['url'], t['ad'], t['seo']) for t in targets.values()]
+    log(f'☎ Живая проверка подмены (реклама/SEO): {len(cities)} город(ов) в браузере …')
     try:
         if proxy:
             _os.environ.setdefault('FORMS_PROXY', proxy)
@@ -472,31 +514,20 @@ def _проверить_живую_подмену(domains, результаты,
     by_host = {kpmod._norm_host((r.get('url') or '').replace('https://', '')): r
                for r in (res or [])}
     for var in результаты:
-        r = by_host.get(kpmod._norm_host(var.get('domain', '')))
-        if not r:
+        host = kpmod._norm_host(var.get('domain', ''))
+        r, t = by_host.get(host), targets.get(host)
+        if not r or not t:
             continue
-        fld = next((f for f in var.get('fields', [])
-                    if f.get('field') == 'Тел. Реклама Город'), None)
-        if fld is None:
-            continue
-        st = r.get('status')
-        shown = ", ".join(r.get('shown') or []) or "–"
-        if st == 'not_replaced':
-            # Номер в коде верный, но с меткой на сайте остаётся общий - подмена
-            # реально НЕ срабатывает. Это ошибка (её и не хватало заказчику).
-            fld['status'] = 'bug'
-            fld['found'] = shown
-            fld['note'] = ("подмена рекламного номера НЕ срабатывает: с меткой "
-                           "?utm_source=yandex на сайте показывается общий номер, "
-                           "а не рекламный из КП (в коде номер настроен, но замена "
-                           "не отрабатывает)")
-        elif st == 'replaced_ok':
-            fld['status'] = 'ok'
-            fld['found'] = shown if shown != "–" else fld.get('found', '')
-            fld['note'] = "рекламная подмена работает (с меткой показывается рекламный номер)"
-        elif st == 'no_element':
-            fld['note'] = ((fld.get('note') or "")
-                           + " · живую подмену не проверить: элемент .ct_phone не найден").strip(" ·")
+        fields = var.get('fields', [])
+        _ad_fld = next((f for f in fields if f.get('field') == 'Тел. Реклама Город'), None)
+        if _ad_fld is not None and t['ad']:
+            _merge_подмена(_ad_fld, r, t['ad_from_kp'], t['ad'],
+                           "рекламный номер", "с меткой ?utm_source=yandex")
+        _seo_fld = next((f for f in fields if f.get('field') == 'Тел. SEO Город'), None)
+        _seo_r = r.get('seo')
+        if _seo_fld is not None and _seo_r and t['seo']:
+            _merge_подмена(_seo_fld, _seo_r, True, t['seo'],
+                           "поисковый (SEO) номер", "из поиска (органика)")
 
 
 def main() -> int:
@@ -694,7 +725,7 @@ def main() -> int:
     # случай «в коде номер верный, но замена не срабатывает» (по просьбе
     # заказчика). Мягко - любые ошибки не мешают отчёту.
     try:
-        _проверить_живую_подмену(domains, результаты, proxy, _stamp)
+        _проверить_живую_подмену(domains, результаты, html_map, proxy, _stamp)
     except Exception as _e:  # noqa: BLE001
         _stamp(f'⚠ Живая проверка подмены пропущена ({_e}).')
 
@@ -860,7 +891,7 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
                 # Примечание - ВВЕРХУ (сразу видно, в чём дело), ниже - что ждали
                 # и что по факту на сайте.
                 note = (f.get("note") or "").strip()
-                подпись = f"Примечание: {note}\n\n" if note else ""
+                подпись = f"{note}\n\n" if note else ""
                 подпись += (f"КП: {f['expected']}\n"
                             f"На сайте: {f['found']}")
                 # Длинное не расписываем в ячейке - отсылаем на лист «Расхождения».
@@ -870,8 +901,11 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
                 cm.width, cm.height = 340, 170   # чтобы текст влезал в окошко
                 cell.comment = cm
                 cell.fill = BUG_FILL if status == "bug" else WARN_FILL
-                # На лист «Расхождения» - И красные (✗), И жёлтые (⚠).
-                расхождения.append((res["domain"], res.get("city", ""), name,
+                # На лист «Расхождения» - И красные (✗), И жёлтые (⚠). Имя
+                # переменной - без префикса «Тел.» (в отдельном столбце и так
+                # понятно, что это телефон): «Реклама Город», «SEO Город» и т.п.
+                расхождения.append((res["domain"], res.get("city", ""),
+                                    name.replace("Тел. ", ""),
                                     f["expected"], f["found"], f.get("note", "")))
         r += 1
 
