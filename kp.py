@@ -388,6 +388,12 @@ _WA_URL_RE = re.compile(
     r'(?:https?:)?//(?:wa\.me|api\.whatsapp\.com|chat\.whatsapp\.com)[^"\'\s>]*'
     r'|whatsapp://[^"\'\s>]*', re.I)
 
+# <script>/<style> при сборе ОТОБРАЖАЕМЫХ телефонов вырезаем: там лежат «голые»
+# 11-значные числа (конфиг коллтрекинга, аналитика, id), которые regex ловил как
+# телефон и выдавал ложное расхождение (70492027885 → «+7 (049) 202-78-85» у
+# Хабаровска). Номера из КОДА проверяем отдельно (коллтрекинг → check_ad_number).
+_SCRIPT_STYLE_RE = re.compile(r'<(script|style)\b[^>]*>[\s\S]*?</\1>', re.I)
+
 
 def extract_site_contacts(html: str) -> dict:
     """Достать из шапки+подвала телефоны, почты и текст адреса."""
@@ -401,7 +407,9 @@ def extract_site_contacts(html: str) -> dict:
     # утекать в список телефонов. Если этот же номер показан ещё и как телефон
     # (tel:/видимый текст) - он всё равно попадёт (из tel:/текста), поэтому
     # города, где телефон = вотсап (напр. Бишкек), не теряют номер.
-    _region_no_wa = _WA_URL_RE.sub(' ', region_html)
+    # Скрипты/стили вырезаем: их «голые» числа - не отображаемые телефоны.
+    _region_novis = _SCRIPT_STYLE_RE.sub(' ', region_html)
+    _region_no_wa = _WA_URL_RE.sub(' ', _region_novis)
     # Маски ввода телефона («+7 (000) 000-00-00») и заглушки с кодом 000 -
     # не настоящие номера, отбрасываем, чтобы не считать их расхождением.
     phones = [p for p in (split_phones(text) + split_phones(_region_no_wa))
@@ -816,8 +824,10 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     # номером нельзя (всегда «не совпадает»). Берём пул подменных номеров из
     # конфига коллтрекинга (Sipuni) прямо в HTML - тот же, что JS показывает
     # рекламе, - и сверяем с ним. None, если в КП нет рекл. номера.
-    from calltracking_checker import check_ad_number
+    from calltracking_checker import check_ad_number, parse_config
     _ad = check_ad_number(html, row.phone_ad)
+    # Пул подменных (рекламных) номеров ИЗ КОДА (конфиг коллтрекинга), без сотовых.
+    _pool = {n for n in parse_config(html).get("ad_numbers", set()) if not _is_mobile(n)}
 
     # Колонки телефонов - с префиксом «Тел.», чтобы не путать с колонкой «Город»
     # (проверка города). Порядок как в КП: общий → реклама → SEO.
@@ -827,16 +837,27 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         _exps = phones_in_cell(val)         # первый = текущий номер (не «стар.»)
         exp = _exps[0] if _exps else ''
         raw = str(val).strip() if val is not None else ""
-        if label == "Тел. Реклама Город" and _ad and _ad["status"] in ("ok", "bug"):
-            # Есть коллтрекинг и рекламный номер в КП - сверяем с пулом подмены.
-            if _ad["status"] == "ok":
+        if label == "Тел. Реклама Город":
+            # Рекламный номер живёт в КОДЕ (конфиг коллтрекинга), а не в видимом
+            # тексте - поэтому сверяем КП с пулом подмены ИЗ КОДА.
+            if _ad and _ad["status"] == "ok":
                 add(label, fmt(exp), fmt(exp), "ok",
-                    "рекламный номер (подмена коллтрекинга) совпадает с КП")
-            else:
+                    "рекламный номер в коде (коллтрекинг) совпадает с КП")
+                continue
+            if _ad and _ad["status"] == "bug":
                 _cfg = ", ".join(fmt(n) for n in _ad["configured"]) or "–"
                 add(label, fmt(exp), _cfg, "bug",
-                    "рекламный номер подмены не совпадает с КП")
-            continue
+                    f"в коде рекламный номер не совпадает с КП (в коде: {_cfg})")
+                continue
+            if not exp:
+                # В КП рекламного номера нет, но в КОДЕ подмена ЕСТЬ, и это номер,
+                # которого в КП города нет вообще → ⚠ (в КП, видимо, не заведён).
+                _code_new = sorted(n for n in _pool if n not in kp_phones)
+                if _code_new:
+                    add(label, "–", ", ".join(fmt(n) for n in _code_new), "warn",
+                        "в коде есть рекламный номер, которого нет в КП города")
+                    continue
+            # иначе (нет коллтрекинга / обычный номер) - общая логика ниже.
         if not exp:
             if raw and raw not in ("–", "-"):
                 # В ячейке КП значение НЕ телефон (мусор/опечатка «2» - часто
