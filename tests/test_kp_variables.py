@@ -585,3 +585,25 @@ def test_mobile_city_number_is_compared():
         assert "999" in by2["Тел. Общий Город"]["found"]
     finally:
         (row.phone_common, row.phone_ad, row.phone_seo, row.all_phones) = saved
+
+
+def test_messenger_from_header_not_footer_global_channel():
+    """Мессенджеры сверяем по ШАПКЕ (иконки контакта города), а ГЛОБАЛЬНЫЙ канал
+    компании в <footer> (напр. t.me/inmetprom) НЕ считаем контактом города.
+    Кейс ИМП/СНГ: у Минска/Астаны/Баку своих иконок в шапке нет → «на сайте нет»
+    (а не ложный @inmetprom из подвала). Просьба заказчика: «проверяй по шапке»."""
+    # Город с иконкой менеджера в шапке + глобальный канал в подвале.
+    html = ('<header>Черемхово '
+            '<a href="https://t.me/imp_manager2">TG</a> '
+            '<a href="https://wa.me/79634523249">WA</a></header>'
+            '<footer><a href="https://t.me/inmetprom">Наш канал</a></footer>')
+    c = kp.extract_site_contacts(html)
+    assert c["telegram"] == ["imp_manager2"], c["telegram"]   # без inmetprom из подвала
+    assert "9634523249" in c["whatsapp"]
+
+    # СНГ: в шапке иконок нет, в подвале только глобальный канал → на сайте пусто.
+    sng = ('<header>Минск +375 (44) 588-81-48 minsk@inmetprom.by</header>'
+           '<footer><a href="https://t.me/inmetprom">Наш канал</a></footer>')
+    c2 = kp.extract_site_contacts(sng)
+    assert c2["telegram"] == [], c2["telegram"]
+    assert c2["whatsapp"] == []
