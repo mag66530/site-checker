@@ -436,6 +436,69 @@ def _только_почта_для_перевода(city: str, fields: list) ->
     return fields
 
 
+def _проверить_живую_подмену(domains, результаты, proxy, log) -> None:
+    """Браузерная проверка РЕКЛАМНОЙ подмены номера (?utm_source=yandex): реально
+    ли коллтрекинг меняет номер в браузере (а не только «настроен в коде»). У
+    городов с рекламным номером в КП открываем главную с меткой в реальном
+    браузере; если подмена НЕ сработала (стоит общий) - помечаем «Тел. Реклама
+    Город» ошибкой ✗. Ошибки/недоступность браузера отчёт НЕ ломают - остаётся
+    статическая проверка по коду."""
+    import os as _os
+    import kp as kpmod
+    # Города с валидным (не сотовым) рекламным номером в КП. Один город на хост.
+    cities, seen = [], set()
+    for dom, row in domains:
+        host = kpmod._norm_host(dom)
+        if host in seen:
+            continue
+        # Рекламный подменный номер часто МОБИЛЬНЫЙ (962/903…) - здесь сотовые НЕ
+        # исключаем (в отличие от сверки видимого номера): подмену проверяем как есть.
+        _exp = kpmod.phones_in_cell(row.phone_ad)
+        if _exp:
+            seen.add(host)
+            cities.append((row.city or dom, f'https://{dom}', row.phone_ad, row.phone_seo))
+    if not cities:
+        return
+    log(f'☎ Живая проверка рекламной подмены: {len(cities)} город(ов) в браузере '
+        f'(метка ?utm_source=yandex) …')
+    try:
+        if proxy:
+            _os.environ.setdefault('FORMS_PROXY', proxy)
+        from calltracking_browser import run as ct_run
+        res = ct_run(cities, log=log)
+    except Exception as e:  # noqa: BLE001
+        log(f'⚠ Живую подмену проверить не удалось ({e}) - оставляю проверку по коду.')
+        return
+    by_host = {kpmod._norm_host((r.get('url') or '').replace('https://', '')): r
+               for r in (res or [])}
+    for var in результаты:
+        r = by_host.get(kpmod._norm_host(var.get('domain', '')))
+        if not r:
+            continue
+        fld = next((f for f in var.get('fields', [])
+                    if f.get('field') == 'Тел. Реклама Город'), None)
+        if fld is None:
+            continue
+        st = r.get('status')
+        shown = ", ".join(r.get('shown') or []) or "–"
+        if st == 'not_replaced':
+            # Номер в коде верный, но с меткой на сайте остаётся общий - подмена
+            # реально НЕ срабатывает. Это ошибка (её и не хватало заказчику).
+            fld['status'] = 'bug'
+            fld['found'] = shown
+            fld['note'] = ("подмена рекламного номера НЕ срабатывает: с меткой "
+                           "?utm_source=yandex на сайте показывается общий номер, "
+                           "а не рекламный из КП (в коде номер настроен, но замена "
+                           "не отрабатывает)")
+        elif st == 'replaced_ok':
+            fld['status'] = 'ok'
+            fld['found'] = shown if shown != "–" else fld.get('found', '')
+            fld['note'] = "рекламная подмена работает (с меткой показывается рекламный номер)"
+        elif st == 'no_element':
+            fld['note'] = ((fld.get('note') or "")
+                           + " · живую подмену не проверить: элемент .ct_phone не найден").strip(" ·")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--project', required=True, choices=list(PROJECT_NAMES))
@@ -627,6 +690,14 @@ def main() -> int:
                f'{_n_fail} из {len(domains)}. В отчёте они помечены ✗ по всей строке '
                'с причиной - это НЕ ошибки КП, а недоступность сайта. '
                'Перезапусти позже или проверь, открывается ли сайт в браузере.')
+    # Живая проверка рекламной подмены в браузере (?utm_source=yandex): ловит
+    # случай «в коде номер верный, но замена не срабатывает» (по просьбе
+    # заказчика). Мягко - любые ошибки не мешают отчёту.
+    try:
+        _проверить_живую_подмену(domains, результаты, proxy, _stamp)
+    except Exception as _e:  # noqa: BLE001
+        _stamp(f'⚠ Живая проверка подмены пропущена ({_e}).')
+
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
     xlsx = work / 'variables.xlsx'
