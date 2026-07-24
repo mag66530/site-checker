@@ -395,6 +395,10 @@ _ADDRESS_RE = re.compile(
     r'микрорайон|\bмкр\b|\bмкрн|квартал|\bкв-л',
     re.IGNORECASE,
 )
+# Азербайджанские уличные маркеры (Баку/.az): «… küçəsi» (улица),
+# «prospekti» (проспект), «döngəsi» (переулок), «məhləsi», «meydan» (площадь) -
+# чтобы адрес в подвале переведённого сайта не читался как отсутствующий.
+_ADDRESS_AZ_RE = re.compile(r'küçə|prospekt|döngə|məhlə|meydan', re.IGNORECASE)
 
 
 def _extract_region(html: str, tag: str, side: str, fallback_frac: float = 0.28) -> str:
@@ -564,6 +568,8 @@ def _d_hdr_callback(c: _Ctx):
         or 'обратный звонок' in t
         or 'заказать обратный' in t
         or 'перезвоните мне' in t
+        # структурно (перевод не мешает): кнопка заказа звонка СМУ
+        or 'call-back-form' in c.header_html.lower()
     )
     return present, None
 
@@ -579,6 +585,10 @@ def _d_hdr_request(c: _Ctx):
         or 'оформить заказ' in t
         or 'оформите заказ' in t
         or 'оставить заявку' in t
+        # структурно: кнопка «оставить заявку» СМУ (txt-back-form / make-request),
+        # чтобы на переведённых зеркалах (.az и др.) не было ложного бага
+        or 'txt-back-form' in c.header_html.lower()
+        or 'make-request' in c.header_html.lower()
     )
     return present, None
 
@@ -594,6 +604,8 @@ def _d_hdr_city(c: _Ctx):
         or 'geo-mark' in h or 'icon-geo' in h
         or 'select-city' in h or 'city-select' in h or 'cityselect' in h
         or 'js-city' in h or 'choose-city' in h
+        # СМУ-переключатель города (перевод не мешает): town-select / a-town
+        or 'town-select' in h or 'a-town' in h
     )
     return present, None
 
@@ -616,15 +628,22 @@ def _d_ftr_writeus(c: _Ctx):
         'написать нам' in t
         or 'напишите нам' in t
         or 'написать письмо' in t
+        # структурно: кнопка «написать нам» СМУ в подвале (иконка an-ico-mail),
+        # чтобы перевод («Bizə yazın» и т.п.) не давал ложный баг
+        or 'an-ico-mail' in c.footer_html.lower()
     )
     return present, None
 
 
 def _d_ftr_address(c: _Ctx):
-    # Пока - наличие адреса в подвале (метка «Адрес» или уличный маркер).
-    # Сверку конкретного адреса с КП по каждому городу добавим, когда придёт КП.
+    # Наличие адреса в подвале: метка «Адрес»/«Ünvan» (RU/AZ) или уличный маркер
+    # (рус. или азерб.). Сверку конкретного адреса с КП по городам - позже.
     t = c.footer_text_lower
-    present = 'адрес' in t or bool(_ADDRESS_RE.search(c.footer_text))
+    present = (
+        'адрес' in t or 'ünvan' in t or 'unvan' in t
+        or bool(_ADDRESS_RE.search(c.footer_text))
+        or bool(_ADDRESS_AZ_RE.search(c.footer_text))
+    )
     return present, None
 
 
