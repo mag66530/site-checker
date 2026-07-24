@@ -397,3 +397,61 @@ def test_merge_podmena_wording_and_format():
     assert fld2['found'] == '+7 (421) 268-05-56'
     assert ('в КП и на сайте стоит общий номер, но в коде сайта стоит другой '
             'рекламный номер: +7 (800) 600-98-56') == fld2['note']
+
+
+def test_mismatch_notes_are_uniform():
+    """Все расхождения (✗) пишутся ЕДИНООБРАЗНО: «<поле> на сайте не совпадает с
+    КП» - без разнобоя «в КП нет / на сайте нет / не распознан» (просьба
+    заказчика). КП и фактическое значение сайта видны в колонках «КП»/«На сайте»."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+             row.email, row.address, row.telegram, row.whatsapp)
+    # КП всё сломано («2»), на сайте - реальные данные, отличные от КП.
+    row.phone_seo = row.phone_ad = row.phone_common = "2"
+    row.all_phones = ""
+    row.email = row.address = row.telegram = row.whatsapp = "2"
+    try:
+        html = (
+            '<header>'
+            '<a href="tel:+74991303669">+7 (499) 130-36-69</a> '
+            '<a href="mailto:msk@stalmetural.ru">msk@stalmetural.ru</a> '
+            'Адрес: Москва, улица Полярная, 5 '
+            '<a href="https://t.me/some_manager">TG</a>'
+            '<a href="https://wa.me/79995553311">WA</a>'
+            '</header>')
+        by = {f["field"]: f for f in kp.check_variables(html, "stalmetural.ru")["fields"]}
+        assert by["Тел. Общий Город"]["note"] == "телефон на сайте не совпадает с КП"
+        assert by["Почта"]["note"] == "почта на сайте не совпадает с КП"
+        assert by["Адрес"]["note"] == "адрес на сайте не совпадает с КП"
+        assert by["Telegram"]["note"] == "Telegram на сайте не совпадает с КП"
+        assert by["WhatsApp"]["note"] == "WhatsApp на сайте не совпадает с КП"
+        # И везде видно фактическое значение с сайта.
+        for f in ("Тел. Общий Город", "Почта", "Адрес", "Telegram", "WhatsApp"):
+            assert by[f]["found"] not in ("–", ""), f
+    finally:
+        (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones,
+         row.email, row.address, row.telegram, row.whatsapp) = saved
+
+
+def test_empty_and_garbage_slot_behave_identically():
+    """Противоречие устранено: пустая ячейка слота и мусор «2» в ней ведут себя
+    ОДИНАКОВО. Если на сайте только известный номер города - оба дают «–»
+    (отдельного номера нет), а не «пусто → –, а 2 → баг»."""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones)
+    row.phone_common = "+7 (495) 111-22-33"
+    row.phone_ad = ""
+    row.all_phones = "4951112233"
+    html = '<header><a href="tel:+74951112233">+7 (495) 111-22-33</a></header>'
+    try:
+        for slot_val in ("", "2"):
+            row.phone_seo = slot_val
+            by = {f["field"]: f for f in
+                  kp.check_variables(html, "stalmetural.ru")["fields"]}
+            assert by["Тел. SEO Город"]["status"] == "na", slot_val
+    finally:
+        (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones) = saved
