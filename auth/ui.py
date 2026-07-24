@@ -511,6 +511,27 @@ def _reset_password_view(token: str) -> None:
 
 # ---------- gate ----------
 
+def _capture_return_slug() -> None:
+    """Запоминает slug ТЕКУЩЕЙ страницы до cookie-probe. Probe (_restore_session_
+    from_cookie) делает st.stop() без вызова st.navigation — из-за этого Streamlit
+    сбрасывает URL на корень, и после восстановления сессии открывается стартовая
+    страница вместо той, где пользователь обновил вкладку. Запомненный slug
+    возвращает app.py через take_return_slug() (st.switch_page)."""
+    if "_return_slug" in st.session_state:
+        return
+    try:
+        from urllib.parse import urlsplit
+        slug = urlsplit(st.context.url).path.strip("/").split("/")[-1]
+    except Exception:
+        slug = ""
+    st.session_state["_return_slug"] = slug or ""
+
+
+def take_return_slug() -> str:
+    """Отдаёт и очищает slug страницы, на которую надо вернуться после логина."""
+    return st.session_state.pop("_return_slug", "") or ""
+
+
 def require_login() -> bool:
     """Гейт. Рисует экран входа/регистрации/сброса. True = пускаем в приложение."""
     if not st.session_state.get("_seed_admin_done"):
@@ -531,6 +552,7 @@ def require_login() -> bool:
         _ensure_cookie()   # cookie пишется каждый ран: надёжно + скользящие 30 дней
         return True
 
+    _capture_return_slug()          # до probe: запомнить страницу для возврата
     if _restore_session_from_cookie():
         _ensure_cookie()
         return True

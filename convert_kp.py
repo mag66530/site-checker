@@ -120,7 +120,12 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     # столбца без шапки) - берём их по позиции из layout (city_col/country_col).
     if ci_city is None and layout.get('city_col') is not None:
         ci_city = layout['city_col']
-    ci_email = _col(headers, 'e-mail') or _col(headers, 'почта') or _col(headers, 'email')
+    # Почта: сначала ОСНОВНАЯ колонка «Почта» (контактный блок), и только потом
+    # «E-Mail». У ИМП в таблице ДВЕ почтовые колонки: «Почта» (заполнена у всех
+    # городов) и вторичная «E-Mail» (в блоке карт, заполнена лишь у части). Раньше
+    # брали «E-Mail» первой - и у ~половины городов почта выходила пустой.
+    ci_email = (_col(headers, exact='почта') or _col(headers, 'почта')
+                or _col(headers, 'e-mail') or _col(headers, 'email'))
     # ВАЖНО: сначала ТОЧНАЯ колонка «url» - иначе _col(...,'ссылка') цеплял
     # «Ссылка для яндекс-карт» (iframe карты) вместо адреса сайта, и домены
     # городов (особенно поддомены СНГ) не читались - города выпадали из проверки.
