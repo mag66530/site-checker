@@ -863,7 +863,7 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             if _ad and _ad["status"] == "bug":
                 _cfg = ", ".join(fmt(n) for n in _ad["configured"]) or "–"
                 add(label, fmt(exp), _cfg, "bug",
-                    f"в коде рекламный номер не совпадает с КП (в коде: {_cfg})")
+                    "телефон на сайте не совпадает с КП")
                 continue
             if not exp:
                 # В КП рекламного номера нет, но в КОДЕ подмена ЕСТЬ, и это номер,
