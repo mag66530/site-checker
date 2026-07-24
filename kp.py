@@ -411,8 +411,8 @@ def extract_site_contacts(html: str) -> dict:
     from content_checker import _extract_region
     from text_checker import html_to_visible_text
 
-    region_html = (_extract_region(html, 'header', 'top') + '\n'
-                   + _extract_region(html, 'footer', 'bottom'))
+    _footer_html = _extract_region(html, 'footer', 'bottom')
+    region_html = (_extract_region(html, 'header', 'top') + '\n' + _footer_html)
     text = html_to_visible_text(region_html)
     # Телефоны берём БЕЗ WhatsApp-ссылок (wa.me/…): номер вотсапа не должен
     # утекать в список телефонов. Если этот же номер показан ещё и как телефон
@@ -454,25 +454,35 @@ def extract_site_contacts(html: str) -> dict:
                           r'\.?\s*[\w/]*)?', addr, re.IGNORECASE)
             if m2 and m2.group(0).strip(' ,;·|'):
                 addr = m2.group(0).strip(' ,;·|')
-    # Мессенджеры ищем по ВСЕМУ html: кнопки часто плавающие/виджеты вне шапки-подвала.
-    tg = re.findall(r'(?:t\.me|telegram\.me)/([A-Za-z0-9_]{3,})', html, re.I)
-    tg += re.findall(r'tg://resolve\?domain=([A-Za-z0-9_]{3,})', html, re.I)
+    # Мессенджеры (Telegram/WhatsApp) ищем ВЕЗДЕ, КРОМЕ ПОДВАЛА: в шапке стоят
+    # иконки контакта КОНКРЕТНОГО ГОРОДА (менеджер + вотсап), а в подвале - ССЫЛКИ
+    # НА ГЛОБАЛЬНЫЙ канал компании (напр. t.me/inmetprom), не относящийся к городу.
+    # Раньше глобальный канал утекал в «на сайте» и давал ложные срабатывания у
+    # СНГ-городов (у них своих иконок в шапке нет → должно быть «на сайте нет»).
+    # Просьба заказчика: «проверяй по шапке - нет значков, значит на сайте нет».
+    # Вырезаем РОВНО блок <footer>…</footer> (глобальный канал компании лежит
+    # там). Не через _extract_region - тот добавляет ~24 КБ перед подвалом и на
+    # мелких страницах захватывает и шапку.
+    _ftr_m = re.search(r'<footer\b[^>]*>.*?</footer>', html, re.I | re.S)
+    _msgr_html = (html[:_ftr_m.start()] + ' ' + html[_ftr_m.end():]) if _ftr_m else html
+    tg = re.findall(r'(?:t\.me|telegram\.me)/([A-Za-z0-9_]{3,})', _msgr_html, re.I)
+    tg += re.findall(r'tg://resolve\?domain=([A-Za-z0-9_]{3,})', _msgr_html, re.I)
     _tg_skip = {'share', 'joinchat', 'iv', 's', 'proxy', 'socks',
                 'addstickers', 'joinchannel', 'addlist'}
     tg = [t.lower() for t in tg if t.lower() not in _tg_skip]
     wa_raw = re.findall(
         r'(?:wa\.me/|api\.whatsapp\.com/send[^"\'\s]*?phone=|whatsapp://send\?phone=)'
-        r'(\+?\d[\d\-()\s]{7,})', html, re.I)
+        r'(\+?\d[\d\-()\s]{7,})', _msgr_html, re.I)
     wa = [n for n in (normalize_phone(w) for w in wa_raw) if n]
     # Рабочие chat-ссылки вотсапа (по ним кнопка «переходит в WhatsApp»).
     wa_urls = re.findall(
         r'href=["\']((?:https?:)?//(?:wa\.me|api\.whatsapp\.com|chat\.whatsapp\.com)'
-        r'[^"\']*)["\']', html, re.I)
+        r'[^"\']*)["\']', _msgr_html, re.I)
     # Кнопка вотсапа ВООБЩЕ есть? (ссылка на wa.me ИЛИ <a> с текстом про вотсап -
     # тогда, если рабочей chat-ссылки нет, кнопка «битая»). Ищем по <a>-тегам.
     wa_anchor_urls = re.findall(
         r'<a\b[^>]*?href=["\']([^"\']+)["\'][^>]*>(?:(?!</a>).){0,200}?'
-        r'(?:whatsapp|вотсап|ватсап|вацап)', html, re.I | re.S)
+        r'(?:whatsapp|вотсап|ватсап|вацап)', _msgr_html, re.I | re.S)
     return {
         'phones': list(dict.fromkeys(phones)),
         'emails': list(dict.fromkeys(emails)),
