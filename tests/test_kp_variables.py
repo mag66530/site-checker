@@ -645,3 +645,36 @@ def test_site_address_without_trailing_marker():
     # И «Скачать» сразу после адреса.
     html2 = '<main>АДРЕС улица Мира, 5 Скачать прайс-лист</main>'
     assert kp._site_address_full(html2) == "улица Мира, 5"
+
+
+def test_address_match_localized_not_fooled_by_page():
+    """Адрес сверяется ЛОКАЛЬНО: номер дома из КП должен стоять РЯДОМ с названием
+    улицы на странице. Иначе на длинном тексте «улица где-то» + «нужное число
+    где-то ещё» ложно засчитывались как совпадение, и смена дома не ловилась."""
+    # Адрес на сайте изменён на 999, а «151» встречается в другом месте страницы.
+    page = 'В каталоге 151 позиция. Контакты: улица Люблинская, 999. © 2024'
+    assert kp.address_match(page, 'улица Люблинская, 151') is False
+    # Верный адрес на странице - совпадает.
+    page_ok = 'Каталог. Адрес: улица Люблинская, 151. Телефон +7'
+    assert kp.address_match(page_ok, 'улица Люблинская, 151') is True
+
+
+def test_obshiy_phone_strict_one_digit_change_caught():
+    """«Общий Город» виден на сайте напрямую и должен совпадать ТОЧНО. Смена
+    одной цифры в КП (при том что старый номер остался в наборе all_phones) НЕ
+    должна прятаться под «другой номер этого города» - это ✗. (Для SEO/Реклама
+    подмену коллтрекинга по-прежнему засчитываем мягко.)"""
+    m = kp.load_kp("smu")
+    kp._KP_CACHE["smu"] = m
+    row = m["stalmetural.ru"]
+    saved = (row.phone_common, row.all_phones)
+    # На сайте старый номер …69; в КП «Общий» изменён на …60, но all_phones старый.
+    row.phone_common = "7 (499) 130-36-60"
+    row.all_phones = "4991303669;9031303669"      # старый …69 ещё в наборе
+    html = '<header><a href="tel:+74991303669">+7 (499) 130-36-69</a></header>'
+    try:
+        by = {f["field"]: f for f in kp.check_variables(html, "stalmetural.ru")["fields"]}
+        assert by["Тел. Общий Город"]["status"] == "bug"
+        assert by["Тел. Общий Город"]["note"] == "телефон на сайте не совпадает с КП"
+    finally:
+        (row.phone_common, row.all_phones) = saved
