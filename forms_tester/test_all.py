@@ -1162,6 +1162,7 @@ _SRVVAL_ВИДЫ = (
     ("empty_name", "без имени"),
     ("empty_phone", "без телефона"),
     ("bad_email", "некорректный e-mail"),
+    ("bad_phone", "невалидный телефон"),
     ("too_long", "превышение длины поля"),
 )
 
@@ -1218,6 +1219,12 @@ _JS_SRVVAL_TAMPER = r"""
     target = ctrls.find(e => (e.type||'').toLowerCase()==='tel'
       || /phone|tel|тел/i.test(
         (e.name||'') + ' ' + (e.placeholder||'') + ' ' + (e.getAttribute('autocomplete')||'')));
+  } else if (тип === 'bad_phone') {
+    // Поле ТЕЛЕФОНА - впишем ЯВНО невалидный номер (буквы/мусор), проба
+    // «сервер принял невалидный телефон».
+    target = ctrls.find(e => (e.type||'').toLowerCase()==='tel'
+      || /phone|tel|тел/i.test(
+        (e.name||'') + ' ' + (e.placeholder||'') + ' ' + (e.getAttribute('autocomplete')||'')));
   }
   if (!target) return {done: false};
 
@@ -1227,9 +1234,11 @@ _JS_SRVVAL_TAMPER = r"""
   target.removeAttribute('pattern');
   target.removeAttribute('maxlength');
   if ((target.type || '').toLowerCase() === 'email') target.type = 'text';
+  if (тип === 'bad_phone' && (target.type||'').toLowerCase() === 'tel') target.type = 'text';
 
   if (тип === 'empty' || тип === 'empty_name' || тип === 'empty_phone') target.value = '';
   else if (тип === 'bad_email') target.value = 'test-validation-probe-not-an-email';
+  else if (тип === 'bad_phone') target.value = 'абвгд-не-телефон-XYZ';
   else if (тип === 'too_long') target.value = 'ТЕСТ-ВАЛИДАЦИЯ ' + 'A'.repeat(4000);
 
   fire(target);
@@ -1457,6 +1466,9 @@ def _тело_подтверждает_подмену(вид: str, поле: str
     low = t.lower()
     if вид == "bad_email":
         return "test-validation-probe-not-an-email" in low
+    if вид == "bad_phone":
+        return ("не-телефон-xyz" in low) or ("%d0%bd%d0%b5-%d1%82" in low) \
+            or ("абвгд" in low)
     if вид == "too_long":
         return ("тест-валидация" in low) or ("aaaaaaaaaaaaaaaaaaaa" in low)
     # empty / empty_name / empty_phone: поле должно быть пустым в теле.
@@ -1566,32 +1578,49 @@ def серверная_валидация_детали(попытки: dict, п�
     строкой."""
     поля = поля or {}
 
-    def _поле(вид):
-        return str(поля.get(вид) or "").strip()
+    def _человеческое_поле(вид):
+        # Человеческое название поля по его name/токену (телефон/имя/почта/…).
+        p = str(поля.get(вид) or "").strip().lower()
+        if вид == "empty_name":
+            return "имени"
+        if вид == "empty_phone" or вид == "bad_phone":
+            return "телефона"
+        if вид == "bad_email":
+            return "почты"
+        if any(k in p for k in ("phone", "tel", "тел")):
+            return "телефона"
+        if any(k in p for k in ("mail", "email", "почт")):
+            return "почты"
+        if any(k in p for k in ("name", "fio", "имя", "фио", "фамил")):
+            return "имени"
+        if any(k in p for k in ("message", "comment", "textarea", "сообщ", "коммент", "text")):
+            return "сообщения"
+        return "обязательного поля"
 
     def _прошло(вид):
-        # Что именно прошло на сервер (для «Воспроизведено»).
-        p = _поле(вид)
-        pб = f"`{p}`" if p else ""
+        # Человеческая фраза «что прошло на сервер», без бэктиков.
+        поле = _человеческое_поле(вид)
         if вид in ("empty", "empty_name", "empty_phone"):
-            return f"без {pб}" if p else "без обязательного поля"
+            return f"без {поле}"
         if вид == "bad_email":
-            return f"с некорректным {pб}" if p else "с некорректным e-mail"
+            return "с невалидной почтой"
+        if вид == "bad_phone":
+            return "с невалидным телефоном"
         if вид == "too_long":
-            return f"с превышением лимита символов в {pб}" if p else "с превышением лимита символов"
-        return f"с нарушением в {pб}" if p else "с нарушением данных"
+            return "со слишком длинным текстом"
+        return "с битыми данными"
 
     def _состояние(вид):
-        # Краткое состояние поля (для «Требует ручной проверки» и «отклонил»).
-        p = _поле(вид)
-        pб = f"`{p}`" if p else ""
+        поле = _человеческое_поле(вид)
         if вид in ("empty", "empty_name", "empty_phone"):
-            return f"пустой {pб}" if p else "пустое обязательное поле"
+            return f"пустое поле {поле}"
         if вид == "bad_email":
-            return f"невалидный {pб}" if p else "невалидный e-mail"
+            return "невалидная почта"
+        if вид == "bad_phone":
+            return "невалидный телефон"
         if вид == "too_long":
-            return f"превышение лимита символов в {pб}" if p else "превышение лимита символов"
-        return f"нарушение в {pб}" if p else "нарушение данных"
+            return "слишком длинный текст"
+        return "битые данные"
 
     def _союз(items):
         if not items:
@@ -1620,9 +1649,8 @@ def серверная_валидация_детали(попытки: dict, п�
     # остальное (отклонено / неоднозначно) = в матрице ✓, комментарий не нужен.
     if not прошли:
         return ""
-    строки = ["Отсутствует серверная валидация формы (только фронт)",
-              "• Воспроизведено: сервер принимает заявки " + _союз(прошли) + "."]
-    return "\n".join(строки)
+    # Просто и по-человечески: «Сервер принимает заявки без телефона, без имени».
+    return "Сервер принимает заявки " + _союз(прошли)
 
 
 def валидация_сервера_вердикт(попытки: dict) -> tuple:
@@ -8790,6 +8818,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                             статус = "УСПЕШНО (подтверждение на странице)"
                         elif успех:
                             статус = f"ОШИБКА (нет признака успеха «{успех}» на странице)"
+                            _коммент_готовый = (
+                                f"Оформление не завершилось: не дошли до «{успех}» "
+                                f"(страницы заказа с ORDER_ID). Оформление прервалось "
+                                "на одном из шагов оформления (Далее / Оформить заказ) - "
+                                "проверьте вручную, на каком шаге форма не пускает "
+                                "дальше (незаполненное обязательное поле, обязательная "
+                                "опция товара, ошибка доставки/оплаты).")
                         else:
                             статус = "УСПЕШНО (страница открыта)"
                         имя_лог = имя_теста_из_конфига(
@@ -8900,8 +8935,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         товар_css = step.get("признак_товар_css") or step.get("css")
                         коммент = str(
                             step.get("комментарий_провал")
-                            or "Кнопка «Добавить в корзину» не работает "
-                               "(товар не кладётся в корзину)"
+                            or "Из карточки товара товар не кладётся в корзину: "
+                               "клик «В корзину» не сработал, корзина осталась пустой."
                         )
                         try:
                             ms_wait = int(step.get("ожидание_мс") or step.get("мс") or 6000)
