@@ -174,23 +174,42 @@ def _norm_addr(s: Optional[str]) -> str:
 
 def address_match(site_addr: str, kp_addr: str) -> bool:
     """
-    Мягкое сравнение адресов: совпали номер дома и название улицы -
-    считаем, что адрес тот же. «Рязанский проспект, 86/1с1» ≈ «Рязанский
-    пр., 86/1c1».
+    Совпадение адреса КП с текстом сайта - ЛОКАЛЬНО (как Ctrl+F по адресу):
+    название улицы из КП должно встретиться на странице, И РЯДОМ с ним (в том же
+    месте, а не где-то ещё) - номер дома из КП. Иначе на длинном тексте страницы
+    «улица где-то» + «номер где-то ещё» ложно засчитывались как совпадение, и
+    изменённый адрес/номер дома не ловился. «Рязанский проспект, 86/1с1» ≈
+    «Рязанский пр., 86/1c1»; «улица Люблинская, 151» ≠ «улица Люблинская, 99».
     """
-    s, k = _norm_addr(site_addr), _norm_addr(kp_addr)
+    k_raw = kp_addr or ""
+    k = _norm_addr(k_raw)
     if not k:
         return False
-    knums = set(re.findall(r'\d+', k))
-    snums = set(re.findall(r'\d+', s))
+    # Значимые слова улицы (без типов «улица/проспект/…» и коротких).
     kwords = [w for w in re.findall(r'[а-яё]+', k)
               if len(w) >= 4 and w not in _STREET_WORDS]
-    swords = set(re.findall(r'[а-яё]+', s))
-    # Номер дома: хотя бы один общий (или в КП номера нет)
-    num_ok = (not knums) or bool(knums & snums)
-    # Улица: хотя бы одно значимое слово улицы совпало
-    word_ok = (not kwords) or any(w in swords for w in kwords)
-    return num_ok and word_ok
+    if not kwords:
+        # В КП нет названия улицы (редкий случай) - мягко по номеру дома.
+        knums = set(re.findall(r'\d+', k))
+        return bool(knums) and bool(knums & set(re.findall(r'\d+',
+                                                           _norm_addr(site_addr))))
+    # ГЛАВНЫЙ номер дома: первое число в части ПОСЛЕ последней запятой
+    # («…, 86/1с1» → 86; «…, 151» → 151; «микрорайон 26-й, 58Б» → 58).
+    _tail = k_raw.rsplit(',', 1)[-1] if ',' in k_raw else k_raw
+    _hm = re.search(r'\d+', _norm_addr(_tail))
+    house = _hm.group(0) if _hm else ''
+    s = _norm_addr(site_addr)
+    _house_re = re.compile(r'(?<!\d)' + re.escape(house) + r'(?!\d)') if house else None
+    for w in kwords:
+        for m in re.finditer(re.escape(w), s):
+            if _house_re is None:
+                return True            # в КП нет номера дома - хватит улицы
+            # Окно вокруг названия улицы: номер дома обычно сразу за улицей,
+            # иногда перед («5-й проезд»). Смотрим ±немного символов.
+            window = s[max(0, m.start() - 12):m.end() + 30]
+            if _house_re.search(window):
+                return True
+    return False
 
 
 # ── Запись из КП (одна строка-город) ─────────────────────────────────
@@ -730,9 +749,18 @@ def _fmt(nat: str, dial: str = '7') -> str:
 _ADDR_TAIL_RE = re.compile(
     r'\s*(?:контакт\w*|время работы|режим работы|часы работы|график\w*|режим\w*|'
     r'реквизит\w*|прайс\w*|скачать|наш телефон|наша почта|наш адрес|карт[ае]\b|'
+    # Меню/попап выбора города (баннер «Ваш город: … ? Всё верно / Выбрать город»):
+    r'выбрать\s+(?:другой\s+)?город|ваш\s+город|вс[её]\s+верно|сменить\s+город|'
     r'телефон\w*|тел\.|e-?mail|почт\w*[:\s]|почта\b|whatsapp|телеграм|telegram|'
     r'i[şs]\s*saat\w*|əlaqə|elaqe|iş\s*vaxt\w*|'
     r'\+?[78][\s(]?\d{3}|\+?\d{11,}|[a-z0-9._%+-]+@).*$', re.I | re.S | re.U)
+
+
+# Фразы меню/попапа, которые НЕ адрес (даже если рядом оказалась цифра): попап
+# выбора города «… ? Всё верно Выбрать город …». Такой текст в «Сайт» не пускаем.
+_ADDR_JUNK_RE = re.compile(
+    r'выбрать\s+(?:другой\s+)?город|ваш\s+город|вс[её]\s+верно|сменить\s+город|\?',
+    re.I | re.U)
 
 
 def _обрезать_хвост_адреса(s: str) -> str:
@@ -770,6 +798,8 @@ def _site_address_full(html: str) -> str:
     # «Bakı, 23 İzmir küçəsi»). Иначе после случайного «адрес…» захватились бы
     # категории/меню («Уличные фонари…»).
     if not re.search(r'\d', cap):
+        return ''
+    if _ADDR_JUNK_RE.search(cap):        # попап выбора города и т.п. - не адрес
         return ''
     if not (_RE_ADDR_STREET.search(cap)
             or re.search(r'[' + _ADDR_LETTER + r'][' + _ADDR_LETTER + r'\-]{2,}'
@@ -910,19 +940,19 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                     "телефон на сайте не совпадает с КП")
                 continue
             if not exp:
-                _code_new = sorted(n for n in _pool if n not in kp_phones)
-                if _code_new:
-                    if _kp_disp != "–":
-                        # В ячейке КП стоит значение (мусор «2») - оно не совпадает
-                        # с рекламным номером из кода → ✗ (значение КП показываем).
-                        add(label, _kp_disp, ", ".join(fmt(n) for n in _code_new),
-                            "bug", "телефон на сайте не совпадает с КП")
-                    else:
-                        # КП пусто, а в коде есть рекламный номер, которого в КП
-                        # города нет вообще → ⚠ (в КП, видимо, не заведён).
-                        add(label, "–", ", ".join(fmt(n) for n in _code_new), "warn",
-                            "в коде есть рекламный номер, которого нет в КП города")
+                if _kp_disp != "–":
+                    # В ячейке КП стоит значение (мусор «2») - оно не совпадает с
+                    # рекламным номером из кода → ✗ (значение КП показываем).
+                    _cfg = ", ".join(fmt(n) for n in sorted(_pool)) or site_ph_primary
+                    add(label, _kp_disp, _cfg, "bug",
+                        "телефон на сайте не совпадает с КП")
                     continue
+                # В КП рекламного номера НЕТ - проверять нечего: прочерк «–»
+                # (не ошибка). Городам без своего рекл. номера (СНГ и т.п.) в коде
+                # подставляется ОБЩИЙ/глобальный подменный - это не расхождение КП.
+                add(label, "–", site_ph_primary, "na",
+                    "рекламного номера в КП нет, на сайте общий")
+                continue
             # иначе (нет коллтрекинга / обычный номер) - общая логика ниже.
         if not exp:
             if _kp_disp != "–":
@@ -949,12 +979,15 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                     add(label, "–", "–", "na", "нет ни в КП, ни на сайте")
         elif exp in site_phones:
             add(label, fmt(exp), fmt(exp), "ok", "совпадает с КП")
-        elif site_phones & kp_phones:
-            # На сайте другой ГОРОДСКОЙ номер того же города из КП - засчитываем
-            # (✓): значит номер города верный, просто в другой слот. В «На сайте»
-            # показываем именно этот совпавший номер.
+        elif label != "Тел. Общий Город" and (site_phones & kp_phones):
+            # ТОЛЬКО для рекламного/поискового слота: их номер подменяет
+            # коллтрекинг, и СТАТИЧЕСКИ на сайте виден ОБЩИЙ номер города. Если он
+            # из набора КП города - засчитываем (✓), «живую» подмену проверит
+            # браузер отдельно. Для «Общий Город» так НЕЛЬЗЯ: он виден на сайте
+            # напрямую и должен совпадать ТОЧНО (иначе смена одной цифры в КП/на
+            # сайте не ловилась - пряталась под «другой номер этого города»).
             add(label, fmt(exp), fmt(sorted(site_phones & kp_phones)[0]), "ok_set",
-                "на сайте другой номер этого же города из КП")
+                "на сайте общий номер города (подменный проверит браузер)")
         elif site_phones:
             # На сайте городской номер, которого НЕТ в КП (номер сменили/опечатка) -
             # это расхождение ✗.
@@ -1104,16 +1137,14 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     _wa_kp_show = fmt(exp_wa) if _wa_valid else (_wa_raw if _wa_raw
                                                  and _wa_raw not in ("–", "-") else "–")
     if not site_wa:
-        # На сайте WhatsApp-номера НЕТ.
-        if wa_anchor and _wa_valid:
-            # Кнопка вотсапа в шапке есть, но номер в ссылке не читается - сверить
-            # нельзя (⚠, проверить вручную).
-            add("WhatsApp", fmt(exp_wa), "номер в ссылке не виден", "warn",
-                "кнопка WhatsApp есть, номер скрыт - проверьте вручную")
-            fields[-1]["check_url"] = wa_anchor[0]
-        elif _wa_kp_show != "–":
+        # На сайте читаемого WhatsApp-номера НЕТ.
+        if _wa_kp_show != "–":
             # В КП значение есть, а на сайте вотсапа нет → ✗ «отсутствует».
+            # Если есть кнопка-ссылка (номер скрыт за JS) - уточним её вживую
+            # (variables_run сходит по check_url и допишет, что за ней).
             add("WhatsApp", _wa_kp_show, "–", "bug", "WhatsApp на сайте отсутствует")
+            if wa_anchor:
+                fields[-1]["check_url"] = wa_anchor[0]
         else:
             add("WhatsApp", "–", "–", "na", "нет ни в КП, ни на сайте")
     elif _wa_valid and exp_wa in site_wa:
