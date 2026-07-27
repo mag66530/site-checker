@@ -7806,12 +7806,31 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # Всё под try: если переоткрыть не вышло - проба идёт по СТАРОЙ форме,
             # ровно как раньше (никакой регрессии, максимум прежнее «Проверить»).
             def _переоткрыть_и_заполнить():
-                if переоткрыть_fn is None or not _снимок_валидных or _is_order:
+                # Диагностика: печатаем ПРИЧИНУ, если переоткрыть не вышло - иначе
+                # «Проверить: проба не отработала» непонятно откуда.
+                if переоткрыть_fn is None:
+                    print("      ↳ переоткрытие недоступно: нет шага открытия формы "
+                          "(форма не последний шаг сценария)")
+                    return None, None
+                if not _снимок_валидных:
+                    print("      ↳ переоткрытие недоступно: не снят снимок валидных "
+                          "значений формы")
+                    return None, None
+                if _is_order:
                     return None, None
                 try:
                     if not переоткрыть_fn():
+                        print("      ↳ переоткрытие не удалось: перезагрузка/повтор "
+                              "шагов открытия формы не сработали (goto/клик упали)")
                         return None, None
                     page.wait_for_timeout(600)
+                    # На СНГ-домене (kz/by/…) после перезагрузки часто всплывает
+                    # попап выбора региона и перекрывает форму → «форма не найдена».
+                    # Гасим его перед поиском формы.
+                    try:
+                        закрыть_попап_региона(page)
+                    except Exception:  # noqa: BLE001
+                        pass
                     if use_text:
                         _loc = page.locator("form").filter(
                             has_text=str(форма_config.get("text") or "").strip())
@@ -7826,6 +7845,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         except Exception:  # noqa: BLE001
                             continue
                     if _f is None:
+                        print(f"      ↳ переоткрытие: после перезагрузки форма "
+                              f"{sel!r} не найдена видимой (попап региона перекрыл / "
+                              "форма открывается кликом, которого нет в шагах)")
                         return None, None
                     try:
                         _tag = _f.evaluate("el => el.tagName.toLowerCase()")
