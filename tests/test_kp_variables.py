@@ -409,27 +409,30 @@ def test_widget_url_digits_not_phone():
 
 
 def test_merge_podmena_wording_and_format():
-    """Живая проверка подмены: расхождение пишется ЕДИНООБРАЗНО «телефон на сайте
-    не совпадает с КП» (как все остальные поля), а номера ЧИТАЕМО
-    (+7 (800) 600-98-56, не голыми цифрами). Что в КП/на сайте - в колонках."""
+    """Живая проверка подмены:
+      • номер БРАЛИ ИЗ КП и он не подставился → ✗ «телефон на сайте не совпадает
+        с КП» (номера читаемо, +7 (800) 600-98-56);
+      • рекламного номера в КП НЕТ (брали из кода) → это НЕ ошибка, а прочерк «–»
+        «рекламного номера в КП нет, на сайте общий» (кейс СНГ)."""
     import variables_run as vr
-    fld = {'field': 'Тел. Реклама Город', 'expected': '–', 'found': '–',
-           'status': 'na', 'note': ''}
-    vr._merge_подмена(fld, {'status': 'replaced_ok', 'shown': ['8006009856']},
-                      False, '8006009856', "рекламный номер",
+    # from_kp=True, не подставился → ✗
+    fld = {'field': 'Тел. Реклама Город', 'expected': '+7 (962) 388-79-12',
+           'found': '–', 'status': 'ok', 'note': ''}
+    vr._merge_подмена(fld, {'status': 'not_replaced', 'shown': ['4991303669']},
+                      True, '9623887912', "рекламный номер",
                       "с меткой ?utm_source=yandex", dial='7')
     assert fld['status'] == 'bug'
-    assert fld['found'] == '+7 (800) 600-98-56'          # читаемый формат
+    assert fld['found'] == '+7 (499) 130-36-69'          # читаемый формат
     assert fld['note'] == 'телефон на сайте не совпадает с КП'
 
+    # from_kp=False (в КП рекламного номера нет) → прочерк «–», не ошибка
     fld2 = {'field': 'Тел. Реклама Город', 'expected': '–', 'found': '–',
             'status': 'na', 'note': ''}
-    vr._merge_подмена(fld2, {'status': 'not_replaced', 'shown': ['4212680556']},
+    vr._merge_подмена(fld2, {'status': 'replaced_ok', 'shown': ['8006009856']},
                       False, '8006009856', "рекламный номер",
                       "с меткой ?utm_source=yandex", dial='7')
-    assert fld2['status'] == 'bug'
-    assert fld2['found'] == '+7 (421) 268-05-56'
-    assert fld2['note'] == 'телефон на сайте не совпадает с КП'
+    assert fld2['status'] == 'na'
+    assert fld2['note'] == 'рекламного номера в КП нет, на сайте общий'
 
 
 def test_mismatch_notes_are_uniform():
