@@ -745,3 +745,50 @@ def test_site_address_not_fooled_by_city_picker_popup():
     # Настоящий адрес после попапа - берём его.
     ok = '<main>Ваш город Ульяновск? Всё верно. Адрес: ул. Бебеля, 11 Контакты</main>'
     assert kp._site_address_full(ok) == "ул. Бебеля, 11"
+
+
+def test_site_address_raw_nepolny():
+    """_site_address_raw достаёт текст поля «Адрес:» ДАЖЕ если адрес неполный
+    (без улицы/дома): битый «, г. Гродно,» на сайтах МПЭ/Беларусь → «г. Гродно».
+    Мусор (попап города) и пустое поле - ''."""
+    html = ('<main><p>Адрес: , г. Гродно, Телефон офиса продаж 375 (29) 643-66-60 '
+            'Email: grodno@mepen.by</p></main>')
+    assert kp._site_address_raw(html) == "г. Гродно"
+    assert kp._site_address_full(html) == ""          # неполный - строгий отвергает
+    # попап выбора города - не адрес
+    assert kp._site_address_raw('<main>Адрес: Ваш город? Всё верно Выбрать город</main>') == ""
+    # метки нет вовсе
+    assert kp._site_address_raw('<main>Только телефон 375 (29) 643-66-60</main>') == ""
+
+
+def test_incomplete_site_address_is_flagged_not_hidden():
+    """Кейс МПЭ/Беларусь (Гродно/Могилёв/Витебск): на сайте в поле адреса стоит
+    битый «, г. Гродно,» (город, БЕЗ улицы и дома). Это дефект сайта - показываем
+    «г. Гродно» и помечаем ✗, а НЕ прячем за «–»/«нет ни в КП, ни на сайте»
+    (прямая просьба заказчика: «в поле адрес есть инфа - это баг, не прячь»)."""
+    contacts = ('<main><h2>МетПромЭнерго в Гродно</h2>'
+                '<p>Адрес: , г. Гродно, Телефон офиса продаж 375 (29) 643-66-60</p>'
+                '<p>Email grodno@mepen.by</p></main>')
+    main = '<header>grodno@mepen.by 375 (29) 643-66-60</header>'
+    # КП адреса нет (пусто)
+    row = kp.KPRow(domain='grodno.mepen.by', city='Гродно', address='',
+                   country='Беларусь')
+    r = kp.check_variables(main, 'grodno.mepen.by', contacts_html=contacts, row=row)
+    af = next(f for f in r['fields'] if f['field'] == 'Адрес')
+    assert af['status'] == 'bug', af                  # НЕ na, НЕ «–»
+    assert af['found'] == 'г. Гродно', af             # показываем что на сайте
+    assert 'неполн' in af['note'], af                 # «адрес на сайте неполный…»
+
+    # КП адрес ЕСТЬ, а на сайте только «г. Гродно» - тоже показываем город, не «–»
+    row2 = kp.KPRow(domain='grodno.mepen.by', city='Гродно',
+                    address='улица Ленина, 5', country='Беларусь')
+    r2 = kp.check_variables(main, 'grodno.mepen.by', contacts_html=contacts, row=row2)
+    af2 = next(f for f in r2['fields'] if f['field'] == 'Адрес')
+    assert af2['status'] == 'bug' and af2['found'] == 'г. Гродно', af2
+
+    # А вот если поля адреса на сайте нет вовсе И в КП пусто - тогда «–» (na)
+    row3 = kp.KPRow(domain='x.by', city='Тест', address='', country='Беларусь')
+    r3 = kp.check_variables('<header>только телефон 375 (29) 643-66-60</header>',
+                            'x.by', row=row3)
+    af3 = next(f for f in r3['fields'] if f['field'] == 'Адрес')
+    assert af3['status'] == 'na' and af3['found'] == '–', af3
