@@ -599,6 +599,27 @@ def _совпало(цель: dict, fired: set[str]) -> str | None:
     return None
 
 
+def _proxy_from_env():
+    """Прокси для Playwright из env GOALS_PROXY (http://user:pass@host:port).
+    Возвращает dict для chromium.launch(proxy=...) или None."""
+    from urllib.parse import unquote, urlparse
+    raw = (os.environ.get('GOALS_PROXY') or '').strip()
+    if not raw:
+        return None
+    pr = urlparse(raw if '://' in raw else 'http://' + raw)
+    if not pr.hostname:
+        return None
+    server = f"{pr.scheme or 'http'}://{pr.hostname}"
+    if pr.port:
+        server += f":{pr.port}"
+    conf = {'server': server}
+    if pr.username:
+        conf['username'] = unquote(pr.username)
+    if pr.password:
+        conf['password'] = unquote(pr.password)
+    return conf
+
+
 def выполнить_прогон(pid: str, headless: bool = True, log=print, stop=None) -> dict:
     """Открывает страницы, кликает, слушает Метрику. Возвращает
     {'fired': set(id), 'страницы': [{'название','url','код','счётчик','визит'}]}."""
@@ -661,10 +682,19 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
     # Облачная среда (агентский прокси режет TLS браузера): гоняем трафик страницы
     # через сетевой стек драйвера (route.fetch). Локально флага нет - напрямую.
     _via_driver = bool(os.environ.get('CCR_AGENT_PROXY_ENABLED'))
+    # Прокси прогона (env GOALS_PROXY, ставит goals_check из блока «Доступ к
+    # сайту»). Нужен сайтам, которые режут зарубежный/дата-центровый IP сервера
+    # (stalmetural.ru, inmetprom.ru): без него браузер целей упирался в 403/
+    # таймаут - «РФ не отвечает». Пусто - идём напрямую, как раньше.
+    _proxy = _proxy_from_env()
     with sync_playwright() as pw:
-        b = pw.chromium.launch(headless=headless,
-                               args=["--disable-blink-features=AutomationControlled",
-                                     "--no-sandbox"])
+        _launch_kw = dict(headless=headless,
+                          args=["--disable-blink-features=AutomationControlled",
+                                "--no-sandbox"])
+        if _proxy:
+            _launch_kw['proxy'] = _proxy
+            log(f'Прокси прогона: {_proxy["server"]}')
+        b = pw.chromium.launch(**_launch_kw)
         # Прикидываемся обычным Chrome: часть сайтов (напр. inmetprom.ru) отдаёт
         # 403 «голому» headless-браузеру. Реальный User-Agent + заголовки часто
         # снимают такую блокировку.
@@ -1566,6 +1596,20 @@ def _классифицировать(pid: str, каталог: dict, прого
                           'форма не сработала в текущем прогоне (не найдена/не '
                           'отправлена/только на части городов) - проверьте вручную')
                 счёт['manual'] += 1
+            elif (g.get('url_часть', '') or '').strip().lower() in ('mailto', 'tel') and (
+                    'mailto:' in код if (g.get('url_часть', '') or '').strip().lower() == 'mailto'
+                    else ('href="tel:' in код or "href='tel:" in код)):
+                # url-цель «содержит mailto/tel» = клик по email/телефон-ссылке.
+                # Метрика такие клики считает САМА («внешняя ссылка»/e-mail): своего
+                # reachGoal и перехода на страницу нет, обычным прогоном не поймать.
+                # Но ссылка на сайте ЕСТЬ - значит действие возможно и Метрика зачтёт.
+                _вид = 'e-mail' if (g.get('url_часть', '') or '').strip().lower() == 'mailto' else 'телефон'
+                способ, статус, цвет = 'ссылка', 'Действие выполнено', GREEN
+                детали = (f'цель = клик по ссылке {_вид} (mailto/tel). Метрика считает '
+                          f'такие клики сама («внешняя ссылка»/{_вид}) - отдельного '
+                          f'reachGoal нет, но ссылка {_вид} на сайте есть, и при клике '
+                          f'посетителя Метрика цель зачтёт')
+                счёт['ok'] += 1
             else:
                 статус, цвет = 'Нет автопроверки', GREY
                 детали = (f"цель = визит на страницу «{g.get('url_часть','')}». Обычный "

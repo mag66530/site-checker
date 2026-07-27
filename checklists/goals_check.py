@@ -270,15 +270,17 @@ if not _alive:
                  f'или на своём сервере; в облаке нужен playwright + packages.txt.')
 
 # Прокси + проверка доступности сайта (над кнопкой запуска)
+_goals_proxy = None
 try:
     from site_access import render_proxy_access
     _dom = ''
     _vars = СТРАНЫ.get(_base, [])
     if _vars and '·' in _vars[0][1]:
         _dom = _vars[0][1].split('·')[-1].strip()
-    render_proxy_access(f'goals_{_base}',
-                        default_url=(f"https://{_dom}/" if _dom else ''),
-                        pid=_base)
+    _goals_proxy = render_proxy_access(
+        f'goals_{_base}',
+        default_url=(f"https://{_dom}/" if _dom else ''),
+        pid=_base)
 except Exception as _e_pa:
     st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
 
@@ -298,6 +300,10 @@ with c1:
         env = dict(os.environ)
         env['PYTHONIOENCODING'] = 'utf-8'
         env['PYTHONUNBUFFERED'] = '1'
+        # Прокси прогона: браузер целей пойдёт через него (иначе stalmetural.ru /
+        # inmetprom.ru режут зарубежный IP сервера - «РФ не отвечает»).
+        if _goals_proxy:
+            env['GOALS_PROXY'] = _goals_proxy
         # Telegram: креды берём из секретов (те же, что у еженедельной проверки) и
         # кладём в окружение прогона - goals_run сам отправит сводный отчёт в чат.
         try:
