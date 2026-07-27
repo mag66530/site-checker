@@ -68,6 +68,57 @@ def test_address_match_different_house():
     assert not address_match('улица Люблинская, 99', 'улица Люблинская, 151')
 
 
+def test_address_pochtovy_indeks_ne_lomaet_adres():
+    """Почтовый индекс в адресе («198096, …» / «720001, …») НЕ должен ломать адрес.
+    Баг: стоп-маркер телефона «7/8 + 3 цифры» срабатывал на цифрах индекса
+    («8096» из 198096, «7200» из 720001) и адрес схлопывался в «19»/пусто (кейсы
+    МПЭ/СПб и МПЭ/Бишкек, страница «Контакты»). Индекс - самостоятельный 6-значный
+    токен, в КП его нет - убираем его целиком, а адрес сохраняем."""
+    from kp import _обрезать_хвост_адреса, _site_address_full
+    # СПб: индекс начинается на 1 → раньше резалось до «19»
+    src = ('198096, г. Санкт-Петербург, Гаванская улица, 4 '
+           'Телефон офиса продаж 7 (812) 986-43-98 Email spb@mepen.ru')
+    assert _обрезать_хвост_адреса(src) == 'г. Санкт-Петербург, Гаванская улица, 4'
+    # Бишкек: индекс начинается на 7 («720001» → «7200») → раньше резалось в пусто
+    assert _обрезать_хвост_адреса('720001, г. Бишкек, улица Токтогула, 125 '
+                                  'Телефон 996 (22) 065-25-09') \
+        == 'г. Бишкек, улица Токтогула, 125'
+    # индекс В СЕРЕДИНЕ («город, индекс, улица») - тоже убираем, адрес цел
+    assert _обрезать_хвост_адреса('г. Санкт-Петербург, 198096, Гаванская улица, 4 '
+                                  'Телефон 7 (812) 000-00-00') \
+        == 'г. Санкт-Петербург, Гаванская улица, 4'
+    # …но НАСТОЯЩИЙ телефон после адреса по-прежнему обрезаем
+    assert _обрезать_хвост_адреса('Гаванская улица, 4 8 495 000 00 00') \
+        == 'Гаванская улица, 4'
+    # дом-номер (не 6 цифр) НЕ трогаем
+    assert _обрезать_хвост_адреса('улица Токтогула, 125') == 'улица Токтогула, 125'
+    html = ('<main><h2>МетПромЭнерго в Бишкеке</h2>'
+            '<p>Адрес: 720001, г. Бишкек, улица Токтогула, 125</p>'
+            '<p>Телефон офиса продаж 996 (22) 065-25-09</p></main>')
+    assert _site_address_full(html) == 'г. Бишкек, улица Токтогула, 125'
+
+
+def test_check_variables_adres_s_indeksom_na_kontaktah():
+    """Кейс МПЭ/Бишкек (mepen.kg) с жалобы заказчика: адрес лежит на «Контактах»
+    с индексом «720001, г. Бишкек, улица Токтогула, 125». КП = «улица Токтогула,
+    125» → Адрес ✓ (совпадает), а «Сайт» показывает адрес, а не «–»/«19»."""
+    import kp as kpmod
+    row = kpmod.KPRow(domain='mepen.kg', city='Бишкек',
+                      phone_common='996 (22) 065-25-09', all_phones='',
+                      email='bishkek@mepen.kg', address='улица Токтогула, 125',
+                      country='Киргизия')
+    main = '<header>bishkek@mepen.kg 996 (22) 065-25-09</header>'  # на главной адреса нет
+    contacts = ('<main><h2>МетПромЭнерго в Бишкеке</h2>'
+                '<p>Адрес: 720001, г. Бишкек, улица Токтогула, 125</p>'
+                '<p>Телефон офиса продаж 996 (22) 065-25-09</p>'
+                '<p>Email bishkek@mepen.kg</p></main>')
+    r = kpmod.check_variables(main, 'mepen.kg', contacts_html=contacts, row=row)
+    af = next(f for f in r['fields'] if f['field'] == 'Адрес')
+    assert af['status'] == 'ok', af
+    assert af['found'] not in ('', '–', '72'), af      # не пусто и не обрезано
+    assert 'Токтогула' in af['found'], af
+
+
 # ── Приоритет телефона SEO → реклама → общий ─────────────────────────
 
 
@@ -301,6 +352,33 @@ def test_convert_drops_linkless_satellites(tmp_path, monkeypatch):
     # ровно один город на домен .kz и всего два города (Москва + Алматы)
     assert sum(1 for d, _ in got if d == 'stalmetural.kz') == 1
     assert len(got) == 2
+
+
+def test_convert_numeric_cells_no_dot_zero(tmp_path, monkeypatch):
+    """Числовые ячейки КП не должны превращаться в «...0»/экспоненту. openpyxl
+    отдаёт число как float: телефон-числом → 74991234567.0, мусор «2» → 2.0.
+    Показываем целое без «.0» (иначе телефон в КП бился, а «2» выводилось «2.0» -
+    кейс СНГ mepen.uz/mepen.kg, где в отчёте у заказчика стояло «2.0»)."""
+    pytest.importorskip('openpyxl')
+    from openpyxl import Workbook
+    import csv
+    import convert_kp
+
+    wb = Workbook(); ws = wb.active; ws.title = 'Справочники'
+    ws.append(['Страна', 'Город', 'url', 'Адрес', 'e-mail',
+               'SEO Город', 'Реклама Город', 'Общий Город', 'Telegram', 'WhatsApp'])
+    # телефон записан ЧИСЛОМ (не текстом); почта-мусор «2» тоже число
+    ws.append(('Россия', 'Москва', 'https://stalmetural.ru/', 'ул. Т, 1',
+               2, '', '', 74991234567, '', ''))
+    src = tmp_path / 'kp.xlsx'; wb.save(str(src))
+
+    monkeypatch.setattr(convert_kp, 'CATALOGS_DIR', tmp_path)
+    out = convert_kp.convert('smu', str(src))
+    with open(out, encoding='utf-8') as f:
+        row = next(csv.DictReader(f))
+    assert row['phone_common'] == '74991234567', row['phone_common']   # не «...0»
+    assert '.0' not in row['phone_common'] and 'e+' not in row['phone_common'].lower()
+    assert row['email'] == '2', row['email']                           # «2», не «2.0»
 
 
 def test_convert_relabels_azerbaijan_translation(tmp_path, monkeypatch):
