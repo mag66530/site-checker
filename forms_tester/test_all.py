@@ -7874,6 +7874,22 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 return True
                             except Exception:  # noqa: BLE001
                                 pass
+                    # Поля «Имя» нет (напр. «Срочный заказ» - только телефон):
+                    # XSS-отражение ловится из ЛЮБОГО поля, поэтому суём маркер в
+                    # первое видимое текстовое поле/textarea. Иначе XSS вообще не
+                    # проверялся на формах без имени (был ложный «Проверить»).
+                    for _sel in ("textarea >> visible=true",
+                                 "input[type='text'] >> visible=true",
+                                 "input:not([type]) >> visible=true",
+                                 "input[type='tel'] >> visible=true",
+                                 "input[type='search'] >> visible=true"):
+                        _l = scope.locator(_sel)
+                        if _l.count() > 0:
+                            try:
+                                _l.first.fill(значение, force=True)
+                                return True
+                            except Exception:  # noqa: BLE001
+                                pass
                 except Exception:  # noqa: BLE001
                     pass
                 return False
@@ -7893,8 +7909,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         _имя_ок = _xss_заполнить_имя(_xf, _XSS_PAYLOAD)
                         if not _имя_ок:
                             _x_ст, _x_дет = ("Проверить",
-                                             "не удалось подставить XSS-маркер в "
-                                             "поле имени - проверьте вручную")
+                                             "на форме нет текстового поля для "
+                                             "XSS-маркера - проверьте вручную")
                         else:
                             _xss_posts = []
 
