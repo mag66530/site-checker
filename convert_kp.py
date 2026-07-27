@@ -151,7 +151,14 @@ def convert(project_id: str, xlsx_path: str) -> Path:
         if idx is None or idx >= len(row):
             return ''
         v = row[idx]
-        return '' if v is None else str(v).strip()
+        if v is None:
+            return ''
+        # openpyxl отдаёт число из ячейки как float: «2» → 2.0, а телефон-числом →
+        # 74991234567.0 (а то и «7.5e+10»). Целое показываем без «.0» и без
+        # экспоненты - иначе в КП телефон бился, а мусор «2» выводился как «2.0».
+        if isinstance(v, float) and v.is_integer():
+            return str(int(v))
+        return str(v).strip()
 
     def norm_country(v):
         """Приводим синонимы страны к единому виду (в КП АПС встречается и «РФ»,
