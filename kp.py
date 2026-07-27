@@ -929,19 +929,19 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                     "телефон на сайте не совпадает с КП")
                 continue
             if not exp:
-                _code_new = sorted(n for n in _pool if n not in kp_phones)
-                if _code_new:
-                    if _kp_disp != "–":
-                        # В ячейке КП стоит значение (мусор «2») - оно не совпадает
-                        # с рекламным номером из кода → ✗ (значение КП показываем).
-                        add(label, _kp_disp, ", ".join(fmt(n) for n in _code_new),
-                            "bug", "телефон на сайте не совпадает с КП")
-                    else:
-                        # КП пусто, а в коде есть рекламный номер, которого в КП
-                        # города нет вообще → ⚠ (в КП, видимо, не заведён).
-                        add(label, "–", ", ".join(fmt(n) for n in _code_new), "warn",
-                            "в коде есть рекламный номер, которого нет в КП города")
+                if _kp_disp != "–":
+                    # В ячейке КП стоит значение (мусор «2») - оно не совпадает с
+                    # рекламным номером из кода → ✗ (значение КП показываем).
+                    _cfg = ", ".join(fmt(n) for n in sorted(_pool)) or site_ph_primary
+                    add(label, _kp_disp, _cfg, "bug",
+                        "телефон на сайте не совпадает с КП")
                     continue
+                # В КП рекламного номера НЕТ - проверять нечего: прочерк «–»
+                # (не ошибка). Городам без своего рекл. номера (СНГ и т.п.) в коде
+                # подставляется ОБЩИЙ/глобальный подменный - это не расхождение КП.
+                add(label, "–", site_ph_primary, "na",
+                    "рекламного номера в КП нет, на сайте общий")
+                continue
             # иначе (нет коллтрекинга / обычный номер) - общая логика ниже.
         if not exp:
             if _kp_disp != "–":
@@ -1126,16 +1126,14 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     _wa_kp_show = fmt(exp_wa) if _wa_valid else (_wa_raw if _wa_raw
                                                  and _wa_raw not in ("–", "-") else "–")
     if not site_wa:
-        # На сайте WhatsApp-номера НЕТ.
-        if wa_anchor and _wa_valid:
-            # Кнопка вотсапа в шапке есть, но номер в ссылке не читается - сверить
-            # нельзя (⚠, проверить вручную).
-            add("WhatsApp", fmt(exp_wa), "номер в ссылке не виден", "warn",
-                "кнопка WhatsApp есть, номер скрыт - проверьте вручную")
-            fields[-1]["check_url"] = wa_anchor[0]
-        elif _wa_kp_show != "–":
+        # На сайте читаемого WhatsApp-номера НЕТ.
+        if _wa_kp_show != "–":
             # В КП значение есть, а на сайте вотсапа нет → ✗ «отсутствует».
+            # Если есть кнопка-ссылка (номер скрыт за JS) - уточним её вживую
+            # (variables_run сходит по check_url и допишет, что за ней).
             add("WhatsApp", _wa_kp_show, "–", "bug", "WhatsApp на сайте отсутствует")
+            if wa_anchor:
+                fields[-1]["check_url"] = wa_anchor[0]
         else:
             add("WhatsApp", "–", "–", "na", "нет ни в КП, ни на сайте")
     elif _wa_valid and exp_wa in site_wa:
