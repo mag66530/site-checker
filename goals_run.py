@@ -10,12 +10,27 @@ goals_run.py - фоновый прогон «Проверки целей» (ст
 для КАЖДОЙ выбранной страны.
 """
 import argparse
+import os
+import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).parent
+
+
+def _forms_uses_proxy(base: str) -> bool:
+    """У проекта форм включён прокси (config ИСПОЛЬЗОВАТЬ_ПРОКСИ = True)? Такие
+    сайты (напр. ИМП/inmetprom.ru) режут прямое подключение из дата-центра и
+    требуют российский IP. Читаем флаг текстом - без импорта чужого config."""
+    cfg = ROOT / 'forms_tester' / 'projects' / base / 'config.py'
+    try:
+        txt = cfg.read_text(encoding='utf-8')
+    except Exception:  # noqa: BLE001
+        return False
+    m = re.search(r'ИСПОЛЬЗОВАТЬ_ПРОКСИ\s*=\s*(True|False)', txt)
+    return bool(m and m.group(1) == 'True')
 
 
 def _stamp(msg):
@@ -50,9 +65,20 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
     _patu = re.compile(r'(?:URL сценария:|переход →)\s*(https?://\S+)')
     fired: set = set()
     urls: set = set()
+    # Прокси форм-подпроцессу: у «Проверки целей» есть свой прокси прогона
+    # (GOALS_PROXY, ставит goals_check из блока «Доступ к сайту»). Форм-движок
+    # читает FORMS_PROXY, а не GOALS_PROXY - поэтому для проектов, где формам
+    # нужен прокси (ИМП режет дата-центр), пробрасываем его подпроцессу. Иначе
+    # заказ-сценарий 403-ится, не доходит до /cart/ и корзинные url-цели красные.
+    _env = os.environ.copy()
+    _gp = (os.environ.get('GOALS_PROXY') or '').strip()
+    if _gp and not _env.get('FORMS_PROXY') and _forms_uses_proxy(base):
+        _env['FORMS_PROXY'] = _gp
+        _stamp(f'ФОРМЫ: прокси прогона проброшен форм-движку ({_gp.split("@")[-1]})')
     try:
         proc = subprocess.Popen(args, cwd=str(ROOT), stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                env=_env)
         for line in proc.stdout:            # стримим в общий лог И ловим цели/URL
             print(line, end='', flush=True)
             for m in _pat1.finditer(line):
