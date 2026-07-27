@@ -8608,21 +8608,28 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         # Заполнение поля по ВИДИМОЙ подписи (label) - для форм, где
                         # имена полей рисуются в JS (bx-soa): get_by_label, затем
                         # запасной вариант по placeholder. Не падаем, если поля нет.
+                        # Дополнительно принимаем прямой «css» (поле без label/placeholder,
+                        # напр. купон basket-coupon-input).
                         метка = str(step.get("метка") or step.get("label") or "").strip()
+                        _css_f = str(step.get("css") or "").strip()
                         _tok = step.get("значение") or step.get("value") or ""
                         _val = _resolve_form_field_token(
                             _tok, имя_теста="", телефон=телефон_отправки,
                             почта=ПОЧТА, имя=ИМЯ, комментарий=КОММЕНТАРИЙ, город=ГОРОД,
                         )
-                        if not метка or not str(_val).strip():
-                            print(f"   ⚠️ Шаг {i + 1}: «заполнить_по_метке» без метки/значения - пропуск.")
+                        if (not метка and not _css_f) or not str(_val).strip():
+                            print(f"   ⚠️ Шаг {i + 1}: «заполнить_по_метке» без метки/css/значения - пропуск.")
                             continue
                         _filled = False
                         _esc = метка.replace('"', '\\"')
-                        for _getter in (
-                            lambda: page.get_by_label(метка, exact=False),
-                            lambda: page.locator(f'input[placeholder*="{_esc}"], textarea[placeholder*="{_esc}"]'),
-                        ):
+                        _getters = []
+                        if _css_f:
+                            _getters.append(lambda: page.locator(_css_f))
+                        if метка:
+                            _getters.append(lambda: page.get_by_label(метка, exact=False))
+                            _getters.append(lambda: page.locator(
+                                f'input[placeholder*="{_esc}"], textarea[placeholder*="{_esc}"]'))
+                        for _getter in _getters:
                             try:
                                 _loc = _getter().first
                                 _loc.wait_for(state="visible", timeout=7000)
@@ -8632,8 +8639,9 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 break
                             except Exception:  # noqa: BLE001
                                 continue
+                        _откуда = f"по css {_css_f}" if _css_f else f"по метке «{метка}»"
                         print(
-                            f"   ✏️ Шаг {i + 1}: поле по метке «{метка}» - "
+                            f"   ✏️ Шаг {i + 1}: поле {_откуда} - "
                             f"{'заполнено' if _filled else 'НЕ найдено'}"
                         )
 
