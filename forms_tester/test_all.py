@@ -6479,16 +6479,45 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
 
             form = loc.nth(idx)
             # Несколько форм с одним классом (напр. find-form встречается 3 раза):
-            # скрытые дубли можно «отправить», но цель на них не срабатывает. Если
-            # индекс явно не задан - берём первую ВИДИМУЮ форму.
+            # скрытые/перекрытые дубли можно «заполнить», но отправка на них не
+            # срабатывает (submit не регистрируется) → форма шла в «НЕТ
+            # ПОДТВЕРЖДЕНИЯ». Если индекс явно не задан - берём форму, у которой
+            # кнопка отправки РЕАЛЬНО кликабельна (её центр не перекрыт другим
+            # элементом), а не просто «первую видимую».
             if idx == 0 and n_match > 1 and "индекс" not in форма_config:
+                def _кнопка_кликабельна(_frm) -> bool:
+                    try:
+                        _b = _frm.locator(
+                            "button[type='submit'], input[type='submit'], button.btn, button"
+                        ).first
+                        if not _b.count():
+                            return False
+                        return bool(_b.evaluate(
+                            "b => { const r=b.getBoundingClientRect();"
+                            " if (r.width<=0||r.height<=0) return false;"
+                            " const x=r.left+r.width/2, y=r.top+r.height/2;"
+                            " const el=document.elementFromPoint(x,y);"
+                            " return !!(el && (el===b || b.contains(el) || el.contains(b))); }"))
+                    except Exception:  # noqa: BLE001
+                        return False
+                _выбрана = None
+                _первая_видимая = None
                 for _k in range(n_match):
                     try:
-                        if loc.nth(_k).is_visible():
-                            form = loc.nth(_k)
+                        _cf = loc.nth(_k)
+                        if not _cf.is_visible():
+                            continue
+                        if _первая_видимая is None:
+                            _первая_видимая = _cf
+                        if _кнопка_кликабельна(_cf):
+                            _выбрана = _cf
                             break
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         continue
+                form = _выбрана or _первая_видимая or form
+                if _выбрана is not None and n_match > 1:
+                    print("      Из нескольких форм выбрана та, где кнопка отправки "
+                          "реально кликабельна (не перекрыта)")
             form.wait_for(state="visible", timeout=8000)
             try:
                 _root_tag = form.evaluate("el => el.tagName.toLowerCase()")
@@ -7831,19 +7860,33 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         закрыть_попап_региона(page)
                     except Exception:  # noqa: BLE001
                         pass
+                    _f = None
                     if use_text:
                         _loc = page.locator("form").filter(
                             has_text=str(форма_config.get("text") or "").strip())
+                        for _k in range(min(_loc.count(), 6)):
+                            try:
+                                if _loc.nth(_k).is_visible():
+                                    _f = _loc.nth(_k)
+                                    break
+                            except Exception:  # noqa: BLE001
+                                continue
                     else:
-                        _loc = page.locator(sel)
-                    _f = None
-                    for _k in range(min(_loc.count(), 6)):
-                        try:
-                            if _loc.nth(_k).is_visible():
-                                _f = _loc.nth(_k)
+                        # ВАЖНО: те же fallback-селекторы, что и при первом поиске
+                        # (напр. 'form#txt-back' → 'div#txt-back'). Раньше искали по
+                        # СЫРОМУ sel → на подобранных селекторах форма «не находилась»
+                        # и переоткрытие падало (серверная валидация/XSS «Проверить»).
+                        for _cand in _expand_form_selector_fallbacks(sel):
+                            _loc = page.locator(_cand)
+                            for _k in range(min(_loc.count(), 6)):
+                                try:
+                                    if _loc.nth(_k).is_visible():
+                                        _f = _loc.nth(_k)
+                                        break
+                                except Exception:  # noqa: BLE001
+                                    continue
+                            if _f is not None:
                                 break
-                        except Exception:  # noqa: BLE001
-                            continue
                     if _f is None:
                         print(f"      ↳ переоткрытие: после перезагрузки форма "
                               f"{sel!r} не найдена видимой (попап региона перекрыл / "
