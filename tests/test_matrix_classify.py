@@ -429,9 +429,8 @@ def test_запись_чтение_детали_роундтрип(tmp_path):
         t.MATRIX_DETAILS_FILE = old
 
 
-def test_матрица_двойная_отправка_под_вопросом_галочка(tmp_path):
-    # По требованию (минимум ⚠): «под вопросом» = не смогли доказать двойную
-    # отправку → ✓, не жёлтый.
+def test_матрица_двойная_отправка_под_вопросом_жёлтый(tmp_path):
+    # «под вопросом» = тул не смог посчитать отправки. Врать ✓ нельзя - честное ⚠.
     from openpyxl import load_workbook
     old = t.MATRIX_DETAILS_FILE
     t.MATRIX_DETAILS_FILE = str(tmp_path / "matrix_details.json")
@@ -441,7 +440,7 @@ def test_матрица_двойная_отправка_под_вопросом_
         t.построить_матрицу_проверок(str(path))
         ws = load_workbook(str(path))["Москва"]
         assert str([ws.cell(i, 2).value for i in range(2, ws.max_row + 1)
-                    if str(ws.cell(i, 1).value) == "Двойная отправка"][0]) == "✓"
+                    if str(ws.cell(i, 1).value) == "Двойная отправка"][0]) == "⚠"
     finally:
         t.MATRIX_DETAILS_FILE = old
 
