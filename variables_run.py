@@ -774,8 +774,12 @@ def main() -> int:
                 _phones = list(_br.get('phones') or [])
                 if _pk.get('phone') and _pk['phone'] not in _phones:
                     _phones.append(_pk['phone'])
+                _emails = list(_br.get('emails') or [])
+                _pe = (_pk.get('email') or '').lower()
+                if _pe and _pe not in _emails:
+                    _emails.append(_pe)
                 _data = {'phones': _phones,
-                         'email': _br.get('email') or _pk.get('email', ''),
+                         'emails': _emails,
                          'whatsapp': _site_msgr,
                          'telegram': _site_msgr,          # у МПК TG = номер WhatsApp
                          'address': _br.get('address', '')}

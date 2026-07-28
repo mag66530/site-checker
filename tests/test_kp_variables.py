@@ -886,6 +886,7 @@ def test_per_city_picker_synthetic_check():
                 '<h4>Филиалы в России</h4><p>вводный текст</p>')
     br = kp.parse_city_branches(contacts)
     assert br['Екатеринбург']['phones'] == ['+73432023883', '+73432026886']
+    assert 'ekb@metpromko.ru' in br['Екатеринбург']['emails']
     assert 'Филиалы в России' not in br
     assert kp.city_aliases('Астана') == ['астана', 'нур-султан', 'нурсултан']
 
@@ -895,7 +896,7 @@ def test_per_city_picker_synthetic_check():
                    address='пр. Космонавтов, 158', whatsapp='+7 (963) 136-87-88',
                    country='Россия')
     d = br['Екатеринбург']
-    syn = kp.build_city_page('Екатеринбург', {'phones': d['phones'], 'email': d['email'],
+    syn = kp.build_city_page('Екатеринбург', {'phones': d['phones'], 'emails': d['emails'],
                              'whatsapp': d['whatsapp'], 'telegram': d['whatsapp'],
                              'address': d['address']})
     by = {f['field']: f for f in kp.check_variables(syn, 'metpromko.ru', row=row)['fields']}

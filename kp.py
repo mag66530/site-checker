@@ -614,7 +614,10 @@ def parse_city_branches(html: str) -> dict:
             addr = re.sub(r'\s+', ' ', a).strip(' ,;')
         phones = re.findall(r'href="tel:([^"]+)"', block)
         wa = re.findall(r'(?:wa\.me/|whatsapp[^"]*?phone=)(\+?\d[\d\-()\s]{7,})', block, re.I)
-        emails = re.findall(r'mailto:([^"?<>]+)', block)
+        # ВСЕ почты блока - и из mailto, и из ВИДИМОГО текста. У части городов на
+        # сайте ссылка битая: mailto:ufa@… , а показан kazan@… (Казань). Берём обе,
+        # сверка засчитает совпадение по ЛЮБОЙ - как и у 2 телефонов города.
+        emails = re.findall(r'[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}', block, re.I)
         has_addr = bool(addr and re.search(r'\d', addr)
                         and (re.search(r'\bг\.', addr) or _RE_ADDR_STREET.search(addr)))
         if not has_addr and not phones and not emails:
@@ -624,7 +627,7 @@ def parse_city_branches(html: str) -> dict:
         out[city] = {
             'address': addr if has_addr else '',
             'phones': list(dict.fromkeys(phones)),
-            'email': emails[0].strip() if emails else '',
+            'emails': list(dict.fromkeys(e.lower() for e in emails)),
             'whatsapp': wa[0].strip() if wa else '',
         }
     return out
@@ -646,9 +649,10 @@ def build_city_page(city: str, data: Optional[dict]) -> str:
         ph = (ph or '').strip()
         if ph:
             parts.append(f'<a href="tel:{ph}">{ph}</a>')
-    em = (d.get('email') or '').strip()
-    if em:
-        parts.append(f'<a href="mailto:{em}">{em}</a>')
+    for em in (d.get('emails') or []):
+        em = (em or '').strip()
+        if em:
+            parts.append(f'<a href="mailto:{em}">{em}</a>')
     wa = re.sub(r'\D', '', d.get('whatsapp') or '')
     if wa:
         parts.append(f'<a href="https://wa.me/{wa}">Чат в WhatsApp</a>')
