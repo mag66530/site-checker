@@ -968,7 +968,21 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
         if p and p not in _site_ph_ordered:
             _site_ph_ordered.append(p)
     site_phones = set(_site_ph_ordered)
-    site_ph_primary = fmt(_site_ph_ordered[0]) if _site_ph_ordered else "–"
+    # ДОСТОВЕРНО отображаемые («кликабельные») номера сайта - из ссылок tel:.
+    # Случайный/временный номер, попавший в ТЕКСТ шапки/подвала (виджет обратного
+    # звонка, тех. строка, разовая ручная правка), в tel: обычно НЕ оформлен. Мы
+    # ищем «новый номер, которого нет в КП» именно среди tel:, а не среди любого
+    # текста - иначе выходил ФАНТОМНЫЙ ✗ по номеру, которого на странице уже нет
+    # (жалоба заказчика: «в КП не совпадает SEO», а номер найти нельзя). Если
+    # tel:-ссылок нет (часть сайтов номер ссылкой не оформляет) - откатываемся на
+    # общий разбор текста, чтобы не потерять номер вовсе.
+    _tel_ordered = []
+    for _m in re.finditer(r'href=["\']tel:([^"\']+)["\']', html or "", re.I):
+        _p = normalize_phone(_m.group(1))
+        if _p and _p not in _tel_ordered:
+            _tel_ordered.append(_p)
+    _display_ordered = _tel_ordered or _site_ph_ordered
+    site_ph_primary = fmt(_display_ordered[0]) if _display_ordered else "–"
     site_ph_any = site_ph_primary
 
     # Три АКТИВНЫХ номера города - ТЕКУЩИЕ Общий/Реклама/SEO из КП (первый номер
@@ -1047,7 +1061,9 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                 #   • на сайте НОВЫЙ номер, которого в КП города нет вообще → ✗;
                 #   • на сайте только известные номера города (общий) → «–»;
                 #   • на сайте номера нет → «–».
-                _new = [p for p in _site_ph_ordered if p not in kp_phones]
+                # «Новый» номер ищем среди ДОСТОВЕРНО отображаемых (tel:), а не
+                # любого текста - чтобы случайный/временный номер не давал ✗.
+                _new = [p for p in _display_ordered if p not in kp_phones]
                 if _new:
                     add(label, "–", fmt(_new[0]), "bug",
                         "телефон на сайте не совпадает с КП")
@@ -1156,6 +1172,15 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                  or (_fb if re.search(r'[а-яёa-z]{3,}', _fb, re.I) else ""))
     _site_shown = _site_full or _site_raw
 
+    # Сверяем адрес КП именно со ЗНАЧЕНИЕМ ПОЛЯ «Адрес:» сайта (_site_shown), а НЕ
+    # по всему тексту страницы. Иначе короткий адрес-«только город» ложно совпадал
+    # с названием города в заголовке/меню («…в Гомеле», попап выбора города) - то
+    # есть тянулся из других мест. По всей странице (haystack) сверяем ТОЛЬКО как
+    # запасной вариант, когда поле «Адрес:» на сайте не распозналось (часть сайтов
+    # выводит адрес без метки) - чтобы у них не выходило ложное «не совпадает».
+    _addr_ok = (address_match(_site_shown, row.address) if _site_shown
+                else address_match(haystack, row.address))
+
     if not _addr_kp_valid:
         _kp_addr_show = (row.address if row.address
                          and str(row.address).strip() not in ("–", "-") else "–")
@@ -1176,9 +1201,11 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                 "адрес на сайте неполный - нет улицы или дома")
         else:
             add("Адрес", "–", "–", "na", "нет ни в КП, ни на сайте")
-    elif address_match(haystack, row.address):
+    elif _addr_ok:
+        # «На сайте» показываем ИМЕННО поле «Адрес:» сайта (что реально стоит в
+        # графе адреса - с ним и сверялись), иначе - чистый фрагмент/факт.
         add("Адрес", row.address,
-            _addr_on_page(haystack, row.address) or _found_addr()
+            _site_shown or _addr_on_page(haystack, row.address) or _found_addr()
             or "совпадает с КП", "ok", "совпадает с КП")
     else:
         # Адрес из КП не совпал. Показываем, ЧТО реально на сайте - полный адрес,
