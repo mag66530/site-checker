@@ -782,7 +782,7 @@ def test_site_address_raw_nepolny():
     Мусор (попап города) и пустое поле - ''."""
     html = ('<main><p>Адрес: , г. Гродно, Телефон офиса продаж 375 (29) 643-66-60 '
             'Email: grodno@mepen.by</p></main>')
-    assert kp._site_address_raw(html) == "г. Гродно"
+    assert kp._site_address_raw(html) == ", г. Гродно,"
     assert kp._site_address_full(html) == ""          # неполный - строгий отвергает
     # попап выбора города - не адрес
     assert kp._site_address_raw('<main>Адрес: Ваш город? Всё верно Выбрать город</main>') == ""
@@ -805,7 +805,7 @@ def test_incomplete_site_address_is_flagged_not_hidden():
     r = kp.check_variables(main, 'grodno.mepen.by', contacts_html=contacts, row=row)
     af = next(f for f in r['fields'] if f['field'] == 'Адрес')
     assert af['status'] == 'bug', af                  # НЕ na, НЕ «–»
-    assert af['found'] == 'г. Гродно', af             # показываем что на сайте
+    assert af['found'] == ', г. Гродно,', af           # показываем РОВНО как на сайте (с запятыми)
     assert 'неполн' in af['note'], af                 # «адрес на сайте неполный…»
 
     # КП адрес ЕСТЬ, а на сайте только «г. Гродно» - тоже показываем город, не «–»
@@ -813,7 +813,7 @@ def test_incomplete_site_address_is_flagged_not_hidden():
                     address='улица Ленина, 5', country='Беларусь')
     r2 = kp.check_variables(main, 'grodno.mepen.by', contacts_html=contacts, row=row2)
     af2 = next(f for f in r2['fields'] if f['field'] == 'Адрес')
-    assert af2['status'] == 'bug' and af2['found'] == 'г. Гродно', af2
+    assert af2['status'] == 'bug' and af2['found'] == ', г. Гродно,', af2
 
     # А вот если поля адреса на сайте нет вовсе И в КП пусто - тогда «–» (na)
     row3 = kp.KPRow(domain='x.by', city='Тест', address='', country='Беларусь')
