@@ -633,35 +633,45 @@ def parse_city_branches(html: str) -> dict:
     return out
 
 
-def _mpk_three_way(kp_norms, header_norms, contacts_norms, fmt):
+def _mpk_field(kp_norms, kp_raw, header_norms, contacts_norms, fmt):
     """Трёхточечная сверка одного поля МПК: КП vs ШАПКА (данные пикера города) vs
-    КОНТАКТЫ (блок филиала на /contacts). Возвращает (status, found, note).
+    КОНТАКТЫ (блок филиала на /contacts). Возвращает (status, expected, found, note).
     Правило заказчика по МЕСТУ расхождения:
       • совпало и в шапке, и в контактах (или источник отсутствует) → ✓;
       • не совпало в ШАПКЕ (в контактах ок) → ✗ «в шапке сайта…»;
       • не совпало в КОНТАКТАХ (в шапке ок) → ✗ «на сайте…» (стата = «сайт»);
       • не совпало И там, и там → ✗ «на сайте…».
-    Если в КП значения нет: на сайте есть → ✗ (заказчик просил не прятать), иначе –."""
+    Значение КП (expected) показываем КАК ЕСТЬ: валидное - в читаемом виде, мусор
+    («2») - как в ячейке (заказчик: любое значение в ячейке сравниваем и
+    показываем; «–» ТОЛЬКО когда в ячейке совсем пусто). Мусор в КП с сайтом не
+    совпадает → ✗."""
     kp = {x for x in kp_norms if x}
     hv = [x for x in header_norms if x]
     cv = [x for x in contacts_norms if x]
+    raw = (kp_raw or '').strip()
+    raw_meaningful = bool(raw) and raw not in ('–', '-')
     if not kp:
         site = list(dict.fromkeys(cv or hv))
+        site_disp = ", ".join(fmt(x) for x in site) if site else "–"
+        if raw_meaningful:
+            # В КП мусор («2») - показываем его, с сайтом он не совпадает → ✗.
+            return "bug", raw, site_disp, "на сайте не совпадает с КП"
         if site:
-            return "bug", ", ".join(fmt(x) for x in site), "на сайте есть, а в КП нет"
-        return "na", "–", "нет ни в КП, ни на сайте"
+            return "bug", "–", site_disp, "на сайте есть, а в КП нет"
+        return "na", "–", "–", "нет ни в КП, ни на сайте"
+    exp = fmt(sorted(kp)[0])
     h_present, c_present = bool(hv), bool(cv)
     h_match, c_match = bool(kp & set(hv)), bool(kp & set(cv))
     if (not h_present or h_match) and (not c_present or c_match):
         both = (set(hv) | set(cv)) & kp
-        return "ok", fmt(sorted(both)[0] if both else sorted(kp)[0]), "совпадает с КП"
+        return "ok", exp, fmt(sorted(both)[0] if both else sorted(kp)[0]), "совпадает с КП"
     h_disp = ", ".join(fmt(x) for x in dict.fromkeys(hv)) if hv else "–"
     c_disp = ", ".join(fmt(x) for x in dict.fromkeys(cv)) if cv else "–"
     if h_present and not h_match and (not c_present or c_match):
-        return "bug", h_disp, "в шапке сайта не совпадает с КП"
+        return "bug", exp, h_disp, "в шапке сайта не совпадает с КП"
     if c_present and not c_match and (not h_present or h_match):
-        return "bug", c_disp, "на сайте не совпадает с КП"
-    return "bug", (c_disp if c_present else h_disp), "на сайте не совпадает с КП"
+        return "bug", exp, c_disp, "на сайте не совпадает с КП"
+    return "bug", exp, (c_disp if c_present else h_disp), "на сайте не совпадает с КП"
 
 
 def check_variables_mpk(row: 'KPRow', header: dict, branch: dict) -> dict:
@@ -669,8 +679,9 @@ def check_variables_mpk(row: 'KPRow', header: dict, branch: dict) -> dict:
     (header = данные пикера выбора города: phone/email/whatsapp) ↔ КОНТАКТЫ
     (branch = блок филиала на /contacts: phones/emails/whatsapp/address).
     Возвращает {'fields': [...]} как check_variables, БЕЗ «Город» (его ставит
-    variables_run). У МПК нет SEO/рекламных номеров - эти слоты «–». Telegram и
-    WhatsApp - один номер; Telegram сверяем с колонкой WhatsApp КП (в шапке t.me)."""
+    variables_run). У МПК одна колонка «Телефон» (нет SEO/рекламных). Telegram и
+    WhatsApp - один номер; Telegram сверяем с колонкой WhatsApp КП (в шапке t.me).
+    Значения КП показываем как есть - мусор («2») не прячем за «–»."""
     header = header or {}
     branch = branch or {}
     dial = _dial_for(row)
@@ -681,33 +692,33 @@ def check_variables_mpk(row: 'KPRow', header: dict, branch: dict) -> dict:
         fields.append({"field": field, "expected": expected or "–",
                        "found": found or "–", "status": status, "note": note})
 
-    # ── Телефон (Общий) ──
+    # ── Телефон ──
     kp_ph = list(dict.fromkeys(phones_in_cell(row.phone_common)))
     h_ph = [normalize_phone(header.get('phone'))]
     c_ph = [normalize_phone(p) for p in (branch.get('phones') or [])]
-    st, fnd, note = _mpk_three_way(kp_ph, h_ph, c_ph, fmt)
-    add("Тел. Общий Город", fmt(kp_ph[0]) if kp_ph else "–", fnd, st, note)
-    add("Тел. Реклама Город", "–", "–", "na", "у МПК рекламных номеров нет")
-    add("Тел. SEO Город", "–", "–", "na", "у МПК SEO-номеров нет")
+    st, exp, fnd, note = _mpk_field(kp_ph, row.phone_common, h_ph, c_ph, fmt)
+    add("Телефон", exp, fnd, st, note)
 
     # ── Почта ──
     _em = (row.email or '').strip().lower()
     kp_em = [_em] if re.match(r'[^@\s]+@[^@\s]+\.[^@\s]+$', _em) else []
     h_em = [(header.get('email') or '').strip().lower()]
     c_em = [e.strip().lower() for e in (branch.get('emails') or [])]
-    st, fnd, note = _mpk_three_way(kp_em, h_em, c_em, lambda x: x)
-    add("Почта", (_em or "–"), fnd, st, note.replace("совпадает", "почта совпадает")
-        if st == "ok" else note)
+    st, exp, fnd, note = _mpk_field(kp_em, row.email, h_em, c_em, lambda x: x)
+    add("Почта", exp, fnd, st, note)
 
-    # ── Адрес (только КОНТАКТЫ - в шапке адреса нет) ──
+    # ── Адрес (только КОНТАКТЫ - в шапке адреса нет; значение КП показываем как есть) ──
     kp_addr = (row.address or '').strip()
     kp_addr_valid = bool(kp_addr) and bool(re.search(r'[а-яё]', _norm_addr(kp_addr)))
     c_addr = (branch.get('address') or '').strip()
+    kp_addr_disp = kp_addr if (kp_addr and kp_addr not in ('–', '-')) else '–'
     if not kp_addr_valid:
-        if c_addr:
-            add("Адрес", kp_addr or "–", c_addr, "bug", "адрес на сайте не совпадает с КП")
+        if c_addr and kp_addr_disp != '–':
+            add("Адрес", kp_addr_disp, c_addr, "bug", "на сайте не совпадает с КП")
+        elif c_addr:
+            add("Адрес", "–", c_addr, "bug", "на сайте есть, а в КП нет")
         else:
-            add("Адрес", "–", "–", "na", "нет ни в КП, ни на сайте")
+            add("Адрес", kp_addr_disp, "–", "na", "нет ни в КП, ни на сайте")
     elif c_addr and address_match(c_addr, kp_addr):
         add("Адрес", kp_addr, c_addr, "ok", "совпадает с КП")
     elif c_addr:
@@ -717,18 +728,15 @@ def check_variables_mpk(row: 'KPRow', header: dict, branch: dict) -> dict:
 
     # ── Telegram (у МПК = номер WhatsApp; в шапке t.me/+номер, в контактах нет) ──
     kp_msgr = normalize_phone(row.whatsapp)
-    if not kp_msgr:
-        add("Telegram", "–", "–", "na", "номера мессенджера в КП нет")
-    else:
-        h_tg = [normalize_phone(header.get('whatsapp'))]   # phone2 = и WhatsApp, и Telegram
-        st, fnd, note = _mpk_three_way([kp_msgr], h_tg, [], fmt)
-        add("Telegram", fmt(kp_msgr), fnd, st, note)
+    h_tg = [normalize_phone(header.get('whatsapp'))]      # phone2 = и WhatsApp, и Telegram
+    st, exp, fnd, note = _mpk_field([kp_msgr] if kp_msgr else [], row.whatsapp, h_tg, [], fmt)
+    add("Telegram", exp, fnd, st, note)
 
     # ── WhatsApp (шапка = phone2, контакты = WhatsApp блока филиала) ──
     h_wa = [normalize_phone(header.get('whatsapp'))]
     c_wa = [normalize_phone(branch.get('whatsapp'))]
-    st, fnd, note = _mpk_three_way([kp_msgr] if kp_msgr else [], h_wa, c_wa, fmt)
-    add("WhatsApp", fmt(kp_msgr) if kp_msgr else "–", fnd, st, note)
+    st, exp, fnd, note = _mpk_field([kp_msgr] if kp_msgr else [], row.whatsapp, h_wa, c_wa, fmt)
+    add("WhatsApp", exp, fnd, st, note)
 
     return {"domain": _norm_host(row.domain), "city": row.city,
             "country": row.country, "matched": True, "fields": fields}

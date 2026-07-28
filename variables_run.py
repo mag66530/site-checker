@@ -849,7 +849,7 @@ def main() -> int:
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
     xlsx = work / 'variables.xlsx'
-    _записать_xlsx(xlsx, PROJECT_NAMES[a.project], результаты)
+    _записать_xlsx(xlsx, PROJECT_NAMES[a.project], результаты, per_city=_per_city_mode)
     _stamp(f'Отчёт сохранён: {xlsx}')
     # Telegram: отчёт КП получателям проекта (креды - в окружении, их проставляет
     # страница из секретов). Подпись унифицирована с формами и целями. Без
@@ -908,7 +908,8 @@ def _написать_легенду(ws) -> None:
         cell.alignment = Alignment(wrap_text=True, vertical="top")
 
 
-def _записать_xlsx(path: Path, proj_name: str, результаты: list) -> None:
+def _записать_xlsx(path: Path, proj_name: str, результаты: list,
+                   per_city: bool = False) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
 
@@ -926,15 +927,24 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
     # Колонки отчёта: (заголовок, ключ поля из check_variables). «Тел.» в подписи
     # телефонов не пишем - над ними стоит групповой заголовок «Телефония/Почта».
     _ID = ["Страна(КП)", "Город(КП)"]
-    _VARS = [("Город", "Город"), ("Адрес", "Адрес"),
-             ("Общий Город", "Тел. Общий Город"),
-             ("Реклама Город", "Тел. Реклама Город"),
-             ("SEO Город", "Тел. SEO Город"),
-             ("Почта", "Почта"),
-             ("Telegram", "Telegram"), ("WhatsApp", "WhatsApp")]
-    n_cols = len(_ID) + len(_VARS)                       # 10
-    _GROUPS = [("Телефония/Почта", 5, 8), ("Мессенджеры", 9, 10)]
-    _SEP_AFTER = {4, 8}   # вертикальный разделитель после «Адрес» и после «Почта»
+    if per_city:
+        # МПК: один сайт на все города, SEO/рекламных номеров нет - одна колонка
+        # «Телефон» (просьба заказчика: без «Реклама Город»/«SEO Город»).
+        _VARS = [("Город", "Город"), ("Адрес", "Адрес"),
+                 ("Телефон", "Телефон"), ("Почта", "Почта"),
+                 ("Telegram", "Telegram"), ("WhatsApp", "WhatsApp")]
+        _GROUPS = [("Телефония/Почта", 5, 6), ("Мессенджеры", 7, 8)]
+        _SEP_AFTER = {4, 6}
+    else:
+        _VARS = [("Город", "Город"), ("Адрес", "Адрес"),
+                 ("Общий Город", "Тел. Общий Город"),
+                 ("Реклама Город", "Тел. Реклама Город"),
+                 ("SEO Город", "Тел. SEO Город"),
+                 ("Почта", "Почта"),
+                 ("Telegram", "Telegram"), ("WhatsApp", "WhatsApp")]
+        _GROUPS = [("Телефония/Почта", 5, 8), ("Мессенджеры", 9, 10)]
+        _SEP_AFTER = {4, 8}   # разделитель после «Адрес» и после «Почта»
+    n_cols = len(_ID) + len(_VARS)
 
     def _bdr(col, bottom=False):
         return Border(right=_thin if col in _SEP_AFTER else None,

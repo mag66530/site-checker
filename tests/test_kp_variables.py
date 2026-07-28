@@ -890,11 +890,10 @@ def test_mpk_three_way_check():
                    address='пр. Космонавтов, 158', whatsapp='+7 (963) 136-87-88', country='Россия')
     header = {'phone': '+7 (343) 202 38 83', 'email': 'ekb@metpromko.ru', 'whatsapp': '+7 (963) 136-87-88'}
     by = {f['field']: f for f in kp.check_variables_mpk(row, header, br['Екатеринбург'])['fields']}
-    assert by['Тел. Общий Город']['status'] == 'ok', by['Тел. Общий Город']
+    assert by['Телефон']['status'] == 'ok', by['Телефон']
     assert by['Почта']['status'] == 'ok'
     assert by['Адрес']['status'] == 'ok'
     assert by['WhatsApp']['status'] == 'ok'
-    assert by['Тел. SEO Город']['status'] == 'na'
 
     # Расхождение в ШАПКЕ: контакты как в КП, а шапка показывает другой номер → ✗
     # «в шапке сайта».
@@ -904,8 +903,8 @@ def test_mpk_three_way_check():
                'emails': ['ufa@metpromko.ru', 'kazan@metpromko.ru'], 'whatsapp': ''}
     header2 = {'phone': '+7 (999) 000 00 00', 'email': 'kazan@metpromko.ru', 'whatsapp': ''}
     by2 = {f['field']: f for f in kp.check_variables_mpk(row2, header2, branch2)['fields']}
-    assert by2['Тел. Общий Город']['status'] == 'bug', by2['Тел. Общий Город']
-    assert 'шапке' in by2['Тел. Общий Город']['note']
+    assert by2['Телефон']['status'] == 'bug', by2['Телефон']
+    assert 'шапке' in by2['Телефон']['note']
     # Почта: видимая kazan@ (в контактах) == КП, шапка kazan@ → ✓ (битый mailto ufa@ не мешает)
     assert by2['Почта']['status'] == 'ok', by2['Почта']
 
@@ -914,5 +913,29 @@ def test_mpk_three_way_check():
     branch3 = dict(branch2, phones=['+79990000000'])
     header3 = {'phone': '+7 (843) 216 62 83', 'email': 'kazan@metpromko.ru', 'whatsapp': ''}
     by3 = {f['field']: f for f in kp.check_variables_mpk(row2, header3, branch3)['fields']}
-    assert by3['Тел. Общий Город']['status'] == 'bug'
-    assert 'на сайте' in by3['Тел. Общий Город']['note']
+    assert by3['Телефон']['status'] == 'bug'
+    assert 'на сайте' in by3['Телефон']['note']
+
+
+def test_mpk_garbage_kp_value_shown_not_dash():
+    """МПК: если в ячейке КП мусор («2»), показываем его в колонке КП и ставим ✗
+    (не прячем за «–»). «–» только когда в ячейке совсем пусто."""
+    row = kp.KPRow(domain='metpromko.ru', city='Тест', phone_common='2',
+                   email='2', address='2', whatsapp='2', country='Россия')
+    branch = {'address': 'г. Тест, ул. Ленина, 5', 'phones': ['+74951112233'],
+              'emails': ['test@metpromko.ru'], 'whatsapp': '+79001112233'}
+    header = {'phone': '+7 (495) 111-22-33', 'email': 'test@metpromko.ru',
+              'whatsapp': '+7 (900) 111-22-33'}
+    by = {f['field']: f for f in kp.check_variables_mpk(row, header, branch)['fields']}
+    # мусор «2» показан в КП, статус ✗
+    assert by['Телефон']['status'] == 'bug' and by['Телефон']['expected'] == '2', by['Телефон']
+    assert by['Почта']['status'] == 'bug' and by['Почта']['expected'] == '2', by['Почта']
+    assert by['Адрес']['expected'] == '2', by['Адрес']
+    # нет колонок Реклама/SEO
+    assert 'Тел. Реклама Город' not in by and 'Тел. SEO Город' not in by
+
+    # Пусто в КП + на сайте есть → «–» в КП (не мусор), ✗ «на сайте есть, а в КП нет»
+    row2 = kp.KPRow(domain='metpromko.ru', city='Тест2', phone_common='',
+                    email='', address='', whatsapp='', country='Россия')
+    by2 = {f['field']: f for f in kp.check_variables_mpk(row2, header, branch)['fields']}
+    assert by2['Телефон']['expected'] == '–' and by2['Телефон']['status'] == 'bug'
