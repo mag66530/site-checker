@@ -8154,6 +8154,16 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         pass
                     _f = _apply_container_expand(_f, форма_config)
                     _f.evaluate(_JS_RATELIMIT_RESTORE, _снимок_валидных)
+                    # ВАЖНО: на переоткрытой (свежей) форме галочка согласия снята.
+                    # На формах, что РЕАЛЬНО требуют согласие (напр. «Контакты» МПЭ),
+                    # без неё ЛЮБАЯ отправка блокируется - и серверная валидация/XSS/
+                    # лимит давали «проба не отработала» (POST не уходил из-за
+                    # согласия, а не из-за нашей подмены). Ставим согласие, как в
+                    # основной отправке, чтобы пробы били по тамперу, а не по галочке.
+                    try:
+                        _ensure_modal_consent(_f, page)
+                    except Exception:  # noqa: BLE001
+                        pass
                     _bcss = str(форма_config.get("кнопка_css") or "").strip()
                     _s = _f.locator(
                         _bcss or "button[type='submit'], input[type='submit'], button.btn"
