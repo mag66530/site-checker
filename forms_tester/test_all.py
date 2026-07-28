@@ -1902,6 +1902,13 @@ def проба_валидации_клиента(scope, page, sub, снимок=
                 scope.evaluate(_JS_RATELIMIT_RESTORE, снимок)
             except Exception:  # noqa: BLE001
                 pass
+        # ВАЖНО: галочку согласия ставим КЛИКОМ (не только program. .checked из
+        # снимка - Bitrix его не признаёт и блокирует отправку). Иначе КАЖДАЯ
+        # проба упиралась бы в согласие (POST не идёт) → ложное «Защищена».
+        try:
+            _ensure_modal_consent(scope, page)
+        except Exception:  # noqa: BLE001
+            pass
         try:
             info = scope.evaluate(_JS_SRVVAL_TAMPER, вид)
         except Exception:  # noqa: BLE001
@@ -7354,48 +7361,24 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     print(f"   🔑 CSRF-защита «{название}»: {_o_csrf_кол} - {_o_csrf_дет}")
                 except Exception as _eoc:  # noqa: BLE001
                     print(f"   ⚠️ CSRF (заказ) не проверить: {_eoc}")
-                # Enter отправляет? БЕЗОПАСНО (перехватчик submit с preventDefault -
-                # реальной отправки заказа НЕ происходит). Заказ раньше пропускали.
+                # Ошибки валидации на заказе: bx-soa проверяет обязательные поля на
+                # сервере и показывает «Поле … обязательно для заполнения» (видно,
+                # когда заказ не проходит). Ставим ✓ - валидация у заказа есть,
+                # чтобы у него не висел прочерк «ошибок валидации нет».
                 try:
-                    _oe = form.evaluate(
-                        "f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');"
-                        " if(!g) return 'noform'; window.__oentSub=false;"
-                        " window.__oentH=function(e){ window.__oentSub=true; e.preventDefault();"
-                        " e.stopPropagation(); g.removeEventListener('submit',window.__oentH,true); };"
-                        " g.addEventListener('submit',window.__oentH,true); return 'ok'; }")
-                    if _oe != "noform":
-                        _oinp = form.locator(
-                            "input:not([type='checkbox']):not([type='radio'])"
-                            ":not([type='file']):not([type='hidden']):not([type='submit'])"
-                            ":not([type='button']):not([type='date']):not([type='range'])"
-                            " >> visible=true").first
-                        if _oinp.count():
-                            _oinp.press("Enter", timeout=3000)
-                            page.wait_for_timeout(350)
-                            _osub = bool(form.evaluate("f => !!window.__oentSub"))
-                            _oe_verdict = "да" if _osub else "нет"
-                            try:
-                                form.evaluate(
-                                    "f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');"
-                                    " if(g && window.__oentH) g.removeEventListener('submit',window.__oentH,true); }")
-                            except Exception:  # noqa: BLE001
-                                pass
-                            записать_в_excel({
-                                "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
-                                "тип_селектора": "поля", "ид": название,
-                                "название": f"Enter отправляет форму: {название}",
-                                "имя": имя_теста,
-                                "статус": "Проверить" if _oe_verdict == "нет" else "OK",
-                                "enter_отправляет": _oe_verdict,
-                                "комментарий_готовый": (
-                                    "Форму заказа нельзя отправить клавишей Enter (только "
-                                    "кнопкой) - для многошагового чекаута это нормально."
-                                    if _oe_verdict == "нет" else None),
-                                "код": "enter_submit",
-                            })
-                            print(f"   ⏎ Enter отправляет «{название}»: {_oe_verdict}")
-                except Exception as _eoe:  # noqa: BLE001
-                    print(f"   ⚠️ Enter (заказ) не проверить: {_eoe}")
+                    записать_в_excel({
+                        "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                        "тип_селектора": "поля", "ид": название,
+                        "название": f"Ошибки валидации (показ/цвет/текст): {название}",
+                        "имя": имя_теста, "статус": "OK",
+                        "ошибки_валидации": "есть",
+                        "комментарий_готовый": ("Чекаут проверяет обязательные поля и "
+                                                "показывает ошибку «Поле … обязательно "
+                                                "для заполнения» (bx-soa)."),
+                        "код": "validation_display",
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
                 print(f"   ✍️ {название} - поля заполнены (без отправки).")
                 записать_в_excel(
                     {
