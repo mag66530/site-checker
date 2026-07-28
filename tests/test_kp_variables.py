@@ -873,3 +873,19 @@ def test_address_matched_against_field_not_whole_page():
     af2 = next(f for f in kp.check_variables(bad_html, 'gomel.mepen.by', row=row)['fields']
                if f['field'] == 'Адрес')
     assert af2['status'] == 'bug', af2
+
+
+def test_address_matched_on_contacts_even_if_main_has_other_field():
+    """Адрес сверяем с графой «Адрес:» ОБЕИХ страниц. Если у главной своя графа
+    адреса (напр. общий/головной в подвале), а нужный городской адрес - на
+    «Контактах», совпадение с «Контактами» должно давать ✓ (раньше бралось только
+    поле главной, и адрес с «Контактов» не участвовал → ложный ✗)."""
+    row = kp.KPRow(domain='y.mepen.ru', city='Тест2',
+                   address='улица Токтогула, 125', country='Россия')
+    main = '<footer><p>Адрес: улица Ленина, 5</p></footer>'      # своя графа на главной
+    contacts = '<main><p>Адрес: г. Тест2, улица Токтогула, 125</p></main>'
+    af = next(f for f in kp.check_variables(main, 'y.mepen.ru',
+                                            contacts_html=contacts, row=row)['fields']
+              if f['field'] == 'Адрес')
+    assert af['status'] == 'ok', af
+    assert 'Токтогула' in af['found'], af          # показываем поле, где совпало
