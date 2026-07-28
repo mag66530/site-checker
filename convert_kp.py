@@ -19,6 +19,7 @@ from openpyxl import load_workbook
 
 from kp import KP_LAYOUT, CATALOGS_DIR, _norm_host
 from kp import split_phones as _split_phones
+from kp import phones_in_cell as _phones_in_cell
 
 # Домены, которые НЕ проверяем нигде (по просьбе заказчика) - даже если они есть
 # в КП-таблице. Строку с таким доменом пропускаем при сборке CSV.
@@ -42,6 +43,11 @@ def _phone_columns(headers):
         ht = str(h).lower().replace('\n', ' ').strip()
         if ht == 'город':
             continue
+        # Колонки блока проверки («Контактный телефон/ошибка», «Ватсап/ошибка»…)
+        # содержат «ок»/«ошибка», а не номер - в телефоны их не берём (у МТТ такой
+        # аудит-блок стоит рядом с контактами и раньше давал мусор в all_phones).
+        if 'ошибка' in ht:
+            continue
         if any(k in ht for k in ('город', 'сотов', 'мобильн', 'основн',
                                  'подменн', 'ватсап', 'для ватсап')):
             out.append(i)
@@ -61,11 +67,16 @@ def _find_header_row(ws, max_scan=6):
 
 
 def _col(headers, *keywords, exact=None):
-    """Индекс колонки, чей заголовок содержит все keywords (или равен exact)."""
+    """Индекс колонки, чей заголовок содержит все keywords (или равен exact).
+    Колонки блока проверки («Почта/ошибка», «Адрес/ошибка», …) пропускаем: у МТТ
+    аудит-столбцы соседствуют с контактными и по слову «почта»/«адрес» перебивали
+    настоящую колонку (в почту попадало «ок» вместо e-mail)."""
     for i, h in enumerate(headers):
         if h is None:
             continue
         ht = str(h).lower().replace('\n', ' ').strip()
+        if 'ошибка' in ht:
+            continue
         if exact is not None and ht == exact:
             return i
         if keywords and all(k in ht for k in keywords):
@@ -132,6 +143,10 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     ci_url = (_col(headers, exact='url') or _col(headers, 'url', 'магазин')
               or _col(headers, 'домен') or _col(headers, 'ссылка')
               or _col(headers, 'url'))
+    # Если колонку ссылки по заголовку не нашли (у МПИ она без шапки - пустой
+    # заголовок после «Численность») - берём её по позиции из layout.
+    if ci_url is None and layout.get('url_col') is not None:
+        ci_url = layout['url_col']
     ci_seo = _col(headers, *layout['phone_seo'])
     ci_ad = _col(headers, *layout['phone_ad'])
     ci_common = _col(headers, *layout['phone_common'])
@@ -146,6 +161,11 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     ci_tg = _col(headers, 'telegram') or _col(headers, 'телеграм')
     ci_wa = (_col(headers, 'whatsapp') or _col(headers, 'ватсап')
              or _col(headers, 'вацап') or _col(headers, 'ватсапп'))
+    # Колонка «приоритет ресурса» (у МТТ): строк на город несколько - свой сайт
+    # и маркетплейсы (pulscen/all.biz/…). В проверку КП берём ТОЛЬКО свой сайт -
+    # строки, где приоритет == priority_keep. Для остальных проектов не задано.
+    ci_priority = layout.get('priority_col')
+    priority_keep = layout.get('priority_keep')
 
     def cell(row, idx):
         if idx is None or idx >= len(row):
@@ -187,6 +207,15 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     for row in ws.iter_rows(min_row=hdr_row_idx + 1, values_only=True):
         if not row or not any(row):
             continue
+        # Фильтр по приоритету ресурса (МТТ): оставляем только строки своего сайта
+        # (priority == priority_keep), маркетплейсы/пустой приоритет пропускаем.
+        if ci_priority is not None:
+            try:
+                pv = int(float(cell(row, ci_priority)))
+            except (TypeError, ValueError):
+                pv = None
+            if pv != priority_keep:
+                continue
         city = cell(row, ci_city)
         url = cell(row, ci_url)
         # Домен берём из колонки url (это «своя ссылка» города).
@@ -217,6 +246,18 @@ def convert(project_id: str, xlsx_path: str) -> Path:
         all_norm = []
         for idx in phone_cols:
             for n in _split_phones(cell(row, idx)):
+                if n not in all_norm:
+                    all_norm.append(n)
+        # Назначенные слоты (SEO/Реклама/Общий) - это выверенные телефонные ячейки:
+        # разбираем их мягким phones_in_cell, который понимает «голый» местный номер
+        # без кода страны («(861) 944-63-99»), тогда как строгий split_phones (для
+        # произвольных колонок) его пропускает. Иначе у городов с местным номером
+        # all_phones выходил пустым (и ложно срабатывало предупреждение о «съехавших
+        # колонках»), хотя номер в КП валиден.
+        for idx in (ci_seo, ci_ad, ci_common):
+            if idx is None:
+                continue
+            for n in _phones_in_cell(cell(row, idx)):
                 if n not in all_norm:
                     all_norm.append(n)
         rows_out.append({
@@ -268,7 +309,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
 
 def main():
     if len(sys.argv) != 3:
-        print('Использование: python convert_kp.py <smu|imp|mpe> <путь_к_xlsx>')
+        projects = '|'.join(KP_LAYOUT)
+        print(f'Использование: python convert_kp.py <{projects}> <путь_к_xlsx>')
         sys.exit(1)
     convert(sys.argv[1], sys.argv[2])
 
