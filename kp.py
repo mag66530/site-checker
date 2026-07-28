@@ -1291,7 +1291,9 @@ def load_kp_for_domain(domain: str) -> dict:
     host = _norm_host(domain)
     parts = host.split('.')
     brand = parts[-2] if len(parts) >= 2 else host
-    for proj in ('smu', 'imp', 'mpe', 'avia'):
+    # Все проекты с КП (не хардкод-список - иначе новые проекты, напр. mtt/mpi,
+    # выпадали бы из авто-подбора КП по домену, когда row не передан).
+    for proj in KP_LAYOUT:
         if proj not in _KP_CACHE:
             # refresh=False: не тянем Google по каждому проекту при переборе -
             # нужный проект уже обновлён явным load_kp(project) в начале прогона.
