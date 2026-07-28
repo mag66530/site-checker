@@ -821,3 +821,55 @@ def test_incomplete_site_address_is_flagged_not_hidden():
                             'x.by', row=row3)
     af3 = next(f for f in r3['fields'] if f['field'] == 'Адрес')
     assert af3['status'] == 'na' and af3['found'] == '–', af3
+
+
+def test_transient_text_phone_does_not_flag_empty_slot():
+    """Жалоба заказчика: у Назрани/Новочебоксарска ✗ «SEO не совпадает» по номеру
+    +7 (905) 919-69-02, которого на сайте не найти. Причина - в пустой слот
+    попадал ЛЮБОЙ номер из ТЕКСТА шапки/подвала (виджет/временная правка), даже
+    если он не оформлен ссылкой tel:. Теперь «новый номер» ищем среди tel:, а не
+    любого текста: временный номер из текста слот НЕ краснит, а основной (tel:)
+    из КП - ✓."""
+    row = kp.KPRow(domain='nazran.mepen.ru', city='Назрань',
+                   phone_common='+7 (800) 700-56-38', phone_seo='', phone_ad='',
+                   all_phones='8007005638', email='nazran@mepen.ru',
+                   country='Россия')
+    # tel: = общий (в КП); +7 905 919-69-02 - только в тексте виджета, без tel:
+    html = ('<header><a href="tel:+78007005638">+7 (800) 700-56-38</a>'
+            '<div class="callback">Заказать звонок +7 (905) 919-69-02</div>'
+            '</header>')
+    by = {f['field']: f for f in kp.check_variables(html, 'nazran.mepen.ru', row=row)['fields']}
+    assert by['Тел. Общий Город']['status'] == 'ok'
+    assert by['Тел. SEO Город']['status'] == 'na', by['Тел. SEO Город']
+    assert by['Тел. Реклама Город']['status'] == 'na'
+
+    # Но НАСТОЯЩИЙ новый номер (оформлен ссылкой tel:) - по-прежнему ✗.
+    html2 = '<header><a href="tel:+79059196902">+7 (905) 919-69-02</a></header>'
+    by2 = {f['field']: f for f in kp.check_variables(html2, 'nazran.mepen.ru', row=row)['fields']}
+    assert by2['Тел. SEO Город']['status'] == 'bug'
+    assert '905' in (by2['Тел. SEO Город']['found'] or '')
+
+
+def test_address_matched_against_field_not_whole_page():
+    """Жалоба заказчика: адрес надо сверять СТРОГО с графой «Адрес:» сайта, чтобы
+    из других мест (заголовок «…в Гомеле», попап выбора города) ничего не
+    тянулось. Короткий адрес-«только город» из КП должен совпадать с полем адреса
+    сайта, но НЕ ловиться на названии города в заголовке."""
+    row = kp.KPRow(domain='gomel.mepen.by', city='Гомель',
+                   phone_common='375 (29) 643-66-60', email='gomel@mepen.by',
+                   address=', г. Гомель,', country='Беларусь')
+    # Поле «Адрес:» = «, г. Гомель,» (как на сайте, с лишними запятыми) → ✓.
+    ok_html = ('<title>МетПромЭнерго в Гомеле</title><main>МетПромЭнерго в Гомеле '
+               '<p>Адрес: , г. Гомель,</p>'
+               '<p>Телефон 375 (29) 643-66-60</p></main>')
+    af = next(f for f in kp.check_variables(ok_html, 'gomel.mepen.by', row=row)['fields']
+              if f['field'] == 'Адрес')
+    assert af['status'] == 'ok', af
+
+    # Заголовок содержит «Гомель», но в ПОЛЕ адреса другой адрес → ✗ (не тянем из
+    # заголовка). КП «, г. Гомель,» с полем «улица Ленина, 5» не совпадает.
+    bad_html = ('<title>МетПромЭнерго в Гомеле</title><main>в Гомеле '
+                '<p>Адрес: улица Ленина, 5</p></main>')
+    af2 = next(f for f in kp.check_variables(bad_html, 'gomel.mepen.by', row=row)['fields']
+               if f['field'] == 'Адрес')
+    assert af2['status'] == 'bug', af2
