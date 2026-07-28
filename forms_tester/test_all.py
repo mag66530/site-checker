@@ -467,12 +467,12 @@ def проба_без_согласия(scope, page) -> str:
         return ""
     if sub is None:
         return ""
-    # Перехват submit (preventDefault - без навигации) + гасим POST (без заявки).
+    # Единственный надёжный признак «форма отправилась без галочки» - реально
+    # ушедший POST на сервер (его мы ловим и ГАСИМ через route.abort, поэтому
+    # заявка НЕ создаётся). Событие submit НЕ показатель: у Bitrix-форм оно
+    # срабатывает и БЕЗ согласия, но обработчик тут же показывает «нужно
+    # согласие» и POST не шлёт - это как раз «заблокировано» (согласие обязательно).
     posted = {"n": 0}
-    try:
-        scope.evaluate(_JS_VAL_ARM)
-    except Exception:  # noqa: BLE001
-        pass
 
     def _route(route):
         try:
@@ -492,10 +492,6 @@ def проба_без_согласия(scope, page) -> str:
     try:
         page.route("**/*", _route)
     except Exception:  # noqa: BLE001
-        try:
-            scope.evaluate(_JS_VAL_DISARM)
-        except Exception:  # noqa: BLE001
-            pass
         return ""
     try:
         try:
@@ -508,7 +504,7 @@ def проба_без_согласия(scope, page) -> str:
             except Exception:  # noqa: BLE001
                 pass
         if _clicked:
-            page.wait_for_timeout(1200)
+            page.wait_for_timeout(1500)
     finally:
         try:
             page.unroute("**/*", _route)
@@ -517,20 +513,11 @@ def проба_без_согласия(scope, page) -> str:
                 page.unroute("**/*")
             except Exception:  # noqa: BLE001
                 pass
-    # Пробовал ли клиент отправить (POST или submit-событие, которое мы перехватили).
-    try:
-        _submit_fired = bool(scope.evaluate("f => !!window.__valSub"))
-    except Exception:  # noqa: BLE001
-        _submit_fired = False
-    try:
-        scope.evaluate(_JS_VAL_DISARM)
-    except Exception:  # noqa: BLE001
-        pass
     if not _clicked:
         return ""
-    if posted["n"] > 0 or _submit_fired:
-        return "отправляется"   # клиент дал отправить без галочки → ✗
-    return "заблокировано"      # отправка не пошла - согласие обязательно → ✓
+    if posted["n"] > 0:
+        return "отправляется"   # POST ушёл без галочки → ✗ (можно без согласия)
+    return "заблокировано"      # POST не пошёл - согласие обязательно → ✓
 
 
 def _parse_accept_types(accept: str):
