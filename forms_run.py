@@ -40,47 +40,6 @@ PROJECT_NAMES = {
 }
 
 
-def _acquire_run_lock(work: Path, *, ttl_sec: int = 7200):
-    """Замок одного прогона на проект: не даёт стартовать проверку форм второй раз,
-    пока первая ещё идёт. Без него два одновременных запуска пишут в один
-    log_forms.xlsx (лог перемешивается, отчёт затирается), а на боевые формы уходят
-    ДВОЙНЫЕ тест-заявки. Возвращает путь lock-файла при успехе или None, если прогон
-    уже идёт. Устаревший замок (старше ttl_sec - процесс, видимо, умер) снимаем."""
-    import time as _t
-    lock = work / '.run.lock'
-    try:
-        if lock.exists():
-            try:
-                age = _t.time() - lock.stat().st_mtime
-            except OSError:
-                age = ttl_sec + 1
-            if age < ttl_sec:
-                return None  # свежий замок - другой прогон реально идёт
-            try:
-                lock.unlink()  # устаревший (крашнувшийся) прогон - снимаем
-            except OSError:
-                pass
-        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        try:
-            os.write(fd, f'{os.getpid()} {int(_t.time())}\n'.encode())
-        finally:
-            os.close(fd)
-        return lock
-    except FileExistsError:
-        return None  # кто-то создал замок между проверкой и созданием
-    except OSError:
-        return lock  # ФС не даёт замок - не блокируем работу, просто без защиты
-
-
-def _release_run_lock(lock) -> None:
-    if not lock:
-        return
-    try:
-        Path(lock).unlink()
-    except OSError:
-        pass
-
-
 def _имена_заказов(src_config: Path) -> list[str]:
     """Названия сценариев/форм/шагов из блоков «тип: Оформление*» конфига проекта -
     это и есть сквозной заказ (корзина → оформление). Нужны, чтобы «Проверка целей»
@@ -331,16 +290,6 @@ def main() -> int:
 
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
-
-    # Замок одного прогона: если проверка форм этого проекта уже идёт - НЕ стартуем
-    # второй раз (иначе два процесса перемешают лог и нашлют двойные тест-заявки).
-    _run_lock = _acquire_run_lock(work)
-    if _run_lock is None:
-        _stamp(f'⛔ Проверка форм проекта «{PROJECT_NAMES.get(a.project, a.project)}» '
-               f'уже выполняется - дождитесь её завершения (второй запуск отменён, '
-               f'чтобы не перемешать отчёт и не наслать двойные тест-заявки).')
-        return 3
-
     base_config = src_config.read_text(encoding='utf-8')
 
     # Выбор форм из интерфейса: дописываем в конфиг список ТОЛЬКО_ФОРМЫ (движок
@@ -389,7 +338,6 @@ def main() -> int:
         os.chdir(work)
     except OSError as e:
         _stamp(f'✗ Не удалось перейти в {work}: {e}')
-        _release_run_lock(_run_lock)
         return 2
 
     rc = 0
@@ -649,7 +597,6 @@ def main() -> int:
             except Exception as e:  # noqa: BLE001
                 _stamp(f'⚠ Telegram-отправка не удалась ({e}) - отчёт всё равно готов.')
         _stamp('✅ ВСЁ ГОТОВО')
-    _release_run_lock(_run_lock)
     return rc
 
 
