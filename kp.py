@@ -633,36 +633,105 @@ def parse_city_branches(html: str) -> dict:
     return out
 
 
-def build_city_page(city: str, data: Optional[dict]) -> str:
-    """Синтетическая «страница города» из данных пикера/филиала - чтобы обычная
-    сверка (check_variables + проверка города) работала как для отдельного
-    поддомена. Кладём ИМЯ ГОРОДА (для проверки «город на сайте»), ВСЕ телефоны
-    (tel:), почту (mailto:), WhatsApp (wa.me) и Telegram (t.me - у МПК тот же
-    номер, что WhatsApp) и адрес (метка «Адрес:»). Других городов на странице нет
-    - «чужой город» ложно не сработает.
-    data: {phones:[…], email, whatsapp, telegram, address}."""
-    city = (city or '').strip()
-    d = data or {}
-    parts = [f'<title>МетПромКо в городе {city}</title>',
-             f'<header><div class="city">{city}</div>']
-    for ph in (d.get('phones') or []):
-        ph = (ph or '').strip()
-        if ph:
-            parts.append(f'<a href="tel:{ph}">{ph}</a>')
-    for em in (d.get('emails') or []):
-        em = (em or '').strip()
-        if em:
-            parts.append(f'<a href="mailto:{em}">{em}</a>')
-    wa = re.sub(r'\D', '', d.get('whatsapp') or '')
-    if wa:
-        parts.append(f'<a href="https://wa.me/{wa}">Чат в WhatsApp</a>')
-    tg = re.sub(r'\D', '', d.get('telegram') or '')
-    if tg:
-        parts.append(f'<a href="https://t.me/+{tg}">Telegram</a>')
-    parts.append('</header>')
-    if d.get('address'):
-        parts.append(f'<main><p>Адрес: {d["address"]}</p></main>')
-    return ''.join(parts)
+def _mpk_three_way(kp_norms, header_norms, contacts_norms, fmt):
+    """Трёхточечная сверка одного поля МПК: КП vs ШАПКА (данные пикера города) vs
+    КОНТАКТЫ (блок филиала на /contacts). Возвращает (status, found, note).
+    Правило заказчика по МЕСТУ расхождения:
+      • совпало и в шапке, и в контактах (или источник отсутствует) → ✓;
+      • не совпало в ШАПКЕ (в контактах ок) → ✗ «в шапке сайта…»;
+      • не совпало в КОНТАКТАХ (в шапке ок) → ✗ «на сайте…» (стата = «сайт»);
+      • не совпало И там, и там → ✗ «на сайте…».
+    Если в КП значения нет: на сайте есть → ✗ (заказчик просил не прятать), иначе –."""
+    kp = {x for x in kp_norms if x}
+    hv = [x for x in header_norms if x]
+    cv = [x for x in contacts_norms if x]
+    if not kp:
+        site = list(dict.fromkeys(cv or hv))
+        if site:
+            return "bug", ", ".join(fmt(x) for x in site), "на сайте есть, а в КП нет"
+        return "na", "–", "нет ни в КП, ни на сайте"
+    h_present, c_present = bool(hv), bool(cv)
+    h_match, c_match = bool(kp & set(hv)), bool(kp & set(cv))
+    if (not h_present or h_match) and (not c_present or c_match):
+        both = (set(hv) | set(cv)) & kp
+        return "ok", fmt(sorted(both)[0] if both else sorted(kp)[0]), "совпадает с КП"
+    h_disp = ", ".join(fmt(x) for x in dict.fromkeys(hv)) if hv else "–"
+    c_disp = ", ".join(fmt(x) for x in dict.fromkeys(cv)) if cv else "–"
+    if h_present and not h_match and (not c_present or c_match):
+        return "bug", h_disp, "в шапке сайта не совпадает с КП (в контактах — как в КП)"
+    if c_present and not c_match and (not h_present or h_match):
+        return "bug", c_disp, "на сайте (в контактах) не совпадает с КП"
+    return "bug", (c_disp if c_present else h_disp), "на сайте не совпадает с КП (и в шапке, и в контактах)"
+
+
+def check_variables_mpk(row: 'KPRow', header: dict, branch: dict) -> dict:
+    """Сверка города МПК (один сайт на все города). Трёхточечно: КП ↔ ШАПКА
+    (header = данные пикера выбора города: phone/email/whatsapp) ↔ КОНТАКТЫ
+    (branch = блок филиала на /contacts: phones/emails/whatsapp/address).
+    Возвращает {'fields': [...]} как check_variables, БЕЗ «Город» (его ставит
+    variables_run). У МПК нет SEO/рекламных номеров - эти слоты «–». Telegram и
+    WhatsApp - один номер; Telegram сверяем с колонкой WhatsApp КП (в шапке t.me)."""
+    header = header or {}
+    branch = branch or {}
+    dial = _dial_for(row)
+    fmt = lambda n: _fmt(n, dial)
+    fields = []
+
+    def add(field, expected, found, status, note):
+        fields.append({"field": field, "expected": expected or "–",
+                       "found": found or "–", "status": status, "note": note})
+
+    # ── Телефон (Общий) ──
+    kp_ph = list(dict.fromkeys(phones_in_cell(row.phone_common)))
+    h_ph = [normalize_phone(header.get('phone'))]
+    c_ph = [normalize_phone(p) for p in (branch.get('phones') or [])]
+    st, fnd, note = _mpk_three_way(kp_ph, h_ph, c_ph, fmt)
+    add("Тел. Общий Город", fmt(kp_ph[0]) if kp_ph else "–", fnd, st, note)
+    add("Тел. Реклама Город", "–", "–", "na", "у МПК рекламных номеров нет")
+    add("Тел. SEO Город", "–", "–", "na", "у МПК SEO-номеров нет")
+
+    # ── Почта ──
+    _em = (row.email or '').strip().lower()
+    kp_em = [_em] if re.match(r'[^@\s]+@[^@\s]+\.[^@\s]+$', _em) else []
+    h_em = [(header.get('email') or '').strip().lower()]
+    c_em = [e.strip().lower() for e in (branch.get('emails') or [])]
+    st, fnd, note = _mpk_three_way(kp_em, h_em, c_em, lambda x: x)
+    add("Почта", (_em or "–"), fnd, st, note.replace("совпадает", "почта совпадает")
+        if st == "ok" else note)
+
+    # ── Адрес (только КОНТАКТЫ - в шапке адреса нет) ──
+    kp_addr = (row.address or '').strip()
+    kp_addr_valid = bool(kp_addr) and bool(re.search(r'[а-яё]', _norm_addr(kp_addr)))
+    c_addr = (branch.get('address') or '').strip()
+    if not kp_addr_valid:
+        if c_addr:
+            add("Адрес", kp_addr or "–", c_addr, "bug", "адрес на сайте не совпадает с КП")
+        else:
+            add("Адрес", "–", "–", "na", "нет ни в КП, ни на сайте")
+    elif c_addr and address_match(c_addr, kp_addr):
+        add("Адрес", kp_addr, c_addr, "ok", "совпадает с КП")
+    elif c_addr:
+        add("Адрес", kp_addr, c_addr, "bug", "адрес на сайте не совпадает с КП")
+    else:
+        add("Адрес", kp_addr, "–", "bug", "адрес на сайте не найден")
+
+    # ── Telegram (у МПК = номер WhatsApp; в шапке t.me/+номер, в контактах нет) ──
+    kp_msgr = normalize_phone(row.whatsapp)
+    if not kp_msgr:
+        add("Telegram", "–", "–", "na", "номера мессенджера в КП нет")
+    else:
+        h_tg = [normalize_phone(header.get('whatsapp'))]   # phone2 = и WhatsApp, и Telegram
+        st, fnd, note = _mpk_three_way([kp_msgr], h_tg, [], fmt)
+        add("Telegram", fmt(kp_msgr), fnd, st, note)
+
+    # ── WhatsApp (шапка = phone2, контакты = WhatsApp блока филиала) ──
+    h_wa = [normalize_phone(header.get('whatsapp'))]
+    c_wa = [normalize_phone(branch.get('whatsapp'))]
+    st, fnd, note = _mpk_three_way([kp_msgr] if kp_msgr else [], h_wa, c_wa, fmt)
+    add("WhatsApp", fmt(kp_msgr) if kp_msgr else "–", fnd, st, note)
+
+    return {"domain": _norm_host(row.domain), "city": row.city,
+            "country": row.country, "matched": True, "fields": fields}
 
 
 # ── Главная функция сверки ───────────────────────────────────────────

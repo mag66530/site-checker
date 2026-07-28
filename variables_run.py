@@ -486,30 +486,6 @@ def _load_branches(dom, main_html, proxy, log):
     return {}
 
 
-def _apply_mpk_telegram(var, row, site_msgr, kpmod):
-    """МПК: Telegram и WhatsApp - ОДИН И ТОТ ЖЕ номер (мобильный). Отдельного
-    Telegram в КП нет, поэтому Telegram сверяем с номером мессенджера КП (колонка
-    WhatsApp): есть ли на сайте Telegram и совпадает ли его номер. Заменяем поле
-    Telegram (иначе оно всегда «–», т.к. в КП телеграма нет)."""
-    kp_wa = kpmod.normalize_phone(row.whatsapp)
-    site_n = kpmod.normalize_phone(site_msgr)
-    dial = kpmod._dial_for(row)
-    for f in var.get("fields", []):
-        if f.get("field") != "Telegram":
-            continue
-        if not kp_wa:
-            f.update(expected="–", found="–", status="na",
-                     note="номера мессенджера в КП нет")
-        elif site_n and site_n == kp_wa:
-            f.update(expected=kpmod._fmt(kp_wa, dial), found=kpmod._fmt(site_n, dial),
-                     status="ok", note="Telegram на сайте, номер как в КП (WhatsApp)")
-        elif site_n:
-            f.update(expected=kpmod._fmt(kp_wa, dial), found=kpmod._fmt(site_n, dial),
-                     status="bug", note="номер Telegram на сайте не совпадает с КП")
-        else:
-            f.update(expected=kpmod._fmt(kp_wa, dial), found="–",
-                     status="bug", note="Telegram на сайте не найден")
-        break
 
 
 def _merge_подмена(fld, r, from_kp, target, kind, метка, dial='7') -> None:
@@ -761,51 +737,27 @@ def main() -> int:
         # Собираем «страницу города» и сверяем её обычным механизмом. Если у домена
         # пикера нет (одногородний сайт СНГ) - проверяем страницу как есть.
         if _per_city_mode:
-            # Данные города: филиал с «Контактов» (адрес + ВСЕ телефоны + почта +
-            # WhatsApp) и пикер выбора города с главной (телефон/почта/WhatsApp).
-            # Филиал приоритетнее (там 2-й телефон и адрес); пикер дополняет.
+            # МПК: один сайт на все города. Сверяем ТРЁХТОЧЕЧНО - КП ↔ ШАПКА (данные
+            # пикера выбора города, что показывается в шапке при выборе города) ↔
+            # КОНТАКТЫ (блок филиала на /contacts). Так видно, ГДЕ расхождение: в
+            # шапке или в статичном блоке контактов (просьба заказчика - иначе всё
+            # «зелёное», а реальные различия шапка/контакты прятались).
             if dom not in _branch_cache:
                 _branch_cache[dom] = _load_branches(dom, html, proxy, _stamp)
             _pick = kpmod.parse_city_picker(html)
-            _br = _by_city(_branch_cache[dom], row.city) or {}
-            _pk = _by_city(_pick, row.city) or {}
-            _site_msgr = _br.get('whatsapp') or _pk.get('whatsapp') or ''
+            _br = _by_city(_branch_cache[dom], row.city)   # контакты (стата)
+            _pk = _by_city(_pick, row.city)                # шапка (пикер)
             if _br or _pk:
-                _phones = list(_br.get('phones') or [])
-                if _pk.get('phone') and _pk['phone'] not in _phones:
-                    _phones.append(_pk['phone'])
-                _emails = list(_br.get('emails') or [])
-                _pe = (_pk.get('email') or '').lower()
-                if _pe and _pe not in _emails:
-                    _emails.append(_pe)
-                _data = {'phones': _phones,
-                         'emails': _emails,
-                         'whatsapp': _site_msgr,
-                         'telegram': _site_msgr,          # у МПК TG = номер WhatsApp
-                         'address': _br.get('address', '')}
-                _syn = kpmod.build_city_page(row.city, _data)
-                # «Город»: у общего сайта города различаются НЕ доменом, а строкой в
-                # списке городов/филиалов сайта. Нашли город (есть его данные) → ✓.
+                var = kpmod.check_variables_mpk(row, _pk or {}, _br or {})
                 _gorod = {"field": "Город", "expected": row.city,
                           "found": "есть на сайте", "status": "ok",
                           "note": "город есть на сайте (список городов/филиалы)"}
             else:
-                # Города нет ни в пикере, ни среди филиалов сайта → ✗.
-                _syn = kpmod.build_city_page(row.city, None)
+                # Города нет ни в пикере, ни среди филиалов сайта → ✗ по всей строке.
+                var = kpmod.check_variables_mpk(row, {}, {})
                 _gorod = {"field": "Город", "expected": row.city,
                           "found": "нет на сайте", "status": "bug",
                           "note": "города из КП нет на сайте (ни в списке городов, ни в филиалах)"}
-            var = kpmod.check_variables(_syn, dom, row=row)
-            # У МПК нет SEO/рекламных номеров - эти слоты всегда «–». Сайт города
-            # может показывать 2 номера (у части городов): это НЕ «новый номер», а
-            # тот же город - в пустой слот такое ✗ не ставим (просьба заказчика:
-            # совпал любой из номеров города → галочка).
-            for _f in var["fields"]:
-                if _f["field"] in ("Тел. SEO Город", "Тел. Реклама Город"):
-                    _f.update(status="na", expected="–", found="–",
-                              note="у МПК SEO/рекламных номеров нет")
-            # Telegram у МПК = номер WhatsApp (в КП отдельного нет) - сверяем номер.
-            _apply_mpk_telegram(var, row, _site_msgr, kpmod)
             var["fields"] = [_gorod] + var["fields"]
             var["fields"] = _только_почта_для_перевода(row.city, var["fields"])
             var["error"] = ""
