@@ -458,31 +458,58 @@ def _norm_city_name(s: str) -> str:
 
 
 def _by_city(mapping: dict, city: str):
-    """Значение из {город: …} по имени города - устойчиво к регистру/ё/пробелам."""
+    """Значение из {город: …} по имени города - устойчиво к регистру/ё/пробелам и
+    к синонимам (Астана ↔ Нур-Султан)."""
     if not mapping:
         return None
-    if city in mapping:
-        return mapping[city]
-    n = _norm_city_name(city)
-    for k, v in mapping.items():
-        if _norm_city_name(k) == n:
-            return v
+    import kp as _kp
+    aliases = _kp.city_aliases(city)
+    norm = {_norm_city_name(k): v for k, v in mapping.items()}
+    for a in aliases:
+        if a in norm:
+            return norm[a]
     return None
 
 
-def _load_branch_addresses(dom, main_html, proxy, log):
-    """Адреса филиалов per_city-проекта лежат на «Контактах» (блоки
-    <h4>Город</h4><p>адрес</p>). Грузим «Контакты» ОДИН раз на домен и разбираем.
-    {} если не удалось."""
+def _load_branches(dom, main_html, proxy, log):
+    """Филиалы per_city-проекта (адрес + ВСЕ телефоны + почта + WhatsApp по городам)
+    лежат на «Контактах». Грузим «Контакты» ОДИН раз на домен и разбираем. {} если
+    не удалось."""
     import kp as _kp
     cpath = _find_contacts_path(main_html, dom) or '/contacts/'
     for _try in range(2):
         ch, cerr = _fetch_one(dom, _proxy_parts(proxy), path=cpath)
         if ch and not cerr:
-            return _kp.parse_branch_addresses(ch)
+            return _kp.parse_city_branches(ch)
         time.sleep(1.0)
-    log(f'    {dom}: не удалось загрузить «{cpath}» - адреса филиалов не проверю')
+    log(f'    {dom}: не удалось загрузить «{cpath}» - филиалы (адрес/2-й телефон) не проверю')
     return {}
+
+
+def _apply_mpk_telegram(var, row, site_msgr, kpmod):
+    """МПК: Telegram и WhatsApp - ОДИН И ТОТ ЖЕ номер (мобильный). Отдельного
+    Telegram в КП нет, поэтому Telegram сверяем с номером мессенджера КП (колонка
+    WhatsApp): есть ли на сайте Telegram и совпадает ли его номер. Заменяем поле
+    Telegram (иначе оно всегда «–», т.к. в КП телеграма нет)."""
+    kp_wa = kpmod.normalize_phone(row.whatsapp)
+    site_n = kpmod.normalize_phone(site_msgr)
+    dial = kpmod._dial_for(row)
+    for f in var.get("fields", []):
+        if f.get("field") != "Telegram":
+            continue
+        if not kp_wa:
+            f.update(expected="–", found="–", status="na",
+                     note="номера мессенджера в КП нет")
+        elif site_n and site_n == kp_wa:
+            f.update(expected=kpmod._fmt(kp_wa, dial), found=kpmod._fmt(site_n, dial),
+                     status="ok", note="Telegram на сайте, номер как в КП (WhatsApp)")
+        elif site_n:
+            f.update(expected=kpmod._fmt(kp_wa, dial), found=kpmod._fmt(site_n, dial),
+                     status="bug", note="номер Telegram на сайте не совпадает с КП")
+        else:
+            f.update(expected=kpmod._fmt(kp_wa, dial), found="–",
+                     status="bug", note="Telegram на сайте не найден")
+        break
 
 
 def _merge_подмена(fld, r, from_kp, target, kind, метка, dial='7') -> None:
@@ -712,7 +739,7 @@ def main() -> int:
     _n_fail = 0
     # per_city (МПК): один сайт обслуживает все города через пикер выбора города.
     _per_city_mode = _per_city(a.project)
-    _addr_cache = {}          # домен → {город: адрес филиала} (грузим 1 раз на домен)
+    _branch_cache = {}        # домен → {город: {address, phones, email, whatsapp}} (1 раз/домен)
     for dom, row in domains:
         html, err = html_map.get(dom, ("", "не загружено"))
         # ЛЮБАЯ ошибка загрузки (HTTP 500 / обрыв соединения / таймаут / неполная
@@ -734,29 +761,51 @@ def main() -> int:
         # Собираем «страницу города» и сверяем её обычным механизмом. Если у домена
         # пикера нет (одногородний сайт СНГ) - проверяем страницу как есть.
         if _per_city_mode:
+            # Данные города: филиал с «Контактов» (адрес + ВСЕ телефоны + почта +
+            # WhatsApp) и пикер выбора города с главной (телефон/почта/WhatsApp).
+            # Филиал приоритетнее (там 2-й телефон и адрес); пикер дополняет.
+            if dom not in _branch_cache:
+                _branch_cache[dom] = _load_branches(dom, html, proxy, _stamp)
             _pick = kpmod.parse_city_picker(html)
-            if _pick:
-                if dom not in _addr_cache:
-                    _addr_cache[dom] = _load_branch_addresses(dom, html, proxy, _stamp)
-                _cd = _by_city(_pick, row.city)
-                _ad = _by_city(_addr_cache[dom], row.city) or ''
-                _syn = kpmod.build_city_page(row.city, _cd, _ad)
+            _br = _by_city(_branch_cache[dom], row.city) or {}
+            _pk = _by_city(_pick, row.city) or {}
+            _site_msgr = _br.get('whatsapp') or _pk.get('whatsapp') or ''
+            if _br or _pk:
+                _phones = list(_br.get('phones') or [])
+                if _pk.get('phone') and _pk['phone'] not in _phones:
+                    _phones.append(_pk['phone'])
+                _emails = list(_br.get('emails') or [])
+                _pe = (_pk.get('email') or '').lower()
+                if _pe and _pe not in _emails:
+                    _emails.append(_pe)
+                _data = {'phones': _phones,
+                         'emails': _emails,
+                         'whatsapp': _site_msgr,
+                         'telegram': _site_msgr,          # у МПК TG = номер WhatsApp
+                         'address': _br.get('address', '')}
+                _syn = kpmod.build_city_page(row.city, _data)
                 # «Город»: у общего сайта города различаются НЕ доменом, а строкой в
-                # списке выбора города (пикере). Проверяем, что город из КП в этом
-                # списке ЕСТЬ (есть его данные) - тогда ✓; нет = ✗ (город потерян).
-                if _cd:
-                    _gorod = {"field": "Город", "expected": row.city,
-                              "found": "есть на сайте", "status": "ok",
-                              "note": "город есть в списке городов сайта"}
-                else:
-                    _gorod = {"field": "Город", "expected": row.city,
-                              "found": "нет в списке городов", "status": "bug",
-                              "note": "города из КП нет в списке выбора города на сайте"}
+                # списке городов/филиалов сайта. Нашли город (есть его данные) → ✓.
+                _gorod = {"field": "Город", "expected": row.city,
+                          "found": "есть на сайте", "status": "ok",
+                          "note": "город есть на сайте (список городов/филиалы)"}
             else:
-                # Домен без пикера (одногородний сайт СНГ) - проверяем как обычно.
-                _syn = html
-                _gorod, _ = _регион_статусы(html, kpmod._norm_host(dom), ctx)
+                # Города нет ни в пикере, ни среди филиалов сайта → ✗.
+                _syn = kpmod.build_city_page(row.city, None)
+                _gorod = {"field": "Город", "expected": row.city,
+                          "found": "нет на сайте", "status": "bug",
+                          "note": "города из КП нет на сайте (ни в списке городов, ни в филиалах)"}
             var = kpmod.check_variables(_syn, dom, row=row)
+            # У МПК нет SEO/рекламных номеров - эти слоты всегда «–». Сайт города
+            # может показывать 2 номера (у части городов): это НЕ «новый номер», а
+            # тот же город - в пустой слот такое ✗ не ставим (просьба заказчика:
+            # совпал любой из номеров города → галочка).
+            for _f in var["fields"]:
+                if _f["field"] in ("Тел. SEO Город", "Тел. Реклама Город"):
+                    _f.update(status="na", expected="–", found="–",
+                              note="у МПК SEO/рекламных номеров нет")
+            # Telegram у МПК = номер WhatsApp (в КП отдельного нет) - сверяем номер.
+            _apply_mpk_telegram(var, row, _site_msgr, kpmod)
             var["fields"] = [_gorod] + var["fields"]
             var["fields"] = _только_почта_для_перевода(row.city, var["fields"])
             var["error"] = ""
