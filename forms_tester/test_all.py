@@ -1294,6 +1294,7 @@ _SRVVAL_ВИДЫ = (
     ("empty", "обязательное поле пусто"),
     ("empty_name", "без имени"),
     ("empty_phone", "без телефона"),
+    ("short_phone", "неполный телефон"),
     ("bad_email", "некорректный e-mail"),
     ("bad_phone", "невалидный телефон"),
     ("too_long", "превышение длины поля"),
@@ -1358,6 +1359,12 @@ _JS_SRVVAL_TAMPER = r"""
     target = ctrls.find(e => (e.type||'').toLowerCase()==='tel'
       || /phone|tel|тел/i.test(
         (e.name||'') + ' ' + (e.placeholder||'') + ' ' + (e.getAttribute('autocomplete')||'')));
+  } else if (тип === 'short_phone') {
+    // Поле ТЕЛЕФОНА - впишем НЕПОЛНЫЙ номер (одна-две цифры, как «+7 (1»),
+    // проба «сервер принял заявку с не до конца введённым телефоном».
+    target = ctrls.find(e => (e.type||'').toLowerCase()==='tel'
+      || /phone|tel|тел/i.test(
+        (e.name||'') + ' ' + (e.placeholder||'') + ' ' + (e.getAttribute('autocomplete')||'')));
   }
   if (!target) return {done: false};
 
@@ -1372,6 +1379,7 @@ _JS_SRVVAL_TAMPER = r"""
   if (тип === 'empty' || тип === 'empty_name' || тип === 'empty_phone') target.value = '';
   else if (тип === 'bad_email') target.value = 'test-validation-probe-not-an-email';
   else if (тип === 'bad_phone') target.value = 'абвгд-не-телефон-XYZ';
+  else if (тип === 'short_phone') target.value = '+7 (1';
   else if (тип === 'too_long') target.value = 'ТЕСТ-ВАЛИДАЦИЯ ' + 'A'.repeat(4000);
 
   fire(target);
@@ -1602,6 +1610,17 @@ def _тело_подтверждает_подмену(вид: str, поле: str
     if вид == "bad_phone":
         return ("не-телефон-xyz" in low) or ("%d0%bd%d0%b5-%d1%82" in low) \
             or ("абвгд" in low)
+    if вид == "short_phone":
+        # Неполный телефон реально ушёл, если значение поля телефона в теле
+        # содержит МАЛО цифр (≤5) - полный номер даёт 10-11 цифр.
+        import re as _re
+        import urllib.parse as _up
+        m = (_re.search(r'(?:^|&)' + _re.escape(п) + r'=([^&]*)', t)
+             or _re.search(r'"' + _re.escape(п) + r'"\s*:\s*"([^"]*)"', t))
+        if not m or not п:
+            return False
+        _digits = _re.sub(r'\D', '', _up.unquote_plus(m.group(1)))
+        return 0 < len(_digits) <= 5
     if вид == "too_long":
         return ("тест-валидация" in low) or ("aaaaaaaaaaaaaaaaaaaa" in low)
     # empty / empty_name / empty_phone: поле должно быть пустым в теле.
@@ -1716,7 +1735,7 @@ def серверная_валидация_детали(попытки: dict, п�
         p = str(поля.get(вид) or "").strip().lower()
         if вид == "empty_name":
             return "имени"
-        if вид == "empty_phone" or вид == "bad_phone":
+        if вид in ("empty_phone", "bad_phone", "short_phone"):
             return "телефона"
         if вид == "bad_email":
             return "почты"
@@ -1739,6 +1758,8 @@ def серверная_валидация_детали(попытки: dict, п�
             return "с невалидной почтой"
         if вид == "bad_phone":
             return "с невалидным телефоном"
+        if вид == "short_phone":
+            return "с НЕПОЛНЫМ телефоном (номер введён не до конца, напр. «+7 (1»)"
         if вид == "too_long":
             return "со слишком длинным текстом"
         return "с битыми данными"
@@ -1751,6 +1772,8 @@ def серверная_валидация_детали(попытки: dict, п�
             return "невалидная почта"
         if вид == "bad_phone":
             return "невалидный телефон"
+        if вид == "short_phone":
+            return "неполный телефон"
         if вид == "too_long":
             return "слишком длинный текст"
         return "битые данные"

@@ -125,7 +125,7 @@ def test_форма_заказа_пропускается_без_браузер�
 
 def test_виды_нарушений_покрывают_имя_телефон_почту_длину():
     виды = dict(t._SRVVAL_ВИДЫ)
-    assert set(виды) == {"empty", "empty_name", "empty_phone",
+    assert set(виды) == {"empty", "empty_name", "empty_phone", "short_phone",
                          "bad_email", "bad_phone", "too_long"}
 
 
@@ -267,6 +267,27 @@ def test_тело_bad_email_маркер():
 def test_тело_too_long_маркер():
     assert t._тело_подтверждает_подмену("too_long", "message",
         "message=" + "A"*4000) is True
+
+
+def test_тело_неполный_телефон():
+    # Неполный номер (мало цифр) реально ушёл на сервер → подтверждаем подмену.
+    assert t._тело_подтверждает_подмену("short_phone", "phone",
+        "phone=%2B7+%281&name=X") is True                 # «+7 (1» → 2 цифры
+    assert t._тело_подтверждает_подмену("short_phone", "ORDER_PROP_3",
+        '{"ORDER_PROP_3":"+7 (1"}') is True               # JSON-тело
+    # Полный номер (10-11 цифр) НЕ считаем неполным.
+    assert t._тело_подтверждает_подмену("short_phone", "phone",
+        "phone=74957991438&name=X") is False
+    # Поля нет в теле - не доказываем.
+    assert t._тело_подтверждает_подмену("short_phone", "phone", "name=X") is False
+
+
+def test_деталь_неполный_телефон_принят():
+    d = t.серверная_валидация_детали({"short_phone": "принято"},
+                                     {"short_phone": "phone"})
+    assert "неполным телефоном" in d.lower()
+    # В матрице это ✗ (УЯЗВИМА).
+    assert t.валидация_сервера_вердикт({"short_phone": "принято"})[0] == "УЯЗВИМА"
 
 
 def test_тело_пустое_не_подтверждает():
