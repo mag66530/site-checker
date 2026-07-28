@@ -866,17 +866,11 @@ def test_address_matched_on_contacts_even_if_main_has_other_field():
     assert 'Токтогула' in af['found'], af          # показываем поле, где совпало
 
 
-def test_per_city_picker_synthetic_check():
-    """МПК: один сайт на все города. Данные города берём из блока филиала на
-    «Контактах» (адрес + ВСЕ телефоны + почта + WhatsApp) и пикера выбора города,
-    собираем «страницу города» и сверяем обычным механизмом. SEO/реклама у МПК
-    нет → «–»; у части городов 2 телефона - совпадение с любым = ✓."""
-    picker_html = ('<a href="#" class="selectCity" data-city="Екатеринбург" '
-                   'data-phone1="+7 (343) 202 38 83" data-email="ekb@metpromko.ru" '
-                   'data-phone2="+7 (963) 136-87-88">Екатеринбург</a>')
-    pick = kp.parse_city_picker(picker_html)
-    assert pick['Екатеринбург']['phone'] == '+7 (343) 202 38 83'
-
+def test_mpk_three_way_check():
+    """МПК: трёхточечная сверка КП ↔ шапка (пикер) ↔ контакты (блок филиала).
+    Совпало и там, и там → ✓; не совпало в шапке → «в шапке сайта»; не совпало в
+    контактах → «на сайте». Екб: 2 телефона в контактах (совпал любой = ✓).
+    Казань: почта в mailto битая (ufa@), но видимая (kazan@) как в КП → ✓."""
     contacts = ('<h4>Екатеринбург</h4><p>620058, г. Екатеринбург, пр. Космонавтов, 158'
                 '<br />Время работы</p><ul>'
                 '<li><a href="tel:+73432023883">(343) 202-38-83</a>, '
@@ -890,19 +884,35 @@ def test_per_city_picker_synthetic_check():
     assert 'Филиалы в России' not in br
     assert kp.city_aliases('Астана') == ['астана', 'нур-султан', 'нурсултан']
 
-    # В КП второй номер (202-68-86) - на сайте есть оба → Общий ✓ (совпал любой).
+    # Екб: КП второй номер, на сайте оба (шапка=202-38-83, контакты=оба) → ✓.
     row = kp.KPRow(domain='metpromko.ru', city='Екатеринбург',
                    phone_common='(343) 202-38-83, (343) 202-68-86', email='ekb@metpromko.ru',
-                   address='пр. Космонавтов, 158', whatsapp='+7 (963) 136-87-88',
-                   country='Россия')
-    d = br['Екатеринбург']
-    syn = kp.build_city_page('Екатеринбург', {'phones': d['phones'], 'emails': d['emails'],
-                             'whatsapp': d['whatsapp'], 'telegram': d['whatsapp'],
-                             'address': d['address']})
-    by = {f['field']: f for f in kp.check_variables(syn, 'metpromko.ru', row=row)['fields']}
+                   address='пр. Космонавтов, 158', whatsapp='+7 (963) 136-87-88', country='Россия')
+    header = {'phone': '+7 (343) 202 38 83', 'email': 'ekb@metpromko.ru', 'whatsapp': '+7 (963) 136-87-88'}
+    by = {f['field']: f for f in kp.check_variables_mpk(row, header, br['Екатеринбург'])['fields']}
     assert by['Тел. Общий Город']['status'] == 'ok', by['Тел. Общий Город']
     assert by['Почта']['status'] == 'ok'
     assert by['Адрес']['status'] == 'ok'
     assert by['WhatsApp']['status'] == 'ok'
     assert by['Тел. SEO Город']['status'] == 'na'
-    assert by['Тел. Реклама Город']['status'] == 'na'
+
+    # Расхождение в ШАПКЕ: контакты как в КП, а шапка показывает другой номер → ✗
+    # «в шапке сайта».
+    row2 = kp.KPRow(domain='metpromko.ru', city='Казань', phone_common='(843) 216-62-83',
+                    email='kazan@metpromko.ru', address='улица Тихорецкая, 2А', country='Россия')
+    branch2 = {'address': 'г. Казань, улица Тихорецкая, 2А', 'phones': ['+78432166283'],
+               'emails': ['ufa@metpromko.ru', 'kazan@metpromko.ru'], 'whatsapp': ''}
+    header2 = {'phone': '+7 (999) 000 00 00', 'email': 'kazan@metpromko.ru', 'whatsapp': ''}
+    by2 = {f['field']: f for f in kp.check_variables_mpk(row2, header2, branch2)['fields']}
+    assert by2['Тел. Общий Город']['status'] == 'bug', by2['Тел. Общий Город']
+    assert 'шапке' in by2['Тел. Общий Город']['note']
+    # Почта: видимая kazan@ (в контактах) == КП, шапка kazan@ → ✓ (битый mailto ufa@ не мешает)
+    assert by2['Почта']['status'] == 'ok', by2['Почта']
+
+    # Расхождение в КОНТАКТАХ: шапка как в КП, а блок контактов - другой номер → ✗
+    # «на сайте (в контактах)».
+    branch3 = dict(branch2, phones=['+79990000000'])
+    header3 = {'phone': '+7 (843) 216 62 83', 'email': 'kazan@metpromko.ru', 'whatsapp': ''}
+    by3 = {f['field']: f for f in kp.check_variables_mpk(row2, header3, branch3)['fields']}
+    assert by3['Тел. Общий Город']['status'] == 'bug'
+    assert 'контакт' in by3['Тел. Общий Город']['note']
