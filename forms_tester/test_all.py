@@ -7354,6 +7354,48 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     print(f"   🔑 CSRF-защита «{название}»: {_o_csrf_кол} - {_o_csrf_дет}")
                 except Exception as _eoc:  # noqa: BLE001
                     print(f"   ⚠️ CSRF (заказ) не проверить: {_eoc}")
+                # Enter отправляет? БЕЗОПАСНО (перехватчик submit с preventDefault -
+                # реальной отправки заказа НЕ происходит). Заказ раньше пропускали.
+                try:
+                    _oe = form.evaluate(
+                        "f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');"
+                        " if(!g) return 'noform'; window.__oentSub=false;"
+                        " window.__oentH=function(e){ window.__oentSub=true; e.preventDefault();"
+                        " e.stopPropagation(); g.removeEventListener('submit',window.__oentH,true); };"
+                        " g.addEventListener('submit',window.__oentH,true); return 'ok'; }")
+                    if _oe != "noform":
+                        _oinp = form.locator(
+                            "input:not([type='checkbox']):not([type='radio'])"
+                            ":not([type='file']):not([type='hidden']):not([type='submit'])"
+                            ":not([type='button']):not([type='date']):not([type='range'])"
+                            " >> visible=true").first
+                        if _oinp.count():
+                            _oinp.press("Enter", timeout=3000)
+                            page.wait_for_timeout(350)
+                            _osub = bool(form.evaluate("f => !!window.__oentSub"))
+                            _oe_verdict = "да" if _osub else "нет"
+                            try:
+                                form.evaluate(
+                                    "f => { const g = f.tagName==='FORM' ? f : f.querySelector('form');"
+                                    " if(g && window.__oentH) g.removeEventListener('submit',window.__oentH,true); }")
+                            except Exception:  # noqa: BLE001
+                                pass
+                            записать_в_excel({
+                                "тип": "ПРОВЕРКА", "страница": страница, "url": log_url,
+                                "тип_селектора": "поля", "ид": название,
+                                "название": f"Enter отправляет форму: {название}",
+                                "имя": имя_теста,
+                                "статус": "Проверить" if _oe_verdict == "нет" else "OK",
+                                "enter_отправляет": _oe_verdict,
+                                "комментарий_готовый": (
+                                    "Форму заказа нельзя отправить клавишей Enter (только "
+                                    "кнопкой) - для многошагового чекаута это нормально."
+                                    if _oe_verdict == "нет" else None),
+                                "код": "enter_submit",
+                            })
+                            print(f"   ⏎ Enter отправляет «{название}»: {_oe_verdict}")
+                except Exception as _eoe:  # noqa: BLE001
+                    print(f"   ⚠️ Enter (заказ) не проверить: {_eoe}")
                 print(f"   ✍️ {название} - поля заполнены (без отправки).")
                 записать_в_excel(
                     {
@@ -9333,6 +9375,18 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         # → «Да» (✓); иначе пусто (–), без ложного ✗.
                         _данные_заказ = ("Да (заказ создан на сервере, ORDER_ID)"
                                          if str(статус).startswith("УСПЕШНО") else "")
+                        # Обработка ошибок на заказе: заказ прошёл → ошибок не было,
+                        # все шаги валидны (корректно, ✓); заказ упал, НО показал
+                        # понятную ошибку («поле обязательно» и т.п.) → тоже
+                        # корректно (✓, ошибку обработали); заказ упал БЕЗ понятной
+                        # ошибки → молчаливый сбой (✗). Так у заказа перестаёт зря
+                        # висеть прочерк в «Обработка ошибок».
+                        if str(статус).startswith("УСПЕШНО"):
+                            _обр_ош_заказ = "корректно"
+                        elif _chk_err:
+                            _обр_ош_заказ = "корректно"
+                        else:
+                            _обр_ош_заказ = "ошибка без объяснения"
                         записать_в_excel(
                             {
                                 "тип": "PLAYWRIGHT",
@@ -9347,6 +9401,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 "статус": статус,
                                 "уведомление": _уведомл_заказ,
                                 "данные_дошли": _данные_заказ,
+                                "обработка_ошибок": _обр_ош_заказ,
                                 "код": "browser",
                             }
                         )
