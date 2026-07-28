@@ -1172,25 +1172,6 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                  or (_fb if re.search(r'[а-яёa-z]{3,}', _fb, re.I) else ""))
     _site_shown = _site_full or _site_raw
 
-    # Сверяем адрес КП именно со ЗНАЧЕНИЕМ ПОЛЯ «Адрес:» сайта, а НЕ по всему тексту
-    # страницы - иначе короткий адрес-«только город» ложно совпадал с названием
-    # города в заголовке/меню («…в Гомеле», попап выбора города). Поле «Адрес:»
-    # берём с ОБЕИХ страниц - главной И «Контактов»: у МПЭ городской адрес часто
-    # ТОЛЬКО на «Контактах», а в подвале главной - общий/головной. Совпало хотя бы
-    # с одним полем → ✓ (иначе адрес на «Контактах» не участвовал, если у главной
-    # была своя графа адреса, и выходил ложный ✗). По всей странице (haystack)
-    # сверяем ТОЛЬКО как запасной вариант - когда графы «Адрес:» нет нигде (сайт
-    # выводит адрес без метки), иначе у таких городов было бы ложное «не совпадает».
-    _addr_fields = [f for f in (
-        _site_address_full(html), _site_address_full(contacts_html or ""),
-        _site_address_raw(html), _site_address_raw(contacts_html or ""),
-        _fb if re.search(r'[а-яёa-z]{3,}', _fb, re.I) else "",
-    ) if f]
-    _matched_field = next((f for f in _addr_fields
-                           if address_match(f, row.address)), "")
-    _addr_ok = (bool(_matched_field) if _addr_fields
-                else address_match(haystack, row.address))
-
     if not _addr_kp_valid:
         _kp_addr_show = (row.address if row.address
                          and str(row.address).strip() not in ("–", "-") else "–")
@@ -1211,12 +1192,16 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
                 "адрес на сайте неполный - нет улицы или дома")
         else:
             add("Адрес", "–", "–", "na", "нет ни в КП, ни на сайте")
-    elif _addr_ok:
-        # «На сайте» показываем ИМЕННО то поле «Адрес:», с которым совпало (полное
-        # в приоритете), иначе - что видно в графе адреса, иначе - чистый факт.
+    elif address_match(haystack, row.address):
+        # Сверяем по ВСЕМУ видимому тексту главной + «Контактов» (haystack): адрес
+        # у части сайтов лежит не в поле «Адрес:», а в блоке контактов/подвале, и
+        # поле «Адрес:» у некоторых проектов вообще отдаёт мусор (у ИМП там попап
+        # выбора города - «Улан-Удэ Ульяновск …»). address_match требует, чтобы
+        # улица И номер дома из КП стояли РЯДОМ, поэтому по названию города в
+        # заголовке ложно не срабатывает. «На сайте» показываем чистый фрагмент.
         add("Адрес", row.address,
-            _matched_field or _site_shown or _addr_on_page(haystack, row.address)
-            or _found_addr() or "совпадает с КП", "ok", "совпадает с КП")
+            _addr_on_page(haystack, row.address) or _found_addr()
+            or "совпадает с КП", "ok", "совпадает с КП")
     else:
         # Адрес из КП не совпал. Показываем, ЧТО реально на сайте - полный адрес,
         # иначе хотя бы неполный («г. Гродно»), иначе «–». Прочерк не прячем, если
