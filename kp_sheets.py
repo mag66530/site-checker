@@ -229,7 +229,19 @@ def refresh_project(project: str, log=print) -> tuple[bool, str]:
     sa = service_account_info()
     try:
         if sa:
-            content = _download_xlsx_private(fid, sa)
+            # Приватный путь (сервисный аккаунт) - основной для КП-таблиц, которые
+            # расшарены на бота-читателя. Но публичная таблица «по ссылке» может
+            # быть НЕ расшарена на бота явно (напр. МТТ): тогда приватный путь
+            # падает, а публичный экспорт по ссылке ещё работает - пробуем его как
+            # запасной. Если не сработал и он - отдаём ошибку приватного пути (она
+            # подсказывает, что расшарить таблицу на сервисный аккаунт).
+            try:
+                content = _download_xlsx_private(fid, sa)
+            except Exception as e_priv:  # noqa: BLE001
+                try:
+                    content = _download_xlsx_public(url)
+                except Exception:  # noqa: BLE001
+                    raise e_priv
         else:
             content = _download_xlsx_public(url)
     except Exception as e:  # noqa: BLE001
