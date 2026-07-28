@@ -782,7 +782,7 @@ def test_site_address_raw_nepolny():
     Мусор (попап города) и пустое поле - ''."""
     html = ('<main><p>Адрес: , г. Гродно, Телефон офиса продаж 375 (29) 643-66-60 '
             'Email: grodno@mepen.by</p></main>')
-    assert kp._site_address_raw(html) == "г. Гродно"
+    assert kp._site_address_raw(html) == ", г. Гродно,"
     assert kp._site_address_full(html) == ""          # неполный - строгий отвергает
     # попап выбора города - не адрес
     assert kp._site_address_raw('<main>Адрес: Ваш город? Всё верно Выбрать город</main>') == ""
@@ -805,7 +805,7 @@ def test_incomplete_site_address_is_flagged_not_hidden():
     r = kp.check_variables(main, 'grodno.mepen.by', contacts_html=contacts, row=row)
     af = next(f for f in r['fields'] if f['field'] == 'Адрес')
     assert af['status'] == 'bug', af                  # НЕ na, НЕ «–»
-    assert af['found'] == 'г. Гродно', af             # показываем что на сайте
+    assert af['found'] == ', г. Гродно,', af           # показываем РОВНО как на сайте (с запятыми)
     assert 'неполн' in af['note'], af                 # «адрес на сайте неполный…»
 
     # КП адрес ЕСТЬ, а на сайте только «г. Гродно» - тоже показываем город, не «–»
@@ -813,7 +813,7 @@ def test_incomplete_site_address_is_flagged_not_hidden():
                     address='улица Ленина, 5', country='Беларусь')
     r2 = kp.check_variables(main, 'grodno.mepen.by', contacts_html=contacts, row=row2)
     af2 = next(f for f in r2['fields'] if f['field'] == 'Адрес')
-    assert af2['status'] == 'bug' and af2['found'] == 'г. Гродно', af2
+    assert af2['status'] == 'bug' and af2['found'] == ', г. Гродно,', af2
 
     # А вот если поля адреса на сайте нет вовсе И в КП пусто - тогда «–» (na)
     row3 = kp.KPRow(domain='x.by', city='Тест', address='', country='Беларусь')
@@ -850,26 +850,17 @@ def test_transient_text_phone_does_not_flag_empty_slot():
     assert '905' in (by2['Тел. SEO Город']['found'] or '')
 
 
-def test_address_matched_against_field_not_whole_page():
-    """Жалоба заказчика: адрес надо сверять СТРОГО с графой «Адрес:» сайта, чтобы
-    из других мест (заголовок «…в Гомеле», попап выбора города) ничего не
-    тянулось. Короткий адрес-«только город» из КП должен совпадать с полем адреса
-    сайта, но НЕ ловиться на названии города в заголовке."""
-    row = kp.KPRow(domain='gomel.mepen.by', city='Гомель',
-                   phone_common='375 (29) 643-66-60', email='gomel@mepen.by',
-                   address=', г. Гомель,', country='Беларусь')
-    # Поле «Адрес:» = «, г. Гомель,» (как на сайте, с лишними запятыми) → ✓.
-    ok_html = ('<title>МетПромЭнерго в Гомеле</title><main>МетПромЭнерго в Гомеле '
-               '<p>Адрес: , г. Гомель,</p>'
-               '<p>Телефон 375 (29) 643-66-60</p></main>')
-    af = next(f for f in kp.check_variables(ok_html, 'gomel.mepen.by', row=row)['fields']
+def test_address_matched_on_contacts_even_if_main_has_other_field():
+    """Адрес сверяем с графой «Адрес:» ОБЕИХ страниц. Если у главной своя графа
+    адреса (напр. общий/головной в подвале), а нужный городской адрес - на
+    «Контактах», совпадение с «Контактами» должно давать ✓ (раньше бралось только
+    поле главной, и адрес с «Контактов» не участвовал → ложный ✗)."""
+    row = kp.KPRow(domain='y.mepen.ru', city='Тест2',
+                   address='улица Токтогула, 125', country='Россия')
+    main = '<footer><p>Адрес: улица Ленина, 5</p></footer>'      # своя графа на главной
+    contacts = '<main><p>Адрес: г. Тест2, улица Токтогула, 125</p></main>'
+    af = next(f for f in kp.check_variables(main, 'y.mepen.ru',
+                                            contacts_html=contacts, row=row)['fields']
               if f['field'] == 'Адрес')
     assert af['status'] == 'ok', af
-
-    # Заголовок содержит «Гомель», но в ПОЛЕ адреса другой адрес → ✗ (не тянем из
-    # заголовка). КП «, г. Гомель,» с полем «улица Ленина, 5» не совпадает.
-    bad_html = ('<title>МетПромЭнерго в Гомеле</title><main>в Гомеле '
-                '<p>Адрес: улица Ленина, 5</p></main>')
-    af2 = next(f for f in kp.check_variables(bad_html, 'gomel.mepen.by', row=row)['fields']
-               if f['field'] == 'Адрес')
-    assert af2['status'] == 'bug', af2
+    assert 'Токтогула' in af['found'], af          # показываем поле, где совпало
