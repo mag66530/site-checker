@@ -7147,10 +7147,42 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # Кнопка отправки: по умолчанию стандартные submit-кнопки; если у сайта
             # своя (например button.send у Авиапромсталь) - задаётся ключом «кнопка_css».
             _btn_css = str(форма_config.get("кнопка_css") or "").strip()
-            sub = form.locator(
-                _btn_css or "button[type='submit'], input[type='submit'], button.btn"
-            ).first
-            sub.scroll_into_view_if_needed()
+            # Кнопку отправки выбираем УСТОЙЧИВО: первую ВИДИМУЮ, причём сначала
+            # среди НАСТОЯЩИХ сабмитов (input/button[type=submit], web_form_submit),
+            # и лишь потом среди широкого button.btn/button. Раньше брали просто
+            # .first - и на формах, где перед «Отправить» стоит скрытый триггер
+            # модалки (у МПЭ кнопка «Рассчитать заказ +» с data-bs-toggle), .first
+            # цеплялся за него, а scroll_into_view висел 30с и ронял ВСЮ проверку
+            # формы (весь столбец уходил в прочерки). Плюс сам scroll теперь с
+            # таймаутом 5с и «мягкий» - не роняет проверку, даже если не прокрутил.
+            def _выбрать_кнопку_отправки():
+                порядок = ([_btn_css] if _btn_css else [
+                    "button[type='submit'], input[type='submit'], "
+                    "input[name='web_form_submit'], button[name='web_form_submit']",
+                    "button.btn, button",
+                ])
+                for _sel in порядок:
+                    try:
+                        _cands = form.locator(_sel)
+                        _n = _cands.count()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    for _i in range(min(_n, 8)):
+                        _c = _cands.nth(_i)
+                        try:
+                            if _c.is_visible():
+                                return _c
+                        except Exception:  # noqa: BLE001
+                            continue
+                return form.locator(
+                    _btn_css or "button[type='submit'], input[type='submit'], button.btn"
+                ).first
+
+            sub = _выбрать_кнопку_отправки()
+            try:
+                sub.scroll_into_view_if_needed(timeout=5000)
+            except Exception:  # noqa: BLE001
+                pass
 
             # ── Ошибки валидации отображаются корректно (показ/цвет/текст) ──
             # Нативную валидацию ловим checkValidity() без отправки; кастомную -
@@ -7973,7 +8005,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                         _bcss or "button[type='submit'], input[type='submit'], button.btn"
                     ).first
                     try:
-                        _s.scroll_into_view_if_needed()
+                        _s.scroll_into_view_if_needed(timeout=5000)
                     except Exception:  # noqa: BLE001
                         pass
                     return _f, _s
