@@ -944,6 +944,17 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     site_ph_primary = fmt(_site_ph_ordered[0]) if _site_ph_ordered else "–"
     site_ph_any = site_ph_primary
 
+    # Три АКТИВНЫХ номера города - ТЕКУЩИЕ Общий/Реклама/SEO из КП (первый номер
+    # каждой ячейки, без «стар.»), БЕЗ старых из all_phones. Если на сайте вместо
+    # Общего показан один из этих активных (напр. SEO-номер вместо обычного) - это
+    # штатная подмена коллтрекинга, НЕ ошибка (просьба заказчика). А вот смена
+    # Общего на УСТАРЕВШИЙ номер (что лежит только в all_phones) - по-прежнему ✗.
+    _active_kp = set()
+    for _v in (row.phone_common, row.phone_ad, row.phone_seo):
+        _ph = phones_in_cell(_v)
+        if _ph:
+            _active_kp.add(_ph[0])
+
     # Рекламный номер («Реклама Город») подменяется коллтрекингом ТОЛЬКО при
     # рекламном визите (?utm_source=yandex) - в обычной выдаче/инкогнито на
     # странице стоит обычный (SEO/общий) номер. Поэтому сверять его с ВИДИМЫМ
@@ -1029,6 +1040,18 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             # сайте не ловилась - пряталась под «другой номер этого города»).
             add(label, fmt(exp), fmt(sorted(site_phones & kp_phones)[0]), "ok_set",
                 "на сайте общий номер города (подменный проверит браузер)")
+        elif label == "Тел. Общий Город" and (site_phones & _active_kp):
+            # На сайте ВМЕСТО Общего показан ДРУГОЙ АКТИВНЫЙ номер города из КП
+            # (SEO/рекламный - штатная подмена коллтрекинга). Это НЕ ошибка (просьба
+            # заказчика): номер из КП, просто другого назначения. Старые номера из
+            # all_phones сюда НЕ входят - смена Общего на устаревший остаётся ✗.
+            _shown = sorted(site_phones & _active_kp)[0]
+            _seo0 = (phones_in_cell(row.phone_seo) or [''])[0]
+            _ad0 = (phones_in_cell(row.phone_ad) or [''])[0]
+            _kind = "SEO" if _shown == _seo0 else ("рекламный" if _shown == _ad0
+                                                   else "подменный")
+            add(label, fmt(exp), fmt(_shown), "ok_set",
+                f"на сайте показан {_kind} номер города из КП (не ошибка)")
         elif site_phones:
             # На сайте городской номер, которого НЕТ в КП (номер сменили/опечатка) -
             # это расхождение ✗.

@@ -713,6 +713,35 @@ def test_address_match_localized_not_fooled_by_page():
     assert kp.address_match(page_ok, 'улица Люблинская, 151') is True
 
 
+def test_obshiy_slot_seo_number_shown_is_ok():
+    """Если в КП есть SEO/рекламный номер и на сайте ВМЕСТО Общего выводится он
+    (штатная подмена коллтрекинга) - это НЕ ошибка (просьба заказчика): номер из
+    КП, просто другого назначения → ✓ (ok_set). При этом смена Общего на
+    УСТАРЕВШИЙ номер (только в all_phones) по-прежнему ✗ - см.
+    test_obshiy_phone_strict_one_digit_change_caught."""
+    row = kp.KPRow(domain='x.ru', city='Т',
+                   phone_common='7 (499) 130-36-69', phone_seo='7 (499) 130-60-28',
+                   phone_ad='7 (499) 130-07-86',
+                   all_phones='4991303669;4991306028;4991300786', country='Россия')
+    # на сайте показан SEO-номер (…60-28) вместо Общего (…36-69)
+    html = '<header><a href="tel:+74991306028">+7 (499) 130-60-28</a></header>'
+    f = next(x for x in kp.check_variables(html, 'x.ru', row=row)["fields"]
+             if x["field"] == "Тел. Общий Город")
+    assert f["status"] == "ok_set", f            # ✓, не ✗
+    assert f["found"] == "+7 (499) 130-60-28"
+    assert "SEO" in f["note"] and "не ошибка" in f["note"]
+    # рекламный номер вместо Общего - тоже ✓
+    html2 = '<header><a href="tel:+74991300786">+7 (499) 130-07-86</a></header>'
+    f2 = next(x for x in kp.check_variables(html2, 'x.ru', row=row)["fields"]
+              if x["field"] == "Тел. Общий Город")
+    assert f2["status"] == "ok_set" and "рекламный" in f2["note"], f2
+    # чужой номер (НЕ из активного набора КП) вместо Общего - ✗
+    html3 = '<header><a href="tel:+74950001122">+7 (495) 000-11-22</a></header>'
+    f3 = next(x for x in kp.check_variables(html3, 'x.ru', row=row)["fields"]
+              if x["field"] == "Тел. Общий Город")
+    assert f3["status"] == "bug", f3
+
+
 def test_obshiy_phone_strict_one_digit_change_caught():
     """«Общий Город» виден на сайте напрямую и должен совпадать ТОЧНО. Смена
     одной цифры в КП (при том что старый номер остался в наборе all_phones) НЕ
