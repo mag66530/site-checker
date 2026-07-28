@@ -570,49 +570,94 @@ def parse_city_picker(html: str) -> dict:
     return out
 
 
-def parse_branch_addresses(html: str) -> dict:
-    """{город → адрес} из блоков филиалов на «Контактах»:
-    <h4>Барнаул</h4><p>656038, г. Барнаул, Комсомольский проспект, 120<br>Время…</p>.
-    Берём текст <p> до <br>/«Время работы»; служебные <h4> (напр. «Филиалы в
-    России») отсеиваем - у них в теле нет номера дома/«г.»."""
+# Города-синонимы (в КП одно имя, на сайте другое). Астана = Нур-Султан (сайт в
+# «Контактах»/пикере пишет «Нур-Султан», а в КП город «Астана»).
+CITY_ALIASES = {
+    'астана': ['нур-султан', 'нурсултан'],
+    'нур-султан': ['астана'],
+    'нурсултан': ['астана'],
+}
+
+
+def city_aliases(city: str) -> list:
+    """Имя города + его синонимы (нижним регистром, ё→е) - для поиска города на
+    сайте, где он может называться иначе (Астана ↔ Нур-Султан)."""
+    n = re.sub(r'\s+', ' ', (city or '')).strip().lower().replace('ё', 'е')
+    out = [n] + [a.replace('ё', 'е') for a in CITY_ALIASES.get(n, [])]
+    seen, uniq = set(), []
+    for x in out:
+        if x and x not in seen:
+            seen.add(x)
+            uniq.append(x)
+    return uniq
+
+
+def parse_city_branches(html: str) -> dict:
+    """{город → {address, phones:[…], email, whatsapp}} из блоков филиалов на
+    «Контактах»: <h4>Екатеринбург</h4><p>индекс, г. …, улица, дом</p><ul>
+    <li><a href="tel:…">(343) 202-38-83</a>, <a href="tel:…">(343) 202-68-86</a>
+    <li><a href="wa.me/…">WhatsApp</a><li><a href="mailto:…">почта</a></ul>.
+    Берём ВСЕ телефоны блока (у части городов их 2), почту и WhatsApp. Служебные
+    <h4> (напр. «Филиалы в России») без адреса/телефона отсеиваются."""
     out = {}
-    for m in re.finditer(r'<h4\b[^>]*>([^<]{2,40})</h4>\s*<p\b[^>]*>(.*?)(?:<br|Время\s+работы)',
-                         html or '', re.S | re.I):
-        city = re.sub(r'\s+', ' ', m.group(1)).strip()
-        body = re.sub(r'<[^>]+>', ' ', m.group(2))
-        body = body.replace('\xa0', ' ').replace('&nbsp;', ' ')
-        body = re.sub(r'\s+', ' ', body).strip(' ,;')
-        # Настоящий адрес: есть номер дома (цифра) и «г.»/маркер улицы.
-        if not body or not re.search(r'\d', body):
+    parts = re.split(r'<h4\b[^>]*>', html or '')
+    for seg in parts[1:]:
+        mcity = re.match(r'([^<]{2,40})</h4>', seg)
+        if not mcity:
             continue
-        if not (re.search(r'\bг\.', body) or _RE_ADDR_STREET.search(body)):
+        city = re.sub(r'\s+', ' ', mcity.group(1)).strip()
+        block = seg[mcity.end():]          # до следующего <h4> (уже отрезано split'ом)
+        mp = re.search(r'<p\b[^>]*>(.*?)(?:<br|Время\s+работы|</p>)', block, re.S | re.I)
+        addr = ''
+        if mp:
+            a = re.sub(r'<[^>]+>', ' ', mp.group(1)).replace('\xa0', ' ').replace('&nbsp;', ' ')
+            addr = re.sub(r'\s+', ' ', a).strip(' ,;')
+        phones = re.findall(r'href="tel:([^"]+)"', block)
+        wa = re.findall(r'(?:wa\.me/|whatsapp[^"]*?phone=)(\+?\d[\d\-()\s]{7,})', block, re.I)
+        emails = re.findall(r'mailto:([^"?<>]+)', block)
+        has_addr = bool(addr and re.search(r'\d', addr)
+                        and (re.search(r'\bг\.', addr) or _RE_ADDR_STREET.search(addr)))
+        if not has_addr and not phones and not emails:
+            continue                       # служебный заголовок, не филиал
+        if city in out:
             continue
-        out.setdefault(city, body)
+        out[city] = {
+            'address': addr if has_addr else '',
+            'phones': list(dict.fromkeys(phones)),
+            'email': emails[0].strip() if emails else '',
+            'whatsapp': wa[0].strip() if wa else '',
+        }
     return out
 
 
-def build_city_page(city: str, city_data: Optional[dict], address: str = '') -> str:
+def build_city_page(city: str, data: Optional[dict]) -> str:
     """Синтетическая «страница города» из данных пикера/филиала - чтобы обычная
     сверка (check_variables + проверка города) работала как для отдельного
-    поддомена. Кладём ИМЯ ГОРОДА (для проверки «город на сайте»), телефон (tel:),
-    почту (mailto:), WhatsApp (wa.me) и адрес (метка «Адрес:»). Никаких ДРУГИХ
-    городов на странице нет - «чужой город» ложно не сработает."""
+    поддомена. Кладём ИМЯ ГОРОДА (для проверки «город на сайте»), ВСЕ телефоны
+    (tel:), почту (mailto:), WhatsApp (wa.me) и Telegram (t.me - у МПК тот же
+    номер, что WhatsApp) и адрес (метка «Адрес:»). Других городов на странице нет
+    - «чужой город» ложно не сработает.
+    data: {phones:[…], email, whatsapp, telegram, address}."""
     city = (city or '').strip()
-    d = city_data or {}
+    d = data or {}
     parts = [f'<title>МетПромКо в городе {city}</title>',
              f'<header><div class="city">{city}</div>']
-    ph = (d.get('phone') or '').strip()
-    if ph:
-        parts.append(f'<a href="tel:{ph}">{ph}</a>')
+    for ph in (d.get('phones') or []):
+        ph = (ph or '').strip()
+        if ph:
+            parts.append(f'<a href="tel:{ph}">{ph}</a>')
     em = (d.get('email') or '').strip()
     if em:
         parts.append(f'<a href="mailto:{em}">{em}</a>')
     wa = re.sub(r'\D', '', d.get('whatsapp') or '')
     if wa:
         parts.append(f'<a href="https://wa.me/{wa}">Чат в WhatsApp</a>')
+    tg = re.sub(r'\D', '', d.get('telegram') or '')
+    if tg:
+        parts.append(f'<a href="https://t.me/+{tg}">Telegram</a>')
     parts.append('</header>')
-    if address:
-        parts.append(f'<main><p>Адрес: {address}</p></main>')
+    if d.get('address'):
+        parts.append(f'<main><p>Адрес: {d["address"]}</p></main>')
     return ''.join(parts)
 
 

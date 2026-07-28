@@ -867,32 +867,37 @@ def test_address_matched_on_contacts_even_if_main_has_other_field():
 
 
 def test_per_city_picker_synthetic_check():
-    """МПК: один сайт на все города. Контакты города берём из пикера выбора города
-    (data-phone1/email/phone2) + адрес из блока филиала, собираем «страницу города»
-    и сверяем обычным механизмом. SEO/реклама у МПК нет → «–»."""
-    html = ('<a href="#" class="selectCity" data-city="Барнаул" '
-            'data-phone1="+7 (3852) 25 24 41" data-email="barnaul@metpromko.ru" '
-            'data-phone2="+7 (962) 223-51-86">Барнаул</a>'
-            '<a href="#" class="selectCity" data-city="Москва" '
-            'data-phone1="+7 (495) 961 75 16" data-email="moscow@metpromko.ru" '
-            'data-phone2="+7 (903) 961-75-16">Москва</a>')
-    pick = kp.parse_city_picker(html)
-    assert set(pick) == {'Барнаул', 'Москва'}
-    assert pick['Барнаул']['phone'] == '+7 (3852) 25 24 41'
-    assert pick['Барнаул']['email'] == 'barnaul@metpromko.ru'
-    assert pick['Барнаул']['whatsapp'] == '+7 (962) 223-51-86'
+    """МПК: один сайт на все города. Данные города берём из блока филиала на
+    «Контактах» (адрес + ВСЕ телефоны + почта + WhatsApp) и пикера выбора города,
+    собираем «страницу города» и сверяем обычным механизмом. SEO/реклама у МПК
+    нет → «–»; у части городов 2 телефона - совпадение с любым = ✓."""
+    picker_html = ('<a href="#" class="selectCity" data-city="Екатеринбург" '
+                   'data-phone1="+7 (343) 202 38 83" data-email="ekb@metpromko.ru" '
+                   'data-phone2="+7 (963) 136-87-88">Екатеринбург</a>')
+    pick = kp.parse_city_picker(picker_html)
+    assert pick['Екатеринбург']['phone'] == '+7 (343) 202 38 83'
 
-    contacts = ('<h4>Барнаул</h4><p>656038, г. Барнаул, Комсомольский проспект, 120'
-                '<br />Время работы</p><h4>Филиалы в России</h4><p>вводный текст</p>')
-    addr = kp.parse_branch_addresses(contacts)
-    assert addr['Барнаул'] == '656038, г. Барнаул, Комсомольский проспект, 120'
-    assert 'Филиалы в России' not in addr        # служебный h4 (без адреса) отсеян
+    contacts = ('<h4>Екатеринбург</h4><p>620058, г. Екатеринбург, пр. Космонавтов, 158'
+                '<br />Время работы</p><ul>'
+                '<li><a href="tel:+73432023883">(343) 202-38-83</a>, '
+                '<a href="tel:+73432026886">(343) 202-68-86</a>'
+                '<li><a href="https://wa.me/+79631368788">WhatsApp</a>'
+                '<li><a href="mailto:ekb@metpromko.ru">ekb@metpromko.ru</a></ul>'
+                '<h4>Филиалы в России</h4><p>вводный текст</p>')
+    br = kp.parse_city_branches(contacts)
+    assert br['Екатеринбург']['phones'] == ['+73432023883', '+73432026886']
+    assert 'Филиалы в России' not in br
+    assert kp.city_aliases('Астана') == ['астана', 'нур-султан', 'нурсултан']
 
-    row = kp.KPRow(domain='metpromko.ru', city='Барнаул',
-                   phone_common='+7 (3852) 25-24-41', email='barnaul@metpromko.ru',
-                   address='Комсомольский проспект, 120',
-                   whatsapp='+7 (962) 223-51-86', country='Россия')
-    syn = kp.build_city_page('Барнаул', pick['Барнаул'], addr['Барнаул'])
+    # В КП второй номер (202-68-86) - на сайте есть оба → Общий ✓ (совпал любой).
+    row = kp.KPRow(domain='metpromko.ru', city='Екатеринбург',
+                   phone_common='(343) 202-38-83, (343) 202-68-86', email='ekb@metpromko.ru',
+                   address='пр. Космонавтов, 158', whatsapp='+7 (963) 136-87-88',
+                   country='Россия')
+    d = br['Екатеринбург']
+    syn = kp.build_city_page('Екатеринбург', {'phones': d['phones'], 'email': d['email'],
+                             'whatsapp': d['whatsapp'], 'telegram': d['whatsapp'],
+                             'address': d['address']})
     by = {f['field']: f for f in kp.check_variables(syn, 'metpromko.ru', row=row)['fields']}
     assert by['Тел. Общий Город']['status'] == 'ok', by['Тел. Общий Город']
     assert by['Почта']['status'] == 'ok'
