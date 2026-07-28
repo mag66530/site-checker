@@ -405,6 +405,134 @@ def проверка_согласия_2_13(scope, page) -> dict:
     return res
 
 
+def проба_без_согласия(scope, page) -> str:
+    """РЕАЛЬНАЯ проба пункта «Без согласия не отправить»: снимаем галочку согласия
+    и пытаемся отправить форму, НО гасим отправку (перехват submit с preventDefault
+    + abort POST) - реальная заявка НЕ уходит. Смотрим, дал ли клиент отправить:
+      • форма попыталась отправиться (POST или submit-событие) → 'отправляется'
+        (✗ - можно отправить без галочки согласия);
+      • отправка НЕ пошла (клиент заблокировал по отсутствию согласия) →
+        'заблокировано' (✓);
+      • не удалось определить (кнопку/галочку не нашли, клик не прошёл) → ''
+        (вердикт останется прежним - «не подтверждено»/⚠).
+    Безопасно: заявку не создаёт. Юнит-теста нет (нужен браузер) - всё guarded."""
+    # Контейнер с галочкой согласия (галочки часто вне <form> - в теле модалки).
+    контейнер = scope
+    try:
+        if scope.locator("input[type='checkbox']").count() == 0:
+            anc = scope.locator(
+                "xpath=ancestor::*[contains(@class,'modal') or contains(@class,'popup') "
+                "or contains(@class,'fancybox') or contains(@class,'my-modal') "
+                "or @role='dialog'][1]")
+            if anc.count():
+                контейнер = anc.first
+    except Exception:  # noqa: BLE001
+        return ""
+    # Снимаем ВСЕ видимые галочки согласия. Если видимых нет - проверять нечего.
+    try:
+        cb = контейнер.locator("input[type='checkbox']")
+        видимых = 0
+        for i in range(min(cb.count(), 12)):
+            el = cb.nth(i)
+            try:
+                if not el.is_visible():
+                    continue
+                видимых += 1
+                if el.is_checked():
+                    el.uncheck(force=True)
+            except Exception:  # noqa: BLE001
+                continue
+        if not видимых:
+            return ""
+    except Exception:  # noqa: BLE001
+        return ""
+    # Видимая кнопка отправки (сначала настоящий сабмит, потом широкий button).
+    sub = None
+    try:
+        for _sel in ("button[type='submit'], input[type='submit'], "
+                     "input[name='web_form_submit'], button[name='web_form_submit']",
+                     "button.btn, button"):
+            cands = scope.locator(_sel)
+            for i in range(min(cands.count(), 8)):
+                c = cands.nth(i)
+                try:
+                    if c.is_visible():
+                        sub = c
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+            if sub is not None:
+                break
+    except Exception:  # noqa: BLE001
+        return ""
+    if sub is None:
+        return ""
+    # Перехват submit (preventDefault - без навигации) + гасим POST (без заявки).
+    posted = {"n": 0}
+    try:
+        scope.evaluate(_JS_VAL_ARM)
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _route(route):
+        try:
+            req = route.request
+            if (req.method or "").upper() == "POST" and not _ds_это_трекер(req.url):
+                posted["n"] += 1
+                route.abort("failed")
+            else:
+                route.continue_()
+        except Exception:  # noqa: BLE001
+            try:
+                route.continue_()
+            except Exception:  # noqa: BLE001
+                pass
+
+    _clicked = False
+    try:
+        page.route("**/*", _route)
+    except Exception:  # noqa: BLE001
+        try:
+            scope.evaluate(_JS_VAL_DISARM)
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+    try:
+        try:
+            sub.click(timeout=4000)
+            _clicked = True
+        except Exception:  # noqa: BLE001
+            try:
+                sub.evaluate("b => b.click()")
+                _clicked = True
+            except Exception:  # noqa: BLE001
+                pass
+        if _clicked:
+            page.wait_for_timeout(1200)
+    finally:
+        try:
+            page.unroute("**/*", _route)
+        except Exception:  # noqa: BLE001
+            try:
+                page.unroute("**/*")
+            except Exception:  # noqa: BLE001
+                pass
+    # Пробовал ли клиент отправить (POST или submit-событие, которое мы перехватили).
+    try:
+        _submit_fired = bool(scope.evaluate("f => !!window.__valSub"))
+    except Exception:  # noqa: BLE001
+        _submit_fired = False
+    try:
+        scope.evaluate(_JS_VAL_DISARM)
+    except Exception:  # noqa: BLE001
+        pass
+    if not _clicked:
+        return ""
+    if posted["n"] > 0 or _submit_fired:
+        return "отправляется"   # клиент дал отправить без галочки → ✗
+    return "заблокировано"      # отправка не пошла - согласие обязательно → ✓
+
+
 def _parse_accept_types(accept: str):
     """accept-атрибут <input type=file> → (список типов, принимает_любые?).
     Пустой accept или '*'/'*/*' = загрузчик берёт ЛЮБЫЕ файлы. Чистая
@@ -6772,14 +6900,29 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _текст_согл = bool(_c213.get("текст_согласия")) and _c213["чекбоксов"] == 0
                 _ok213 = (_c213["чекбоксов"] >= 2 and not _c213["предустановлены"]
                           and _c213["ссылка"] and _c213["валидация"])
-                # «Без согласия не отправить» - три состояния:
-                #  - есть текст-согласие без чекбокса → неприменимо (пусто → «–»);
-                #  - обязательность подтверждена (required/checkValidity) → «да» (✓);
+                # РЕАЛЬНАЯ проба «Без согласия не отправить»: если есть чекбокс
+                # согласия и это НЕ форма заказа - реально пробуем отправить БЕЗ
+                # галочки (POST гасим, заявка не уходит). Даёт ТОЧНЫЙ вердикт
+                # (✓/✗) вместо статической догадки: отправилось → ✗, не пустило → ✓.
+                _без_согл = ""
+                if _c213['чекбоксов'] >= 1 and not безопасная_отправка and not _текст_согл:
+                    try:
+                        _без_согл = проба_без_согласия(form, page)
+                    except Exception:  # noqa: BLE001
+                        _без_согл = ""
+                # «Без согласия не отправить» - состояния (по убыванию точности):
+                #  - текст-согласие без чекбокса → неприменимо (пусто → «–»);
+                #  - реальная проба: отправилось без галочки → «нет» (✗);
+                #  - реальная проба: не пустило → «да» (✓);
+                #  - обязательность подтверждена статически (required) → «да» (✓);
                 #  - чекбокса нет вообще → «нет» (✗, отправить без согласия можно);
-                #  - чекбокс есть, но подтвердить не вышло → «не подтверждено» (⚠),
-                #    чтобы не выдавать ложный ✗ на формах с проверкой согласия в JS.
+                #  - чекбокс есть, но подтвердить не вышло → «не подтверждено» (⚠).
                 if _текст_согл:
                     _обяз_знач = ''
+                elif _без_согл == 'отправляется':
+                    _обяз_знач = 'нет'
+                elif _без_согл == 'заблокировано':
+                    _обяз_знач = 'да'
                 elif _c213['валидация']:
                     _обяз_знач = 'да'
                 elif _c213['чекбоксов'] == 0:
