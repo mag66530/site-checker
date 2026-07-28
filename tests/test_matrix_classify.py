@@ -75,8 +75,17 @@ def test_детектор_ошибки_оформления_ловит_неза�
     assert t.response_indicates_form_error("Заполните обязательные поля")
     assert t.response_indicates_form_error("Необходимо заполнить обязательные поля")
     assert t.response_indicates_form_error("Заказ не оформлен")
+    # Формулировка МПЭ («Рассчитать заказ»):
+    assert t.response_indicates_form_error(
+        "Не заполнены следующие обязательные поля: » «Адрес электронной почты»")
+    # Явная неудачная отправка обычной формы:
+    assert t.response_indicates_form_error("Не удалось отправить форму")
+    assert t.response_indicates_form_error("Ошибка при отправке")
     # Успешная страница ошибкой не считается (нет ложных срабатываний):
     assert t.response_indicates_form_error("Заказ сформирован. Спасибо!") == ""
+    # Браузерная подсказка одного поля НЕ считается ошибкой формы (иначе на
+    # промежуточных шагах были бы ложные ✗):
+    assert t.response_indicates_form_error("Заполните это поле") == ""
 
 
 def test_ошибка_на_шаге_далее_крест():
