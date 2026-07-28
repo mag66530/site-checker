@@ -169,6 +169,9 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     # строки, где приоритет == priority_keep. Для остальных проектов не задано.
     ci_priority = layout.get('priority_col')
     priority_keep = layout.get('priority_keep')
+    # per_city (МПК): один сайт на много городов - дедуп по (домен, ГОРОД), а не по
+    # одному домену, иначе все города metpromko.ru схлопнулись бы в один.
+    per_city = layout.get('per_city')
 
     def cell(row, idx):
         if idx is None or idx >= len(row):
@@ -237,10 +240,12 @@ def convert(project_id: str, xlsx_path: str) -> Path:
                 continue                     # спутник владельца ссылки - пропускаем
         if host in _EXCLUDE_HOSTS:          # исключённый домен - не проверяем нигде
             continue
-        # Дедуп по ДОМЕНУ: один город (владелец ссылки) на один сайт.
-        if not host or host in seen:
+        # Дедуп: обычно по ДОМЕНУ (один город-владелец ссылки на сайт), а для
+        # per_city (МПК) - по (ДОМЕН, ГОРОД), чтобы все города общего сайта остались.
+        _dkey = (host, city) if per_city else host
+        if not host or _dkey in seen:
             continue
-        seen.add(host)
+        seen.add(_dkey)
         # Сайт-«дубль» (переводная версия) - подписываем страной с пометкой,
         # чтобы в отчёте он не сливался с основным городом.
         city = _CITY_OVERRIDE.get(host, city)

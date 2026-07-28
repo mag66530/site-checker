@@ -68,20 +68,20 @@ KP_LAYOUT = {
         'country_col': 0,
         'city_col': 1,
     },
-    # МПК (Метпромко). Лист «адреса, телефоны» - это таблица РЕСУРСОВ (по строке
-    # на площадку): у каждого города несколько строк (свой мини-сайт + маркетплейсы
-    # pulscen/all.biz/blizko/satu.kz/tiu.ru…). Свой сайт помечен «приоритет
-    # ресурса» = 1 - только такие строки и берём (priority_col/priority_keep),
-    # маркетплейсы в проверку КП не идут. SEO/Реклама/Общий тут нет - единственная
-    # колонка «телефон» кладётся в слот «Общий». Домен - в колонке «субдомен /
-    # домен» (её находит _col по слову «домен»).
+    # МПК (Метпромко). Лист «карта присутствия»: чистая таблица - по СТРОКЕ на
+    # город (страна/город/адрес/индекс/домен/телефон/WhatsApp/email/филиал). У МПК
+    # НЕТ поддоменов по городам: один сайт metpromko.ru на все города РФ (+ домены
+    # СНГ .kz/.by/.kg/.uz/.az/.am). Поэтому per_city=True: НЕ схлопываем города в
+    # один домен (иначе оставался бы 1 город на metpromko.ru). Контакты города
+    # берём из пикера выбора города прямо в HTML (parse_city_picker) + адрес из
+    # блока филиала на /contacts (parse_branch_addresses) - см. variables_run.
+    # SEO/Реклама у МПК нет - единственная колонка «телефон» идёт в слот «Общий».
     'mpk': {
-        'sheet': 'адреса, телефоны',
+        'sheet': 'карта присутствия',
         'phone_seo':    ('seo', 'город'),      # нет таких колонок - слот пустой
         'phone_ad':     ('реклама', 'город'),  # нет таких колонок - слот пустой
         'phone_common': ('телефон',),          # единственная колонка «телефон»
-        'priority_col': 0,                     # «приоритет ресурса»: 1 = свой сайт
-        'priority_keep': 1,
+        'per_city': True,                      # один сайт на все города (пикер)
     },
     # МПИ (МетПромИнтекс). Лист «Карта присутсвия» (именно так, с опечаткой в
     # таблице). Структура как у МПЭ/СМУ: у каждого города свой поддомен, телефоны
@@ -539,6 +539,81 @@ def extract_site_contacts(html: str) -> dict:
         'whatsapp_anchor_urls': list(dict.fromkeys(wa_anchor_urls)),
         'full_text': text,
     }
+
+
+# ── Сайты «один домен на все города» (пикер выбора города) ────────────
+# У МПК (Метпромко) один сайт metpromko.ru обслуживает ВСЕ города РФ (+ отдельные
+# домены СНГ). Контакты каждого города НЕ на своём поддомене, а прямо в HTML:
+#   • список выбора города - ссылки <a class="selectCity"> с data-city / data-phone1
+#     (телефон) / data-email / data-phone2/phone3 (WhatsApp) - клик по городу лишь
+#     перекладывает эти значения в шапку (onclick="return false;", без запроса);
+#   • адрес города - в блоке филиала на /contacts: <h4>Город</h4><p>индекс, г. …</p>.
+# Мы разбираем эти данные из статического HTML и собираем «страницу города», по
+# которой обычная сверка check_variables работает как для отдельного поддомена.
+
+
+def parse_city_picker(html: str) -> dict:
+    """{город → {phone, email, whatsapp}} из ссылок <a class="selectCity" …> с
+    data-атрибутами (data-phone1/email/phone2). '' там, где атрибута нет."""
+    out = {}
+    for m in re.finditer(r'<a\b[^>]*\bclass="[^"]*selectCity[^"]*"[^>]*>', html or '', re.I):
+        tag = m.group(0)
+        d = dict(re.findall(r'data-([\w-]+)="([^"]*)"', tag))
+        city = (d.get('city') or '').strip()
+        if not city:
+            continue
+        out[city] = {
+            'phone': (d.get('phone1') or '').strip(),
+            'email': (d.get('email') or '').strip(),
+            'whatsapp': (d.get('phone2') or d.get('phone3') or '').strip(),
+        }
+    return out
+
+
+def parse_branch_addresses(html: str) -> dict:
+    """{город → адрес} из блоков филиалов на «Контактах»:
+    <h4>Барнаул</h4><p>656038, г. Барнаул, Комсомольский проспект, 120<br>Время…</p>.
+    Берём текст <p> до <br>/«Время работы»; служебные <h4> (напр. «Филиалы в
+    России») отсеиваем - у них в теле нет номера дома/«г.»."""
+    out = {}
+    for m in re.finditer(r'<h4\b[^>]*>([^<]{2,40})</h4>\s*<p\b[^>]*>(.*?)(?:<br|Время\s+работы)',
+                         html or '', re.S | re.I):
+        city = re.sub(r'\s+', ' ', m.group(1)).strip()
+        body = re.sub(r'<[^>]+>', ' ', m.group(2))
+        body = body.replace('\xa0', ' ').replace('&nbsp;', ' ')
+        body = re.sub(r'\s+', ' ', body).strip(' ,;')
+        # Настоящий адрес: есть номер дома (цифра) и «г.»/маркер улицы.
+        if not body or not re.search(r'\d', body):
+            continue
+        if not (re.search(r'\bг\.', body) or _RE_ADDR_STREET.search(body)):
+            continue
+        out.setdefault(city, body)
+    return out
+
+
+def build_city_page(city: str, city_data: Optional[dict], address: str = '') -> str:
+    """Синтетическая «страница города» из данных пикера/филиала - чтобы обычная
+    сверка (check_variables + проверка города) работала как для отдельного
+    поддомена. Кладём ИМЯ ГОРОДА (для проверки «город на сайте»), телефон (tel:),
+    почту (mailto:), WhatsApp (wa.me) и адрес (метка «Адрес:»). Никаких ДРУГИХ
+    городов на странице нет - «чужой город» ложно не сработает."""
+    city = (city or '').strip()
+    d = city_data or {}
+    parts = [f'<title>МетПромКо в городе {city}</title>',
+             f'<header><div class="city">{city}</div>']
+    ph = (d.get('phone') or '').strip()
+    if ph:
+        parts.append(f'<a href="tel:{ph}">{ph}</a>')
+    em = (d.get('email') or '').strip()
+    if em:
+        parts.append(f'<a href="mailto:{em}">{em}</a>')
+    wa = re.sub(r'\D', '', d.get('whatsapp') or '')
+    if wa:
+        parts.append(f'<a href="https://wa.me/{wa}">Чат в WhatsApp</a>')
+    parts.append('</header>')
+    if address:
+        parts.append(f'<main><p>Адрес: {address}</p></main>')
+    return ''.join(parts)
 
 
 # ── Главная функция сверки ───────────────────────────────────────────

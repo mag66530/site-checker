@@ -443,6 +443,48 @@ def _только_почта_для_перевода(city: str, fields: list) ->
     return fields
 
 
+# ── per_city (МПК): один сайт на все города через пикер выбора города ──
+
+
+def _per_city(project) -> bool:
+    """Проект-«один сайт на все города» (МПК): контакты города берём из пикера
+    выбора города в HTML, а не с отдельного поддомена."""
+    import kp as _kp
+    return bool(_kp.KP_LAYOUT.get(project, {}).get('per_city'))
+
+
+def _norm_city_name(s: str) -> str:
+    return re.sub(r'\s+', ' ', (s or '')).strip().lower().replace('ё', 'е')
+
+
+def _by_city(mapping: dict, city: str):
+    """Значение из {город: …} по имени города - устойчиво к регистру/ё/пробелам."""
+    if not mapping:
+        return None
+    if city in mapping:
+        return mapping[city]
+    n = _norm_city_name(city)
+    for k, v in mapping.items():
+        if _norm_city_name(k) == n:
+            return v
+    return None
+
+
+def _load_branch_addresses(dom, main_html, proxy, log):
+    """Адреса филиалов per_city-проекта лежат на «Контактах» (блоки
+    <h4>Город</h4><p>адрес</p>). Грузим «Контакты» ОДИН раз на домен и разбираем.
+    {} если не удалось."""
+    import kp as _kp
+    cpath = _find_contacts_path(main_html, dom) or '/contacts/'
+    for _try in range(2):
+        ch, cerr = _fetch_one(dom, _proxy_parts(proxy), path=cpath)
+        if ch and not cerr:
+            return _kp.parse_branch_addresses(ch)
+        time.sleep(1.0)
+    log(f'    {dom}: не удалось загрузить «{cpath}» - адреса филиалов не проверю')
+    return {}
+
+
 def _merge_подмена(fld, r, from_kp, target, kind, метка, dial='7') -> None:
     """Вписать результат браузерной пробы подмены в поле слота (реклама/SEO).
     r - {status, shown}; from_kp - номер брали из КП (True) или из кода (False);
@@ -668,6 +710,9 @@ def main() -> int:
                    f'город={row.city!r}, адрес={(row.address or "")[:30]!r}')
     результаты = []
     _n_fail = 0
+    # per_city (МПК): один сайт обслуживает все города через пикер выбора города.
+    _per_city_mode = _per_city(a.project)
+    _addr_cache = {}          # домен → {город: адрес филиала} (грузим 1 раз на домен)
     for dom, row in domains:
         html, err = html_map.get(dom, ("", "не загружено"))
         # ЛЮБАЯ ошибка загрузки (HTTP 500 / обрыв соединения / таймаут / неполная
@@ -683,6 +728,39 @@ def main() -> int:
             _n_fail += 1
             результаты.append({"domain": dom, "city": row.city,
                                "country": row.country, "error": err, "fields": []})
+            continue
+        # per_city (МПК): контакты города берём из пикера выбора города (телефон/
+        # почта/WhatsApp прямо в HTML) + адрес филиала со страницы «Контакты».
+        # Собираем «страницу города» и сверяем её обычным механизмом. Если у домена
+        # пикера нет (одногородний сайт СНГ) - проверяем страницу как есть.
+        if _per_city_mode:
+            _pick = kpmod.parse_city_picker(html)
+            if _pick:
+                if dom not in _addr_cache:
+                    _addr_cache[dom] = _load_branch_addresses(dom, html, proxy, _stamp)
+                _cd = _by_city(_pick, row.city)
+                _ad = _by_city(_addr_cache[dom], row.city) or ''
+                _syn = kpmod.build_city_page(row.city, _cd, _ad)
+                # «Город»: у общего сайта города различаются НЕ доменом, а строкой в
+                # списке выбора города (пикере). Проверяем, что город из КП в этом
+                # списке ЕСТЬ (есть его данные) - тогда ✓; нет = ✗ (город потерян).
+                if _cd:
+                    _gorod = {"field": "Город", "expected": row.city,
+                              "found": "есть на сайте", "status": "ok",
+                              "note": "город есть в списке городов сайта"}
+                else:
+                    _gorod = {"field": "Город", "expected": row.city,
+                              "found": "нет в списке городов", "status": "bug",
+                              "note": "города из КП нет в списке выбора города на сайте"}
+            else:
+                # Домен без пикера (одногородний сайт СНГ) - проверяем как обычно.
+                _syn = html
+                _gorod, _ = _регион_статусы(html, kpmod._norm_host(dom), ctx)
+            var = kpmod.check_variables(_syn, dom, row=row)
+            var["fields"] = [_gorod] + var["fields"]
+            var["fields"] = _только_почта_для_перевода(row.city, var["fields"])
+            var["error"] = ""
+            результаты.append(var)
             continue
         var = kpmod.check_variables(html, dom, row=row)
         # Адрес не нашли в шапке/подвале главной? У части проектов (МПЭ/mepen) он
