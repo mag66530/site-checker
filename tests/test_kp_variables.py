@@ -915,4 +915,4 @@ def test_mpk_three_way_check():
     header3 = {'phone': '+7 (843) 216 62 83', 'email': 'kazan@metpromko.ru', 'whatsapp': ''}
     by3 = {f['field']: f for f in kp.check_variables_mpk(row2, header3, branch3)['fields']}
     assert by3['Тел. Общий Город']['status'] == 'bug'
-    assert 'контакт' in by3['Тел. Общий Город']['note']
+    assert 'на сайте' in by3['Тел. Общий Город']['note']

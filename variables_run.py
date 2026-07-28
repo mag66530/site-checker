@@ -716,6 +716,17 @@ def main() -> int:
     # per_city (МПК): один сайт обслуживает все города через пикер выбора города.
     _per_city_mode = _per_city(a.project)
     _branch_cache = {}        # домен → {город: {address, phones, email, whatsapp}} (1 раз/домен)
+    # Корневой домен (metpromko.ru) в «Контактах» держит ВСЕ города с адресами -
+    # используем как master-fallback, если у домена города (напр. СНГ .az/.am) блок
+    # филиала распарсился неполно (адрес не нашёлся).
+    _root_dom = ''
+    if _per_city_mode:
+        try:
+            _rd = json.loads((ROOT / 'projects' / f'{a.project}.json')
+                             .read_text(encoding='utf-8')).get('root_domain', '')
+            _root_dom = kpmod._norm_host(_rd)
+        except Exception:  # noqa: BLE001
+            _root_dom = ''
     for dom, row in domains:
         html, err = html_map.get(dom, ("", "не загружено"))
         # ЛЮБАЯ ошибка загрузки (HTTP 500 / обрыв соединения / таймаут / неполная
@@ -744,8 +755,22 @@ def main() -> int:
             # «зелёное», а реальные различия шапка/контакты прятались).
             if dom not in _branch_cache:
                 _branch_cache[dom] = _load_branches(dom, html, proxy, _stamp)
+            # master-fallback: /contacts корневого домена (там все города).
+            if _root_dom and _root_dom not in _branch_cache:
+                _rh = html_map.get(_root_dom, ('', ''))[0]
+                _branch_cache[_root_dom] = (_load_branches(_root_dom, _rh, proxy, _stamp)
+                                            if _rh else {})
             _pick = kpmod.parse_city_picker(html)
-            _br = _by_city(_branch_cache[dom], row.city)   # контакты (стата)
+            # Контакты (стата): блок филиала домена; пропуски (напр. адрес не
+            # распарсился у СНГ) добираем из корневого домена metpromko.ru.
+            _own_b = _by_city(_branch_cache.get(dom), row.city) or {}
+            _root_b = _by_city(_branch_cache.get(_root_dom), row.city) or {}
+            _br = None
+            if _own_b or _root_b:
+                _br = {'address': _own_b.get('address') or _root_b.get('address', ''),
+                       'phones': _own_b.get('phones') or _root_b.get('phones', []),
+                       'emails': _own_b.get('emails') or _root_b.get('emails', []),
+                       'whatsapp': _own_b.get('whatsapp') or _root_b.get('whatsapp', '')}
             _pk = _by_city(_pick, row.city)                # шапка (пикер)
             if _br or _pk:
                 var = kpmod.check_variables_mpk(row, _pk or {}, _br or {})

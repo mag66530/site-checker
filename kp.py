@@ -658,10 +658,10 @@ def _mpk_three_way(kp_norms, header_norms, contacts_norms, fmt):
     h_disp = ", ".join(fmt(x) for x in dict.fromkeys(hv)) if hv else "–"
     c_disp = ", ".join(fmt(x) for x in dict.fromkeys(cv)) if cv else "–"
     if h_present and not h_match and (not c_present or c_match):
-        return "bug", h_disp, "в шапке сайта не совпадает с КП (в контактах — как в КП)"
+        return "bug", h_disp, "в шапке сайта не совпадает с КП"
     if c_present and not c_match and (not h_present or h_match):
-        return "bug", c_disp, "на сайте (в контактах) не совпадает с КП"
-    return "bug", (c_disp if c_present else h_disp), "на сайте не совпадает с КП (и в шапке, и в контактах)"
+        return "bug", c_disp, "на сайте не совпадает с КП"
+    return "bug", (c_disp if c_present else h_disp), "на сайте не совпадает с КП"
 
 
 def check_variables_mpk(row: 'KPRow', header: dict, branch: dict) -> dict:
