@@ -198,20 +198,6 @@ def _project_has_admin(project: str) -> bool:
         return False
 
 
-def _project_uses_proxy(project: str) -> bool:
-    """True, если у проекта в config.py задан ИСПОЛЬЗОВАТЬ_ПРОКСИ (сайт режет
-    прямое подключение, напр. Метпромко) - тогда галочка «Вкл. Прокси» стартует
-    включённой. Остальным проектам флага нет - прокси по умолчанию выключен."""
-    p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
-    try:
-        spec = importlib.util.spec_from_file_location(f'cfg_prx_{project}', p)
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)
-        return bool(getattr(m, 'ИСПОЛЬЗОВАТЬ_ПРОКСИ', False))
-    except Exception:
-        return False
-
-
 def _count_expected(project: str) -> int:
     """Сколько форм ожидается проверить (для шкалы прогресса). Best-effort:
     считаем включённые формы/модалки + шаги-формы в сценариях. Если не вышло - 0."""
@@ -1131,16 +1117,16 @@ if _forms_none:
 if _cities_none:
     st.warning('Не выбрано ни одного домена/города - отметь хотя бы один, чтобы запустить.')
 
-# Прокси + проверка доступности сайта (над кнопкой запуска)
+# Прокси. Поля и проверка доступа - только на странице «Настройки проекта».
+# pid_key - id ЭТОЙ страницы (напр. 'metpromko'), а личный кабинет и
+# projects/*.json знают проект как 'mpk' - поэтому отображаем через
+# canonical_project_id, иначе настройки искались бы под чужим именем.
 _forms_proxy = None
 try:
-    from site_access import render_proxy_access
-    _forms_proxy = render_proxy_access(
-        f'forms_{pid_key}',
-        default_url=f"https://{proj['domain']}/", pid=pid_key,
-        default_on=_project_uses_proxy(pid_key))
+    from proxy_config import canonical_project_id, proxy_for_project
+    _forms_proxy = proxy_for_project(canonical_project_id(pid_key))
 except Exception as _e_pa:
-    st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
+    st.caption(f'⚠ Прокси не определился: {_e_pa}')
 
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:

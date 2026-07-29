@@ -28,6 +28,7 @@ import time
 
 from product_links import collect_product_links, save_product_links
 from sources import load_project_config, load_sources, list_projects
+from proxy_config import proxy_for_project
 
 
 def run_for_project(project_id: str, proxy: str | None, concurrency: int) -> bool:
@@ -36,9 +37,17 @@ def run_for_project(project_id: str, proxy: str | None, concurrency: int) -> boo
     total = len(src.categories)
     print(f'\n=== {cfg["name"]} ===')
     print(f'Категорий: {total}, фильтров: {len(src.filters)}')
+    # Явный --proxy сильнее автоматики (ручной запуск может временно
+    # проверить другой адрес). Если не передан - берём из единого механизма
+    # (proxy_config.py): БД личного кабинета → proxy_url_<id> → proxy_url →
+    # HTTP_PROXY, с уважением к use_proxy проекта - тот же порядок
+    # источников, что и у остальных прогонов/страниц.
+    if not proxy:
+        proxy = proxy_for_project(project_id)
     if cfg.get('use_proxy') and not proxy:
-        print('⚠ В конфиге проекта use_proxy=true, а прокси не задан - '
-              'с зарубежного IP сайт может блокировать. Продолжаю без прокси.')
+        print('⚠ В конфиге проекта use_proxy=true, а прокси не задан (ни --proxy, '
+              'ни личный кабинет/секреты/HTTP_PROXY) - с зарубежного IP сайт может '
+              'блокировать. Продолжаю без прокси.')
 
     started = time.time()
     last_shown = {'pct': -1}

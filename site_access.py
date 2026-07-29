@@ -1,19 +1,19 @@
 """
-site_access.py - общий UI-блок для страниц чек-листов: поле прокси и
-проверка доступности сайта (реальный IP / нужен ли прокси).
+site_access.py - проверка доступности сайта (реальный IP / нужен ли прокси).
 
-Ставится НАД кнопкой «Запустить проверку». Один компонент на все страницы
-(кроме автокликеров) - чтобы не дублировать. render_proxy_access(...)
-рисует:
-  • поле ввода прокси + чекбокс «Вкл. Прокси» (мастер-выключатель:
-    выключен - прокси не используется, даже если поле заполнено);
-  • один свёрнутый блок «Доступ к сайту» с вердиктом в заголовке
-    (напрямую / через прокси / прокси не меняет адрес), а внутри: какой
-    прокси активен, два адреса выхода рядом (напрямую и через прокси),
-    цветной итог и разовая проверка конкретного URL (статус/время/Server).
+render_access_check(...) - блок «Доступ к сайту» на странице «Настройки
+проекта». Показывает, какой прокси активен, и по кнопке сверяет адрес выхода
+напрямую и через прокси + разово дёргает конкретный URL (статус/время/WAF).
 
-Прокси по умолчанию берётся из секретов проекта; поле позволяет временно
-переопределить/протестировать другой.
+Полей прокси здесь НЕТ: адрес задаётся в форме настроек проекта выше,
+включается флагом use_proxy из projects/<pid>.json. Раньше такой блок вместе
+с полем ввода висел над кнопкой «Запустить проверку» на четырёх страницах
+чек-листов (render_proxy_access) - его убрали, чтобы настройки прокси были
+ровно в одном месте, а не дублировались на каждой странице прогона.
+
+Побочный эффект переезда: временно подставить другой прокси, не сохраняя его
+в настройки, больше нельзя. Если понадобится - это отдельное поле на странице
+настроек, а не возврат блока на страницы прогона.
 """
 import re
 import time
@@ -31,32 +31,14 @@ _IP_SERVICES = (
 )
 
 
-def _secret(key):
-    try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            return st.secrets[key]
-    except Exception:
-        pass
-    return None
-
-
 def secret_proxy(pid: str = "") -> str | None:
     """Прокси: настройки проекта из кабинета (БД) → proxy_url_<pid> →
-    proxy_url → env HTTP_PROXY."""
-    import os
-    if pid:
-        try:
-            import auth
-            v = auth.project_setting(pid, "proxy_url")
-            if v:
-                return v
-        except Exception:
-            pass
-        v = _secret(f"proxy_url_{pid}")
-        if v:
-            return v
-    return (_secret("proxy_url") or os.environ.get("HTTP_PROXY")
-            or os.environ.get("http_proxy"))
+    proxy_url → env HTTP_PROXY. Логика вынесена в proxy_config.py - её же
+    используют фоновые прогоны (runner_30min.py, run_scheduled.py и т.п.),
+    которые исполняются отдельным процессом без Streamlit, - так адрес
+    прокси проекта читается ОДНИМ и тем же способом везде."""
+    from proxy_config import resolve_proxy
+    return resolve_proxy(pid)
 
 
 def _mask(proxy: str) -> str:
@@ -131,166 +113,76 @@ def probe_site(url: str, proxy: str | None = None, timeout: int = 12) -> dict:
                 "snippet": "", "error": f"{kind} ({e})"}
 
 
-def render_proxy_access(key_prefix: str, default_url: str = "",
-                        pid: str = "", default_on: bool | None = None) -> str | None:
-    """Рисует блок (поле прокси + проверка доступа) НАД кнопкой запуска.
-    Возвращает эффективный прокси (переопределение или из секретов, либо
-    None, если чекбокс выключен) - страница может использовать его в прогоне.
+def render_access_check(pid: str, default_url: str = "",
+                        known_proxy: str | None = None) -> None:
+    """Проверка доступа к сайту для страницы «Настройки проекта».
 
-    key_prefix - уникальный префикс ключей session_state на страницу.
-    default_on - стартовое состояние галочки «Вкл. Прокси»: None (по умолчанию) -
-    как раньше, включена при наличии секрета; True/False - явно задать (напр. на
-    «Проверке форм» прокси нужен только части проектов, остальным - выключен)."""
-    sec_proxy = secret_proxy(pid)
+    Здесь НЕТ поля прокси и мастер-выключателя - в отличие от старого блока,
+    который стоял на страницах чек-листов (он убран: настройки прокси живут
+    в одном месте). Адрес задаётся выше в форме настроек, включается флагом
+    use_proxy проекта. Это только диагностика «что видно снаружи».
 
-    # ── Текущий IP напрямую (кэшируем на сессию - не дёргаем сеть на каждый rerun) ──
-    _ip_key = f"{key_prefix}_direct_ip"
-    if _ip_key not in st.session_state:
-        st.session_state[_ip_key] = outbound_ip(None)
-    _ip, _ms, _err = st.session_state[_ip_key]
+    known_proxy - адрес, уже прочитанный вызывающей страницей. Передавайте
+    его: иначе на КАЖДУЮ отрисовку уйдёт лишний запрос в базу за той же
+    настройкой, которую страница только что загрузила.
 
-    # Отступ СВЕРХУ: отделяем рамку прокси от галочек проверок над ней (иначе
-    # блок «слипается» с чекбоксами и читается как их продолжение).
-    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+    Сеть дёргаем ТОЛЬКО по кнопке: страница настроек открывается часто, и
+    ждать три сетевых запроса при каждом заходе незачем.
+    """
+    from proxy_config import project_use_proxy, resolve_proxy
 
-    # ── Весь блок - в одной рамке (st.container(border)): поле прокси, чекбокс и
-    #    диагностика читаются как единый компонент, а не два разных пункта. ──
+    use_proxy = project_use_proxy(pid)
+    # Адрес из настроек проекта знаем от вызывающего; лезем в общий механизм
+    # (секреты/env) только если там пусто.
+    proxy = (known_proxy or resolve_proxy(pid)) if use_proxy else None
+
     with st.container(border=True):
-        # Поле прокси + чекбокс (управление прогоном - остаётся на виду).
-        c1, c2 = st.columns([4, 1])
-        proxy_field = c1.text_input(
-            "Прокси", key=f"{key_prefix}_proxy_field",
-            placeholder="http://user:pass@host:port (пусто = без прокси)",
-            label_visibility="collapsed")
-        _chk_default = bool(sec_proxy) if default_on is None else bool(default_on)
-        use_proxy = c2.checkbox("Вкл. Прокси", key=f"{key_prefix}_proxy_on",
-                                value=_chk_default)
-
-        field = (proxy_field or "").strip()
-        if use_proxy:
-            effective = field or sec_proxy or None
-        else:
-            effective = None
-        st.session_state[f"{key_prefix}_effective_proxy"] = effective
-
-        # IP через прокси: кэш по значению эффективного прокси (один запрос на
-        # прокси за сессию). Показывает, реально ли прокси подменяет адрес.
-        _pip = _pms = _perr = None
-        if effective:
-            _pip_key = f"{key_prefix}_proxy_ip::{effective}"
-            if _pip_key not in st.session_state:
-                st.session_state[_pip_key] = outbound_ip(effective)
-            _pip, _pms, _perr = st.session_state[_pip_key]
-
-        # Единый вердикт: как сейчас идут запросы (в заголовок и в цветную плашку).
-        _same_ip = bool(effective and _pip and _ip and _pip == _ip)
+        st.markdown("**Доступ к сайту**")
         if not use_proxy:
-            _tag, _kind = "напрямую", "off"
-        elif not effective:
-            _tag, _kind = "⚠ прокси не задан", "warn"
-        elif _same_ip:
-            _tag, _kind = "⚠ прокси не меняет адрес", "warn"
-        elif _pip:
-            _tag, _kind = "через прокси", "ok"
+            st.caption("У проекта прокси выключен (`use_proxy: false` в "
+                       "`projects/%s.json`) - страницы качаются напрямую." % pid)
+        elif proxy:
+            st.caption(f"Прокси включён, активен: `{_mask(proxy)}`")
         else:
-            _tag, _kind = "⚠ прокси не проверен", "warn"
+            st.caption("Прокси включён (`use_proxy: true`), но адрес не задан "
+                       "ни здесь, ни в секретах - часть страниц не загрузится.")
 
-        # Диагностика внутри той же рамки. По умолчанию СВЁРНУТА при заходе на
-        # проверки (не мозолит глаза) - раскрывается по клику вручную.
-        with st.expander(f"🔒 Доступ к сайту · {_tag}", expanded=False):
-            # 1) Какой прокси активен (маскируем пароль).
-            if not use_proxy:
-                st.caption("Прокси выключен – все запросы идут напрямую.")
-            elif not effective:
-                st.caption("⚠ Прокси включён, но не задан (ни поле, ни секрет) – "
-                           "запросы пойдут напрямую.")
+        url = st.text_input("Адрес для проверки", value=default_url,
+                            key=f"ac_url_{pid}",
+                            placeholder="https://example.ru/")
+        if not st.button("Проверить доступ", key=f"ac_go_{pid}"):
+            return
+
+        with st.spinner("Проверяю…"):
+            direct_ip, direct_ms, direct_err = outbound_ip(None)
+            proxy_ip = proxy_ms = proxy_err = None
+            if proxy:
+                proxy_ip, proxy_ms, proxy_err = outbound_ip(proxy)
+            probe = probe_site(url, proxy) if url else None
+
+        c1, c2 = st.columns(2)
+        c1.metric("IP напрямую", direct_ip or "—",
+                  help=direct_err or (f"{direct_ms} мс" if direct_ms else None))
+        c2.metric("IP через прокси", proxy_ip or ("—" if proxy else "прокси нет"),
+                  help=proxy_err or (f"{proxy_ms} мс" if proxy_ms else None))
+
+        # Главный вопрос блока: реально ли прокси меняет адрес выхода. Если нет -
+        # он настроен, но не работает, и это надо увидеть сразу.
+        if proxy and direct_ip and proxy_ip:
+            if direct_ip == proxy_ip:
+                st.warning("Прокси не меняет адрес выхода - похоже, он не "
+                           "применяется. Сайт увидит тот же IP.")
             else:
-                _src = "введён вручную" if field else "из секретов проекта"
-                st.caption(f"Прокси: `{_mask(effective)}` · {_src}")
+                st.success("Прокси работает: адрес выхода отличается от прямого.")
 
-            # 2) Два адреса выхода рядом - сразу видно, подменяет ли прокси IP.
-            ca, cb = st.columns(2)
-            ca.markdown("🌐 **Напрямую**  \n"
-                        + (f"`{_ip}` · {_ms} мс" if _ip else f"_не определён ({_err})_"))
-            if not effective:
-                _cell = "_прокси выключен_"
-            elif _pip:
-                _cell = f"`{_pip}` · {_pms} мс"
-            else:
-                _cell = f"_не определён ({_perr})_"
-            cb.markdown(f"🛡 **Через прокси**  \n{_cell}")
-
-            # 3) Цветной итог одной фразой.
-            if _kind == "off":
-                st.info("Запросы идут напрямую – прокси выключен.")
-            elif not effective:
-                st.warning("Прокси включён, но адрес не задан – фактически идём напрямую.")
-            elif _same_ip:
-                st.warning("Прокси включён, но адрес выхода не меняется – проверьте "
-                           "строку прокси или секрет.")
-            elif _pip:
-                st.success(f"Прокси работает – выход подменяется на `{_pip}`.")
-            else:
-                st.warning(f"Прокси включён, но проверить адрес не удалось ({_perr}).")
-
-            st.divider()
-
-            # 4) Разовая проверка конкретного сайта по текущим настройкам.
-            st.markdown("**Проверить конкретный сайт**")
-            url = st.text_input("URL для проверки", value=default_url or "",
-                                key=f"{key_prefix}_probe_url",
-                                placeholder="https://example.ru/",
-                                label_visibility="collapsed",
-                                help="Один запрос к указанному адресу ТЕКУЩИМИ настройками "
-                                     "прокси - тем же способом, каким пойдёт основная "
-                                     "проверка. Показывает, доступен ли сайт (HTTP 200), "
-                                     "какой сервер и сколько заняло, - чтобы заранее понять, "
-                                     "не блокирует ли сайт наш IP/регион, не запуская "
-                                     "полный прогон.")
-            if st.button("Проверить доступ", key=f"{key_prefix}_probe_btn"):
-                _u = url.strip()
-                if not _u:
-                    st.caption("URL не задан – впишите адрес для проверки.")
-                else:
-                    with st.spinner("Проверяю доступ…"):
-                        site = probe_site(_u, effective)
-                    _pm = "через прокси" if effective else "напрямую"
-                    if site["error"]:
-                        st.error(f"❌ Не доступен ({_pm}) – {site['error']} · "
-                                 f"{site['ms']} мс")
-                    elif site["status"] == 200:
-                        st.success(f"✅ Доступен – HTTP 200 ({_pm}) · "
-                                   f"Server {site['server'] or '–'} · {site['ms']} мс")
-                    else:
-                        # На не-200 показываем Server и слой защиты (WAF): по ним
-                        # видно, КТО режет - origin nginx сайта или анти-DDoS перед
-                        # ним. Это подсказывает, ГДЕ должен стоять whitelist IP.
-                        _srv = f" · Server {site['server']}" if site.get("server") else ""
-                        _waf = f" · защита: {site['waf']}" if site.get("waf") else ""
-                        st.error(f"❌ Не доступен – HTTP {site['status']} ({_pm})"
-                                 f"{_srv}{_waf} · {site['ms']} мс")
-                        if site["status"] in (401, 403, 451):
-                            if effective is None:
-                                st.caption("Сайт блокирует этот IP — включите прокси.")
-                            elif site.get("waf"):
-                                st.caption(
-                                    f"Режет защита {site['waf']} ПЕРЕД сайтом, а не "
-                                    f"origin. Если IP прокси в белом списке — "
-                                    f"whitelist надо ставить на {site['waf']}, а не "
-                                    f"только в nginx сайта.")
-                            else:
-                                st.caption(
-                                    "IP прокси блокируется даже при whitelist. "
-                                    "Частые причины: прокси палится заголовками "
-                                    "Via / X-Forwarded-For (нужен анонимный/elite "
-                                    "или SOCKS5-прокси), либо whitelist добавлен не "
-                                    "на том слое (CDN/WAF перед сайтом), либо exit-IP "
-                                    "прокси не тот, что внесли (прокси ротирует IP).")
-                        if site.get("snippet"):
-                            st.caption(f"Ответ сайта: {site['snippet']}")
-
-    # Отступ СНИЗУ: отделяем рамку прокси от кнопки «Запустить проверку» под ней
-    # (иначе рамка и чёрная кнопка «слипаются»).
-    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
-
-    return effective
+        if probe is None:
+            return
+        if probe["error"]:
+            st.error(f"Сайт не ответил: {probe['error']}")
+        elif probe["status"] == 200:
+            st.success(f"200 OK · {probe['ms']} мс · {probe['size']} байт"
+                       + (f" · Server: {probe['server']}" if probe["server"] else ""))
+        else:
+            st.error(f"HTTP {probe['status']} · {probe['ms']} мс"
+                     + (f" · режет {probe['waf']}" if probe["waf"] else "")
+                     + (f"\n\n{probe['snippet']}" if probe["snippet"] else ""))

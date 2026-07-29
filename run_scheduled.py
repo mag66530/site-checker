@@ -5,7 +5,10 @@ run_scheduled.py - автономный прогон чек-листа по ра
 Секреты читаются из переменных окружения (в GitHub Action - из repository Secrets),
 имена ключей - те же, что в st.secrets приложения:
 
-  proxy_url                          - прокси (обязателен для ИМП; датацентр-IP блокируется)
+  proxy_url                          - общий прокси на все проекты (обязателен для ИМП;
+                                       датацентр-IP блокируется)
+  proxy_url_<pid>                    - свой прокси на конкретный проект (сильнее общего
+                                       proxy_url - см. proxy_config.py)
   telegram_bot_token                 - токен бота для отправки отчёта
   telegram_recipients_<pid>          - получатель(и) chat_id, через запятую/пробел
   metrika_<pid>_email / _password    - почта Метрики/Вебмастера/Я.Бизнес/2ГИС
@@ -61,9 +64,14 @@ def _recipients(pid: str) -> list[str]:
 
 
 def build_creds(pid: str) -> dict:
-    """Собрать creds из окружения - та же структура, что готовит UI из st.secrets."""
+    """Собрать creds из окружения - та же структура, что готовит UI из st.secrets.
+
+    proxy_url: свой адрес на проект (secret/env proxy_url_<pid>) - приоритет,
+    иначе общий proxy_url - тот же порядок, что и в proxy_config.resolve_proxy
+    (БД личного кабинета сюда не заглядывает - её тут просто нет: этот скрипт
+    гоняется автономно из GitHub Actions/CLI без Streamlit-рантайма)."""
     return {
-        'proxy_url': _env('proxy_url'),
+        'proxy_url': _env(f'proxy_url_{pid}') or _env('proxy_url'),
         'tg_token': _env('telegram_bot_token'),
         'tg_recipients': _recipients(pid),
         'metrika': _pair(MAILBOX_CONFIG, pid),

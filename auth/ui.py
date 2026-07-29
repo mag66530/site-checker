@@ -104,6 +104,19 @@ def project_label(key: str) -> str:
     return key
 
 
+def project_main_url(key: str) -> str:
+    """Главная страница проекта - подставляем в проверку доступа к сайту,
+    чтобы не заставлять вбивать адрес руками."""
+    try:
+        with open(os.path.join("projects", f"{key}.json"), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return ""
+    if data.get("main_url"):
+        return data["main_url"]
+    return f"https://{data['root_domain']}/" if data.get("root_domain") else ""
+
+
 def _app_base_url() -> str:
     try:
         return str(st.secrets["app"]["base_url"]).rstrip("/")
@@ -782,6 +795,18 @@ def project_settings_page() -> None:
                 st.success(f"✅ Настройки проекта «{project_label(pid)}» сохранены")
             except Exception as e:
                 st.error(f"❌ Не удалось сохранить: {e}")
+
+    # Проверка доступа к сайту - здесь, рядом с полем прокси. Раньше этот блок
+    # висел на каждой странице чек-листов; убрали, чтобы настройки прокси были
+    # ровно в одном месте.
+    try:
+        from site_access import render_access_check
+        # cur уже загружен выше - передаём готовый адрес, чтобы блок не ходил
+        # в базу второй раз за той же настройкой.
+        render_access_check(pid, default_url=project_main_url(pid),
+                            known_proxy=cur.get("proxy_url") or None)
+    except Exception as e:  # noqa: BLE001
+        st.caption(f"⚠ Блок проверки доступа не загрузился: {e}")
 
 
 def admin_panel_page() -> None:

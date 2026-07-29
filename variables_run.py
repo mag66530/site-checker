@@ -27,6 +27,8 @@ from types import SimpleNamespace
 ROOT = Path(__file__).parent
 WORK_ROOT = ROOT / 'cache' / 'variables'
 
+from proxy_config import project_use_proxy, resolve_proxy
+
 PROJECT_NAMES = {
     'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром',
     'mpe': 'МПЭ - Мепэн', 'avia': 'АПС - Авиапромсталь',
@@ -46,14 +48,6 @@ _COLOR = {"ok": "1E8E3E", "ok_set": "1E8E3E", "bug": "C62828",
 
 def _stamp(msg):
     print(f'[{datetime.now().strftime("%H:%M:%S")}] {msg}', flush=True)
-
-
-def _use_proxy(project: str) -> bool:
-    p = ROOT / 'projects' / f'{project}.json'
-    try:
-        return bool(json.loads(p.read_text(encoding='utf-8')).get('use_proxy'))
-    except Exception:
-        return False
 
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -658,11 +652,18 @@ def main() -> int:
     # Прокси используем ТОЛЬКО для проектов с use_proxy=true (напр. ИМП, который
     # блокирует зарубежный IP). СМУ/МПЭ (use_proxy=false) качаем напрямую - им
     # прокси не нужен, а сломанный proxy_url иначе давал бы им ложный 407.
+    # Адрес - env proxy_url (страница «Проверка КП» уже кладёт сюда эффективный
+    # прокси из личного кабинета/секретов перед запуском); если запущено
+    # напрямую из CLI без env - падаем на единый механизм (proxy_config.py: БД
+    # личного кабинета → proxy_url_<pid> → proxy_url → HTTP_PROXY).
     proxy = (os.environ.get('proxy_url') or '').strip() or None
-    if _use_proxy(a.project):
+    if project_use_proxy(a.project):
         if not proxy:
-            _stamp('⚠️ У проекта use_proxy=true, а proxy_url не задан - '
-                   'зарубежный IP может блокироваться (будут ошибки загрузки).')
+            proxy = resolve_proxy(a.project)
+        if not proxy:
+            _stamp('⚠️ У проекта use_proxy=true, а прокси не задан (ни в env, ни в '
+                   'личном кабинете/секретах) - зарубежный IP может блокироваться '
+                   '(будут ошибки загрузки).')
     else:
         if proxy:
             _stamp(f'Проект {a.project}: use_proxy=false - страницы качаем '

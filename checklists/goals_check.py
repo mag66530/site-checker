@@ -269,20 +269,15 @@ if not _alive:
         st.error(f'Браузер не готов: {_bmsg}. Проверка целей работает локально '
                  f'или на своём сервере; в облаке нужен playwright + packages.txt.')
 
-# Прокси + проверка доступности сайта (над кнопкой запуска)
+# Прокси. Поля и проверка доступа - только на странице «Настройки проекта»,
+# здесь ничего не показываем: адрес берём из общей точки (proxy_config), она
+# уже учитывает use_proxy проекта и настройку из личного кабинета.
 _goals_proxy = None
 try:
-    from site_access import render_proxy_access
-    _dom = ''
-    _vars = СТРАНЫ.get(_base, [])
-    if _vars and '·' in _vars[0][1]:
-        _dom = _vars[0][1].split('·')[-1].strip()
-    _goals_proxy = render_proxy_access(
-        f'goals_{_base}',
-        default_url=(f"https://{_dom}/" if _dom else ''),
-        pid=_base)
+    from proxy_config import proxy_for_project
+    _goals_proxy = proxy_for_project(_base)
 except Exception as _e_pa:
-    st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
+    st.caption(f'⚠ Прокси не определился: {_e_pa}')
 
 c1, c2 = st.columns([3, 1])
 with c1:

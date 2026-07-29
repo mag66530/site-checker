@@ -36,6 +36,7 @@ from metrika_404 import (
     load_reports_for_period, get_latest_available_date,
 )
 from webmaster_api import fetch_webmaster_issues, load_issues
+from proxy_config import proxy_for_project
 
 REPORTS_DIR = Path(__file__).parent / 'reports'
 REPORTS_DIR.mkdir(exist_ok=True)
@@ -612,7 +613,12 @@ def run_check(pid, params, creds, log, progress):
         started_ms = out['started_at']
         _nd = int(params.get('notify_days', 30))   # период сбора почты/404
 
-        proxy_url = creds.get('proxy_url') if cfg.get('use_proxy') else None
+        # Прокси проекта - единая точка (proxy_config.py): БД личного кабинета →
+        # proxy_url_<pid> → proxy_url → HTTP_PROXY, с уважением к use_proxy.
+        # creds['proxy_url'] - доп. фоллбэк для обратной совместимости: тем
+        # вызывающим, что посчитали адрес сами и передали готовым.
+        proxy_url = (proxy_for_project(pid) or creds.get('proxy_url')) \
+            if cfg.get('use_proxy') else None
         if cfg.get('use_proxy') and not proxy_url:
             log(f'⚠ Прокси нужен для {cfg["name"]}, но не настроен')
         elif proxy_url:

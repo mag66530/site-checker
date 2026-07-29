@@ -324,13 +324,24 @@ else:
 
 st.divider()
 st.subheader('Запуск')
-_proxy = _secret('proxy_url')
-if _proxy:
-    st.caption('Прокси из секретов будет использован (нужен проектам, которые '
+# Прокси проекта - единый механизм (proxy_config.py): БД личного кабинета →
+# proxy_url_<pid> → proxy_url → HTTP_PROXY, С УЧЁТОМ use_proxy проекта.
+# Раньше здесь брали общий _secret('proxy_url') НАПРЯМУЮ и игнорировали
+# use_proxy - подпись «прокси будет использован» показывалась даже проектам
+# с выключенным прокси, а сам адрес не учитывал личный кабинет.
+from proxy_config import project_use_proxy, resolve_proxy
+_use_proxy_flag = project_use_proxy(pid_key)
+_proxy = resolve_proxy(pid_key) if _use_proxy_flag else None
+if _use_proxy_flag and _proxy:
+    st.caption('Прокси проекта будет использован (нужен проектам, которые '
                'блокируют зарубежный IP, напр. СМУ).')
+elif _use_proxy_flag:
+    st.caption('У проекта включён прокси (use_proxy=true), но адрес не '
+               'настроен ни в «Настройках проекта», ни в секретах - часть '
+               'страниц не загрузится (это будет видно в отчёте).')
 else:
-    st.caption('proxy_url в секретах не задан - если проект блокирует зарубежный '
-               'IP, часть страниц не загрузится (это будет видно в отчёте).')
+    st.caption('У проекта прокси выключен (use_proxy=false) - все страницы '
+               'качаются напрямую.')
 
 _alive = _pid_alive(_read_pid())
 # Прошлый прогон уже завершён (в логе метка), но pid-файл остался, а на облаке
@@ -349,15 +360,16 @@ if _alive:
             pass
 _none_chosen = (_mode == 'Выбрать города' and not _chosen)
 
-# Прокси + проверка доступности сайта (над кнопкой запуска)
+# Прокси. Поля и проверка доступа - только на странице «Настройки проекта».
+# Здесь берём адрес из общей точки: она уже учитывает use_proxy проекта, так
+# что при выключенном прокси вернётся None - это и уйдёт в прогон
+# (см. _env['proxy_url'] ниже).
+_effective_proxy = None
 try:
-    from site_access import render_proxy_access
-    _dom = _cities[0][1] if _cities else ''
-    render_proxy_access(f'vars_{pid_key}',
-                        default_url=(f"https://{_dom}/" if _dom else ''),
-                        pid=pid_key)
+    from proxy_config import proxy_for_project
+    _effective_proxy = proxy_for_project(pid_key)
 except Exception as _e_pa:
-    st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
+    st.caption(f'⚠ Прокси не определился: {_e_pa}')
 
 _c1, _c2 = st.columns([3, 1])
 with _c1:
@@ -375,8 +387,8 @@ with _c1:
             # Прокидываем в фоновый процесс: прокси + ссылку на КП-таблицу +
             # JSON сервисного аккаунта (для приватных таблиц) - из секретов.
             _env = {}
-            if _proxy:
-                _env['proxy_url'] = _proxy
+            if _effective_proxy:
+                _env['proxy_url'] = _effective_proxy
             try:
                 if _kp_url:
                     _env[f'kp_sheet_url_{pid_key}'] = _kp_url
