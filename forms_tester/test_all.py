@@ -883,7 +883,10 @@ def проверка_полей_форм(scope, page) -> dict:
             "e.getAttribute('aria-required')==='true')).length;"
             " inp.forEach(e=>{ if(isText(e)) e.value=''; });"
             " let valid=true; try{ valid=f.checkValidity(); }catch(_){}"
-            " inp.forEach((e,i)=>{ e.value=saved[i]; });"
+            # Возвращаем ТОЛЬКО текстовые поля (и каждое под try): у input
+            # type=file присвоение value кидает InvalidStateError и обрывало
+            # восстановление всех следующих полей.
+            " inp.forEach((e,i)=>{ if(isText(e)) { try { e.value=saved[i]; } catch(_){} } });"
             " return {req, emptyInvalid: valid===false};"
             "}")
         if _rq is not None:
@@ -1058,6 +1061,23 @@ def _rgb_в_hex(s: str) -> str:
         return s or ""
 
 
+_РАДИУС_НЕ_ВИДНО = "(не видно)"
+
+
+def _радиус_для_сверки(поле: dict) -> str:
+    """Скругление углов поля для сравнения полей между собой. ЧИСТАЯ функция.
+
+    У поля-подчёркивания (прозрачный фон, рамка только снизу) border-radius
+    НЕ ВИДЕН - скруглять там нечего. Сравнивать такой радиус с радиусом
+    соседнего поля бессмысленно: выходил ✗ «разнобой» на разнице, которую
+    глазом увидеть невозможно (ИМП: «поле 3 — скругление: нужно 4px — по факту
+    0px» на форме, где у полей вообще нет коробки). Поэтому у полей без
+    видимой коробки радиус в сравнении заменяем общей заглушкой."""
+    if not поле.get("boxed", True):
+        return _РАДИУС_НЕ_ВИДНО
+    return str(поле.get("radius") or "")
+
+
 def стиль_формы(scope) -> dict:
     """Пункт «Форма стилизована по макету (цвета, шрифты, отступы)».
 
@@ -1090,6 +1110,19 @@ def стиль_формы(scope) -> dict:
             "   size: g(e,'fontSize'), color: g(e,'color'), bg: g(e,'backgroundColor'),"
             "   bw: g(e,'borderTopWidth'), bs: g(e,'borderTopStyle'), bc: g(e,'borderTopColor'),"
             "   radius: g(e,'borderTopLeftRadius'),"
+            # boxed - есть ли у поля ВИДИМАЯ коробка, углы которой скругление
+            # вообще может скруглить: непрозрачный фон ИЛИ рамка по всем сторонам.
+            # У полей-подчёркиваний (только border-bottom, прозрачный фон)
+            # border-radius на вид никак не влияет - сравнивать его там нельзя.
+            "   boxed: (function(){"
+            "     const tr = c => !c || /transparent/.test(c)"
+            "       || /rgba\\(0,\\s*0,\\s*0,\\s*0\\)/.test(c);"
+            "     if (!tr(g(e,'backgroundColor'))) return true;"
+            "     return ['Top','Right','Bottom','Left'].every(function(s){"
+            "       const w = parseFloat(g(e,'border'+s+'Width'))||0;"
+            "       const st = g(e,'border'+s+'Style');"
+            "       return w>0 && st!=='none' && st!=='hidden' && !tr(g(e,'border'+s+'Color')); });"
+            "   })(),"
             "   pad: g(e,'paddingTop')+' '+g(e,'paddingLeft') });"
             " const tt = ['text','tel','email','search','url','number','password',"
             "'date','time','datetime-local','month','week',''];"
@@ -1150,7 +1183,7 @@ def стиль_формы(scope) -> dict:
         ("размер шрифта", lambda f: f["size"]),
         ("толщина рамки", lambda f: f["bw"]),
         ("стиль рамки", lambda f: f["bs"]),
-        ("скругление углов", lambda f: f["radius"]),
+        ("скругление углов", lambda f: _радиус_для_сверки(f)),
     ]
 
     # 1) Факт стилизации: border-style inset/outset - «голый» браузерный дефолт.
@@ -1166,8 +1199,10 @@ def стиль_формы(scope) -> dict:
     # placeholder vs заполненное поле легально отличаются по цвету текста).
     def подпись(f):
         # Без цвета рамки (f["bc"]) - см. коммент к «свойства»: цвет меняется по
-        # состоянию поля и давал ложный «разнобой».
-        return "|".join([f["font"], f["size"], f["bw"], f["bs"], f["radius"]])
+        # состоянию поля и давал ложный «разнобой». Радиус - только у полей с
+        # видимой коробкой (см. _радиус_для_сверки).
+        return "|".join([f["font"], f["size"], f["bw"], f["bs"],
+                         _радиус_для_сверки(f)])
     подписи = {подпись(f) for f in поля}
     if len(подписи) > 1:
         # За образец берём стиль большинства полей; отклонения показываем
@@ -1200,7 +1235,14 @@ def стиль_формы(scope) -> dict:
 _JS_VAL_NATIVE = r"""
 f => {
   const form = f.tagName==='FORM' ? f : (f.querySelector('form') || f);
-  const skip = ['hidden','submit','button','reset','image'];
+  // 'file' в skip ОБЯЗАТЕЛЬНО: JS не может вернуть файл в input[type=file]
+  // (value можно выставить только в пустую строку - иначе InvalidStateError).
+  // Раньше проба чистила и поле файла тоже: прикреплённый перед отправкой PDF
+  // отваливался, восстановление падало на этом поле, и всё, что стояло в DOM
+  // ПОСЛЕ него, оставалось пустым. Форма с обязательным файлом («Интересует
+  // вакансия?», «Нужна консультация? (товарная)») после этого не отправлялась
+  // вовсе - POST не уходил, а в отчёт шла «ОШИБКА».
+  const skip = ['hidden','submit','button','reset','image','file'];
   const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
   const ctrls = [...form.querySelectorAll('input,textarea,select')]
     .filter(e => !skip.includes((e.type||'').toLowerCase()));
@@ -1235,12 +1277,16 @@ f => {
 _JS_VAL_RESTORE = r"""
 f => {
   const form = f.tagName==='FORM' ? f : (f.querySelector('form') || f);
-  const skip = ['hidden','submit','button','reset','image'];
+  const skip = ['hidden','submit','button','reset','image','file'];
   const ctrls = [...form.querySelectorAll('input,textarea,select')]
     .filter(e => !skip.includes((e.type||'').toLowerCase()));
   const s = window.__valSaved || [];
-  ctrls.forEach((e,i) => { if (s[i]) { const t=(e.type||'').toLowerCase();
-    if (t==='checkbox'||t==='radio') e.checked=s[i].c; else e.value=s[i].v; } });
+  // try на КАЖДОЕ поле: одно проблемное поле не должно обрывать восстановление
+  // остальных (раньше исключение на одном контроле оставляло все следующие за
+  // ним поля пустыми - и боевая отправка уходила с полупустой формой).
+  ctrls.forEach((e,i) => { if (s[i]) { try { const t=(e.type||'').toLowerCase();
+    if (t==='checkbox'||t==='radio') e.checked=s[i].c; else e.value=s[i].v;
+  } catch (_) {} } });
   return true;
 }
 """
@@ -2230,7 +2276,7 @@ _ЛИМИТ_МАРКЕРЫ = (
 # нехватки данных. По образцу window.__valSaved у проверка_отображения_ошибок.
 _JS_RATELIMIT_SNAPSHOT = r"""
 f => {
-  const skip = ['hidden','submit','button','reset','image'];
+  const skip = ['hidden','submit','button','reset','image','file'];
   const ctrls = [...f.querySelectorAll('input,textarea,select')]
     .filter(e => !skip.includes((e.type||'').toLowerCase()));
   return ctrls.map(e => ({v: e.value, c: e.checked}));
@@ -2238,13 +2284,17 @@ f => {
 """
 _JS_RATELIMIT_RESTORE = r"""
 (f, saved) => {
-  const skip = ['hidden','submit','button','reset','image'];
+  // 'file' в skip и try на каждое поле - см. _JS_VAL_RESTORE: файл через JS не
+  // вернуть, а исключение на одном поле обрывало восстановление остальных.
+  const skip = ['hidden','submit','button','reset','image','file'];
   const ctrls = [...f.querySelectorAll('input,textarea,select')]
     .filter(e => !skip.includes((e.type||'').toLowerCase()));
-  ctrls.forEach((e, i) => { if (saved[i]) { const t = (e.type||'').toLowerCase();
+  ctrls.forEach((e, i) => { if (saved[i]) { try {
+    const t = (e.type||'').toLowerCase();
     if (t==='checkbox'||t==='radio') e.checked = saved[i].c; else e.value = saved[i].v;
     e.dispatchEvent(new Event('input', {bubbles:true}));
-    e.dispatchEvent(new Event('change', {bubbles:true})); } });
+    e.dispatchEvent(new Event('change', {bubbles:true}));
+  } catch (_) {} } });
   return true;
 }
 """
@@ -2714,15 +2764,26 @@ def _ds_это_трекер(url: str) -> bool:
     return any(t in u for t in _DS_ТРЕКЕРЫ)
 
 
+_ЗАКАЗ_МАРКЕРЫ = ("onepagecheckout", "/checkout", "checkout/", "saveorder",
+                  "opc_submit", "/order", "/cart", "korzin")
+
+
+def _ds_маркер_заказа(url: str, action: str) -> str:
+    """Какой признак заставил счесть форму заказом (или пустая строка).
+    ЧИСТАЯ функция - нужна, чтобы в отчёте было ВИДНО, почему форма попала в
+    «безопасный» режим: на лид-формах сайт часто шлёт заявку на эндпоинт со
+    словом order («Заказать звонок»), и они молча получали пометку «форма
+    заказа» с пропуском активной пробы спама и серверной валидации."""
+    s = ((url or "") + " " + (action or "")).lower()
+    return next((k for k in _ЗАКАЗ_МАРКЕРЫ if k in s), "")
+
+
 def _ds_похоже_на_заказ(url: str, action: str) -> bool:
     """Похоже ли на форму ОФОРМЛЕНИЯ ЗАКАЗА по URL/action (тогда двойную отправку
     проверяем БЕЗОПАСНО - один клик, чтобы не создать второй заказ). Основной
     признак - тип блока «Оформление…» (передаётся отдельно); это запасная сетка.
     Слово «заказ» из названия НЕ берём: его содержит и «Заказать звонок»."""
-    s = ((url or "") + " " + (action or "")).lower()
-    return any(k in s for k in ("onepagecheckout", "/checkout", "checkout/",
-                                "saveorder", "opc_submit", "/order", "/cart",
-                                "korzin"))
+    return bool(_ds_маркер_заказа(url, action))
 
 
 def _видна_ошибка_отправки(page) -> bool:
@@ -3459,6 +3520,31 @@ def _find_all_options(select_el) -> list:
 # отправил не то (или не всё), что было в полях» - направление, ОБРАТНОЕ
 # «Серверной валидации» (та проверяет, что БИТЫЕ данные сервер отклонит; этот
 # пункт - что ХОРОШИЕ данные не потеряются по дороге).
+# JS: вернуть в форму значения ЭТАЛОНА (снимок сразу после заполнения) в те
+# видимые поля, которые сейчас ПУСТЫ. Заполненные поля не трогаем - сайт мог
+# легально переформатировать значение (маска телефона), это не потеря данных.
+_JS_ДОЗАПОЛНИТЬ = r"""
+(f, эталон) => {
+  const skip = ['hidden','submit','button','reset','image','file','checkbox','radio'];
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const исправлено = [];
+  for (const e of f.querySelectorAll('input,textarea,select')) {
+    const t = (e.type || '').toLowerCase();
+    if (skip.includes(t) || !vis(e)) continue;
+    const ключ = e.name || e.id || '';
+    if (!(ключ in эталон)) continue;
+    if ((e.value || '').trim()) continue;
+    try {
+      e.value = эталон[ключ];
+      e.dispatchEvent(new Event('input', {bubbles:true}));
+      e.dispatchEvent(new Event('change', {bubbles:true}));
+      исправлено.push(ключ);
+    } catch (_) {}
+  }
+  return исправлено;
+}
+"""
+
 _JS_СНИМОК_ПОЛЕЙ = r"""
 f => {
   const skip = ['hidden','submit','button','reset','image','file','checkbox','radio'];
@@ -7592,6 +7678,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             _ensure_modal_consent(form, page)  # надёжно: required + согласие по тексту подписи
             page.wait_for_timeout(300)
 
+            # ЭТАЛОН формы «как её заполнил тул»: снимаем СРАЗУ после заполнения
+            # и согласия, до всех проб. Перед боевой отправкой сверимся с ним и
+            # вернём то, что пробы могли затереть (см. _JS_ДОЗАПОЛНИТЬ ниже).
+            # Раньше любая проба, испортившая поля, тихо срывала саму отправку -
+            # POST не уходил, а в отчёт шла «ОШИБКА»/«нет подтверждения», как
+            # будто дефект у сайта.
+            _эталон_полей = (_снять_поля_формы(form).get("поля") or {})
+
             # Многошаговые формы (например, Bitrix-чекаут): только заполнить поля,
             # а саму отправку делает отдельный шаг сценария «клик» («Далее»/«Оформить заказ»).
             if not cfg_enabled(форма_config.get("отправлять", True)):
@@ -7663,7 +7757,12 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     " return g ? (g.getAttribute('action')||'') : ''; }")
             except Exception:  # noqa: BLE001
                 _act = ""
-            _is_order = bool(безопасная_отправка) or _ds_похоже_на_заказ(page.url, _act)
+            _заказ_маркер = _ds_маркер_заказа(page.url, _act)
+            _is_order = bool(безопасная_отправка) or bool(_заказ_маркер)
+            if _заказ_маркер and not безопасная_отправка:
+                print(f"   ℹ️ «{название}» считаем формой заказа: в адресе отправки "
+                      f"есть «{_заказ_маркер}» - разрушительные пробы (повтор, "
+                      f"серверная валидация) пропускаем из перестраховки.")
 
             # ── Enter отправляет форму? (пункт чек-листа) ──
             # БЕЗОПАСНО: вешаем перехватчик submit (capture) с preventDefault -
@@ -8112,6 +8211,43 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     except Exception:  # noqa: BLE001
                         pass
 
+            # ── СТРАХОВКА ПЕРЕД БОЕВОЙ ОТПРАВКОЙ ──
+            # Пробы выше (показ ошибок, кнопка по заполнению, серверная валидация,
+            # согласие) временно портят форму и возвращают её сами - но если хоть
+            # одна не довосстановила, боевая отправка уходила полупустой: сайт её
+            # НЕ принимал, POST не уходил, и в отчёт шла «ОШИБКА» / «нет
+            # подтверждения», как будто дефект у сайта. Теперь сверяемся с
+            # эталоном (снимок сразу после заполнения) и чиним ПЕРЕД кликом,
+            # громко сообщая об этом в лог.
+            if _эталон_полей:
+                try:
+                    _дозаполнено = form.evaluate(_JS_ДОЗАПОЛНИТЬ, _эталон_полей) or []
+                except Exception:  # noqa: BLE001
+                    _дозаполнено = []
+                if _дозаполнено:
+                    print(f"   ♻️ Перед отправкой восстановлены поля, очищенные "
+                          f"пробами: {', '.join(str(x) for x in _дозаполнено)}")
+            # Файл: JS вернуть его не может (в input[type=file] файл кладёт
+            # только браузер), поэтому прикрепляем заново, если проба отцепила.
+            # Без этого форма с ОБЯЗАТЕЛЬНЫМ файлом («Интересует вакансия?»,
+            # «Нужна консультация? (товарная)») просто не отправлялась.
+            if _отложенная_файл_проба:
+                try:
+                    _fi2 = form.locator("input[type='file']").first
+                    if _fi2.count() and not _fi2.evaluate(
+                            "e => !!(e.files && e.files.length)"):
+                        _fi2.set_input_files(_безвредный_файл(".pdf"), timeout=5000)
+                        page.wait_for_timeout(200)
+                        print("   ♻️ Перед отправкой заново прикреплён тест-файл "
+                              "(проба его отцепила)")
+                except Exception:  # noqa: BLE001
+                    pass
+            # Галочки согласия пробы тоже снимают - ставим обратно (идемпотентно).
+            try:
+                _ensure_modal_consent(form, page)
+            except Exception:  # noqa: BLE001
+                pass
+
             # JS-наблюдатель подтверждения - ПЕРЕД самым кликом: он зафиксирует
             # «Спасибо, заявка принята» В МОМЕНТ появления. Без него главный
             # вердикт формы снимался уже ПОСЛЕ разрушающих проб (быстрый повтор
@@ -8546,9 +8682,21 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             if лимит_проба:
                 try:
                     if _ds_safe:
-                        _rl_ст, _rl_дет = ("Проверить",
-                                           "форма заказа - активная проба спама пропущена "
-                                           "(перестраховка на чекауте, второй заказ не создаём)")
+                        # Говорим ПОЧЕМУ форму сочли заказом: на лид-формах
+                        # («Заказать звонок») сайт часто шлёт заявку на адрес со
+                        # словом order, и пометка «форма заказа» выглядела
+                        # необъяснимой. Если признак - только адрес отправки,
+                        # это, скорее всего, обычная заявка: скажем прямо.
+                        _rl_дет = ("форма заказа - активная проба спама пропущена "
+                                   "(перестраховка на чекауте, второй заказ не создаём)")
+                        if not безопасная_отправка and _заказ_маркер:
+                            _rl_дет = (
+                                "пропущено из перестраховки: адрес отправки формы "
+                                f"содержит «{_заказ_маркер}», и тул считает её формой "
+                                "заказа (второй заказ на боевом сайте не создаём). "
+                                "Если это обычная заявка, а не оформление заказа - "
+                                "лимит проверьте вручную: отправьте её 3-4 раза подряд.")
+                        _rl_ст = "Проверить"
                     elif _перекрыто:
                         _rl_ст, _rl_дет = ("Проверить",
                                            "кнопка перекрыта другим элементом - быстрый повтор "
