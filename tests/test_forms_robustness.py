@@ -85,6 +85,52 @@ def test_мобильная_страница_чужого_города_проп�
     print('✓ мобильную вёрстку чужого города пропускаем, свой - гоним')
 
 
+def test_обрыв_распознаётся_сквозь_обёртку_сценария():
+    # Сценарий заворачивает сетевую ошибку в свой RuntimeError («прервался на
+    # шаге …»). Раньше исходный net:: терялся, и обрыв прокси/сети писался в
+    # отчёт как «ОШИБКА формы». Теперь _это_обрыв_связи разворачивает __cause__.
+    net = Exception('Page.goto: net::ERR_CONNECTION_RESET at https://metpromko.ru/')
+    try:
+        try:
+            raise net
+        except Exception as e:
+            raise RuntimeError('прервался на шаг 1 «перейти»') from e
+    except Exception as wrapped:
+        assert t._это_обрыв_связи(wrapped) is True
+
+    # Текст исходной ошибки, вшитый в сообщение (второй пояс надёжности).
+    assert t._это_обрыв_связи(
+        RuntimeError('прервался на шаг 1: Page.goto: net::ERR_CONNECTION_RESET')
+    ) is True
+    assert t._это_обрыв_связи(RuntimeError('Timeout 30000ms exceeded')) is True
+    print('✓ сетевой обрыв распознаётся даже завёрнутым в RuntimeError сценария')
+
+
+def test_дефект_формы_не_путается_с_обрывом():
+    # Настоящий дефект формы НЕ должен помечаться как сеть/прокси - иначе
+    # обратная ложь: реальную поломку спишут на «недоступность домена».
+    assert t._это_обрыв_связи(
+        RuntimeError('прервался на шаг 2 «форма»: Форма не найдена на странице')
+    ) is False
+    assert t._это_обрыв_связи('всё хорошо') is False
+    print('✓ дефект формы не маскируется под обрыв связи')
+
+
+def test_requests_путь_берёт_прокси_из_env(monkeypatch):
+    # Паритет с «Проверкой КП»: requests-путь должен ходить тем же FORMS_PROXY.
+    monkeypatch.setenv('FORMS_PROXY', 'http://205.172.57.182:1080')
+    p = t._requests_proxies_from_env()
+    assert p == {'http': 'http://205.172.57.182:1080',
+                 'https': 'http://205.172.57.182:1080'}
+    # Без схемы - достраиваем http://
+    monkeypatch.setenv('FORMS_PROXY', '1.2.3.4:8080')
+    assert t._requests_proxies_from_env()['https'] == 'http://1.2.3.4:8080'
+    # Пусто - None (идём напрямую, как раньше)
+    monkeypatch.delenv('FORMS_PROXY', raising=False)
+    assert t._requests_proxies_from_env() is None
+    print('✓ requests-путь подхватывает FORMS_PROXY (как в «Проверке КП»)')
+
+
 if __name__ == '__main__':
     import pytest
     raise SystemExit(pytest.main([__file__, '-v', '-s']))
