@@ -9107,12 +9107,28 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 )
             except Exception:
                 pass
-            # Гасим Magento-попап выбора города Метпромко (#cities-popup «Ваш
-            # город …?») ЖЁСТКО на КАЖДОЙ странице: он гео-зависимый (любой город),
-            # перекрывает страницу и может ПЕРЕОТКРЫТЬСЯ после навигаций/перезапуска
-            # (клик по крестику разово не спасает). CSS display:none !important
-            # бьёт любой JS display:block. Для других проектов #cities-popup нет -
-            # правило безвредно (ничего не находит).
+            # ГЛАВНОЕ от попапа выбора города: ставим куку выбора города ДО скриптов
+            # сайта. Сайт сам показывает попап ТОЛЬКО когда куки нет
+            # (metpromko: `var city = Mage.Cookies.get("mycity"); if(!!city){}
+            # else{ показать попап }`). Кука задана - попап НЕ появляется вообще
+            # (никаких кликов/CSS/таймингов). Работает для любого города и любого
+            # домена (document.cookie ставится на текущий домен), переживает
+            # навигации/перезапуск (init-script идёт на КАЖДУЮ страницу).
+            # Значение берём из конфига проекта (СТАРТОВЫЕ_КУКИ = {"mycity": "20"}).
+            import json as _json_ck
+            _start_cookies = (getattr(config, "СТАРТОВЫЕ_КУКИ", None)
+                              or getattr(config, "START_COOKIES", None))
+            if isinstance(_start_cookies, dict) and _start_cookies:
+                _ck_js = "try{" + "".join(
+                    f"document.cookie={_json_ck.dumps(str(_n)+'='+str(_v)+'; path=/; max-age=31536000')};"
+                    for _n, _v in _start_cookies.items()) + "}catch(e){}"
+                try:
+                    h["context"].add_init_script(_ck_js)
+                except Exception:  # noqa: BLE001
+                    pass
+            # Подстраховка: если попап всё же показался (кука не подошла) - гасим
+            # его CSS-ом на каждой странице (display:none !important бьёт JS). Для
+            # проектов без #cities-popup правило безвредно.
             try:
                 h["context"].add_init_script(
                     "(() => { const add = () => { try {"
