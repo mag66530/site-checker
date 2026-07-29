@@ -8003,6 +8003,35 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     except Exception:  # noqa: BLE001
                         pass
 
+            # Страховка ПЕРЕД отправкой: пробы выше (показ ошибок валидации,
+            # «кнопка по заполнению», серверная валидация) очищают поля и на
+            # части форм НЕ восстанавливают их (напр. «Обратная связь» Метпромко:
+            # после проб поля пустые → штатная отправка уходит пустой → ложное
+            # «поле обязательно / не отправилось»). Дозаполняем из карты «поля»
+            # ТОЛЬКО реально пустые поля (уже заполненные - в т.ч. телефон с
+            # маской - не трогаем).
+            if _ffmap:
+                for _aname, _tok in _ffmap.items():
+                    if _aname == "product-link":
+                        continue
+                    _rval = _resolve_form_field_token(_tok, **_ctx_ff)
+                    if not _rval:
+                        continue
+                    try:
+                        _rloc = form.locator(f'[name="{_aname}"]')
+                        if _rloc.count() == 0:
+                            continue
+                        _cur = _rloc.first.input_value(timeout=1500)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if str(_cur).strip() == "":
+                        try:
+                            _pw_fill_named_field(form, _aname, _rval)
+                            print(f"      ↻ Поле «{_aname}» опустело после проверок - "
+                                  f"заполнил заново перед отправкой")
+                        except Exception:  # noqa: BLE001
+                            pass
+
             _перекрыто = False   # кнопку перекрыл другой элемент (обход JS-кликом)
             try:
                 sub.click(timeout=5000)
