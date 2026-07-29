@@ -201,8 +201,9 @@ def test_уже_не_видна_до_проверки():
 # кандидата и часто не находит ничего, даже когда форма реально внутри.
 
 class _FakeAncestorResult:
-    def __init__(self, n):
+    def __init__(self, n, всплывает=True):
         self._n = n
+        self._всплывает = всплывает
 
     def count(self):
         return self._n
@@ -211,13 +212,18 @@ class _FakeAncestorResult:
     def first(self):
         return self
 
+    def evaluate(self, js, *a):
+        # заглушка _это_всплывающее_окно: лежит ли элемент поверх страницы
+        return self._всплывает
+
 
 class _FakeForm:
-    def __init__(self, n_found):
+    def __init__(self, n_found, всплывает=True):
         self._n = n_found
+        self._всплывает = всплывает
 
     def locator(self, sel):
-        return _FakeAncestorResult(self._n)
+        return _FakeAncestorResult(self._n, self._всплывает)
 
 
 def test_форма_вне_модалки_none():
@@ -228,6 +234,14 @@ def test_форма_вне_модалки_none():
 def test_форма_внутри_модалки_найдена():
     form = _FakeForm(n_found=1)
     assert t._найти_модалку_вокруг(form) is not None
+
+
+def test_обычный_блок_с_классом_modal_не_считается_модалкой():
+    # Регресс ИМП: класс с «modal» висел на ОБЫЧНОМ блоке с формой на странице.
+    # Тул считал его модалкой и писал ✗ «не закрывается» - закрывать там нечего.
+    # Теперь контейнер должен ещё и ВСПЛЫВАТЬ над страницей (fixed/absolute).
+    form = _FakeForm(n_found=1, всплывает=False)
+    assert t._найти_модалку_вокруг(form) is None
 
 
 def test_детектор_модалки_ловит_fancybox_и_aria():
