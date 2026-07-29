@@ -128,7 +128,11 @@
                     {"действие": "перейти", "url": "https://metpromko.ru/onepagecheckout/", "включено": True},
                     {"действие": "пауза", "мс": 2000, "включено": True},
                     {"действие": "форма", "css": "#onepagecheckout_orderform", "название": "Оформить заказ", "включено": True,
-                     "кнопка_css": "#opc_submit_form",
+                     # Реальная кнопка «Сделать Заказ» - button.btn-checkout с
+                     # onclick="checkout.save()". #opc_submit_form - СКРЫТЫЙ
+                     # (visibility:hidden) фиктивный input, клик по нему заказ не
+                     # оформлял. Жмём видимую кнопку.
+                     "кнопка_css": "button.btn-checkout",
                      "поля": {"billing[firstname]": "ИМЯ", "billing[lastname]": "Проверка",
                               "billing[telephone]": "ТЕЛЕФОН", "billing[email]": "ПОЧТА",
                               "billing[city]": "ГОРОД", "billing[street][]": "ул. Тестовая, д. 1",
