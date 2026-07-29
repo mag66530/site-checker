@@ -9107,6 +9107,28 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 )
             except Exception:
                 pass
+            # Гасим Magento-попап выбора города Метпромко (#cities-popup «Ваш
+            # город …?») ЖЁСТКО на КАЖДОЙ странице: он гео-зависимый (любой город),
+            # перекрывает страницу и может ПЕРЕОТКРЫТЬСЯ после навигаций/перезапуска
+            # (клик по крестику разово не спасает). CSS display:none !important
+            # бьёт любой JS display:block. Для других проектов #cities-popup нет -
+            # правило безвредно (ничего не находит).
+            try:
+                h["context"].add_init_script(
+                    "(() => { const add = () => { try {"
+                    " if (document.getElementById('__hide_cities_popup')) return;"
+                    " const s = document.createElement('style');"
+                    " s.id = '__hide_cities_popup';"
+                    " s.textContent = '#cities-popup{display:none!important;"
+                    " visibility:hidden!important;pointer-events:none!important}';"
+                    " (document.head || document.documentElement).appendChild(s);"
+                    " } catch(e){} };"
+                    " add();"
+                    " if (document.readyState === 'loading')"
+                    "   document.addEventListener('DOMContentLoaded', add); })();"
+                )
+            except Exception:
+                pass
             # Цели Метрики ловим ТОЛЬКО когда движок форм вызван «Проверкой целей»
             # (проверять_цели=True). В обычной «Проверке форм» слушатель не вешаем -
             # формы проверяем без целей.
