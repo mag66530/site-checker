@@ -4280,6 +4280,11 @@ _РЕГИОН_ПОПАП_ЗАКРЫТЬ = (
     "#regions_choose_component .close",
     ".sotbit-regions .close, .sotbit-regions-popup .close",
     ".region-popup .close, .city-popup .close, .popup-city .close",
+    # Magento-попап Метпромко: <div id="cities-popup">…<span class="close">×</span>
+    # «Ваш город …?» перекрывает страницу с гео-IP (напр. Екатеринбург) - иначе
+    # клики по формам/кнопкам ловит оверлей. Закрываем крестиком.
+    "#cities-popup .close",
+    "#cities-popup .window-outside .close",
 )
 
 
