@@ -134,3 +134,61 @@ def test_details_populated_on_mismatch():
     assert d['card'] == '+7 000 000-00-00'
     assert '4991303669' in d['kp']
     print('✓ details содержит структурированные КП/карточка для колонки отчёта')
+
+
+# ── Телефон сверяем ТОЛЬКО с «Общий Город», не со всем набором города ───────
+# (просьба заказчика: SEO/рекламный номер - для коллтрекинга на сайте, карта
+# показывает публичный номер организации - это всегда Общий).
+
+
+def test_phone_compares_only_common_not_seo_or_ad():
+    """Номер совпадает с SEO/Рекламным слотом, но НЕ с Общим - раньше (через
+    общий phone_set) засчиталось бы как ✓, теперь это ✗ - карта должна
+    показывать именно Общий номер, а не любой номер города."""
+    row = KPRow(domain='stalmetural.ru', city='Тест',
+               phone_common='+7 495 111-11-11', phone_seo='+7 495 222-22-22',
+               phone_ad='+7 495 333-33-33', all_phones='4951111111;4952222222;4953333333')
+    card = dict(_CARD_MATCH, phone='+7 495 222-22-22')  # это SEO-номер, не Общий
+    r = mc.compare('yandex', 'Тест', 'u', card, row)
+    assert r.phone_match is False, 'SEO-номер на карте - не совпадение с Общим'
+    print('✓ номер из SEO-слота на карте - расхождение, не ложное совпадение')
+
+
+def test_phone_matches_when_equals_common():
+    row = KPRow(domain='stalmetural.ru', city='Тест',
+               phone_common='+7 495 111-11-11', phone_seo='+7 495 222-22-22',
+               all_phones='4951111111;4952222222')
+    card = dict(_CARD_MATCH, phone='+7 (495) 111-11-11')
+    r = mc.compare('yandex', 'Тест', 'u', card, row)
+    assert r.phone_match is True
+    print('✓ номер совпал с Общим - совпадение')
+
+
+def test_garbage_common_is_always_error_not_dash():
+    """Общий Город - мусор, не номер (напр. тестовое '2') - это НЕ то же самое,
+    что пустое поле: в КП есть инфа, и она не телефон → ВСЕГДА ✗, каким бы ни
+    был номер на карточке. То же правило, что в check_variables для
+    «Проверки КП» - мусор в КП не равно пустому полю (подтверждено 2026-07-30
+    после того, как первая версия ошибочно давала «–» вместо ✗)."""
+    row = KPRow(domain='stalmetural.ru', city='Тест', phone_common='2',
+               phone_seo='+7 495 222-22-22', all_phones='4952222222')
+    card = dict(_CARD_MATCH, phone='+7 (499) 130-36-69')
+    r = mc.compare('yandex', 'Тест', 'u', card, row)
+    assert r.phone_match is False
+    assert r.is_error
+    d = next(d for d in r.details if d['field'] == 'телефон')
+    assert d['kp'] == '2'
+    print('✓ мусор («2») в Общем → ✗, не «–»')
+
+
+def test_genuinely_empty_common_is_dash_not_error():
+    """А вот РОВНО пустое поле (не мусор, а пусто) - сверять действительно
+    нечего: phone_match=None, не ✗. Отличие от предыдущего теста - здесь
+    пустая строка, а не текст-не-номер."""
+    row = KPRow(domain='stalmetural.ru', city='Тест', phone_common='',
+               phone_seo='+7 495 222-22-22', all_phones='4952222222')
+    card = dict(_CARD_MATCH, phone='+7 (499) 130-36-69')
+    r = mc.compare('yandex', 'Тест', 'u', card, row)
+    assert r.phone_match is None
+    assert not any(d['field'] == 'телефон' for d in r.details)
+    print('✓ по-настоящему пустое поле Общий → phone_match=None (нечего сравнивать)')

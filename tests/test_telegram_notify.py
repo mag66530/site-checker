@@ -165,6 +165,74 @@ def test_send_report_from_env_custom_filename():
     print('✓ send_report_from_env: имя вложения (report_filename) прокинуто')
 
 
+# ── send_run_notification: получатели рассылаются ПАРАЛЛЕЛЬНО ──────────────
+# Раньше цикл был последовательным - при недоступном Telegram (сеть не
+# отвечает) каждый получатель ждал полный таймаут ПО ОЧЕРЕДИ, на 3+ получателей
+# рассылка растягивалась на минуты. Проверяем реальным замером времени, а не
+# подсчётом вызовов - иначе легко пропустить, что вызовы остались sequential.
+
+
+def test_send_run_notification_runs_in_parallel(monkeypatch):
+    import time
+    delay = 0.3
+    calls = []
+
+    def _slow_send(bot_token, chat_id, text, *, proxy_url=None, parse_mode='HTML'):
+        calls.append(chat_id)
+        time.sleep(delay)
+        return {'ok': True}
+
+    monkeypatch.setattr(telegram_notify, 'send_message', _slow_send)
+    recipients = ['111', '222', '333', '444']
+
+    t0 = time.monotonic()
+    res = telegram_notify.send_run_notification(
+        'TOKEN', recipients, 'Проект', 'текст', report_file=None)
+    elapsed = time.monotonic() - t0
+
+    assert res == {'sent': 4, 'failed': 0, 'errors': []}
+    assert sorted(calls) == sorted(recipients)
+    # Последовательно было бы 4×0.3 = 1.2 сек; параллельно - около 0.3 сек.
+    # Берём щедрый запас (< 0.9), чтобы тест не был хрупким на медленной машине.
+    assert elapsed < delay * len(recipients) * 0.75, \
+        f'получатели разосланы последовательно, не параллельно: {elapsed:.2f} сек'
+    print(f'✓ 4 получателя разосланы за {elapsed:.2f} сек (не {delay * 4:.2f} - параллельно)')
+
+
+def test_send_run_notification_partial_failure_counts_correctly(monkeypatch):
+    def _flaky_send(bot_token, chat_id, text, *, proxy_url=None, parse_mode='HTML'):
+        if chat_id == 'bad':
+            raise RuntimeError('нет сети')
+        return {'ok': True}
+
+    monkeypatch.setattr(telegram_notify, 'send_message', _flaky_send)
+    res = telegram_notify.send_run_notification(
+        'TOKEN', ['good1', 'bad', 'good2'], 'Проект', 'текст', report_file=None)
+    assert res['sent'] == 2
+    assert res['failed'] == 1
+    assert res['errors'] == [{'chat_id': 'bad', 'error': 'нет сети'}]
+    print('✓ частичный отказ: sent/failed считаются верно, остальные не пострадали')
+
+
+def test_send_run_notification_empty_recipients_is_noop(monkeypatch):
+    def _boom(*a, **kw):
+        raise AssertionError('не должно вызываться без получателей')
+    monkeypatch.setattr(telegram_notify, 'send_message', _boom)
+    res = telegram_notify.send_run_notification('TOKEN', [], 'Проект', 'текст')
+    assert res == {'sent': 0, 'failed': 0, 'errors': []}
+    print('✓ пустой список получателей - ничего не отправляется, не падает')
+
+
+def test_default_timeouts_are_short():
+    """Раньше send_document ждал 120 сек НА КАЖДОГО получателя при недоступном
+    Telegram - если соединение всё равно не отвечает (WinError 10060), долгое
+    ожидание ничего не даёт, только замедляет рассылку."""
+    import inspect
+    assert inspect.signature(telegram_notify.send_message).parameters['timeout'].default == 15
+    assert inspect.signature(telegram_notify.send_document).parameters['timeout'].default == 30
+    print('✓ дефолтные таймауты сокращены (send_message=15с, send_document=30с)')
+
+
 if __name__ == '__main__':
     test_escape_html()
     test_format_success()
@@ -174,4 +242,8 @@ if __name__ == '__main__':
     test_send_report_from_env_skips_without_creds()
     test_send_report_from_env_parses_recipients()
     test_send_report_from_env_custom_filename()
+    test_send_run_notification_runs_in_parallel()
+    test_send_run_notification_partial_failure_counts_correctly()
+    test_send_run_notification_empty_recipients_is_noop()
+    test_default_timeouts_are_short()
     print('\n✅ Все тесты telegram_notify.py прошли')

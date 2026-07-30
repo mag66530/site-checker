@@ -7,15 +7,18 @@ maps_compare.py - сверка данных с карточек карт (Янд
 какой картой работает, поэтому упавший источник (напр. Google) не мешает
 остальным (см. yandex_map_check.py, docstring).
 
-Сверка телефона и адреса - ТЕ ЖЕ правила, что уже проверены на «Проверке КП»
-для сайта (kp.py): phone_set()/normalize_phone для телефона, address_match()
-для адреса. Вторую версию сравнения не пишем - это тот же вопрос
-(«соответствуют ли контакты карточки заявленным в КП»), только источник другой.
+Сверка адреса - ТЕ ЖЕ правила, что уже проверены на «Проверке КП» для сайта
+(kp.py): address_match(). Телефон - ОТДЕЛЬНО от «Проверки КП»: там сравнение
+идёт со всем набором номеров города (phone_set - SEO/Реклама/Общий/старые из
+all_phones), а карта показывает ОДИН публичный номер организации - это всегда
+«Общий Город» (просьба заказчика: карты сверяем только с ним, не с полным
+набором - иначе телефон коллтрекинга/SEO ошибочно засчитывался бы как
+совпадение там, где сайт и карта должны показывать один и тот же общий номер).
 """
 import re
 from dataclasses import dataclass, field
 
-from kp import KPRow, normalize_phone, address_match
+from kp import KPRow, normalize_phone, address_match, phones_in_cell
 
 
 @dataclass
@@ -87,16 +90,34 @@ def compare(source: str, city: str, url: str, card: dict, kp_row: KPRow | None) 
         res.details.append({'field': 'город', 'kp': '–', 'card': city})
         return res
 
-    kp_phones = kp_row.phone_set()
-    if kp_phones:
+    # Только «Общий Город» - публичный номер организации, тот же, что должен
+    # быть виден и на карте. Три случая (то же правило, что в check_variables
+    # для «Проверки КП» - мусор в КП НЕ равно пустому полю):
+    #   • ячейка пустая              → сверять нечего, phone_match=None;
+    #   • ячейка НЕ пустая, но это не
+    #     номер (напр. тестовое «2») → ВСЕГДА ✗ - в КП есть инфа, и она не
+    #     номер, значит заведомо не совпадает с картой;
+    #   • ячейка - валидный номер   → сверяем с телефоном карты как обычно.
+    # Разбор валидного номера МЯГКИЙ (как для слотов на «Проверке КП») -
+    # понимает и «голый» номер без кода страны.
+    raw_common = (kp_row.phone_common or '').strip()
+    common_phones = phones_in_cell(raw_common)
+    if common_phones:
         map_phone = normalize_phone(card.get('phone', ''))
-        res.phone_match = bool(map_phone) and map_phone in kp_phones
+        res.phone_match = bool(map_phone) and map_phone in common_phones
         if not res.phone_match:
-            _kp_disp = ', '.join(sorted(kp_phones))
+            _kp_disp = ', '.join(common_phones)
             res.issues.append(
                 f'телефон на карте ({card.get("phone") or "—"}) не совпал с КП')
             res.details.append({'field': 'телефон', 'kp': _kp_disp,
                                 'card': card.get('phone') or '–'})
+    elif raw_common and raw_common not in ('–', '-'):
+        res.phone_match = False
+        res.issues.append(
+            f'в КП «Общий Город» указано «{raw_common}» - не похоже на '
+            f'телефон, но поле не пустое')
+        res.details.append({'field': 'телефон', 'kp': raw_common,
+                            'card': card.get('phone') or '–'})
 
     if kp_row.address:
         res.address_match = address_match(card.get('address', ''), kp_row.address)

@@ -21,6 +21,7 @@ import json
 import re
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 from typing import Optional, Callable
@@ -269,7 +270,7 @@ def send_message(
     *,
     proxy_url: Optional[str] = None,
     parse_mode: str = 'HTML',
-    timeout: int = 30,
+    timeout: int = 15,
 ) -> dict:
     """
     Отправить текстовое сообщение через Telegram Bot API.
@@ -312,7 +313,7 @@ def send_document(
     caption: Optional[str] = None,
     proxy_url: Optional[str] = None,
     parse_mode: str = 'HTML',
-    timeout: int = 120,
+    timeout: int = 30,
     filename: Optional[str] = None,
 ) -> dict:
     """
@@ -425,50 +426,59 @@ def send_run_notification(
     report_filename: Optional[str] = None,
 ) -> dict:
     """
-    Разослать уведомление всем получателям проекта.
+    Разослать уведомление всем получателям проекта - ПАРАЛЛЕЛЬНО (получатели
+    независимы, ждать одного, чтобы начать следующего, незачем). Раньше цикл
+    был последовательным: при недоступности Telegram (WinError 10060 - сеть
+    не отвечает) каждый получатель ждал полный таймаут ПО ОЧЕРЕДИ, и на 3+
+    получателей рассылка растягивалась на минуты. Таймауты у send_message/
+    send_document тоже сделаны короче (15/30 сек) - если не достучались,
+    незачем ждать полторы-две минуты на КАЖДОГО, результат всё равно один.
 
     report_filename - имя, под которым отчёт придёт в чат (по умолчанию имя
     файла на диске).
 
     Возвращает словарь {'sent': N, 'failed': N, 'errors': [...]}
     """
+    ids = [str(c).strip() for c in recipients if str(c).strip()]
+    if not ids:
+        return {'sent': 0, 'failed': 0, 'errors': []}
+
+    caption = summary_text
+    if len(caption) > 1024:
+        # Telegram caption ограничен 1024 символами. Режем по границе строки,
+        # чтобы не порвать HTML-теги, и закрываем blockquote, если открыт.
+        caption = caption[:1000].rsplit('\n', 1)[0]
+        if caption.count('<blockquote') > caption.count('</blockquote>'):
+            caption += '</blockquote>'
+        caption += '\n…'
+
+    def _send_one(chat_id: str):
+        if report_file and report_file.exists():
+            send_document(bot_token, chat_id, report_file, caption=caption,
+                          proxy_url=proxy_url, filename=report_filename)
+        else:
+            send_message(bot_token, chat_id, summary_text, proxy_url=proxy_url)
+        return chat_id
+
     sent = 0
     failed = 0
     errors = []
-    
-    for chat_id in recipients:
-        chat_id = str(chat_id).strip()
-        if not chat_id:
-            continue
-        try:
-            if report_file and report_file.exists():
-                # Отправляем файл с подписью (caption)
-                # Telegram caption ограничен 1024 символами.
-                # Режем по границе строки, чтобы не порвать HTML-теги,
-                # и закрываем blockquote, если он остался открытым.
-                caption = summary_text
-                if len(caption) > 1024:
-                    caption = caption[:1000].rsplit('\n', 1)[0]
-                    if caption.count('<blockquote') > caption.count('</blockquote>'):
-                        caption += '</blockquote>'
-                    caption += '\n…'
-                send_document(
-                    bot_token, chat_id, report_file,
-                    caption=caption,
-                    proxy_url=proxy_url,
-                    filename=report_filename,
-                )
-            else:
-                send_message(bot_token, chat_id, summary_text, proxy_url=proxy_url)
-            
-            sent += 1
-            if log:
-                log('info', f'✓ Отправлено в chat_id={chat_id}')
-        except Exception as e:
-            failed += 1
-            errors.append({'chat_id': chat_id, 'error': str(e)})
-            if log:
-                log('warn', f'⚠ Не доставлено в chat_id={chat_id}: {e}')
+    # max_workers = число получателей: их обычно единицы, отдельный поток на
+    # каждого не создаёт заметной нагрузки, а даёт максимум параллелизма.
+    with ThreadPoolExecutor(max_workers=len(ids)) as pool:
+        futures = {pool.submit(_send_one, cid): cid for cid in ids}
+        for fut in as_completed(futures):
+            chat_id = futures[fut]
+            try:
+                fut.result()
+                sent += 1
+                if log:
+                    log('info', f'✓ Отправлено в chat_id={chat_id}')
+            except Exception as e:
+                failed += 1
+                errors.append({'chat_id': chat_id, 'error': str(e)})
+                if log:
+                    log('warn', f'⚠ Не доставлено в chat_id={chat_id}: {e}')
 
     return {'sent': sent, 'failed': failed, 'errors': errors}
 
