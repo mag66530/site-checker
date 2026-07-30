@@ -269,15 +269,10 @@ if not _alive:
         st.error(f'Браузер не готов: {_bmsg}. Проверка целей работает локально '
                  f'или на своём сервере; в облаке нужен playwright + packages.txt.')
 
-# Прокси. Поля и проверка доступа - только на странице «Настройки проекта»,
-# здесь ничего не показываем: адрес берём из общей точки (proxy_config), она
-# уже учитывает use_proxy проекта и настройку из личного кабинета.
-_goals_proxy = None
-try:
-    from proxy_config import proxy_for_project
-    _goals_proxy = proxy_for_project(_base)
-except Exception as _e_pa:
-    st.caption(f'⚠ Прокси не определился: {_e_pa}')
+# Прокси - чек-бокс дорисовывается в место, оставленное render_account_ui
+# в сайдбаре (см. auth.fill_proxy_slot) - теперь с уже известным ЗДЕСЬ pid.
+import auth
+_goals_proxy = auth.fill_proxy_slot(_base)
 
 c1, c2 = st.columns([3, 1])
 with c1:

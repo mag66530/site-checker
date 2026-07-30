@@ -1117,16 +1117,13 @@ if _forms_none:
 if _cities_none:
     st.warning('Не выбрано ни одного домена/города - отметь хотя бы один, чтобы запустить.')
 
-# Прокси. Поля и проверка доступа - только на странице «Настройки проекта».
-# pid_key - id ЭТОЙ страницы (напр. 'metpromko'), а личный кабинет и
-# projects/*.json знают проект как 'mpk' - поэтому отображаем через
-# canonical_project_id, иначе настройки искались бы под чужим именем.
-_forms_proxy = None
-try:
-    from proxy_config import canonical_project_id, proxy_for_project
-    _forms_proxy = proxy_for_project(canonical_project_id(pid_key))
-except Exception as _e_pa:
-    st.caption(f'⚠ Прокси не определился: {_e_pa}')
+# Прокси - чек-бокс дорисовывается в место, оставленное render_account_ui
+# в сайдбаре (см. auth.fill_proxy_slot). pid_key - id ЭТОЙ страницы (напр.
+# 'metpromko'), а личный кабинет и projects/*.json знают проект как 'mpk' -
+# передаём канонический id, иначе настройки искались бы под чужим именем.
+import auth
+from proxy_config import canonical_project_id
+_forms_proxy = auth.fill_proxy_slot(canonical_project_id(pid_key))
 
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:

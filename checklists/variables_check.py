@@ -4,7 +4,8 @@
 
 Для выбранного проекта фоново качает главные страницы поддоменов и сверяет с КП
 (catalogs/{proj}-kp.csv): город/страна, телефоны (поиск/реклама/общий), почта,
-адрес, Telegram, WhatsApp. Результат - Excel «Проверка КП» + «Расхождения».
+адрес, Telegram, WhatsApp. Результат - Excel «Проверка КП» (+ «Карты», если
+включали сверку с Яндекс.Картами/2ГИС).
 Сделана по образцу страницы «Проверка форм» (фоновый процесс variables_run.py).
 """
 import importlib.util
@@ -17,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
+
+import site_access
 
 ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
@@ -323,25 +326,49 @@ else:
     st.caption(f'Будут проверены все {len(_cities)} доменов и поддоменов проекта.')
 
 st.divider()
+st.markdown('**Источники для сверки**')
+st.caption('Можно снять «Сайт», если нужны только карты - тогда страницы '
+          'сайта вообще не скачиваются, прогон короче.')
+_mc1, _mc2, _mc3, _mc4 = st.columns(4)
+_check_site = _mc1.checkbox(
+    'Сайт (сверка с КП)', value=True, key=f'vc_check_site_{pid_key}',
+    help='Скачивает главные страницы поддоменов, сверяет с КП. Это основная '
+         'проверка страницы - снимай, только если сейчас нужны исключительно '
+         'карты, без затрат времени на сайт.')
+_check_yandex_maps = _mc2.checkbox(
+    'Яндекс.Карты', key=f'vc_map_yandex_{pid_key}',
+    help='Карточка организации на yandex.ru/maps/org/… - сверяем название, '
+         'телефон, адрес, сайт с КП. Ссылка берётся из колонки «Карта» под '
+         '«Яндекс Бизнес» в таблице КП; если у города её нет - город просто '
+         'пропускается (не ошибка).')
+_check_2gis_maps = _mc3.checkbox(
+    '2ГИС', key=f'vc_map_2gis_{pid_key}',
+    help='Карточка организации на 2gis.ru/…/firm/… - те же поля, что и для '
+         'Яндекс.Карт. Ссылка - из колонки «Карта» под «2ГИС» в таблице КП.')
+_mc4.checkbox('Google', value=False, disabled=True,
+             help='Пока не подключено: у Google почти нет прямых ссылок на '
+                  'карточку в таблице КП, нужен отдельный способ находить '
+                  'нужную организацию по названию и городу.')
+if not (_check_site or _check_yandex_maps or _check_2gis_maps):
+    st.warning('Выбери хотя бы один источник - иначе прогону нечего делать.')
+if _check_yandex_maps or _check_2gis_maps:
+    st.caption('⚠ Карты проверяются в браузере - это заметно дольше обычной '
+              'сверки сайта (десятки секунд на карточку).')
+
+st.divider()
 st.subheader('Запуск')
 # Прокси проекта - единый механизм (proxy_config.py): БД личного кабинета →
 # proxy_url_<pid> → proxy_url → HTTP_PROXY, С УЧЁТОМ use_proxy проекта.
 # Раньше здесь брали общий _secret('proxy_url') НАПРЯМУЮ и игнорировали
 # use_proxy - подпись «прокси будет использован» показывалась даже проектам
 # с выключенным прокси, а сам адрес не учитывал личный кабинет.
-from proxy_config import project_use_proxy, resolve_proxy
-_use_proxy_flag = project_use_proxy(pid_key)
-_proxy = resolve_proxy(pid_key) if _use_proxy_flag else None
-if _use_proxy_flag and _proxy:
-    st.caption('Прокси проекта будет использован (нужен проектам, которые '
-               'блокируют зарубежный IP, напр. СМУ).')
-elif _use_proxy_flag:
-    st.caption('У проекта включён прокси (use_proxy=true), но адрес не '
-               'настроен ни в «Настройках проекта», ни в секретах - часть '
-               'страниц не загрузится (это будет видно в отчёте).')
+from proxy_config import resolve_proxy
+if not resolve_proxy(pid_key):
+    st.caption('У проекта не настроен прокси («Настройки проекта») - '
+               'страницы качаются напрямую.')
 else:
-    st.caption('У проекта прокси выключен (use_proxy=false) - все страницы '
-               'качаются напрямую.')
+    st.caption('Прокси настроен - включить его для этого прогона можно '
+               'чек-боксом в сайдбаре слева.')
 
 _alive = _pid_alive(_read_pid())
 # Прошлый прогон уже завершён (в логе метка), но pid-файл остался, а на облаке
@@ -360,27 +387,27 @@ if _alive:
             pass
 _none_chosen = (_mode == 'Выбрать города' and not _chosen)
 
-# Прокси. Поля и проверка доступа - только на странице «Настройки проекта».
-# Здесь берём адрес из общей точки: она уже учитывает use_proxy проекта, так
-# что при выключенном прокси вернётся None - это и уйдёт в прогон
-# (см. _env['proxy_url'] ниже).
-_effective_proxy = None
-try:
-    from proxy_config import proxy_for_project
-    _effective_proxy = proxy_for_project(pid_key)
-except Exception as _e_pa:
-    st.caption(f'⚠ Прокси не определился: {_e_pa}')
+# Прокси - чек-бокс дорисовывается в место, оставленное render_account_ui
+# в сайдбаре (см. auth.fill_proxy_slot) - теперь с уже известным ЗДЕСЬ pid.
+import auth
+_effective_proxy = auth.fill_proxy_slot(pid_key)
 
+_nothing_selected = not (_check_site or _check_yandex_maps or _check_2gis_maps)
 _c1, _c2 = st.columns([3, 1])
 with _c1:
     if st.button('▶ Запустить проверку', use_container_width=True,
-                 type='primary', disabled=_alive or _none_chosen):
+                 type='primary', disabled=_alive or _none_chosen or _nothing_selected):
         if not _deps_ready():
             st.error('В этом окружении нет нужных библиотек (requests/bs4/openpyxl).')
         else:
-            args = ['variables_run.py', '--project', pid_key]
+            args = ['variables_run.py', '--project', pid_key,
+                    '--check-site' if _check_site else '--no-check-site']
             if _mode == 'Выбрать города' and _chosen:
                 args += ['--cities', ','.join(_chosen)]
+            if _check_yandex_maps:
+                args += ['--check-yandex-maps']
+            if _check_2gis_maps:
+                args += ['--check-2gis-maps']
             # На свежем деплое папки cache/ ещё нет - создаём перед очисткой лога.
             LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
             LOG_FILE.write_text('', encoding='utf-8')
@@ -425,10 +452,12 @@ with st.expander('Как читать результат'):
     st.markdown(
         '- **✓** - значение на сайте совпадает с КП (для телефона: номер входит в '
         'набор номеров города из КП).\n'
-        '- **✗** - расхождение (в примечании ячейки: «ожидалось / на сайте»); '
-        'все расхождения собраны на листе «Расхождения».\n'
+        '- **✗** - расхождение. Наведи курсор на ячейку - во всплывающем '
+        'комментарии видно «ожидалось / на сайте».\n'
         '- **⚠** - на сайте не найдено (телефон/почта/адрес/мессенджер).\n'
-        '- **–** - в КП этого поля нет (проверять не с чем).')
+        '- **–** - в КП этого поля нет (проверять не с чем).\n\n'
+        'На листе «Карты» пустая ячейка у источника значит «не проверяли в '
+        'этом прогоне» (галочка была снята) - не путать с «–».')
 
 st.divider()
 st.subheader('Прогресс')
@@ -468,18 +497,26 @@ else:
             file_name=f'Проверка-КП-{pid_key.capitalize()}-{_date}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             use_container_width=True)
-        # быстрый предпросмотр
+        # быстрый предпросмотр. Отдельного листа «Расхождения» в отчёте больше
+        # нет - несовпадения видны прямо в ячейках «Проверки КП» (цвет и
+        # комментарий при наведении), поэтому здесь только сводка по картам.
         try:
             from openpyxl import load_workbook
             wb = load_workbook(xlsx, read_only=True)
-            if 'Расхождения' in wb.sheetnames:
-                ws = wb['Расхождения']
-                rows = [[c.value for c in r] for r in ws.iter_rows(values_only=False)]
-                if len(rows) > 1:
-                    st.caption(f'Найдено расхождений: {len(rows) - 1}. '
-                               'Открой лист «Расхождения» в файле.')
-                else:
-                    st.success('Расхождений не найдено 🎉')
+            if 'Карты' in wb.sheetnames:
+                ws_m = wb['Карты']
+                rows_m = list(ws_m.iter_rows(min_row=2, values_only=True))
+                # Колонки C/D/E - Яндекс.Карты/Google/2ГИС; пусто = не
+                # проверяли (не считаем ни расхождением, ни недоступностью).
+                _vals = [v for row in rows_m for v in row[2:5] if v]
+                _n_bad = _vals.count('✗')
+                _n_unavail = _vals.count('⚠')
+                if _n_bad or _n_unavail:
+                    st.caption(f'Карты: {len(rows_m)} городов - '
+                              f'{_n_bad} расхождений, {_n_unavail} недоступно. '
+                              'Открой лист «Карты» в файле.')
+                elif rows_m:
+                    st.success('Карты: расхождений не найдено 🎉')
             wb.close()
         except Exception:
             pass

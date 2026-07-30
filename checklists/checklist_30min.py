@@ -36,7 +36,6 @@ from sources import (
 from profiles import PROFILES, get_profile_kwargs
 from history import load_history, save_history, WEEKLY_TTL_MS
 from run_estimate import estimate_run_seconds, format_estimate
-from proxy_config import resolve_proxy
 from sitemap import (
     load_product_pathnames, get_cached_products_info, invalidate_sitemap_cache,
 )
@@ -95,15 +94,6 @@ def _secret_pid(base, project_id):
         if v:
             return v
     return _secret(base)
-
-
-def get_proxy_url(project_id: str = ''):
-    """Адрес прокси для проекта. Приоритет как у остальных секретов:
-    настройки проекта из личного кабинета (БД) → proxy_url_<pid> →
-    общий proxy_url → HTTP_PROXY. Раньше читался только общий секрет,
-    из-за чего прокси, заданный проекту на странице «Настройки проекта»,
-    в прогон не попадал."""
-    return resolve_proxy(project_id)
 
 
 def get_metrika_credentials(project_id):
@@ -1053,6 +1043,11 @@ with st.container(border=True):
             st.session_state[_k] = True
 
 pid = st.session_state.c30_project_id
+
+# Прокси - чек-бокс дорисовывается в место, оставленное render_account_ui
+# в сайдбаре (см. auth.fill_proxy_slot) - теперь с уже известным ЗДЕСЬ pid.
+import auth
+_c30_effective_proxy = auth.fill_proxy_slot(pid)
 
 if pid:
     try:
@@ -2344,7 +2339,7 @@ if pid:
             _wm_token = (_secret_pid('yandex_oauth', pid)
                          or _secret_pid('webmaster_oauth', pid))
             creds = {
-                'proxy_url': get_proxy_url(pid),
+                'proxy_url': _c30_effective_proxy,
                 'tg_token': _secret('telegram_bot_token'),
                 'tg_recipients': get_telegram_recipients(pid),
                 'metrika': get_metrika_credentials(pid),

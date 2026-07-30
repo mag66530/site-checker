@@ -69,6 +69,35 @@ def _find_header_row(ws, max_scan=6):
     return 1, first
 
 
+def _map_link_columns(section_row, sub_row):
+    """Индексы колонок «Карта» под секциями «Яндекс Бизнес» / «2ГИС» / «Google».
+    В реальной таблице у каждого сервиса объединённый заголовок на строке ВЫШЕ
+    шапки (Яндекс Бизнес/2ГИС/Google), а под ним три подколонки Аккаунт/Карта/
+    Статус - у объединения данные только в первой ячейке диапазона, дальше
+    None. Секцию колонки «Карта» определяем, идя влево по section_row до
+    первой непустой ячейки.
+
+    ВАЖНО: есть похожая, но ДРУГАЯ колонка «Ссылка для яндекс-карт» - это
+    iframe-виджет карты для встройки на сайт (src=.../map-widget/v1/?um=...),
+    а не прямая ссылка на карточку организации. Она НЕ должна попасть сюда -
+    поэтому ищем именно заголовок «карта» РЯДОМ с «аккаунт»/«статус», а не
+    любое вхождение слова «карта»/«яндекс»."""
+    if not section_row:
+        return {}
+    out = {}
+    for i, h2 in enumerate(sub_row or ()):
+        if h2 is None or str(h2).strip().lower() != 'карта':
+            continue
+        section = None
+        for j in range(min(i, len(section_row) - 1), -1, -1):
+            if section_row[j]:
+                section = str(section_row[j]).strip().lower()
+                break
+        if section and section not in out:
+            out[section] = i
+    return out
+
+
 def _col(headers, *keywords, exact=None):
     """Индекс колонки, чей заголовок содержит все keywords (или равен exact).
     Колонки блока проверки («Почта/ошибка», «Адрес/ошибка», …) пропускаем: у МПК
@@ -127,6 +156,17 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     ws = _pick_sheet(wb, layout['sheet'])
 
     hdr_row_idx, headers = _find_header_row(ws)
+
+    # Секционная строка (Яндекс Бизнес/2ГИС/Google) - ОДНОЙ строкой выше шапки
+    # Аккаунт/Карта/Статус. Если шапка на строке 1 - секционной строки нет
+    # (нечего сканировать выше), это нормально для проектов без этого блока.
+    section_row = None
+    if hdr_row_idx > 1:
+        section_row = next(ws.iter_rows(min_row=hdr_row_idx - 1, max_row=hdr_row_idx - 1,
+                                        values_only=True), None)
+    _map_cols = _map_link_columns(section_row, headers)
+    ci_yandex_map = _map_cols.get('яндекс бизнес')
+    ci_twogis_map = _map_cols.get('2гис')
 
     ci_city = _col(headers, exact='город') or _col(headers, 'город')
     ci_addr = _col(headers, exact='адрес') or _col(headers, 'адрес')
@@ -280,6 +320,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             'country': norm_country(cell(row, ci_country)),
             'telegram': clean_msgr(cell(row, ci_tg)),
             'whatsapp': clean_msgr(cell(row, ci_wa)),
+            'yandex_map_url': cell(row, ci_yandex_map),
+            'twogis_map_url': cell(row, ci_twogis_map),
         })
     wb.close()
 
@@ -289,7 +331,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
         w = csv.DictWriter(f, fieldnames=['domain', 'city', 'phone_seo',
                                           'phone_ad', 'phone_common', 'all_phones',
                                           'email', 'address',
-                                          'country', 'telegram', 'whatsapp'])
+                                          'country', 'telegram', 'whatsapp',
+                                          'yandex_map_url', 'twogis_map_url'])
         w.writeheader()
         w.writerows(rows_out)
     print(f'{project_id}: {len(rows_out)} городов → {out}')

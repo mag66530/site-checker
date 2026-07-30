@@ -39,6 +39,13 @@ def test_extract_messengers():
 
 
 def test_check_variables_ok():
+    # row - явно, а не из живой catalogs/smu-kp.csv: та таблица периодически
+    # правится вручную для других тестов (напр. временная порча '2' в
+    # phone_common) - тест не должен зависеть от того, что там СЕЙЧАС лежит.
+    row = kp.KPRow(domain="stalmetural.ru", city="Москва", country="Россия",
+                   phone_common="+7 (499) 130-36-69", all_phones="4991303669",
+                   email="msk@stalmetural.ru", address="улица Люблинская, 151",
+                   telegram="smu_manager2", whatsapp="7-903-130-36-69")
     html = (
         '<header>'
         '<a href="tel:+74991303669">+7 (499) 130-36-69</a> '
@@ -47,7 +54,7 @@ def test_check_variables_ok():
         '</header>'
         '<a href="https://t.me/smu_manager2">TG</a>'
         '<a href="https://wa.me/79031303669">WA</a>')
-    r = kp.check_variables(html, "stalmetural.ru")
+    r = kp.check_variables(html, "stalmetural.ru", row=row)
     assert r["matched"] is True
     assert r["city"] == "Москва"
     assert r["country"] == "Россия"
@@ -157,10 +164,12 @@ def test_garbage_kp_value_is_info_always_bug():
 
 
 def test_empty_slot_site_shows_common_is_dash_not_bug():
-    """Правило заказчика: если в КП для слота (SEO/Реклама) номера НЕТ, а на сайте
-    стоит ОБЩИЙ номер города (он же есть в КП) - это НЕ баг, а прочерк «–»:
-    отдельного SEO/рекламного номера просто нет, сайт показывает общий. Баг
-    (✗) - только если на сайте НОВЫЙ номер, которого в КП города нет вообще."""
+    """Правило заказчика: если в КП для слота (SEO/Реклама) номера НЕТ - это
+    ВСЕГДА прочерк «–» для этого слота, что бы ни было на сайте (известный
+    номер города или совсем новый). Раньше «совсем новый» номер (которого в
+    КП города нет вообще) считался ✗ - заказчик явно попросил убрать это
+    исключение: пустое поле КП значит «здесь номера просто нет», а не «здесь
+    должен быть номер, и он не совпал» (подтверждено 2026-07-30)."""
     m = kp.load_kp("smu")
     kp._KP_CACHE["smu"] = m
     row = m["stalmetural.ru"]
@@ -176,11 +185,12 @@ def test_empty_slot_site_shows_common_is_dash_not_bug():
         assert by["Тел. SEO Город"]["status"] == "na"       # пусто в КП + общий на сайте → –
         assert by["Тел. Реклама Город"]["status"] == "na"
 
-        # На сайте НОВЫЙ номер, которого в КП нет → все слоты ✗ и виден номер сайта.
+        # На сайте СОВСЕМ НОВЫЙ номер, которого в КП нет вообще - слот SEO
+        # ВСЁ РАВНО «–» (поле пустое в КП, сравнивать нечего в принципе).
         html2 = '<header><a href="tel:+74959998877">+7 (495) 999-88-77</a></header>'
         by2 = {f["field"]: f for f in kp.check_variables(html2, "stalmetural.ru")["fields"]}
-        assert by2["Тел. SEO Город"]["status"] == "bug"
-        assert "999" in (by2["Тел. SEO Город"]["found"] or "")
+        assert by2["Тел. SEO Город"]["status"] == "na"
+        assert by2["Тел. SEO Город"]["found"] == "–"
     finally:
         (row.phone_seo, row.phone_ad, row.phone_common, row.all_phones) = saved
 
@@ -453,7 +463,7 @@ def test_belgorod_empty_seo_shows_dash_not_phantom():
     assert by["Тел. SEO Город"]["status"] == "na"
     assert by["Тел. SEO Город"]["expected"] == "–"
     assert by["Тел. SEO Город"]["found"] == "–"
-    assert "общий номер города" in by["Тел. SEO Город"]["note"]
+    assert "нет" in by["Тел. SEO Город"]["note"]
     # Фантом «945…» не должен просочиться ни в одно поле телефона.
     for f in r["fields"]:
         assert "945" not in (f["found"] or ""), f
@@ -825,11 +835,13 @@ def test_incomplete_site_address_is_flagged_not_hidden():
 
 def test_transient_text_phone_does_not_flag_empty_slot():
     """Жалоба заказчика: у Назрани/Новочебоксарска ✗ «SEO не совпадает» по номеру
-    +7 (905) 919-69-02, которого на сайте не найти. Причина - в пустой слот
+    +7 (905) 919-69-02, которого на сайте не найти. Причина была - в пустой слот
     попадал ЛЮБОЙ номер из ТЕКСТА шапки/подвала (виджет/временная правка), даже
-    если он не оформлен ссылкой tel:. Теперь «новый номер» ищем среди tel:, а не
-    любого текста: временный номер из текста слот НЕ краснит, а основной (tel:)
-    из КП - ✓."""
+    если он не оформлен ссылкой tel:.
+
+    Позже правило расширили (2026-07-30): пустой слот КП - ВСЕГДА «–», что бы
+    ни было на сайте, даже настоящий новый номер через tel:. Проверяем оба
+    случая (временный номер из текста и «настоящий» через tel:) - оба «–»."""
     row = kp.KPRow(domain='nazran.mepen.ru', city='Назрань',
                    phone_common='+7 (800) 700-56-38', phone_seo='', phone_ad='',
                    all_phones='8007005638', email='nazran@mepen.ru',
@@ -843,11 +855,12 @@ def test_transient_text_phone_does_not_flag_empty_slot():
     assert by['Тел. SEO Город']['status'] == 'na', by['Тел. SEO Город']
     assert by['Тел. Реклама Город']['status'] == 'na'
 
-    # Но НАСТОЯЩИЙ новый номер (оформлен ссылкой tel:) - по-прежнему ✗.
+    # НАСТОЯЩИЙ новый номер (оформлен ссылкой tel:) - тоже «–»: поле в КП
+    # пустое, сравнивать нечего в принципе (правило от 2026-07-30).
     html2 = '<header><a href="tel:+79059196902">+7 (905) 919-69-02</a></header>'
     by2 = {f['field']: f for f in kp.check_variables(html2, 'nazran.mepen.ru', row=row)['fields']}
-    assert by2['Тел. SEO Город']['status'] == 'bug'
-    assert '905' in (by2['Тел. SEO Город']['found'] or '')
+    assert by2['Тел. SEO Город']['status'] == 'na'
+    assert by2['Тел. SEO Город']['found'] == '–'
 
 
 def test_address_matched_on_contacts_even_if_main_has_other_field():
