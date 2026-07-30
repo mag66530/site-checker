@@ -211,6 +211,33 @@ def _видимые_узлы(page, sel: str, лимит: int = _ЛИМИТ_УЗ�
         return []
 
 
+# Playwright считает элемент видимым, если у него есть размер и нет
+# visibility:hidden - но НЕ смотрит на opacity. А модалки сплошь скрывают
+# через opacity:0 (плавное появление). Из-за этого поиск попапа находил
+# «Спасибо» ДО отправки и мог дать ложное ✓ «пользователь увидел
+# подтверждение». Поэтому прозрачность проверяем сами.
+_JS_РЕАЛЬНО_ВИДИМ = (
+    "el => { try { const s = getComputedStyle(el);"
+    " if (s.visibility === 'hidden' || s.display === 'none') return false;"
+    " if (parseFloat(s.opacity || '1') <= 0.05) return false;"
+    " let p = el;"                     # прозрачный/скрытый родитель тоже скрывает
+    " while (p) { const ps = getComputedStyle(p);"
+    "   if (parseFloat(ps.opacity || '1') <= 0.05) return false;"
+    "   if (ps.visibility === 'hidden' || ps.display === 'none') return false;"
+    "   p = p.parentElement; }"
+    " return el.getClientRects().length > 0;"
+    " } catch (e) { return false; } }")
+
+
+def _реально_видим(el) -> bool:
+    """Виден ли элемент ГЛАЗАМИ: с размером, без visibility/display-скрытия и
+    без прозрачности (у себя или у любого родителя)."""
+    try:
+        return bool(el.evaluate(_JS_РЕАЛЬНО_ВИДИМ))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _найти_видимый_попап_успеха(page, лимит: int = _ЛИМИТ_УЗЛОВ_ПОПАПА):
     """Локатор ВИДИМОГО окна/блока с текстом подтверждения отправки, или None.
     Единая точка поиска попапа «Спасибо» для всех проверок (детект уведомления,
@@ -219,7 +246,9 @@ def _найти_видимый_попап_успеха(page, лимит: int = _
     for sel in _СЕЛЕКТОРЫ_ПОПАПА_УСПЕХА:
         for el in _видимые_узлы(page, sel, лимит):
             try:
-                if _текст_подтверждает_отправку(el.inner_text(timeout=500)):
+                if not _текст_подтверждает_отправку(el.inner_text(timeout=500)):
+                    continue
+                if _реально_видим(el):
                     return el
             except Exception:  # noqa: BLE001
                 continue
@@ -245,16 +274,53 @@ _JS_ПОДТВ_НАБЛЮДАТЕЛЬ = r"""
   const norm = s => (s || '').toLowerCase().replace(/ё/g, 'е');
   const строки = t => norm(t).split('\n').map(s => s.trim()).filter(Boolean);
   const текст = () => (document.body ? (document.body.innerText || '') : '');
-  const база = new Set(строки(текст()));
+  const есть_маркер = s => маркеры.some(m => s.includes(m));
+  // ВИДИМОСТЬ по-настоящему: элемент в layout И его не спрятали
+  // visibility/opacity/display. Проверено опытом: модалка, скрытая через
+  // opacity:0, попадает в document.body.innerText - то есть её текст лежит в
+  // БАЗОВОМ снимке, и «новый текст» такого попапа никогда не появится. Именно
+  // поэтому подтверждение не ловилось на живых формах. Поэтому главный сигнал
+  // теперь - элемент с текстом благодарности, который СТАЛ видимым.
+  const видим = el => {
+    try {
+      if (!el.getClientRects().length) return false;
+      const s = getComputedStyle(el);
+      return s.visibility !== 'hidden' && s.display !== 'none'
+             && parseFloat(s.opacity || '1') > 0.05;
+    } catch (e) { return false; }
+  };
+  const СЕЛ = "[class*='thank' i],[class*='thanks' i],[class*='success' i],"
+            + "[class*='spasibo' i],[id*='thank' i],[id*='spasibo' i],"
+            + "[id*='success' i],[class*='popup' i],[class*='modal' i],"
+            + "[role='dialog']";
+  const узлы = () => {
+    try { return [...document.querySelectorAll(СЕЛ)].slice(0, 60); }
+    catch (e) { return []; }
+  };
+  // Кто УЖЕ показывает благодарность до отправки (статичный блок, открытый
+  // попап) - его засчитывать нельзя, запоминаем такие узлы.
+  const базовые = new WeakSet();
+  for (const el of узлы()) {
+    if (видим(el) && есть_маркер(norm(el.innerText || ''))) базовые.add(el);
+  }
+  const базаТекст = new Set(строки(текст()));
   window.__confSeen = '';
   const проба = () => {
     try {
       if (window.__confSeen) return;
-      for (const s of строки(текст())) {
-        if (база.has(s)) continue;
-        for (const m of маркеры) {
-          if (s.includes(m)) { window.__confSeen = s.slice(0, 200); return; }
+      // 1) появился ВИДИМЫЙ узел с благодарностью, которого раньше не было
+      for (const el of узлы()) {
+        if (базовые.has(el) || !видим(el)) continue;
+        const t = norm(el.innerText || '');
+        if (t && есть_маркер(t)) {
+          window.__confSeen = (el.innerText || '').trim().slice(0, 200);
+          return;
         }
+      }
+      // 2) запасной сигнал: новая строка текста с маркером
+      for (const s of строки(текст())) {
+        if (базаТекст.has(s)) continue;
+        if (есть_маркер(s)) { window.__confSeen = s.slice(0, 200); return; }
       }
     } catch (e) {}
   };
@@ -275,14 +341,46 @@ def _наблюдатель_подтверждения_старт(page) -> bool:
         return False
 
 
-def _наблюдатель_подтверждения_итог(page) -> str:
-    """Что наблюдатель увидел после отправки: новый фрагмент текста с маркером
-    подтверждения (или пустая строка). Наблюдатель при этом останавливаем."""
+def ждать_подтверждения(page, таймаут_мс: int = 3500) -> str:
+    """Ждёт подтверждение отправки и возвращает его текст (или пустую строку).
+    Выходит СРАЗУ, как только увидел - быстрые формы не замедляет.
+
+    Зачем отдельно: главный вердикт формы («увидел ли посетитель, что заявка
+    принята») надо снимать с ПЕРВОЙ, чистой отправки - ДО того, как тул начнёт
+    жать «Отправить» повторно (двойная отправка + активная проба лимита). Иначе
+    наши же повторы гасят попап «Спасибо», и на рабочей форме выходило «Нет»."""
+    import time as _t
+    дедлайн = _t.monotonic() + max(0.3, int(таймаут_мс) / 1000.0)
+    while True:
+        найдено = _наблюдатель_подтверждения_итог(page, стоп=False)
+        if найдено:
+            return найдено
+        try:
+            эл = _найти_видимый_попап_успеха(page)
+            if эл is not None:
+                return (эл.inner_text(timeout=500) or "").strip()[:200]
+        except Exception:  # noqa: BLE001
+            pass
+        if _t.monotonic() >= дедлайн:
+            return ""
+        try:
+            page.wait_for_timeout(200)
+        except Exception:  # noqa: BLE001
+            return ""
+
+
+def _наблюдатель_подтверждения_итог(page, стоп: bool = True) -> str:
+    """Что наблюдатель увидел после отправки: текст появившегося подтверждения
+    (или пустая строка). стоп=True - заодно останавливает наблюдатель; при
+    стоп=False только подглядываем (наблюдатель продолжает работать)."""
     try:
-        итог = page.evaluate(
-            "() => { const s = window.__confSeen || '';"
-            " try { if (window.__confTimer) clearInterval(window.__confTimer); }"
-            " catch (e) {} window.__confTimer = null; return s; }")
+        if стоп:
+            итог = page.evaluate(
+                "() => { const s = window.__confSeen || '';"
+                " try { if (window.__confTimer) clearInterval(window.__confTimer); }"
+                " catch (e) {} window.__confTimer = null; return s; }")
+        else:
+            итог = page.evaluate("() => window.__confSeen || ''")
         return str(итог or "").strip()
     except Exception:  # noqa: BLE001
         return ""
@@ -8474,6 +8572,17 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     except Exception:  # noqa: BLE001
                         pass
 
+            # ── ПОДТВЕРЖДЕНИЕ ПЕРВОЙ, ЧИСТОЙ ОТПРАВКИ ──
+            # Снимаем ДО повторов и запоминаем навсегда. Дальше тул жмёт
+            # «Отправить» ещё 1-2 раза (двойная отправка + активная проба лимита),
+            # и сайт после повторов попап «Спасибо» часто уже не показывает - на
+            # рабочей форме выходило «уведомление: Нет», хотя вручную окно есть.
+            # Выходим сразу, как увидели, поэтому быстрые формы не замедляются.
+            _подтв_первой = ждать_подтверждения(page, таймаут_мс=3500)
+            if _подтв_первой:
+                print(f"   👁 Подтверждение первой отправки: "
+                      f"{_подтв_первой[:70]!r}")
+
             # Сам тест двойной отправки (guarded - никогда не роняет отправку).
             try:
                 if _ds_safe:
@@ -8622,6 +8731,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                    "Смена кнопки на «Отправлено» - косметика.")
                     elif _mx == 1:
                         _ds_verdict = "защищена"
+                        _ds_ком = ("Повторное нажатие второго запроса не дало - "
+                                   "форма блокирует повтор. Учтите: тул жмёт второй "
+                                   "раз ПОСЛЕ ответа сервера на первую отправку "
+                                   "(так делает нетерпеливый посетитель, когда "
+                                   "ничего не произошло). Молниеносный дабл-клик "
+                                   "«в один момент» так не проверить - если это "
+                                   "важно, щёлкните дважды подряд вручную.")
                     elif _отв_форма.get("статус") is not None:
                         # Ни одного POST в счётчике дублей, НО ответ на отправку
                         # пойман (форма реально отправилась ОДИН раз). Значит
@@ -8685,7 +8801,8 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # уже видел подтверждение - опрос вообще не нужен (вернёт сразу).
             _уведомл_польз = детект_уведомления_пользователю(
                 page, _btn_текст_до, _btn_текст_после, кнопка=sub, таймаут_мс=12000,
-                текст_тела_до=_текст_тела_до, наблюдение=_набл_подтв)
+                текст_тела_до=_текст_тела_до,
+                наблюдение=(_подтв_первой or _набл_подтв))
             _есть_подтверждение = str(_уведомл_польз).startswith("Да")
             # Вердикт по РЕАЛЬНОМУ ответу сервера на отправку (если поймали).
             _отв_вердикт = _ответ_формы_вердикт(
