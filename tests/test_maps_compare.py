@@ -79,6 +79,23 @@ def test_site_subdomain_counts_as_match():
     print('✓ поддомен того же домена - совпадение')
 
 
+def test_site_root_domain_on_card_is_mismatch_when_kp_wants_subdomain():
+    """Реальный случай (2ГИС, Севастополь/Ижевск): карточка показывает
+    КОРНЕВОЙ домен stalmetural.ru, а КП для ЭТОГО города явно ждёт свой
+    поддомен (sevastopol.stalmetural.ru/izhevsk.stalmetural.ru). Это НЕ тот
+    же случай, что «карта = поддомен КП» (test_site_subdomain_counts_as_match) -
+    здесь КП точно указывает нужный сайт для карточки, и корневой домен вместо
+    него - реальная проблема (карточку не обновили под город), а не «тот же
+    бренд». Подтверждено заказчиком на реальных карточках дважды."""
+    row = KPRow(domain='sevastopol.stalmetural.ru', city='Севастополь',
+               phone_common='+7 499 130-36-69', address='Хрусталёва, 74а')
+    card = dict(_CARD_MATCH, site='stalmetural.ru')
+    r = mc.compare('2gis', 'Севастополь', 'u', card, row)
+    assert r.site_match is False
+    assert r.is_error
+    print('✓ карточка на корневой домен при поддомене в КП - расхождение, не совпадение')
+
+
 def test_city_missing_from_kp_reports_but_does_not_crash():
     """Города нет в КП вообще (kp_row=None) - показываем данные карточки,
     явно помечаем «сверять не с чем», не притворяемся совпадением."""

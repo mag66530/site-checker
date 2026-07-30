@@ -195,6 +195,7 @@ def _norm_addr(s: Optional[str]) -> str:
     if not s:
         return ''
     s = str(s).lower().translate(_LAT2CYR)
+    s = s.replace('ё', 'е')               # ё/е пишут вперемешку - не путать с расхождением
     s = re.sub(r'[^\w\s]', ' ', s)        # убрать пунктуацию
     return re.sub(r'\s+', ' ', s).strip()
 

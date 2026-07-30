@@ -129,9 +129,15 @@ def compare(source: str, city: str, url: str, card: dict, kp_row: KPRow | None) 
 
     if kp_row.domain:
         map_site = _norm_site(card.get('site', ''))
+        # ТОЛЬКО карта = сам домен КП или ЕГО поддомен - совпадение (тот же
+        # бренд, просто городской поддомен). ОБРАТНОЕ (карта = корневой домен,
+        # а КП для этого города ждёт конкретный поддомен, напр.
+        # izhevsk.stalmetural.ru) - это НЕ совпадение: КП явно указывает,
+        # какой сайт должен стоять у ЭТОЙ карточки, и корневой домен вместо
+        # городского поддомена - реальная проблема (карточку не обновили),
+        # не "тот же бренд" (подтверждено заказчиком на Севастополе/Ижевске).
         res.site_match = bool(map_site) and (
-            map_site == kp_row.domain or map_site.endswith('.' + kp_row.domain)
-            or kp_row.domain.endswith('.' + map_site))
+            map_site == kp_row.domain or map_site.endswith('.' + kp_row.domain))
         if not res.site_match:
             res.issues.append(
                 f'сайт на карте ({card.get("site") or "—"}) не совпал с КП '
