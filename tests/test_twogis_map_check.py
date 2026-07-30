@@ -60,8 +60,74 @@ _SEVASTOPOL_PANEL = """
 """
 
 
+# Нижний Новгород - РЕАЛЬНЫЙ фрагмент карточки (прислал пользователь). Слаг
+# города с ПОДЧЁРКИВАНИЕМ (n_novgorod), не с дефисом - раньше regex на
+# geo-ссылку не пропускал "_" и адрес считался отсутствующим на карточке.
+_NNOVGOROD_PANEL = """
+<div class="_8sgdp4"><div class="_599hh" data-rack="true">
+<div class="_172gbf8" data-divider="true" data-divider-shifted="true">
+<div class="_1iftozu"><svg></svg></div>
+<div class="_49kxlr"><div class="_1ovqm446"><div class="_z3fqkm"><svg></svg></div>
+<div><div>
+<span class="_14quei">
+  <span class="_wrdavn">​БЦ Муравей</span>
+  <span class="_wrdavn">​<a href="/n_novgorod/geo/2674647933923077" class="_2lcm958">Рождественская,&nbsp;13</a></span>
+</span>
+<div class="_1p8iqzw">Нижегородский район, Нижний Новгород, 603001</div>
+</div>
+<div class="_rtsy3"><div class="_1fpr72l"><button class="_1n1gqlj7" type="button">Показать вход</button></div></div>
+</div></div></div>
+</div>
+<div class="_172gbf8" data-divider="true" data-divider-shifted="true">
+<div class="_1iftozu"><svg></svg></div>
+<div class="_49kxlr"><span><div>
+<a href="https://link.2gis.ru/x/AAAA" target="_blank" class="_1rehek">n-novgorod.stalmetural.ru/</a>
+</div></span></div></div>
+</div></div>
+"""
+
+
+def test_address_with_underscore_city_slug_is_found():
+    """Слаг «n_novgorod» (с подчёркиванием) - раньше regex ловил только
+    дефисные слаги (rostov-na-donu) и адрес Нижнего Новгорода не находился,
+    хотя он явно есть на карточке («БЦ Муравей, Рождественская, 13»)."""
+    data = tm.extract(_html(_NNOVGOROD_PANEL))
+    assert 'Рождественская' in data['address'] and '13' in data['address']
+    assert 'Новгород' in data['address']
+    print('✓ слаг города с подчёркиванием - адрес всё равно находится')
+
+
+def test_nnovgorod_site_still_found_alongside_address():
+    """Сайт на этой же карточке (с завершающим слэшем) находится тоже - оба
+    поля должны работать одновременно, не только одно из двух."""
+    data = tm.extract(_html(_NNOVGOROD_PANEL))
+    assert data['site'] == 'n-novgorod.stalmetural.ru'
+    print('✓ сайт на карточке Нижнего Новгорода тоже находится')
+
+
+# Сургут - текст ссылки на сайт СО СЛЭШЕМ на конце (2ГИС иногда так
+# рендерит) - раньше regex не совпадал из-за него, и сайт считался
+# "отсутствует на карточке", хотя он там есть.
+_SURGUT_PANEL = """
+<div class="_8sgdp4"><div class="_599hh" data-rack="true">
+<div class="_172gbf8"><div class="_49kxlr"><span><div>
+<a href="https://link.2gis.ru/4.2/AAAA0000/aHR0cDovL3N1cmd1dC5zdGFsbWV0dXJhbC5ydS8=" target="_blank" class="_1rehek">surgut.stalmetural.ru/</a>
+</div></span></div></div>
+</div></div>
+"""
+
+
 def _html(panel):
     return _HEAD + '</head><body>' + panel + '</body></html>'
+
+
+def test_site_with_trailing_slash_in_link_text_is_still_found():
+    """Ссылка показывает текст «surgut.stalmetural.ru/» (со слэшем) - раньше
+    это не проходило по regex (^...$ без допуска на «/») и сайт считался
+    отсутствующим на карточке, хотя он там явно есть."""
+    data = tm.extract(_html(_SURGUT_PANEL))
+    assert data['site'] == 'surgut.stalmetural.ru'
+    print('✓ слэш на конце текста ссылки не мешает найти сайт')
 
 
 def test_moscow_site_found_as_bare_domain_not_social_link():

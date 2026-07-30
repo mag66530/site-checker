@@ -202,9 +202,9 @@ st.caption(f'В КП проекта: **{len(_cities)}** поддоменов, с
 
 # ── Проектные шаблоны ────────────────────────────────────────────────
 def _vc_tpl_apply(_tpl_data):
-    # Шаблон уже проставил vc_mode + галочки городов (vc_cb_*) в session_state.
-    # Помечаем инициализацию сетки выполненной, иначе дефолт «отметить всё»
-    # перетёр бы галочки из шаблона.
+    # Шаблон уже проставил vc_mode + список городов (vc_ms_*) в session_state.
+    # Помечаем инициализацию выполненной, иначе дефолт «отметить всё» перетёр
+    # бы выбор из шаблона.
     st.session_state[f'vc_init_{pid_key}'] = True
 
 
@@ -212,18 +212,14 @@ def _vc_tpl_apply(_tpl_data):
 # ПРЯМО по клику «Сохранить» (значения виджетов уже в session_state).
 def _vc_tpl_reset():
     # Сброс к стандартным: охват → «Все домены+поддомены», выбор городов заново
-    # (снимаем флаг инициализации и чистим галочки городов).
-    for _k in ([f'vc_mode_{pid_key}', f'vc_init_{pid_key}']
-               + [_kk for _kk in list(st.session_state.keys())
-                  if _kk.startswith(f'vc_cb_{pid_key}_')]):
+    # (снимаем флаг инициализации и список выбранных городов).
+    for _k in (f'vc_mode_{pid_key}', f'vc_init_{pid_key}', f'vc_ms_{pid_key}'):
         st.session_state.pop(_k, None)
 
 
 _tpl.render_panel(
     'variables', pid_key, on_apply=_vc_tpl_apply, on_reset=_vc_tpl_reset,
-    save_keys=lambda: [f'vc_mode_{pid_key}'] + [
-        _k for _k in list(st.session_state.keys())
-        if _k.startswith(f'vc_cb_{pid_key}_')],
+    save_keys=lambda: [f'vc_mode_{pid_key}', f'vc_ms_{pid_key}'],
     help_text='Шаблон запоминает охват (все домены / выбранные города) и какие '
               'города отмечены. Хранится на сервере проекта **до перезапуска '
               'приложения** - после может сброситься.')
@@ -295,33 +291,49 @@ _mode = st.radio('Охват', ['Все домены+поддомены', 'Вы�
                  key=f'vc_mode_{pid_key}')
 _chosen = []
 if _mode == 'Выбрать города':
-    def _vk(city):
-        return f'vc_cb_{pid_key}_{city}'
+    _ms_key = f'vc_ms_{pid_key}'
     # Дефолт (один раз на проект): отмечены все города. Дальше правки сохраняются.
     if not st.session_state.get(f'vc_init_{pid_key}'):
-        for _nm in _all_city_names:
-            st.session_state[_vk(_nm)] = True
+        st.session_state[_ms_key] = list(_all_city_names)
         st.session_state[f'vc_init_{pid_key}'] = True
+
+    # Подпись с флагом+страной для читаемости в раскрывающемся списке -
+    # реальное значение (что уходит в --cities) остаётся голым именем города.
+    _city_label = {_nm: f"{_COUNTRY_FLAG.get(_country, '🏳')} {_nm}"
+                  for _country, _names in _vc_groups.items() for _nm in _names}
+
+    # Сама строка выбора (чипы) - один из предков-контейнеров BaseWeb Select
+    # держит max-height, посчитанный под ОДНУ строку - при переносе чипов на
+    # несколько строк они обрезались этим max-height и рисовались НАЛЕЗАЯ на
+    # остальную страницу (снятия одной только height было недостаточно -
+    # max-height обрезал независимо от неё; проверено вживую через Playwright
+    # на изолированном стенде - без max-height:none строка не растягивалась).
+    # :has() находит все такие контейнеры-предки НЕЗАВИСИМО от вложенности.
+    st.markdown(
+        """<style>
+        div[data-testid="stMultiSelect"] div:has(span[data-baseweb="tag"]) {
+            height: auto !important;
+            max-height: none !important;
+            min-height: 42px;
+            overflow: visible !important;
+        }
+        div[data-testid="stMultiSelect"] div:has(> span[data-baseweb="tag"]) {
+            flex-wrap: wrap !important;
+        }
+        </style>""", unsafe_allow_html=True)
 
     _b1, _b2, _ = st.columns([1, 1, 4])
     if _b1.button('Выбрать все', use_container_width=True, key=f'vc_all_{pid_key}'):
-        for _nm in _all_city_names:
-            st.session_state[_vk(_nm)] = True
+        st.session_state[_ms_key] = list(_all_city_names)
         st.rerun()
     if _b2.button('Снять все', use_container_width=True, key=f'vc_none_{pid_key}'):
-        for _nm in _all_city_names:
-            st.session_state[_vk(_nm)] = False
+        st.session_state[_ms_key] = []
         st.rerun()
 
-    _sel = []
-    for _country, _names in _vc_groups.items():
-        st.markdown(f"**{_COUNTRY_FLAG.get(_country, '🏳')} {_country}**  ·  {len(_names)}")
-        _cols = st.columns(6)
-        for _i, _nm in enumerate(_names):
-            if _cols[_i % 6].checkbox(_nm, key=_vk(_nm)):
-                _sel.append(_nm)
-    _chosen = _sel
-    st.caption(f'Выбрано: **{len(_sel)} / {len(_all_city_names)}** городов.')
+    _chosen = st.multiselect(
+        'Города', options=_all_city_names, format_func=lambda c: _city_label.get(c, c),
+        key=_ms_key, placeholder='Выберите города…', label_visibility='collapsed')
+    st.caption(f'Выбрано: **{len(_chosen)} / {len(_all_city_names)}** городов.')
 else:
     st.caption(f'Будут проверены все {len(_cities)} доменов и поддоменов проекта.')
 

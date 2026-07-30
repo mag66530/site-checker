@@ -198,6 +198,47 @@ def test_garbage_common_is_always_error_not_dash():
     print('✓ мусор («2») в Общем → ✗, не «–»')
 
 
+# ── «отсутствует» vs «не совпал» - одна и та же логика для телефона/адреса/
+# сайта: на карточке ПУСТО (значения нет вовсе) - это не «другое значение»,
+# формулировка должна отличаться от случая, когда карточка нашла ЧТО-ТО, но
+# не то, что в КП.
+
+
+def test_phone_absent_on_card_says_missing_not_mismatch():
+    card = dict(_CARD_MATCH, phone='')
+    r = mc.compare('yandex', 'Москва', 'u', card, _KP_MOSCOW)
+    assert r.phone_match is False
+    issue = next(i for i in r.issues if 'телефон' in i)
+    assert 'отсутствует' in issue
+    assert 'не совпал' not in issue
+    print('✓ телефона на карточке нет вовсе → «отсутствует», не «не совпал»')
+
+
+def test_phone_different_value_on_card_says_mismatch_not_missing():
+    card = dict(_CARD_MATCH, phone='+7 000 000-00-00')
+    r = mc.compare('yandex', 'Москва', 'u', card, _KP_MOSCOW)
+    issue = next(i for i in r.issues if 'телефон' in i)
+    assert 'не совпал' in issue
+    assert 'отсутствует' not in issue
+    print('✓ на карточке ДРУГОЙ телефон → «не совпал», не «отсутствует»')
+
+
+def test_address_absent_on_card_says_missing():
+    card = dict(_CARD_MATCH, address='')
+    r = mc.compare('yandex', 'Москва', 'u', card, _KP_MOSCOW)
+    issue = next(i for i in r.issues if 'адрес' in i)
+    assert 'отсутствует' in issue
+    print('✓ адреса на карточке нет вовсе → «отсутствует»')
+
+
+def test_site_absent_on_card_says_missing():
+    card = dict(_CARD_MATCH, site='')
+    r = mc.compare('yandex', 'Москва', 'u', card, _KP_MOSCOW)
+    issue = next(i for i in r.issues if 'сайт' in i)
+    assert 'отсутствует' in issue
+    print('✓ сайта на карточке нет вовсе → «отсутствует»')
+
+
 def test_genuinely_empty_common_is_dash_not_error():
     """А вот РОВНО пустое поле (не мусор, а пусто) - сверять действительно
     нечего: phone_match=None, не ✗. Отличие от предыдущего теста - здесь

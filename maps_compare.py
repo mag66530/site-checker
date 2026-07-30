@@ -67,6 +67,17 @@ def _norm_site(url: str) -> str:
     return s.split('/')[0]
 
 
+def _issue_text(field: str, card_val: str) -> str:
+    """Единая формулировка расхождения - одна и та же логика для телефона,
+    адреса, сайта (просьба заказчика: "везде и со всем" одинаково):
+      • на карточке ПУСТО (значения нет вовсе), а в КП есть → «отсутствует»,
+        НЕ «не совпал» - это разные вещи (нет данных ≠ другие данные);
+      • на карточке ЕСТЬ значение, но ДРУГОЕ → «не совпал(а) с КП»."""
+    if (card_val or '').strip():
+        return f'{field} на карте ({card_val}) не совпал с КП'
+    return f'{field} на карте отсутствует, хотя в КП есть'
+
+
 def compare(source: str, city: str, url: str, card: dict, kp_row: KPRow | None) -> MapCheckResult:
     """card - результат extract()/afetch() конкретной карты (name/phone/address/
     site/available/error). kp_row - строка КП этого города (None - в КП города
@@ -107,8 +118,7 @@ def compare(source: str, city: str, url: str, card: dict, kp_row: KPRow | None) 
         res.phone_match = bool(map_phone) and map_phone in common_phones
         if not res.phone_match:
             _kp_disp = ', '.join(common_phones)
-            res.issues.append(
-                f'телефон на карте ({card.get("phone") or "—"}) не совпал с КП')
+            res.issues.append(_issue_text('телефон', card.get('phone', '')))
             res.details.append({'field': 'телефон', 'kp': _kp_disp,
                                 'card': card.get('phone') or '–'})
     elif raw_common and raw_common not in ('–', '-'):
@@ -122,8 +132,7 @@ def compare(source: str, city: str, url: str, card: dict, kp_row: KPRow | None) 
     if kp_row.address:
         res.address_match = address_match(card.get('address', ''), kp_row.address)
         if not res.address_match:
-            res.issues.append(
-                f'адрес на карте ({card.get("address") or "—"}) не совпал с КП')
+            res.issues.append(_issue_text('адрес', card.get('address', '')))
             res.details.append({'field': 'адрес', 'kp': kp_row.address,
                                 'card': card.get('address') or '–'})
 
@@ -140,8 +149,7 @@ def compare(source: str, city: str, url: str, card: dict, kp_row: KPRow | None) 
             map_site == kp_row.domain or map_site.endswith('.' + kp_row.domain))
         if not res.site_match:
             res.issues.append(
-                f'сайт на карте ({card.get("site") or "—"}) не совпал с КП '
-                f'({kp_row.domain})')
+                _issue_text('сайт', card.get('site', '')) + f' ({kp_row.domain})')
             res.details.append({'field': 'сайт', 'kp': kp_row.domain,
                                 'card': card.get('site') or '–'})
 

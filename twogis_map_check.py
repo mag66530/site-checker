@@ -37,7 +37,10 @@ except ImportError:  # pragma: no cover - bs4 всегда есть в этом 
     BeautifulSoup = None
 
 _RE_TITLE = re.compile(r'og:title"\s+content="Отзывы о ([^,"]{1,80}),')
-_RE_GEO_HREF = re.compile(r'^/[a-z\-]+/geo/\d+')
+# Слаг города перед "/geo/" не фиксируем строгим набором символов (был баг:
+# «rostov-na-donu» проходил, «n_novgorod» с подчёркиванием - нет) - ищем сам
+# паттерн "/geo/<id>" где угодно в пути, слаг города вообще не разбираем.
+_RE_GEO_HREF = re.compile(r'/geo/\d+')
 _RE_DOMAIN_TEXT = re.compile(r'^[a-z0-9][a-z0-9\-]*(?:\.[a-z0-9\-]+)+$', re.IGNORECASE)
 
 
@@ -57,7 +60,7 @@ def _find_phone(panel) -> str:
 def _find_address(panel) -> str:
     geo_a = None
     for a in panel.find_all('a', href=True):
-        if _RE_GEO_HREF.match(a['href']):
+        if _RE_GEO_HREF.search(a['href']):
             geo_a = a
             break
     if not geo_a:
@@ -82,7 +85,10 @@ def _find_site(panel) -> str:
     for a in panel.find_all('a', href=True):
         if 'link.2gis.ru' not in a['href']:
             continue
-        txt = a.get_text(strip=True)
+        # Некоторые карточки пишут текст ссылки со слэшем на конце
+        # («surgut.stalmetural.ru/») - без rstrip regex не совпадал, и сайт
+        # ошибочно считался отсутствующим на карточке (хотя он есть).
+        txt = a.get_text(strip=True).rstrip('/')
         if txt and _RE_DOMAIN_TEXT.match(txt):
             return txt.lower()
     return ''
