@@ -169,7 +169,12 @@ def детект_уведомления_пользователю(page, текс�
         # 1) Видимый попап/модалка с текстом успеха (всплывающая «картинка»).
         for sel in ("[class*='popup']", "[class*='modal']", "[role='dialog']",
                     "[class*='thank']", "[class*='success']", "[class*='spasibo']",
-                    "[class*='thanks']"):
+                    "[class*='thanks']",
+                    # Подтверждение бывает по ID, а не по классу: у Метпромко это
+                    # <div id="callme-success-noproduct">Спасибо за обращение!</div>
+                    # (класс success/thank отсутствует - раньше детект его не видел
+                    # и ставил ложное «Нет подтверждения», хотя заявка ушла).
+                    "[id*='success']", "[id*='thank']", "[id*='spasibo']"):
             try:
                 loc = page.locator(sel)
                 for i in range(min(loc.count(), 3)):
@@ -1445,7 +1450,8 @@ def _подтверждение_видно(page) -> bool:
     но без опроса во времени - чистый снимок для сравнения «было/стало»)."""
     for sel in ("[class*='popup']", "[class*='modal']", "[role='dialog']",
                 "[class*='thank']", "[class*='success']", "[class*='spasibo']",
-                "[class*='thanks']"):
+                "[class*='thanks']",
+                "[id*='success']", "[id*='thank']", "[id*='spasibo']"):
         try:
             loc = page.locator(sel)
             for i in range(min(loc.count(), 6)):
@@ -9080,27 +9086,37 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # Маскируем автоматизацию: иначе часть сайтов (Bitrix) не навешивает свой
             # JS-обработчик отправки на «робота», форма уходит обычным POST и сервер
             # отвечает «Доступ запрещён». Флаг + init-скрипт убирают признак webdriver.
+            # Окно во ВЕСЬ экран: на маленьком окне (1366×768) кнопка отправки
+            # у части форм оказывается ПОД оверлеем (липкая шапка / плашка cookie
+            # снизу) - клик «перекрыт», уходит запасной JS-клик, и попап «Спасибо»
+            # ловится хуже → ложное «Нет подтверждения». Большой холст убирает
+            # перекрытие. Headless - крупный viewport; видимый браузер - реально
+            # развёрнутое окно.
             _launch_kw = dict(
                 headless=headless,
-                args=["--disable-blink-features=AutomationControlled"],
+                args=["--disable-blink-features=AutomationControlled",
+                      "--window-size=1920,1080"]
+                + ([] if headless else ["--start-maximized"]),
             )
             _prx = _playwright_proxy_from_env()
             if _prx:
                 _launch_kw["proxy"] = _prx
                 print(f"🔌 Формы идут через прокси: {_prx['server']}")
             h["browser"] = h["play"].chromium.launch(**_launch_kw)
-            h["context"] = h["browser"].new_context(
+            _ctx_kw = dict(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/124.0.0.0 Safari/537.36"
                 ),
-                # Обычное окно. Перекрытые кнопки (баг вёрстки на части
-                # СНГ-доменов) решает принудительный клик в отправке формы,
-                # огромное окно для этого не нужно.
-                viewport={"width": 1366, "height": 768},
                 locale="ru-RU",
             )
+            # Крупный холст, чтобы кнопки форм не уходили под оверлеи (см. выше).
+            if headless:
+                _ctx_kw["viewport"] = {"width": 1920, "height": 1080}
+            else:
+                _ctx_kw["no_viewport"] = True   # берём размер развёрнутого окна
+            h["context"] = h["browser"].new_context(**_ctx_kw)
             try:
                 h["context"].add_init_script(
                     "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
