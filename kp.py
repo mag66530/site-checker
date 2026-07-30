@@ -258,6 +258,7 @@ class KPRow:
     whatsapp: str = ''          # номер WhatsApp (напр. '7-903-130-36-69')
     yandex_map_url: str = ''    # ссылка на карточку организации в Яндекс.Картах
     twogis_map_url: str = ''    # ссылка на карточку организации в 2ГИС
+    google_map_url: str = ''    # ссылка на карточку организации в Google Maps
 
     def telegram_norm(self) -> str:
         """username Telegram в нижнем регистре, без @ и без t.me/."""
@@ -382,6 +383,7 @@ def _row_from_csv(row: dict) -> Optional[KPRow]:
         whatsapp=row.get('whatsapp', ''),
         yandex_map_url=row.get('yandex_map_url', ''),
         twogis_map_url=row.get('twogis_map_url', ''),
+        google_map_url=row.get('google_map_url', ''),
     )
 
 

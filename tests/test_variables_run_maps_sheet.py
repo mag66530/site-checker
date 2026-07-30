@@ -153,6 +153,28 @@ def test_source_not_run_is_blank_not_dash():
     print('✓ источник, которого нет у этого города в map_results - пустая ячейка')
 
 
+def test_all_three_map_sources_columns_in_order():
+    """Яндекс.Карты + Google + 2ГИС включены разом - колонки в порядке
+    _MAP_SOURCES (Яндекс, Google, 2ГИС), не в порядке появления в результатах."""
+    wb, hdr_fill, thin = _wb_with_style()
+    results = [
+        MapCheckResult(source='2gis', city='Москва', url='u', available=True,
+                       country='Россия', phone_match=True, address_match=True,
+                       site_match=True),
+        MapCheckResult(source='google', city='Москва', url='u', available=True,
+                       country='Россия', phone_match=True, address_match=True,
+                       site_match=True),
+        MapCheckResult(source='yandex', city='Москва', url='u', available=True,
+                       country='Россия', phone_match=True, address_match=True,
+                       site_match=True),
+    ]
+    vr._записать_проверку_кп_лист(wb, hdr_fill, thin, [_site_res()], False, results)
+    ws = wb['Проверка КП']
+    header = [c.value for c in next(ws.iter_rows(min_row=2, max_row=2))]
+    assert header[-3:] == ['Яндекс.Карты', 'Google', '2ГИС']
+    print('✓ все три источника карт - колонки в фиксированном порядке')
+
+
 def test_no_maps_no_extra_columns():
     """Без карт (map_results=[]) - сетка ровно как раньше, без колонки «Карты»."""
     wb, hdr_fill, thin = _wb_with_style()

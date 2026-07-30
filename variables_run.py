@@ -585,12 +585,20 @@ def _проверить_живую_подмену(domains, результаты,
                            dial=t.get('dial', '7'))
 
 
-async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis, log=None):
-    """Карточки Яндекс.Карт/2ГИС по ссылкам из КП → список MapCheckResult.
+_MAP_PHASES = [
+    ('yandex', 'yandex_map_url', 'Яндекс.Карты'),
+    ('2gis', 'twogis_map_url', '2ГИС'),
+    ('google', 'google_map_url', 'Google'),
+]
+
+
+async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis, do_google=False, log=None):
+    """Карточки Яндекс.Карт/2ГИС/Google по ссылкам из КП → список MapCheckResult.
     Один общий браузерный контекст на весь прогон (как review_priority.py) -
-    открывать браузер заново на каждую карточку в разы дороже. Яндекс и 2ГИС
-    гоняются раздельными фазами (сперва весь Яндекс, потом весь 2ГИС) - тот же
-    порядок, что в review_priority._fetch_all, для одинаковой нагрузки.
+    открывать браузер заново на каждую карточку в разы дороже. Источники
+    гоняются раздельными фазами (сперва весь Яндекс, потом 2ГИС, потом
+    Google) - тот же порядок, что в review_priority._fetch_all, для
+    одинаковой нагрузки.
 
     log - пишет «[i/N]» после КАЖДОЙ карточки (не только «начали»/«готово»
     один раз на всю фазу): без этого лог на 15-30 минут молчал совсем, и со
@@ -599,7 +607,12 @@ async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis,
     from playwright.async_api import async_playwright
     import yandex_map_check
     import twogis_map_check
+    import google_map_check
     import maps_compare
+
+    _AFETCH = {'yandex': yandex_map_check.afetch, '2gis': twogis_map_check.afetch,
+              'google': google_map_check.afetch}
+    _DO = {'yandex': do_yandex, '2gis': do_2gis, 'google': do_google}
 
     log = log or (lambda *a, **k: None)
     UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/148 Safari/537.36'
@@ -607,19 +620,19 @@ async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis,
     if proxy_url:
         ctx_kw['proxy'] = {'server': proxy_url}
     out = []
-    total = len(domains) * (int(bool(do_yandex)) + int(bool(do_2gis)))
+    total = len(domains) * sum(1 for src, _, _ in _MAP_PHASES if _DO[src])
     done = 0
 
-    async def _run_phase(source, url_attr, afetch):
+    async def _run_phase(source, url_attr, label):
         nonlocal done
         sem = asyncio.Semaphore(4)
+        afetch = _AFETCH[source]
 
         async def _one(row):
             nonlocal done
             card = await afetch(ctx, sem, getattr(row, url_attr))
             done += 1
-            log(f'[{done}/{total}] Карты: {row.city} - '
-                f'{"Яндекс.Карты" if source == "yandex" else "2ГИС"}')
+            log(f'[{done}/{total}] Карты: {row.city} - {label}')
             return maps_compare.compare(source, row.city, getattr(row, url_attr), card, row)
 
         return await asyncio.gather(*[_one(row) for _, row in domains])
@@ -628,10 +641,9 @@ async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis,
         br = await pw.chromium.launch(headless=True)
         try:
             ctx = await br.new_context(**ctx_kw)
-            if do_yandex:
-                out += await _run_phase('yandex', 'yandex_map_url', yandex_map_check.afetch)
-            if do_2gis:
-                out += await _run_phase('2gis', 'twogis_map_url', twogis_map_check.afetch)
+            for source, url_attr, label in _MAP_PHASES:
+                if _DO[source]:
+                    out += await _run_phase(source, url_attr, label)
         finally:
             await br.close()
     return out
@@ -825,12 +837,14 @@ def main() -> int:
     # BooleanOptionalAction сам даёт пару --check-site/--no-check-site.
     ap.add_argument('--check-site', action=argparse.BooleanOptionalAction, default=True)
     # Карты - отдельный, необязательный шаг ПОСЛЕ основной сверки сайта:
-    # открывает карточку организации в браузере (Яндекс.Карты/2ГИС) и сверяет
-    # телефон/адрес/сайт с КП (см. yandex_map_check.py/twogis_map_check.py).
-    # Выключено по умолчанию - это браузерная проверка, дороже обычной сверки
-    # по HTTP, включают по запросу с той же страницы «Проверка КП».
+    # открывает карточку организации в браузере (Яндекс.Карты/2ГИС/Google) и
+    # сверяет телефон/адрес/сайт с КП (см. yandex_map_check.py/
+    # twogis_map_check.py/google_map_check.py). Выключено по умолчанию - это
+    # браузерная проверка, дороже обычной сверки по HTTP, включают по запросу
+    # с той же страницы «Проверка КП».
     ap.add_argument('--check-yandex-maps', action='store_true')
     ap.add_argument('--check-2gis-maps', action='store_true')
+    ap.add_argument('--check-google-maps', action='store_true')
     a = ap.parse_args()
 
     sys.path.insert(0, str(ROOT))
@@ -936,19 +950,21 @@ def main() -> int:
         _stamp('Сайт (сверка с КП) пропущен - галочка снята, страницы сайта '
                'не скачивались вовсе.')
 
-    # Карты (Яндекс/2ГИС) - отдельный необязательный шаг: открывает карточку
-    # организации в браузере, сверяет телефон/адрес/сайт с той же строкой КП.
-    # Не мешает основному отчёту, если сломается - лист «Карты» просто не
-    # появится (проверка сайта уже готова и сохранится в любом случае).
+    # Карты (Яндекс/2ГИС/Google) - отдельный необязательный шаг: открывает
+    # карточку организации в браузере, сверяет телефон/адрес/сайт с той же
+    # строкой КП. Не мешает основному отчёту, если сломается - карты просто
+    # не появятся (проверка сайта уже готова и сохранится в любом случае).
     map_results = []
-    if a.check_yandex_maps or a.check_2gis_maps:
+    if a.check_yandex_maps or a.check_2gis_maps or a.check_google_maps:
         _what = ' + '.join(filter(None, [
             'Яндекс.Карты' if a.check_yandex_maps else '',
-            '2ГИС' if a.check_2gis_maps else '']))
+            '2ГИС' if a.check_2gis_maps else '',
+            'Google' if a.check_google_maps else '']))
         _stamp(f'Сверка с картами ({_what}) …')
         try:
             map_results = asyncio.run(_проверить_карты(
-                domains, proxy, a.check_yandex_maps, a.check_2gis_maps, log=_stamp))
+                domains, proxy, a.check_yandex_maps, a.check_2gis_maps,
+                a.check_google_maps, log=_stamp))
             _n_map_err = sum(1 for r in map_results if r.is_error)
             _n_map_warn = sum(1 for r in map_results if r.is_warning)
             _stamp(f'Карты: проверено {len(map_results)} карточек - '

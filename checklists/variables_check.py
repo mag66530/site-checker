@@ -357,13 +357,15 @@ _check_2gis_maps = _mc3.checkbox(
     '2ГИС', key=f'vc_map_2gis_{pid_key}',
     help='Карточка организации на 2gis.ru/…/firm/… - те же поля, что и для '
          'Яндекс.Карт. Ссылка - из колонки «Карта» под «2ГИС» в таблице КП.')
-_mc4.checkbox('Google', value=False, disabled=True,
-             help='Пока не подключено: у Google почти нет прямых ссылок на '
-                  'карточку в таблице КП, нужен отдельный способ находить '
-                  'нужную организацию по названию и городу.')
-if not (_check_site or _check_yandex_maps or _check_2gis_maps):
+_check_google_maps = _mc4.checkbox(
+    'Google', key=f'vc_map_google_{pid_key}',
+    help='Карточка организации на google.com/maps/place/… - те же поля, что '
+         'и для Яндекс.Карт/2ГИС. Ссылка - из колонки «Карта» под «Google» в '
+         'таблице КП; если у города её нет - город просто пропускается '
+         '(не ошибка).')
+if not (_check_site or _check_yandex_maps or _check_2gis_maps or _check_google_maps):
     st.warning('Выбери хотя бы один источник - иначе прогону нечего делать.')
-if _check_yandex_maps or _check_2gis_maps:
+if _check_yandex_maps or _check_2gis_maps or _check_google_maps:
     st.caption('⚠ Карты проверяются в браузере - это заметно дольше обычной '
               'сверки сайта (десятки секунд на карточку).')
 
@@ -404,7 +406,8 @@ _none_chosen = (_mode == 'Выбрать города' and not _chosen)
 import auth
 _effective_proxy = auth.fill_proxy_slot(pid_key)
 
-_nothing_selected = not (_check_site or _check_yandex_maps or _check_2gis_maps)
+_nothing_selected = not (_check_site or _check_yandex_maps or _check_2gis_maps
+                        or _check_google_maps)
 _c1, _c2 = st.columns([3, 1])
 with _c1:
     if st.button('▶ Запустить проверку', use_container_width=True,
@@ -420,6 +423,8 @@ with _c1:
                 args += ['--check-yandex-maps']
             if _check_2gis_maps:
                 args += ['--check-2gis-maps']
+            if _check_google_maps:
+                args += ['--check-google-maps']
             # На свежем деплое папки cache/ ещё нет - создаём перед очисткой лога.
             LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
             LOG_FILE.write_text('', encoding='utf-8')
