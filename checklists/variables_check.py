@@ -25,6 +25,7 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from checklists import page_templates as _tpl
+from checklists import ui_widgets as _ui
 PY = sys.executable
 LOG_FILE = ROOT / 'cache' / 'variables.log'
 PID_FILE = ROOT / 'cache' / 'variables.pid'
@@ -302,25 +303,9 @@ if _mode == 'Выбрать города':
     _city_label = {_nm: f"{_COUNTRY_FLAG.get(_country, '🏳')} {_nm}"
                   for _country, _names in _vc_groups.items() for _nm in _names}
 
-    # Сама строка выбора (чипы) - один из предков-контейнеров BaseWeb Select
-    # держит max-height, посчитанный под ОДНУ строку - при переносе чипов на
-    # несколько строк они обрезались этим max-height и рисовались НАЛЕЗАЯ на
-    # остальную страницу (снятия одной только height было недостаточно -
-    # max-height обрезал независимо от неё; проверено вживую через Playwright
-    # на изолированном стенде - без max-height:none строка не растягивалась).
-    # :has() находит все такие контейнеры-предки НЕЗАВИСИМО от вложенности.
-    st.markdown(
-        """<style>
-        div[data-testid="stMultiSelect"] div:has(span[data-baseweb="tag"]) {
-            height: auto !important;
-            max-height: none !important;
-            min-height: 42px;
-            overflow: visible !important;
-        }
-        div[data-testid="stMultiSelect"] div:has(> span[data-baseweb="tag"]) {
-            flex-wrap: wrap !important;
-        }
-        </style>""", unsafe_allow_html=True)
+    # Строка выбора (чипы) растягивается по высоте, не обрезается/не
+    # наезжает на остальной контент - общий CSS-фикс, см. ui_widgets.py.
+    _ui.multiselect_grows_css()
 
     _b1, _b2, _ = st.columns([1, 1, 4])
     if _b1.button('Выбрать все', use_container_width=True, key=f'vc_all_{pid_key}'):

@@ -255,8 +255,10 @@ if _done and _alive:
 _running = _alive and not _done
 
 
-@st.cache_resource(show_spinner=False)
 def _browser():
+    # Без st.cache_resource: ensure_browser() уже кэширует УСПЕХ сама
+    # (browser_setup.py) - двойное кэширование поверх нельзя (Streamlit
+    # кэшировал бы и НЕУДАЧУ навсегда, до перезапуска приложения).
     import browser_setup
     return browser_setup.ensure_browser()
 

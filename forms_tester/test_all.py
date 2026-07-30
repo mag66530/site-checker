@@ -10,11 +10,19 @@ from openpyxl import Workbook, load_workbook
 import os
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from playwright.sync_api import sync_playwright
 
 from name_format import build_test_name, cfg_enabled
 
 # Не используем «from config import *»: run_test() перезагружает config с диска (importlib.reload).
+
+# Формы теперь могут проверяться ПАРАЛЛЕЛЬНО (см. run_test(), до 3 одновременно) -
+# append_log_row()/record_submitted_form() читают-правят-пишут ОБЩИЙ файл
+# (log_forms.xlsx / submitted_forms.json); без блокировки конкурентные вызовы
+# теряли бы строки друг друга (последняя запись побеждает) или портили файл.
+_log_write_lock = threading.Lock()
 
 
 def normalize_phone_for_submit(phone: str) -> str:
@@ -5436,6 +5444,14 @@ def init_excel_log(path: str, очистить: bool = True) -> None:
 
 
 def append_log_row(path: str, row: dict) -> None:
+    """Добавляет строку в лог. Обёртка с блокировкой - см. _log_write_lock:
+    формы теперь проверяются параллельно, конкурентная запись в ОДИН файл
+    иначе теряла бы строки (кто сохранил последним - тот и победил)."""
+    with _log_write_lock:
+        _append_log_row_impl(path, row)
+
+
+def _append_log_row_impl(path: str, row: dict) -> None:
     """Добавляет строку в конец файла. Строки форм/сценариев идут на лист «Логи»,
     строки целей Метрики - на отдельный лист «Цели». Колонку «Статус» красит:
     зелёный - Успешно/Заполнено/Зафиксирована, красный - Ошибка."""
@@ -6239,23 +6255,26 @@ def reset_submitted_forms() -> None:
 
 
 def record_submitted_form(rec: dict) -> None:
-    """Дописывает одну отправленную форму в submitted_forms.json (список)."""
+    """Дописывает одну отправленную форму в submitted_forms.json (список).
+    Под той же блокировкой, что и append_log_row - формы проверяются
+    параллельно, конкурентная запись в ОДИН json-файл иначе теряла бы записи."""
     import json as _json
-    data = []
-    try:
-        if os.path.exists(SUBMITTED_FORMS_FILE):
-            with open(SUBMITTED_FORMS_FILE, encoding="utf-8") as fh:
-                data = _json.load(fh)
-            if not isinstance(data, list):
-                data = []
-    except Exception:
+    with _log_write_lock:
         data = []
-    data.append(rec)
-    try:
-        with open(SUBMITTED_FORMS_FILE, "w", encoding="utf-8") as fh:
-            _json.dump(data, fh, ensure_ascii=False)
-    except Exception:
-        pass
+        try:
+            if os.path.exists(SUBMITTED_FORMS_FILE):
+                with open(SUBMITTED_FORMS_FILE, encoding="utf-8") as fh:
+                    data = _json.load(fh)
+                if not isinstance(data, list):
+                    data = []
+        except Exception:
+            data = []
+        data.append(rec)
+        try:
+            with open(SUBMITTED_FORMS_FILE, "w", encoding="utf-8") as fh:
+                _json.dump(data, fh, ensure_ascii=False)
+        except Exception:
+            pass
 
 
 # --- Пер-ячеечные пояснения матрицы: КОНКРЕТНАЯ причина под ✗/⚠ ---
@@ -8578,7 +8597,15 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # и сайт после повторов попап «Спасибо» часто уже не показывает - на
             # рабочей форме выходило «уведомление: Нет», хотя вручную окно есть.
             # Выходим сразу, как увидели, поэтому быстрые формы не замедляются.
-            _подтв_первой = ждать_подтверждения(page, таймаут_мс=3500)
+            # Таймаут увеличен с 3500 до 7000 - формы теперь проверяются ДО 3
+            # ОДНОВРЕМЕННО (несколько полноценных Chromium разом грузят CPU), и
+            # у быстрых форм (мало шагов) критическое окно ожидания подтверждения
+            # у нескольких из них совпадает почти секунда в секунду - под такой
+            # нагрузкой 3.5 с иногда не хватало, попап реально был, а тул писал
+            # «нет статуса». Выход СРАЗУ по факту увиденного - быстрые формы
+            # это не замедляет, увеличенный потолок нужен только медленному
+            # случаю под нагрузкой.
+            _подтв_первой = ждать_подтверждения(page, таймаут_мс=7000)
             if _подтв_первой:
                 print(f"   👁 Подтверждение первой отправки: "
                       f"{_подтв_первой[:70]!r}")
@@ -9708,7 +9735,24 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
     # goals - пойманные цели Яндекс.Метрики за прогон: [{"цель", "время"}].
     # Каждый reachGoal уходит запросом на mc.yandex.* с page-url=goal://домен/цель -
     # перехватываем эти запросы, шаг «проверить_цель» ищет цель в списке.
-    _pw = {"play": None, "browser": None, "context": None, "goals": []}
+    # Пул браузера: раньше ОДИН на весь прогон (формы шли строго по очереди).
+    # Теперь формы/сценарии/модалки могут проверяться ПАРАЛЛЕЛЬНО (см. конец
+    # функции - до 3 потоков разом) - общий sync Playwright-объект нельзя
+    # дёргать из нескольких потоков одновременно (ломается непредсказуемо),
+    # поэтому у КАЖДОГО потока - свой независимый браузер/контекст (лениво,
+    # при первом обращении). goals (цели Метрики) - тоже свои на поток: цель
+    # проверяется в том же потоке, что её поймал, кросс-поточная видимость не
+    # нужна (каждый тест сам себе ловит и сам себе проверяет).
+    _pw_tls = threading.local()
+    _pw_all_states: list[dict] = []
+    _pw_all_states_lock = threading.Lock()
+
+    def _get_pw():
+        if not hasattr(_pw_tls, "state"):
+            _pw_tls.state = {"play": None, "browser": None, "context": None, "goals": []}
+            with _pw_all_states_lock:
+                _pw_all_states.append(_pw_tls.state)
+        return _pw_tls.state
 
     def _поймать_цель(request):
         try:
@@ -9719,14 +9763,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             except Exception:  # noqa: BLE001
                 body = ""
             for t in _извлечь_цели_из_запроса(request.url, body):
-                _pw["goals"].append({"цель": t, "время": _time.time()})
+                _get_pw()["goals"].append({"цель": t, "время": _time.time()})
                 print(f"      🎯 Метрика: зафиксирована цель «{t}»")
         except Exception:  # noqa: BLE001
             pass
 
     def _цели_с(ts):
-        """Цели, пойманные начиная с момента ts."""
-        return [g for g in _pw["goals"] if g["время"] >= ts]
+        """Цели, пойманные начиная с момента ts (в ЭТОМ потоке)."""
+        return [g for g in _get_pw()["goals"] if g["время"] >= ts]
 
     def _отчёт_сработавших_целей(ts, страница, log_url, seen, контекст=""):
         """АВТООПРЕДЕЛЕНИЕ: пишет в отчёт строку по КАЖДОЙ цели Метрики,
@@ -9762,7 +9806,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         return _есть
 
     def _shared_context():
-        h = _pw
+        h = _get_pw()
         if h["context"] is None:
             if h["play"] is None:
                 h["play"] = sync_playwright().start()
@@ -9807,7 +9851,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         return h["context"]
 
     def _drop_browser():
-        h = _pw
+        h = _get_pw()
         try:
             if h["browser"]:
                 h["browser"].close()
@@ -9817,13 +9861,24 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         h["context"] = None
 
     def _close_browser_pool():
-        _drop_browser()
-        try:
-            if _pw["play"]:
-                _pw["play"].stop()
-        except Exception:
-            pass
-        _pw["play"] = None
+        """Закрывает браузеры ВСЕХ потоков за этот прогон, не только текущего -
+        формы могли проверяться параллельно, каждый поток открыл свой."""
+        with _pw_all_states_lock:
+            states = list(_pw_all_states)
+        for state in states:
+            try:
+                if state.get("browser"):
+                    state["browser"].close()
+            except Exception:
+                pass
+            state["browser"] = None
+            state["context"] = None
+            try:
+                if state.get("play"):
+                    state["play"].stop()
+            except Exception:
+                pass
+            state["play"] = None
 
     def _open_page():
         """Новая вкладка в общем контексте; если контекст умер - пересоздать и повторить."""
@@ -10597,6 +10652,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         f"{'requests (быстро, без JS)' if ФОРМЫ_ЧЕРЕЗ_REQUESTS else 'Playwright (как в браузере - заявки на почту)'}\n"
     )
 
+    # Сюда собираем ОТЛОЖЕННЫЕ проверки (сценарий/форма/модалка) - каждая как
+    # функция без аргументов. Раньше каждая проверка запускалась СРАЗУ, одна за
+    # другой (весь вес доп-проб - файлы/XSS/валидация/лимит - складывался
+    # последовательно); теперь сперва СОБИРАЕМ все проверки по всем страницам
+    # (порядок и фильтры - как раньше), а выполняем их НИЖЕ до 3 одновременно
+    # (см. _get_pw() - у каждого потока свой браузер).
+    _tasks: list = []
+
     for страница in СТРАНИЦЫ_ДЛЯ_ПРОВЕРКИ:
         if stop_flag and stop_flag():
             print("\n⏸️ Тест остановлен пользователем")
@@ -10654,55 +10717,60 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     _лог_форма_отсутствует(тип_страницы, url, sc, cap)
                     continue
                 _отметить_форму(cap)
-                # До 2 попыток: СНГ-домены часто рвут соединение (анти-бот),
-                # повтор обычно проходит.
-                _scn_err = None
-                for _попытка in (1, 2):
-                    try:
-                        run_scenario_playwright(url, steps, название_сценария=cap,
-                                                тип_блока=тип_страницы)
-                        _scn_err = None
-                        break
-                    except Exception as _e:  # noqa: BLE001
-                        _scn_err = _e
-                        if _попытка == 1:
-                            print(f"   ↻ Сценарий «{cap}» упал ({str(_e)[:80]}), повтор…")
-                if _scn_err is not None:
-                    # Один упавший сценарий НЕ должен ронять весь прогон -
-                    # пишем ошибку в лог и идём к следующей форме.
-                    print(f"   ❌ Сценарий «{cap}» прерван ошибкой: {_scn_err}")
-                    # Обрыв связи/недоступность домена (антибот/блок прокси) - НЕ
-                    # дефект формы: пишем понятный статус «Недоступен», а не «ОШИБКА».
-                    _обрыв = _это_обрыв_связи(_scn_err)
-                    if _обрыв:
-                        _статус = "Недоступен (прокси/сеть - соединение сброшено)"
-                        _коммент = ("Сайт недоступен через прокси — соединение сброшено "
-                                    "или таймаут. Формы НЕ проверены: это не дефект формы, "
-                                    "а недоступность домена. Нужен рабочий прокси для "
-                                    "этого домена (текущий, похоже, заблокирован сайтом).")
-                    else:
-                        _статус = "ОШИБКА (сценарий прерван)"
-                        _коммент = (f"Сценарий {str(_scn_err)[:200]}"
-                                    if str(_scn_err).strip()
-                                    else "Сценарий прервался на одном из шагов")
-                    try:
-                        записать_в_excel(
-                            {
-                                "тип": "PLAYWRIGHT",
-                                "страница": тип_страницы,
-                                "url": url,
-                                "тип_селектора": "сценарий",
-                                "ид": cap,
-                                "название": cap,
-                                "имя": cap,
-                                "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else cap,
-                                "комментарий_готовый": _коммент,
-                                "статус": _статус,
-                                "код": str(_scn_err)[:300],
-                            }
-                        )
-                    except Exception:  # noqa: BLE001
-                        pass
+
+                def _task(sc=sc, cap=cap, url=url, тип_страницы=тип_страницы, steps=steps):
+                    if stop_flag and stop_flag():
+                        return
+                    # До 2 попыток: СНГ-домены часто рвут соединение (анти-бот),
+                    # повтор обычно проходит.
+                    _scn_err = None
+                    for _попытка in (1, 2):
+                        try:
+                            run_scenario_playwright(url, steps, название_сценария=cap,
+                                                    тип_блока=тип_страницы)
+                            _scn_err = None
+                            break
+                        except Exception as _e:  # noqa: BLE001
+                            _scn_err = _e
+                            if _попытка == 1:
+                                print(f"   ↻ Сценарий «{cap}» упал ({str(_e)[:80]}), повтор…")
+                    if _scn_err is not None:
+                        # Один упавший сценарий НЕ должен ронять весь прогон -
+                        # пишем ошибку в лог и идём к следующей форме.
+                        print(f"   ❌ Сценарий «{cap}» прерван ошибкой: {_scn_err}")
+                        # Обрыв связи/недоступность домена (антибот/блок прокси) - НЕ
+                        # дефект формы: пишем понятный статус «Недоступен», а не «ОШИБКА».
+                        _обрыв = _это_обрыв_связи(_scn_err)
+                        if _обрыв:
+                            _статус = "Недоступен (прокси/сеть - соединение сброшено)"
+                            _коммент = ("Сайт недоступен через прокси — соединение сброшено "
+                                        "или таймаут. Формы НЕ проверены: это не дефект формы, "
+                                        "а недоступность домена. Нужен рабочий прокси для "
+                                        "этого домена (текущий, похоже, заблокирован сайтом).")
+                        else:
+                            _статус = "ОШИБКА (сценарий прерван)"
+                            _коммент = (f"Сценарий {str(_scn_err)[:200]}"
+                                        if str(_scn_err).strip()
+                                        else "Сценарий прервался на одном из шагов")
+                        try:
+                            записать_в_excel(
+                                {
+                                    "тип": "PLAYWRIGHT",
+                                    "страница": тип_страницы,
+                                    "url": url,
+                                    "тип_селектора": "сценарий",
+                                    "ид": cap,
+                                    "название": cap,
+                                    "имя": cap,
+                                    "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else cap,
+                                    "комментарий_готовый": _коммент,
+                                    "статус": _статус,
+                                    "код": str(_scn_err)[:300],
+                                }
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                _tasks.append(_task)
             continue
 
         if есть_шаги and not с_вкл:
@@ -10731,42 +10799,47 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _лог_форма_отсутствует(тип_страницы, url, форма, форма.get("название", "?"))
                 continue
             _отметить_форму(форма.get("название", ""))
-            # До 2 попыток: страница/форма иногда не доходит из-за обрыва соединения
-            # (анти-бот СНГ) - повтор обычно проходит.
-            _frm_err = None
-            for _попытка in (1, 2):
-                try:
-                    if ФОРМЫ_ЧЕРЕЗ_REQUESTS:
-                        отправить_через_requests(url, форма, форма["название"])
-                    else:
-                        # По умолчанию - авто: по коду где можно, иначе браузер.
-                        _проверить_форму_авто(url, форма, форма["название"])
-                    _frm_err = None
-                    break
-                except Exception as _e:  # noqa: BLE001
-                    _frm_err = _e
-                    if _попытка == 1:
-                        print(f"   ↻ Форма «{форма.get('название','?')}» упала ({str(_e)[:70]}), повтор…")
-            if _frm_err is not None:
-                # Сбой одной формы НЕ должен ронять прогон - пишем ошибку и идём дальше.
-                print(f"   ❌ Форма «{форма.get('название','?')}» прервана ошибкой: {_frm_err}")
-                try:
-                    записать_в_excel(
-                        {
-                            "тип": "PLAYWRIGHT-FORM",
-                            "страница": тип_страницы,
-                            "url": url,
-                            "тип_селектора": format_form_selector_type(форма),
-                            "ид": format_form_config_for_log(форма),
-                            "название": форма.get("название", "?"),
-                            "имя": форма.get("название", "?"),
-                            "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else форма.get("название", "?"),
-                            "статус": "ОШИБКА (форма прервана)",
-                            "код": str(_frm_err)[:300],
-                        }
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
+
+            def _task(форма=форма, url=url, тип_страницы=тип_страницы):
+                if stop_flag and stop_flag():
+                    return
+                # До 2 попыток: страница/форма иногда не доходит из-за обрыва соединения
+                # (анти-бот СНГ) - повтор обычно проходит.
+                _frm_err = None
+                for _попытка in (1, 2):
+                    try:
+                        if ФОРМЫ_ЧЕРЕЗ_REQUESTS:
+                            отправить_через_requests(url, форма, форма["название"])
+                        else:
+                            # По умолчанию - авто: по коду где можно, иначе браузер.
+                            _проверить_форму_авто(url, форма, форма["название"])
+                        _frm_err = None
+                        break
+                    except Exception as _e:  # noqa: BLE001
+                        _frm_err = _e
+                        if _попытка == 1:
+                            print(f"   ↻ Форма «{форма.get('название','?')}» упала ({str(_e)[:70]}), повтор…")
+                if _frm_err is not None:
+                    # Сбой одной формы НЕ должен ронять прогон - пишем ошибку и идём дальше.
+                    print(f"   ❌ Форма «{форма.get('название','?')}» прервана ошибкой: {_frm_err}")
+                    try:
+                        записать_в_excel(
+                            {
+                                "тип": "PLAYWRIGHT-FORM",
+                                "страница": тип_страницы,
+                                "url": url,
+                                "тип_селектора": format_form_selector_type(форма),
+                                "ид": format_form_config_for_log(форма),
+                                "название": форма.get("название", "?"),
+                                "имя": форма.get("название", "?"),
+                                "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else форма.get("название", "?"),
+                                "статус": "ОШИБКА (форма прервана)",
+                                "код": str(_frm_err)[:300],
+                            }
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+            _tasks.append(_task)
 
         for модалка in страница.get("модалки") or []:
             if stop_flag and stop_flag():
@@ -10781,11 +10854,31 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             if not _форма_выбрана(модалка.get("название_теста", "")):
                 continue
             _отметить_форму(модалка.get("название_теста", ""))
-            проверить_кнопку_через_playwright(
-                url, модалка["значение"], модалка["название_теста"]
-            )
 
-    # Закрываем общий браузер прогона (пул).
+            def _task(модалка=модалка, url=url):
+                if stop_flag and stop_flag():
+                    return
+                проверить_кнопку_через_playwright(
+                    url, модалка["значение"], модалка["название_теста"]
+                )
+            _tasks.append(_task)
+
+    # Выполняем собранные проверки (сценарии/формы/модалки всех страниц) -
+    # до 3 одновременно, каждая в своём браузере (см. _get_pw()). Раньше это
+    # был весь смысл верхнего цикла - строго по одной, друг за другом; при
+    # тяжёлых доп-пробах (файлы/XSS/валидация/лимит) на 6 формах это
+    # складывалось в разы дольше, чем нужно.
+    if _tasks:
+        print(f"\n🚀 Проверка форм: {len(_tasks)} шт., до 3 одновременно…")
+        with ThreadPoolExecutor(max_workers=min(3, len(_tasks))) as _executor:
+            _futures = [_executor.submit(_t) for _t in _tasks]
+            for _f in as_completed(_futures):
+                try:
+                    _f.result()
+                except Exception as _e:  # noqa: BLE001
+                    print(f"   ⚠️ Задача формы упала необработанным исключением: {_e}")
+
+    # Закрываем браузеры всех потоков, использованных за прогон (пул).
     _close_browser_pool()
 
     _spent = int(_time.time() - _run_t0)

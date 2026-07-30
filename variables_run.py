@@ -6,10 +6,14 @@ variables_run.py - фоновый прогон «Проверки КП» (пун
   • город / страна - нет ли чужого (region_checker);
   • телефоны (поиск/реклама/общий) - номер на сайте входит в набор КП города;
   • почта, адрес, Telegram, WhatsApp - совпадают с КП.
-Результат пишется в cache/variables/<proj>/variables.xlsx (лист «Проверка КП»,
-плюс «Карты» - если включали сверку с Яндекс.Картами/2ГИС). Расхождения видно
-прямо в ячейках: цвет + комментарий при наведении, отдельного листа под них
-нет. Прогресс идёт в stdout, откуда его читает вкладка.
+Результат пишется в cache/variables/<proj>/variables.xlsx (лист «Проверка КП» +
+«Расхождения»; колонки карт - Яндекс.Карты/2ГИС/Google, если включали - на том
+же листе «Проверка КП»). Расхождения видно прямо в ячейках: цвет + комментарий
+при наведении. Прогресс идёт в stdout, откуда его читает вкладка.
+
+Сайт (HTTP, потоки) и карты (Playwright/браузер) друг другу не мешают -
+выполняются ПАРАЛЛЕЛЬНО (сайт - в фоновом потоке, карты - в основном через
+asyncio), а не по очереди.
 
 Запуск:
     python variables_run.py --project smu
@@ -943,10 +947,18 @@ def main() -> int:
     # _check_site - дешёвая функция (просмотр статичного KP_LAYOUT), вызываем
     # в обоих местах, не тащим через возврат ради одного bool.
     _per_city_mode = _per_city(a.project)
+
+    # Сайт (потоки/HTTP) и карты (Playwright/браузер) друг другу не мешают -
+    # запускаем сайт в фоновом потоке и параллельно гоняем карты в основном
+    # (там свой asyncio-цикл для Playwright). Раньше шло строго
+    # последовательно - на прогоне с картами это удваивало время просто так.
+    _site_pool = None
+    _site_future = None
     if a.check_site:
-        результаты = _check_site(a, domains, proxy)
+        from concurrent.futures import ThreadPoolExecutor
+        _site_pool = ThreadPoolExecutor(max_workers=1)
+        _site_future = _site_pool.submit(_check_site, a, domains, proxy)
     else:
-        результаты = []
         _stamp('Сайт (сверка с КП) пропущен - галочка снята, страницы сайта '
                'не скачивались вовсе.')
 
@@ -960,7 +972,8 @@ def main() -> int:
             'Яндекс.Карты' if a.check_yandex_maps else '',
             '2ГИС' if a.check_2gis_maps else '',
             'Google' if a.check_google_maps else '']))
-        _stamp(f'Сверка с картами ({_what}) …')
+        _stamp(f'Сверка с картами ({_what})'
+               + (' - параллельно с сайтом' if _site_future else '') + ' …')
         try:
             map_results = asyncio.run(_проверить_карты(
                 domains, proxy, a.check_yandex_maps, a.check_2gis_maps,
@@ -970,7 +983,15 @@ def main() -> int:
             _stamp(f'Карты: проверено {len(map_results)} карточек - '
                    f'{_n_map_err} расхождений, {_n_map_warn} недоступно.')
         except Exception as _e:  # noqa: BLE001
-            _stamp(f'⚠ Проверка карт не удалась ({_e}) - отчёт по сайту готов.')
+            _stamp(f'⚠ Проверка карт не удалась ({_e}).')
+
+    # Дожидаемся сайта (если проверяли) - к этому моменту карты (если были)
+    # уже отработали параллельно, ждать почти нечего.
+    if _site_future is not None:
+        результаты = _site_future.result()
+        _site_pool.shutdown()
+    else:
+        результаты = []
 
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
