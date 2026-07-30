@@ -1,7 +1,8 @@
 """Тесты листа «Дашборд» в отчёте variables_run.py - сводка по данным
-«Проверка КП»/«Расхождения»: 4 KPI, таблица+график по типу данных, таблица+
-график по источнику, вывод-строка. Сделан по образцу файла, который прислал
-заказчик (КП-сму-...-улучшено.xlsx) - структура и формулы должны совпадать."""
+«Проверка КП»/«Расхождения»: 4 KPI, таблица+график по типу данных (только они -
+таблицу/график «по источнику» убрали по просьбе заказчика), вывод-строка.
+Сделан по образцу файла, который прислал заказчик (КП-сму-...-улучшено.xlsx) -
+структура и формулы должны совпадать."""
 import sys
 from pathlib import Path
 
@@ -66,7 +67,9 @@ def test_type_breakdown_table_matches_var_columns(tmp_path):
     print('✓ таблица «по типу данных» построена по фактическим колонкам отчёта')
 
 
-def test_source_breakdown_table_and_charts_present(tmp_path):
+def test_only_one_table_and_chart_on_dashboard(tmp_path):
+    """Только «Расхождения по типу данных» (лист «Проверка КП») - без таблицы/
+    графика «по источнику»."""
     out = tmp_path / 'test.xlsx'
     r1 = MapCheckResult(source='2gis', city='Город0', url='u', available=True,
                         country='Россия', phone_match=False, address_match=True,
@@ -76,12 +79,11 @@ def test_source_breakdown_table_and_charts_present(tmp_path):
     from openpyxl import load_workbook
     wb = load_workbook(out)
     ws = wb['Дашборд']
-    # источники: «Сайт» (результаты непустые) + «2ГИС» (единственная проверенная карта)
-    src_labels = [ws.cell(r, 2).value for r in range(1, 40)
-                 if ws.cell(r, 2).value in ('Сайт', '2ГИС', 'Яндекс.Карты', 'Google')]
-    assert set(src_labels) == {'Сайт', '2ГИС'}
-    assert len(ws._charts) == 2, 'должно быть 2 графика - bar (по типу) и pie (по источнику)'
-    print('✓ таблица «по источнику» - только реально проверенные источники, 2 графика на листе')
+    all_text = ' '.join(str(ws.cell(r, 2).value or '') for r in range(1, 40))
+    assert 'Расхождения по типу данных' in all_text
+    assert 'по источнику' not in all_text
+    assert len(ws._charts) == 1, 'должен быть ровно 1 график - по типу данных'
+    print('✓ на дашборде только одна таблица+график (по типу данных)')
 
 
 def test_conclusion_line_mentions_top_source(tmp_path):
@@ -100,7 +102,26 @@ def test_conclusion_line_mentions_top_source(tmp_path):
     ws = wb['Дашборд']
     all_text = ' '.join(str(ws.cell(r, 2).value or '') for r in range(1, 45))
     assert 'Главный вывод' in all_text and '2ГИС' in all_text
-    print('✓ вывод-строка на дашборде называет источник с наибольшим числом расхождений')
+    assert 'Подробности' not in all_text, 'лишнюю подпись-уточнение убрали'
+    print('✓ вывод-строка называет источник, без лишней подписи-уточнения')
+
+
+def test_table_title_has_no_extra_caption_and_is_not_truncated(tmp_path):
+    """Заголовок таблицы - без «(лист «Проверка КП»)» (лишняя подпись убрана
+    по просьбе заказчика), и мёрдж достаточно широкий (до H), чтобы текст не
+    обрезался, как это было при узком B:E."""
+    out = tmp_path / 'test.xlsx'
+    vr._записать_xlsx(out, 'СМУ', _результаты(2), per_city=False, map_results=[])
+    from openpyxl import load_workbook
+    wb = load_workbook(out)
+    ws = wb['Дашборд']
+    title_row = next(r for r in range(1, 20)
+                     if ws.cell(r, 2).value and 'Расхождения по типу данных' in str(ws.cell(r, 2).value))
+    assert ws.cell(title_row, 2).value == 'Расхождения по типу данных'
+    merges = [str(m) for m in ws.merged_cells.ranges if m.min_row == title_row]
+    assert merges, 'строка заголовка таблицы должна быть объединена'
+    assert f'H{title_row}' in merges[0], f'мёрдж должен доходить до H, получили {merges[0]}'
+    print('✓ заголовок таблицы - без лишней подписи, мёрдж на всю ширину (не обрезается)')
 
 
 def test_report_round_trips_without_corruption(tmp_path):
@@ -116,3 +137,25 @@ def test_report_round_trips_without_corruption(tmp_path):
     assert set(wb.sheetnames) == {'Дашборд', 'Как читать результат',
                                  'Проверка КП', 'Расхождения'}
     print('✓ файл с дашбордом и графиками сохраняется/открывается без ошибок')
+
+
+def test_chart_anchored_below_section_title_not_overlapping(tmp_path):
+    """Раньше график садился на строку 9 - ту же, где секционный заголовок
+    «Расхождения по типу данных…» (объединённая ячейка B9:E9) - и наезжал на
+    неё. Якорь должен быть на строке ЗАГОЛОВКА САМОЙ ТАБЛИЦЫ («Показатель»/
+    «Расхождений (✗)»), на строку ниже секционного заголовка."""
+    out = tmp_path / 'test.xlsx'
+    vr._записать_xlsx(out, 'СМУ', _результаты(2), per_city=False, map_results=[])
+    from openpyxl import load_workbook
+    wb = load_workbook(out)
+    ws = wb['Дашборд']
+    title_row = next(r for r in range(1, 20)
+                     if ws.cell(r, 2).value and 'Расхождения по типу данных' in str(ws.cell(r, 2).value))
+    table_header_row = title_row + 1
+    assert ws.cell(table_header_row, 2).value == 'Показатель'
+    chart = ws._charts[0]
+    anchor_row = chart.anchor._from.row + 1   # openpyxl anchor - 0-индексный
+    assert anchor_row >= table_header_row, (
+        f'график (строка {anchor_row}) не должен быть ВЫШЕ заголовка таблицы '
+        f'(строка {table_header_row}) - иначе наезжает на секционный заголовок')
+    print(f'✓ график заякорен на строке {anchor_row} - не выше заголовка таблицы ({table_header_row})')

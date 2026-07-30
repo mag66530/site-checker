@@ -1106,18 +1106,16 @@ def _главный_вывод(расхождения: list) -> str:
     _total = len(расхождения)
     _pct = round(100 * _top_n / _total)
     return (f"Главный вывод: больше всего расхождений даёт «{_top_src}» - "
-           f"{_top_n} из {_total} ({_pct}%). Подробности по каждому - на "
-           f"листе «Расхождения».")
+           f"{_top_n} из {_total} ({_pct}%).")
 
 
 def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, расхождения: list) -> None:
-    """Лист «Дашборд» - первым в файле: 4 KPI-показателя, таблица+график
-    расхождений по типу данных (лист «Проверка КП»), таблица+график по
-    источнику сверки (лист «Расхождения»). Числа - формулы Excel (пересчитаются
-    сами, если открыть отчёт и поправить строку вручную), кроме итогового
-    вывода - он посчитан один раз при генерации, не формула."""
+    """Лист «Дашборд» - первым в файле: 4 KPI-показателя + таблица и график
+    расхождений по типу данных (лист «Проверка КП»). Числа - формулы Excel
+    (пересчитаются сами, если открыть отчёт и поправить строку вручную),
+    кроме итогового вывода - он посчитан один раз при генерации, не формула."""
     from openpyxl.styles import Font, Alignment, Border
-    from openpyxl.chart import BarChart, PieChart, Reference
+    from openpyxl.chart import BarChart, Reference
 
     ws = wb.create_sheet("Дашборд", 0)
     ws.sheet_view.showGridLines = False
@@ -1151,7 +1149,9 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
         ws[val_coord].font = Font(name="Arial", size=20, bold=True, color=color)
 
     def _small_table(top_row, title, col_headers, items):
-        ws.merge_cells(start_row=top_row, start_column=2, end_row=top_row, end_column=5)
+        # Мёрдж на всю ширину блока (как у подзаголовка B3:H3) - иначе длинный
+        # заголовок таблицы обрезался в узком B:E.
+        ws.merge_cells(start_row=top_row, start_column=2, end_row=top_row, end_column=8)
         tcell = ws.cell(top_row, 2, title)
         tcell.font = Font(name="Arial", size=12, bold=True)
         hr = top_row + 1
@@ -1169,23 +1169,15 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
         return hr, r - 1   # (строка заголовка таблицы, последняя строка данных)
 
     _hdr1, _last1 = _small_table(
-        9, "Расхождения по типу данных (лист «Проверка КП»)",
+        9, "Расхождения по типу данных",
         ["Показатель", "Расхождений (✗)"],
         [(label, f'=COUNTIF(\'Проверка КП\'!{col}3:{col}{last_row},"✗")')
          for label, col in meta["var_cols"]])
 
-    _hdr2_row = _last1 + 3
-    _disc_last_row = (len(расхождения) + 1) if расхождения else 2
-    _hdr2, _last2 = _small_table(
-        _hdr2_row, "Расхождения по источнику сверки (лист «Расхождения»)",
-        ["Источник", "Кол-во расхождений"],
-        [(src, f'=COUNTIF(Расхождения!$C$2:$C${_disc_last_row},"{src}")')
-         for src in meta["sources"]])
-
     ws.column_dimensions["A"].width = 2
     ws.column_dimensions["B"].width = 20
     ws.column_dimensions["C"].width = 16
-    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["D"].width = 3
     ws.row_dimensions[2].height = 19.5
     ws.row_dimensions[6].height = 24
 
@@ -1198,19 +1190,12 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
         cats = Reference(ws, min_col=2, min_row=_hdr1 + 1, max_row=_last1)
         bar.add_data(data, titles_from_data=True)
         bar.set_categories(cats)
-        ws.add_chart(bar, "E9")
+        # Якорь - строка ЗАГОЛОВКА ТАБЛИЦЫ (не строка секции с названием
+        # таблицы выше), колонка E - с отступом в одну пустую колонку (D) от
+        # самой таблицы, чтобы график не наезжал на неё.
+        ws.add_chart(bar, f"E{_hdr1}")
 
-    if _last2 >= _hdr2 + 1:
-        pie = PieChart()
-        pie.title = "Доля расхождений по источнику"
-        pie.height, pie.width = 8, 10
-        data2 = Reference(ws, min_col=3, min_row=_hdr2, max_row=_last2)
-        cats2 = Reference(ws, min_col=2, min_row=_hdr2 + 1, max_row=_last2)
-        pie.add_data(data2, titles_from_data=True)
-        pie.set_categories(cats2)
-        ws.add_chart(pie, f"E{_hdr2_row}")
-
-    _concl_row = _last2 + 2
+    _concl_row = _last1 + 2
     ws.merge_cells(start_row=_concl_row, start_column=2,
                    end_row=_concl_row + 2, end_column=8)
     ccell = ws.cell(_concl_row, 2, _главный_вывод(расхождения))
@@ -1218,16 +1203,29 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
     ccell.alignment = Alignment(wrap_text=True, vertical="top")
 
 
+# Цвет по площадке (фон + цвет текста) - в колонке «Где проверяли», по
+# образцу присланного файла (там это условное форматирование по значению
+# ячейки; здесь ставим цвет сразу при генерации - площадка каждой строки уже
+# известна, условное форматирование не нужно).
+_ПЛОЩАДКА_ЦВЕТ = {
+    "2ГИС": ("D9E8FB", "1155CC"),
+    "Яндекс.Карты": ("FFF3CD", "9C7A00"),
+    "Google": ("E8D9FB", "6A1B9A"),
+    "Сайт": ("FDE3E3", "C62828"),
+}
+
+
 def _написать_расхождения_лист(wb, hdr_fill, thin, расхождения: list) -> None:
     """Лист «Расхождения» - только проблемные ячейки (сайт + карты вместе),
     для быстрого разбора без похода по всей сетке «Проверка КП». Площадка
     («Сайт»/«Яндекс.Карты»/«2ГИС»/«Google») и поле - раздельными колонками
-    (не склеены через «: »), плюс кликабельная ссылка на проверенное место."""
-    from openpyxl.styles import Font, Alignment, Border
+    (не склеены через «: »), плюс кликабельная ссылка на проверенное место.
+    Площадка подсвечена своим цветом (см. _ПЛОЩАДКА_ЦВЕТ)."""
+    from openpyxl.styles import Font, PatternFill, Alignment, Border
 
     ws2 = wb.create_sheet("Расхождения")
     LINK_FONT = Font(name="Arial", size=10, color="1155CC", underline="single")
-    _headers = ["Поддомен (что проверяли)", "Город", "Где проверяли (площадка)",
+    _headers = ["Поддомен (что проверяли)", "Город", "Где проверяли",
                "Что сверяли", "Должно быть (КП)", "Фактически на площадке",
                "Примечание", "Ссылка на проверенное место"]
     for c, t in enumerate(_headers, 1):
@@ -1239,18 +1237,23 @@ def _написать_расхождения_лист(wb, hdr_fill, thin, рас
     _border = Border(top=thin, bottom=thin, left=thin, right=thin)
     for i, d in enumerate(расхождения, 2):
         _dom = d.get("domain") or ""
-        vals = [_dom, d.get("city", ""), d.get("площадка", ""), d.get("поле", ""),
+        _площадка = d.get("площадка", "")
+        vals = [_dom, d.get("city", ""), _площадка, d.get("поле", ""),
                d.get("кп", ""), d.get("факт", ""), d.get("примечание", "")]
         for c, v in enumerate(vals, 1):
             cell = ws2.cell(i, c, v)
             cell.border = _border
             cell.alignment = Alignment(vertical="center", wrap_text=False)
+        _fill_color, _font_color = _ПЛОЩАДКА_ЦВЕТ.get(_площадка, (None, None))
+        pcell = ws2.cell(i, 3)
+        pcell.font = Font(name="Arial", size=10, bold=True, color=_font_color)
+        if _fill_color:
+            pcell.fill = PatternFill("solid", fgColor=_fill_color)
         if _dom:
             ws2.cell(i, 1).hyperlink = f"https://{_dom}/"
             ws2.cell(i, 1).font = LINK_FONT
         # Ссылка на проверенное место - карточка карты или сам сайт.
         _link = d.get("ссылка") or ""
-        _площадка = d.get("площадка", "")
         _label = f"Открыть {'сайт' if _площадка == 'Сайт' else 'карточку ' + _площадка}"
         lcell = ws2.cell(i, 8, _label)
         lcell.border = _border
