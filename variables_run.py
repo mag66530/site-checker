@@ -1084,32 +1084,184 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
     # проверяли, отчёту нечего показать.
     расхождения: list = []
     if результаты or map_results:
-        расхождения = _записать_проверку_кп_лист(
+        расхождения, _meta = _записать_проверку_кп_лист(
             wb, hdr_fill, _thin, результаты, per_city, map_results)
-        _написать_расхождения_лист(wb, hdr_fill, расхождения)
+        _написать_расхождения_лист(wb, hdr_fill, _thin, расхождения)
+        _записать_дашборд_лист(wb, hdr_fill, _thin, _meta, расхождения)
 
+    wb.active = 0   # открывать сразу на «Дашборд» (если есть) / на легенду
     wb.save(path)
 
 
-def _написать_расхождения_лист(wb, hdr_fill, расхождения: list) -> None:
+def _главный_вывод(расхождения: list) -> str:
+    """Одна строка-итог для «Дашборда» - не формула Excel (искать формулой
+    «самую частую категорию по имени» сложнее и менее прозрачно, чем один раз
+    посчитать при генерации отчёта), просто обычный текст на момент прогона."""
+    if not расхождения:
+        return ("Главный вывод: расхождений не найдено - все проверенные "
+                "данные совпадают с КП.")
+    from collections import Counter
+    _by_src = Counter(d.get("площадка", "") for d in расхождения)
+    _top_src, _top_n = _by_src.most_common(1)[0]
+    _total = len(расхождения)
+    _pct = round(100 * _top_n / _total)
+    return (f"Главный вывод: больше всего расхождений даёт «{_top_src}» - "
+           f"{_top_n} из {_total} ({_pct}%). Подробности по каждому - на "
+           f"листе «Расхождения».")
+
+
+def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, расхождения: list) -> None:
+    """Лист «Дашборд» - первым в файле: 4 KPI-показателя, таблица+график
+    расхождений по типу данных (лист «Проверка КП»), таблица+график по
+    источнику сверки (лист «Расхождения»). Числа - формулы Excel (пересчитаются
+    сами, если открыть отчёт и поправить строку вручную), кроме итогового
+    вывода - он посчитан один раз при генерации, не формула."""
+    from openpyxl.styles import Font, Alignment, Border
+    from openpyxl.chart import BarChart, PieChart, Reference
+
+    ws = wb.create_sheet("Дашборд", 0)
+    ws.sheet_view.showGridLines = False
+    last_row = meta["last_row"]
+    last_var_col = meta["last_var_col_letter"]
+    err_col = meta["err_col_letter"]
+    _hdr_border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    _grey10 = Font(name="Arial", size=10, color="595959")
+    _grey9 = Font(name="Arial", size=9, color="595959")
+
+    ws["B2"] = "Проверка КП vs сайт — сводка"
+    ws["B2"].font = Font(name="Arial", size=16, bold=True, color="1155CC")
+    ws.merge_cells("B3:H3")
+    ws["B3"] = ("Автоматический отчёт по данным листов «Проверка КП» и «Расхождения». "
+               "Обновляется при пересчёте файла (F9 / открытие в Excel).")
+    ws["B3"].font = _grey10
+
+    for lbl_coord, lbl_text, val_coord, formula, color in (
+        ("B5", "Городов/доменов проверено", "B6",
+         f"=COUNTA('Проверка КП'!B3:B{last_row})", "1155CC"),
+        ("D5", "Всего расхождений (✗)", "D6",
+         f'=COUNTIF(\'Проверка КП\'!C3:{last_var_col}{last_row},"✗")', "C62828"),
+        ("F5", "Строк без единого расхождения", "F6",
+         f"=COUNTIF('Проверка КП'!{err_col}3:{err_col}{last_row},0)", "1E8E3E"),
+        ("H5", "Строк с 3+ расхождениями", "H6",
+         f'=COUNTIF(\'Проверка КП\'!{err_col}3:{err_col}{last_row},">=3")', "9C7A00"),
+    ):
+        ws[lbl_coord] = lbl_text
+        ws[lbl_coord].font = _grey9
+        ws[val_coord] = formula
+        ws[val_coord].font = Font(name="Arial", size=20, bold=True, color=color)
+
+    def _small_table(top_row, title, col_headers, items):
+        ws.merge_cells(start_row=top_row, start_column=2, end_row=top_row, end_column=5)
+        tcell = ws.cell(top_row, 2, title)
+        tcell.font = Font(name="Arial", size=12, bold=True)
+        hr = top_row + 1
+        for ci, h in enumerate(col_headers, 2):
+            c = ws.cell(hr, ci, h)
+            c.font = Font(name="Arial", size=10, bold=True)
+            c.fill = hdr_fill
+            c.alignment = Alignment(horizontal="center")
+            c.border = _hdr_border
+        r = hr + 1
+        for label, formula in items:
+            ws.cell(r, 2, label).border = _hdr_border
+            ws.cell(r, 3, formula).border = _hdr_border
+            r += 1
+        return hr, r - 1   # (строка заголовка таблицы, последняя строка данных)
+
+    _hdr1, _last1 = _small_table(
+        9, "Расхождения по типу данных (лист «Проверка КП»)",
+        ["Показатель", "Расхождений (✗)"],
+        [(label, f'=COUNTIF(\'Проверка КП\'!{col}3:{col}{last_row},"✗")')
+         for label, col in meta["var_cols"]])
+
+    _hdr2_row = _last1 + 3
+    _disc_last_row = (len(расхождения) + 1) if расхождения else 2
+    _hdr2, _last2 = _small_table(
+        _hdr2_row, "Расхождения по источнику сверки (лист «Расхождения»)",
+        ["Источник", "Кол-во расхождений"],
+        [(src, f'=COUNTIF(Расхождения!$C$2:$C${_disc_last_row},"{src}")')
+         for src in meta["sources"]])
+
+    ws.column_dimensions["A"].width = 2
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 14
+    ws.row_dimensions[2].height = 19.5
+    ws.row_dimensions[6].height = 24
+
+    if _last1 >= _hdr1 + 1:
+        bar = BarChart()
+        bar.title = "Расхождения по типу данных"
+        bar.height, bar.width = 8, 14
+        bar.legend = None
+        data = Reference(ws, min_col=3, min_row=_hdr1, max_row=_last1)
+        cats = Reference(ws, min_col=2, min_row=_hdr1 + 1, max_row=_last1)
+        bar.add_data(data, titles_from_data=True)
+        bar.set_categories(cats)
+        ws.add_chart(bar, "E9")
+
+    if _last2 >= _hdr2 + 1:
+        pie = PieChart()
+        pie.title = "Доля расхождений по источнику"
+        pie.height, pie.width = 8, 10
+        data2 = Reference(ws, min_col=3, min_row=_hdr2, max_row=_last2)
+        cats2 = Reference(ws, min_col=2, min_row=_hdr2 + 1, max_row=_last2)
+        pie.add_data(data2, titles_from_data=True)
+        pie.set_categories(cats2)
+        ws.add_chart(pie, f"E{_hdr2_row}")
+
+    _concl_row = _last2 + 2
+    ws.merge_cells(start_row=_concl_row, start_column=2,
+                   end_row=_concl_row + 2, end_column=8)
+    ccell = ws.cell(_concl_row, 2, _главный_вывод(расхождения))
+    ccell.font = _grey10
+    ccell.alignment = Alignment(wrap_text=True, vertical="top")
+
+
+def _написать_расхождения_лист(wb, hdr_fill, thin, расхождения: list) -> None:
     """Лист «Расхождения» - только проблемные ячейки (сайт + карты вместе),
-    для быстрого разбора без похода по всей сетке «Проверка КП»."""
-    from openpyxl.styles import Font, Alignment
+    для быстрого разбора без похода по всей сетке «Проверка КП». Площадка
+    («Сайт»/«Яндекс.Карты»/«2ГИС»/«Google») и поле - раздельными колонками
+    (не склеены через «: »), плюс кликабельная ссылка на проверенное место."""
+    from openpyxl.styles import Font, Alignment, Border
 
     ws2 = wb.create_sheet("Расхождения")
-    for c, t in enumerate(["Поддомен", "Город", "Что проверяем", "КП",
-                           "На сайте/карточке", "Примечание"], 1):
+    LINK_FONT = Font(name="Arial", size=10, color="1155CC", underline="single")
+    _headers = ["Поддомен (что проверяли)", "Город", "Где проверяли (площадка)",
+               "Что сверяли", "Должно быть (КП)", "Фактически на площадке",
+               "Примечание", "Ссылка на проверенное место"]
+    for c, t in enumerate(_headers, 1):
         cell = ws2.cell(1, c, t)
-        cell.font = Font(bold=True)
+        cell.font = Font(name="Arial", size=10, bold=True)
         cell.fill = hdr_fill
-    for i, row in enumerate(расхождения, 2):
-        for c, v in enumerate(row, 1):
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    _border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    for i, d in enumerate(расхождения, 2):
+        _dom = d.get("domain") or ""
+        vals = [_dom, d.get("city", ""), d.get("площадка", ""), d.get("поле", ""),
+               d.get("кп", ""), d.get("факт", ""), d.get("примечание", "")]
+        for c, v in enumerate(vals, 1):
             cell = ws2.cell(i, c, v)
-            if c in (4, 5, 6):     # «КП», «На сайте/карточке», «Примечание» - переносим
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
-    for col, w in (("A", 32), ("B", 16), ("C", 22), ("D", 34), ("E", 34), ("F", 70)):
+            cell.border = _border
+            cell.alignment = Alignment(vertical="center", wrap_text=False)
+        if _dom:
+            ws2.cell(i, 1).hyperlink = f"https://{_dom}/"
+            ws2.cell(i, 1).font = LINK_FONT
+        # Ссылка на проверенное место - карточка карты или сам сайт.
+        _link = d.get("ссылка") or ""
+        _площадка = d.get("площадка", "")
+        _label = f"Открыть {'сайт' if _площадка == 'Сайт' else 'карточку ' + _площадка}"
+        lcell = ws2.cell(i, 8, _label)
+        lcell.border = _border
+        lcell.alignment = Alignment(vertical="center")
+        if _link:
+            lcell.hyperlink = _link
+            lcell.font = LINK_FONT
+    for col, w in (("A", 30), ("B", 18), ("C", 20), ("D", 16), ("E", 30),
+                   ("F", 34), ("G", 44), ("H", 24)):
         ws2.column_dimensions[col].width = w
-    ws2.freeze_panes = "A2"
+    ws2.freeze_panes = "C2"
     if not расхождения:
         ws2.cell(2, 1, "Расхождений не найдено 🎉")
 
@@ -1159,7 +1311,12 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
         _GROUPS = _GROUPS + [("Карты", _FIRST_MAP_COL,
                               _FIRST_MAP_COL + len(_MAP_COLS) - 1)]
         _SEP_AFTER = _SEP_AFTER | {_FIRST_MAP_COL - 1}
-    n_cols = _FIRST_MAP_COL - 1 + len(_MAP_COLS)
+    # «Ошибок (✗)» - служебная колонка сразу после всех вар/карт-колонок:
+    # формула COUNTIF по всей строке, дашборд ссылается на неё (строки без
+    # единого расхождения / строки с 3+ расхождениями).
+    _ERR_COL = _FIRST_MAP_COL + len(_MAP_COLS)
+    _SEP_AFTER = _SEP_AFTER | {_ERR_COL - 1}
+    n_cols = _ERR_COL
 
     def _bdr(col, bottom=False):
         return Border(right=_thin if col in _SEP_AFTER else None,
@@ -1173,13 +1330,15 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
         gc = ws.cell(1, c1, txt)
         gc.font = Font(bold=True); gc.alignment = Alignment(horizontal="center")
     # Строка 2 - заголовки колонок (нижняя граница отделяет шапку от данных).
-    _headers = _ID + [d for d, _ in _VARS] + [label for _, label in _MAP_COLS]
+    _headers = (_ID + [d for d, _ in _VARS] + [label for _, label in _MAP_COLS]
+               + ["Ошибок (✗)"])
     for c, t in enumerate(_headers, 1):
         cell = ws.cell(2, c, t)
         cell.font = Font(bold=True); cell.fill = hdr_fill
         cell.alignment = Alignment(horizontal="center")
         cell.border = _bdr(c, bottom=True)
     ws.freeze_panes = "C3"
+    _last_var_col_letter = get_column_letter(_ERR_COL - 1)
 
     LINK_FONT = Font(color="1155CC", underline="single")
     # Заливка только у проблемных ячеек, чтобы зелёные ✓ оставались чистыми
@@ -1262,9 +1421,13 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
                     cm.width, cm.height = 340, 170   # чтобы текст влезал в окошко
                     cell.comment = cm
                     cell.fill = BUG_FILL if status == "bug" else WARN_FILL
-                    расхождения.append((res["domain"], res.get("city", ""),
-                                        f'Сайт: {name.replace("Тел. ", "")}',
-                                        f["expected"], f["found"], f.get("note", "")))
+                    расхождения.append({
+                        "domain": res["domain"], "city": res.get("city", ""),
+                        "площадка": "Сайт", "поле": name.replace("Тел. ", ""),
+                        "кп": f["expected"], "факт": f["found"],
+                        "примечание": f.get("note", ""),
+                        "ссылка": f'https://{res["domain"]}/',
+                    })
 
         # Карты - той же строкой, тот же принцип оформления.
         if _MAP_COLS:
@@ -1315,9 +1478,18 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
                                 _note = f'{d["field"]} не найден на карточке {label}'
                             else:
                                 _note = f'{d["field"]} на карточке {label} не совпадает с КП'
-                            расхождения.append((
-                                res.get("domain") or "", _map_key,
-                                f'{label}: {d["field"]}', d["kp"], d["card"], _note))
+                            расхождения.append({
+                                "domain": res.get("domain") or "", "city": _map_key,
+                                "площадка": label, "поле": d["field"],
+                                "кп": d["kp"], "факт": d["card"],
+                                "примечание": _note, "ссылка": rmap.url,
+                            })
+
+        # «Ошибок (✗)» - формула, не питоновский подсчёт: должна пересчитываться
+        # прямо в Excel, если кто-то вручную поправит ячейку на листе.
+        _err_cell = ws.cell(r, _ERR_COL, f'=COUNTIF(C{r}:{_last_var_col_letter}{r},"✗")')
+        _err_cell.alignment = Alignment(horizontal="center")
+        _err_cell.border = _bdr(_ERR_COL)
         r += 1
 
     # Ширины колонок (как в согласованном образце) + карты пошире, там текст.
@@ -1326,8 +1498,23 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
         ws.column_dimensions[_col].width = _w
     for j in range(len(_MAP_COLS)):
         ws.column_dimensions[get_column_letter(_FIRST_MAP_COL + j)].width = 14
+    ws.column_dimensions[get_column_letter(_ERR_COL)].width = 13
 
-    return расхождения
+    # Метаданные для листа «Дашборд» - какие колонки за что отвечают, где
+    # заканчиваются данные (формулы COUNTIF дашборда ссылаются на эти диапазоны).
+    _var_cols_meta = [(disp, get_column_letter(_FIRST_VAR_COL + i))
+                      for i, (disp, _) in enumerate(_VARS)]
+    _var_cols_meta += [(label, get_column_letter(_FIRST_MAP_COL + j))
+                       for j, (_, label) in enumerate(_MAP_COLS)]
+    _sources = (["Сайт"] if результаты else []) + [label for _, label in _MAP_COLS]
+    meta = {
+        "last_row": r - 1,
+        "last_var_col_letter": _last_var_col_letter,
+        "err_col_letter": get_column_letter(_ERR_COL),
+        "var_cols": _var_cols_meta,
+        "sources": _sources,
+    }
+    return расхождения, meta
 
 
 if __name__ == '__main__':
