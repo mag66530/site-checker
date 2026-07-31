@@ -43,7 +43,10 @@ def test_imp_sources():
 def test_mpe_sources():
     cfg = load_project_config('mpe')
     src = load_sources(cfg)
-    assert len(src.subdomains) == 159, f"МПЭ: ожидалось 159, получили {len(src.subdomains)}"
+    # Список городов пополняется - проверяем «не меньше базы», а не точное
+    # число (как в СМУ/ИМП выше): новый домен в catalogs/mpe-subdomains.csv
+    # не должен ронять тесты.
+    assert len(src.subdomains) >= 159, f"МПЭ: ожидалось ≥159, получили {len(src.subdomains)}"
     assert len(src.categories) > 1000, f"МПЭ: мало категорий"
     assert len(src.filters) == 0, f"МПЭ: должно быть 0 фильтров, получили {len(src.filters)}"
     print(f'✓ МПЭ: {len(src.subdomains)} городов, '
