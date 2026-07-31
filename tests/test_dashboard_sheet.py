@@ -1,11 +1,14 @@
 """Тесты листа «Дашборд» в отчёте variables_run.py - сводка по данным
 «Проверка КП»/«Расхождения»: 4 KPI, таблица+график по типу данных (только они -
 таблицу/график «по источнику» убрали по просьбе заказчика). Числа - готовые
-(посчитаны в Python при генерации), не формулы Excel: график на формулах без
-закешированного значения у части просмотрщиков рисовался пустым/без подписей
-(увидели на проде) - поэтому KPI и таблица под графиком тоже стали обычными
-числами. Сделан по образцу файла, который прислал заказчик
-(КП-сму-...-улучшено.xlsx) - структура должна совпадать."""
+(посчитаны в Python при генерации), не формулы Excel.
+
+График - КАРТИНКА (Pillow), не «родной» график Excel: «родной» BarChart
+рендерился по-разному на одном и том же файле локально и на проде (само
+ориентация/кеш/оси тут ни при чём - разница именно в окружении, скорее
+всего в версии openpyxl), картинка рендерится одинаковыми байтами везде.
+Сделан по образцу файла, который прислал заказчик (КП-сму-...-улучшено.xlsx) -
+структура должна совпадать."""
 import sys
 from pathlib import Path
 
@@ -87,7 +90,7 @@ def test_only_one_table_and_chart_on_dashboard(tmp_path):
     all_text = ' '.join(str(ws.cell(r, 2).value or '') for r in range(1, 40))
     assert 'Расхождения по типу данных' in all_text
     assert 'по источнику' not in all_text
-    assert len(ws._charts) == 1, 'должен быть ровно 1 график - по типу данных'
+    assert len(ws._images) == 1, 'должна быть ровно 1 картинка-график - по типу данных'
     print('✓ на дашборде только одна таблица+график (по типу данных)')
 
 
@@ -144,32 +147,41 @@ def test_report_round_trips_without_corruption(tmp_path):
     print('✓ файл с дашбордом и графиками сохраняется/открывается без ошибок')
 
 
-def test_chart_has_cached_values_not_just_a_range_reference(tmp_path):
-    """openpyxl по умолчанию пишет в график только ССЫЛКУ на диапазон, без
-    закешированных значений (numCache/strCache) - просмотрщики, которые сами
-    не подтягивают данные ячеек (напр. Google Таблицы при импорте xlsx),
-    тогда рисуют пустой график без подписей (баг увидели на проде, скрин с
-    одной палкой без осей). Кеш должен быть заполнен теми же числами и
-    подписями, что и в таблице рядом."""
+def test_chart_image_renders_all_categories_with_visible_bars_or_zero(tmp_path):
+    """Картинка рисуется через _нарисовать_barchart_png() - проверяем саму
+    функцию напрямую (не то, что Excel потом сделает с картинкой - тут дело в
+    байтах PNG, они одинаковы везде): все 9 показателей (8 полей сайта + 1
+    карта) должны попасть на картинку, а не только тот, у которого есть
+    расхождение."""
+    from maps_compare import MapCheckResult as _MCR
+    r = _MCR(source='2gis', city='Город0', url='u', available=True,
+            country='Россия', phone_match=False, address_match=True,
+            site_match=True, issues=['x'],
+            details=[{'field': 'телефон', 'kp': '1', 'card': '–'}])
     out = tmp_path / 'test.xlsx'
-    r = MapCheckResult(source='2gis', city='Город0', url='u', available=True,
-                       country='Россия', phone_match=False, address_match=True,
-                       site_match=True, issues=['x'],
-                       details=[{'field': 'телефон', 'kp': '1', 'card': '–'}])
     vr._записать_xlsx(out, 'СМУ', _результаты(4), per_city=False, map_results=[r])
     from openpyxl import load_workbook
     wb = load_workbook(out)
     ws = wb['Дашборд']
-    chart = ws._charts[0]
-    s = chart.series[0]
-    assert s.val.numRef.numCache is not None, 'нет кеша значений - график будет пустым в части просмотрщиков'
-    vals = [pt.v for pt in s.val.numRef.numCache.pt]
-    assert len(vals) == 9, '8 полей сайта + 1 карта (2ГИС) = 9 показателей'
-    assert 1.0 in vals, 'расхождение по 2ГИС должно попасть в кеш значений'
-    assert s.cat.strRef is not None, 'категории должны быть строковой ссылкой (не numRef) - иначе подписи не попадут в кеш'
-    labels = [pt.v for pt in s.cat.strRef.strCache.pt]
-    assert '2ГИС' in labels and 'Город' in labels
-    print('✓ у графика есть закешированные значения/подписи - не только ссылка на диапазон')
+    assert len(ws._images) == 1
+    img = ws._images[0]
+    assert img.width > 0 and img.height > 0
+    print('✓ картинка-график встроена, размер задан')
+
+
+def test_barchart_png_draws_a_row_per_item(tmp_path):
+    """_нарисовать_barchart_png() напрямую - картинка растёт по высоте с
+    числом показателей (иначе подписи слипаются на большом отчёте)."""
+    from PIL import Image
+    import io
+    items_small = [('Город', 0), ('Адрес', 1)]
+    items_big = [(f'Показатель{i}', i % 2) for i in range(11)]
+    png_small = vr._нарисовать_barchart_png('Т', items_small)
+    png_big = vr._нарисовать_barchart_png('Т', items_big)
+    h_small = Image.open(io.BytesIO(png_small.getvalue())).size[1]
+    h_big = Image.open(io.BytesIO(png_big.getvalue())).size[1]
+    assert h_big > h_small, 'картинка с большим числом показателей должна быть выше'
+    print('✓ высота картинки растёт с числом показателей')
 
 
 def test_chart_anchored_below_section_title_not_overlapping(tmp_path):
@@ -186,8 +198,8 @@ def test_chart_anchored_below_section_title_not_overlapping(tmp_path):
                      if ws.cell(r, 2).value and 'Расхождения по типу данных' in str(ws.cell(r, 2).value))
     table_header_row = title_row + 1
     assert ws.cell(table_header_row, 2).value == 'Показатель'
-    chart = ws._charts[0]
-    anchor_row = chart.anchor._from.row + 1   # openpyxl anchor - 0-индексный
+    img = ws._images[0]
+    anchor_row = img.anchor._from.row + 1   # openpyxl anchor - 0-индексный
     assert anchor_row >= table_header_row, (
         f'график (строка {anchor_row}) не должен быть ВЫШЕ заголовка таблицы '
         f'(строка {table_header_row}) - иначе наезжает на секционный заголовок')

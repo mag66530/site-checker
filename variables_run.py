@@ -1093,23 +1093,76 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
     wb.save(path)
 
 
+def _нарисовать_barchart_png(title: str, items: list[tuple[str, int]]) -> "io.BytesIO":
+    """Горизонтальный bar-chart КАРТИНКОЙ (Pillow), не «родным» графиком Excel.
+
+    «Родной» openpyxl-график (BarChart) на локалке рендерился нормально, а
+    на проде - криво (без подписей, одна сплошная полоса) на ОДНОМ И ТОМ ЖЕ
+    файле в одном и том же Excel - т.е. дело не в коде отчёта, а в разнице
+    окружений при генерации (скорее всего разные версии openpyxl: локально
+    и на облаке ставятся из одного requirements.txt с '>=', могут разойтись).
+    Три попытки почистить это через openpyxl (кеш значений, ориентация,
+    ось) не дали результата на проде - картинка рендерится одинаковыми
+    байтами везде, независимо от того, чем и где она создана."""
+    import io
+    from PIL import Image, ImageDraw, ImageFont
+
+    def _font(bold, size):
+        for name in (("arialbd.ttf" if bold else "arial.ttf"),):
+            try:
+                return ImageFont.truetype(name, size)
+            except Exception:
+                pass
+        try:
+            return ImageFont.load_default(size=size)
+        except TypeError:
+            return ImageFont.load_default()
+
+    SCALE = 2   # рисуем в 2x и не даунскейлим - резче в Excel при масштабе
+    font_title = _font(True, 15 * SCALE)
+    font = _font(False, 13 * SCALE)
+
+    row_h = 30 * SCALE
+    top_pad, bottom_pad = 44 * SCALE, 14 * SCALE
+    label_w = 150 * SCALE
+    bar_area_w = 300 * SCALE
+    val_w = 34 * SCALE
+    W = label_w + bar_area_w + val_w + 20 * SCALE
+    H = top_pad + row_h * max(len(items), 1) + bottom_pad
+
+    img = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(img)
+    d.text((14 * SCALE, 12 * SCALE), title, font=font_title, fill="#000000")
+
+    _max = max((v for _, v in items), default=0) or 1
+    y = top_pad
+    for label, value in items:
+        _tb = d.textbbox((0, 0), label, font=font)
+        _tw = _tb[2] - _tb[0]
+        d.text((label_w - _tw - 10 * SCALE, y + 6 * SCALE), label, font=font, fill="#333333")
+        bar_len = int(bar_area_w * value / _max) if value else 0
+        x0 = label_w
+        x1 = x0 + bar_len
+        color = "#C62828" if value else "#E0E0E0"
+        if bar_len > 0:
+            d.rectangle([x0, y + 4 * SCALE, x1, y + row_h - 10 * SCALE], fill=color)
+        d.text((x1 + 8 * SCALE, y + 6 * SCALE), str(value), font=font, fill="#000000")
+        y += row_h
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+
 def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, расхождения: list) -> None:
     """Лист «Дашборд» - первым в файле: 4 KPI-показателя + таблица и график
     расхождений по типу данных (лист «Проверка КП»). Числа - готовые (посчитаны
-    в Python при генерации), НЕ формулы.
-
-    График - ГОРИЗОНТАЛЬНЫЕ полосы (bar.type="bar"), не вертикальные столбцы
-    (умолчание openpyxl): у показателей длинные подписи («Реклама Город» и
-    т.п.), 11 штук - на узком графике-столбцах Excel такие подписи по оси
-    просто не помещаются и не рисует их вовсе (баг на проде: «график без
-    подписей, одна палка» - палка одна, потому что расхождение было только
-    по одному показателю, остальные 10 - нулевые бары без подписи рядом).
-    Плюс кеш значений/подписей прописан вручную (openpyxl по умолчанию пишет
-    только ссылку на диапазон, без numCache/strCache)."""
+    в Python при генерации), НЕ формулы. График - КАРТИНКОЙ, см.
+    _нарисовать_barchart_png - «родной» график Excel рендерился по-разному
+    локально и на проде, картинка рендерится одинаково везде."""
     from openpyxl.styles import Font, Alignment, Border
-    from openpyxl.chart import BarChart, Reference
-    from openpyxl.chart.data_source import (
-        AxDataSource, NumData, NumVal, StrData, StrRef, StrVal)
+    from openpyxl.drawing.image import Image as _XLImage
 
     ws = wb.create_sheet("Дашборд", 0)
     ws.sheet_view.showGridLines = False
@@ -1168,51 +1221,15 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
     ws.row_dimensions[6].height = 24
 
     if _last1 >= _hdr1 + 1:
-        bar = BarChart()
-        bar.title = "Расхождения по типу данных"
-        # Горизонтальные полосы (как в образце), не вертикальные столбцы: у
-        # показателей длинные подписи («Реклама Город» и т.п.) - при столбцах
-        # (по умолчанию у openpyxl) подписи по оси не помещаются на узком
-        # графике и Excel их просто не рисует, отсюда «график без подписей».
-        bar.type = "bar"
-        bar.grouping = "clustered"
-        bar.gapWidth = 60
-        bar.overlap = -10
-        # openpyxl не переставляет оси сама при смене .type на "bar" - обе
-        # остаются axPos="l" (обе слева), как для вертикальных столбцов.
-        # Для горизонтальных полос ось значений должна быть СНИЗУ - иначе
-        # Excel получает две оси в одном месте и рисует график криво.
-        bar.y_axis.axPos = "b"
-        # Высота растёт с числом показателей - иначе подписи слипаются.
-        bar.height = max(8, 0.9 * len(_table_items))
-        bar.width = 14
-        bar.legend = None
-        data = Reference(ws, min_col=3, min_row=_hdr1, max_row=_last1)
-        cats = Reference(ws, min_col=2, min_row=_hdr1 + 1, max_row=_last1)
-        bar.add_data(data, titles_from_data=True)
-        bar.set_categories(cats)
-        # openpyxl пишет в график только ССЫЛКУ на диапазон, без закешированных
-        # значений (numCache/strCache) - часть просмотрщиков (не только «живой»
-        # Excel) сама данные ячеек не подтягивает и рисует пустой график.
-        # Прописываем кеш вручную теми же данными, что уже в таблице рядом.
-        _ser = bar.series[0]
-        _ser.val.numRef.numCache = NumData(
-            formatCode="General", ptCount=len(_table_items),
-            pt=[NumVal(idx=i, v=v) for i, (_, v) in enumerate(_table_items)])
-        # set_categories() кладёт ссылку в cat.numRef независимо от того, что
-        # там текст (openpyxl не смотрит на тип ячеек) - пересобираем как
-        # строковую ссылку с тем же диапазоном, чтобы подписи категорий тоже
-        # были в кеше.
-        _cat_f = _ser.cat.numRef.f
-        _ser.cat = AxDataSource(strRef=StrRef(
-            f=_cat_f,
-            strCache=StrData(ptCount=len(_table_items),
-                             pt=[StrVal(idx=i, v=lbl)
-                                 for i, (lbl, _) in enumerate(_table_items)])))
+        png = _нарисовать_barchart_png("Расхождения по типу данных", _table_items)
+        img = _XLImage(png)
+        SCALE = 2   # рисовали в 2x (см. _нарисовать_barchart_png) - тут делим обратно
+        img.width = img.width / SCALE
+        img.height = img.height / SCALE
         # Якорь - строка ЗАГОЛОВКА ТАБЛИЦЫ (не строка секции с названием
         # таблицы выше), колонка E - с отступом в одну пустую колонку (D) от
-        # самой таблицы, чтобы график не наезжал на неё.
-        ws.add_chart(bar, f"E{_hdr1}")
+        # самой таблицы, чтобы картинка не наезжала на неё.
+        ws.add_image(img, f"E{_hdr1}")
 
 
 # Цвет по площадке (фон + цвет текста) - в колонке «Где проверяли», по
