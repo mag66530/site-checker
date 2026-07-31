@@ -4627,16 +4627,32 @@ def _закрыть_модалку_способ(page, modal, способ: str) 
     модалка реально пропала (или потеряла видимость) ПОСЛЕ попытки."""
     try:
         if способ == "крестик":
+            # Крестик часто лежит ВНЕ контейнера, выбранного корнем модалки
+            # (оверлей-родитель, соседний узел), и бывает символьным (× без
+            # класса) - поиск только внутри modal по классам его не видел, и
+            # способ проваливался, ни разу не кликнув. Ищем сперва внутри,
+            # затем по всей странице, символьные варианты - тоже.
+            # И НЕ выходим после первого кандидата: [class*='close' i] матчит
+            # обёртки (.close-wrap и т.п.), клик по которым ничего не
+            # закрывает, а прежний break хоронил все остальные селекторы.
             найдена = False
-            for sel in _MODAL_CLOSE_SELECTORS:
-                try:
-                    btn = modal.locator(sel).first
-                    if btn.count() and btn.is_visible():
+            _селекторы_крестика = list(_MODAL_CLOSE_SELECTORS) + [
+                "button:has-text('×')", "span:has-text('×')", "a:has-text('×')",
+                "button:has-text('✕')", "span:has-text('✕')",
+            ]
+            for scope in (modal, page):
+                for sel in _селекторы_крестика:
+                    try:
+                        btn = scope.locator(sel).first
+                        if not (btn.count() and btn.is_visible()):
+                            continue
                         btn.click(timeout=3000, force=True)
                         найдена = True
-                        break
-                except Exception:  # noqa: BLE001
-                    continue
+                        page.wait_for_timeout(400)
+                        if not _модалка_видна(modal):
+                            return True
+                    except Exception:  # noqa: BLE001
+                        continue
             if not найдена:
                 return False
         elif способ == "esc":
@@ -4647,16 +4663,23 @@ def _закрыть_модалку_способ(page, modal, способ: str) 
                 vp = page.viewport_size
             except Exception:  # noqa: BLE001
                 box, vp = None, None
-            if not box or not vp:
+            if not vp:
                 return False
             # Точка заведомо ВНЕ прямоугольника модалки, но внутри вьюпорта -
             # угол экрана обычно свободен от интерактивных элементов сайта.
             кандидаты = [(5, 5), (vp["width"] - 5, 5), (5, vp["height"] - 5)]
-            pt = next((p for p in кандидаты
-                       if not (box["x"] <= p[0] <= box["x"] + box["width"]
-                               and box["y"] <= p[1] <= box["y"] + box["height"])), None)
+            pt = None
+            if box:
+                pt = next((p for p in кандидаты
+                           if not (box["x"] <= p[0] <= box["x"] + box["width"]
+                                   and box["y"] <= p[1] <= box["y"] + box["height"])), None)
             if not pt:
-                return False
+                # Корнем модалки взят ОВЕРЛЕЙ во весь вьюпорт (position:fixed;
+                # inset:0) - точки «вне» не существует, и раньше способ
+                # отваливался без единого клика: ложный ✗ на окнах, которые
+                # посетитель штатно закрывает кликом по затемнению. Клик по
+                # углу - это и есть клик по фону.
+                pt = (5, 5)
             page.mouse.click(*pt)
         else:
             return False

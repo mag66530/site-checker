@@ -30,6 +30,7 @@ gsc_validate_fixes.py
 import argparse
 import asyncio
 import json
+import os
 import random
 import sys
 from datetime import datetime
@@ -41,6 +42,13 @@ PROPS_FILE = Path('gsc_properties.json')
 LOG_FILE = Path('gsc_validate_log.json')
 
 INDEX_REPORT = 'https://search.google.com/search-console/index?resource_id={rid}'
+# Какой Google-аккаунт открывать, если в перенесённой сессии их несколько.
+# Без authuser Google берёт ПЕРВЫЙ аккаунт профиля (authuser=0): если экспорт
+# сессии делали из Chrome с личным аккаунтом впереди рабочего, отчёт по чужому
+# для этого аккаунта ресурсу открывается ПУСТЫМ (без ошибки, HTTP 200) - и так
+# на КАЖДОМ ресурсе подряд. Задаётся email'ом или индексом: env GSC_AUTHUSER
+# (облачный запуск идёт через subprocess) либо флагом --authuser.
+AUTHUSER = ''
 VALIDATE_TEXT = 'Проверить исправление'
 DETAILS_TEXT = 'Подробности'            # span.Zfuf2d на странице причины-ошибки
 NEW_CHECK_TEXT = 'Начать новую проверку'  # span.b88Yg на странице деталей
@@ -116,8 +124,31 @@ async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
     return False
 
 
+def _report_url(rid: str) -> str:
+    """URL отчёта «Индексирование/Страницы» для ресурса, с привязкой к нужному
+    Google-аккаунту (если задан AUTHUSER)."""
+    url = INDEX_REPORT.format(rid=quote(rid, safe=''))
+    if AUTHUSER:
+        url += f'&authuser={quote(AUTHUSER, safe="@")}'
+    return url
+
+
+async def _активный_аккаунт(page) -> str:
+    """Email аккаунта, под которым сейчас открыт GSC (или ''). Берём из
+    aria-label аватара - Google пишет туда «… (mail@example.com)». Нужен в
+    диагностике: «пусто на всех ресурсах» чаще всего значит «вошли не тем
+    аккаунтом», и без email это не видно."""
+    import re as _re
+    try:
+        html = await page.content()
+    except Exception:
+        return ''
+    m = _re.search(r'aria-label="[^"]*?\(([^"()]+@[^"()]+)\)', html)
+    return m.group(1) if m else ''
+
+
 async def _open_report(page, rid: str) -> bool:
-    ok = await _goto_backoff(page, INDEX_REPORT.format(rid=quote(rid, safe='')))
+    ok = await _goto_backoff(page, _report_url(rid))
     if not ok:
         return False
     await page.wait_for_timeout(3000)
@@ -169,6 +200,55 @@ async def _read_reasons(page) -> list[dict]:
         except Exception:
             pass
     return out
+
+
+async def _диагноз_пустого_отчёта(page) -> str:
+    """Почему в отчёте нет ни одной строки причин. Отличает «сессия не принята /
+    нет доступа к ресурсу» от честного «всё чисто». Ничего не меняет на
+    странице - только читает URL и текст.
+
+    Зачем: в облаке (headless + cookies из storage_state) Google часто не
+    принимает перенесённую сессию - другой IP/устройство - и отдаёт логин или
+    «Выберите аккаунт» со статусом 200. Внешне это неотличимо от пустого
+    отчёта, и один и тот же лог получался на ВСЕХ ресурсах подряд."""
+    try:
+        url = page.url or ''
+    except Exception:
+        url = ''
+    try:
+        body = (await page.inner_text('body'))[:400].replace('\n', ' ')
+    except Exception:
+        body = ''
+    low = (url + ' ' + body).lower()
+    почта = await _активный_аккаунт(page)
+    улика = (f'аккаунт: {почта or "не определён"}; URL: {url[:120]}')
+
+    if 'accounts.google.com' in url or 'servicelogin' in low or 'signin/v2' in low:
+        return ('сессия НЕ принята: Google увёл на страницу входа. '
+                'Пере-экспортируй сессию (session_export.py) и обнови секрет '
+                f'autoclick_session. {улика}')
+    if any(m in low for m in ('выберите аккаунт', 'choose an account',
+                              'выбор аккаунта', 'sign in', 'войдите в аккаунт')):
+        return ('сессия НЕ принята: Google просит выбрать аккаунт/войти. '
+                f'Пере-экспортируй сессию и обнови секрет. {улика}')
+    if any(m in low for m in ('у вас нет доступа', 'нет прав', 'permission denied',
+                              "you don't have access", 'доступ запрещ')):
+        return ('нет доступа к ресурсу под этим аккаунтом: gsc_properties.json '
+                f'собран под другим Google-аккаунтом. {улика}')
+    if 'search-console' not in url:
+        return f'мы не на странице отчёта GSC (редирект). {улика}'
+    try:
+        всего = len(await page.query_selector_all('tr[data-rowid]'))
+    except Exception:
+        всего = -1
+    if всего > 0:
+        return (f'строки есть ({всего}), но все НЕвидимые: не догрузился/'
+                f'свёрнут блок таблицы. {улика}')
+    return ('таблица причин пуста: всё проиндексировано, ЛИБО отчёт открыт не '
+            'тем Google-аккаунтом (у него нет прав на ресурс - GSC отдаёт '
+            'пустую страницу без ошибки). Проверь аккаунт в улике; если он не '
+            'тот - задай нужный через --authuser / env GSC_AUTHUSER или '
+            f'пере-экспортируй сессию. {улика}')
 
 
 async def _details_newcheck(page, res: dict, reason: dict, dry_run: bool) -> dict:
@@ -402,7 +482,14 @@ async def process_resource(page, rid: str, dry_run: bool,
 
     reasons = await _read_reasons(page)
     if not reasons:
-        _log('  причин не найдено (всё проиндексировано или другой layout)')
+        # Пустая таблица - НЕ обязательно «всё проиндексировано». Гораздо чаще
+        # (особенно в облаке) мы вообще не на отчёте: Google не принял
+        # перенесённую сессию и увёл на логин/выбор аккаунта, отдав при этом
+        # HTTP 200 - _goto_backoff такое не ловит. Раньше обе ситуации давали
+        # одну и ту же строку, и по логу их было не различить.
+        причина = await _диагноз_пустого_отчёта(page)
+        _log(f'  причин не найдено - {причина}',
+             'warn' if 'сессия' in причина or 'доступ' in причина else 'info')
         return entries
 
     from collections import Counter
@@ -556,11 +643,18 @@ def parse_args():
                     help='фильтр подстрокой (только для фоллбэка gsc_properties.json)')
     ap.add_argument('--dry-run', action='store_true', help='без клика кнопки')
     ap.add_argument('--limit', type=int, default=0, help='максимум причин за запуск')
+    ap.add_argument('--authuser', default='',
+                    help='Google-аккаунт для GSC (email или индекс 0/1/2), если '
+                         'в сессии их несколько; иначе env GSC_AUTHUSER')
     return ap.parse_args()
 
 
 if __name__ == '__main__':
     a = parse_args()
+    # Аккаунт: флаг важнее env (env удобен для облачного запуска через UI).
+    AUTHUSER = (a.authuser or os.environ.get('GSC_AUTHUSER', '')).strip()
+    if AUTHUSER:
+        _log(f'Google-аккаунт для отчётов: authuser={AUTHUSER}')
     res = _load_resources(a.project, a.filter, a.resource)
     if not res:
         _log('Нет ресурсов для обработки.', 'error')
