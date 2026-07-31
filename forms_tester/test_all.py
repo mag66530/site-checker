@@ -4768,11 +4768,10 @@ def _закрыть_модалку_способ(page, modal, способ: str, 
                         try:
                             btn.evaluate("b => b.click()")
                             page.wait_for_timeout(400)
-                            if not _модалка_видна(modal):
+                            if not _ещё_видна():
                                 return True
-                            print(f"      🔬 DEBUG крестик {sel!r}: JS-клик тоже не закрыл")
-                        except Exception as _ejs:  # noqa: BLE001
-                            print(f"      🔬 DEBUG крестик {sel!r}: JS-клик упал: {_ejs}")
+                        except Exception:  # noqa: BLE001
+                            pass
                     except Exception:  # noqa: BLE001
                         continue
             if not найдена:
@@ -4804,7 +4803,7 @@ def _закрыть_модалку_способ(page, modal, способ: str, 
                 pt = (5, 5)
             page.mouse.click(*pt)
             page.wait_for_timeout(500)
-            if not _модалка_видна(modal):
+            if not _ещё_видна():
                 return True
             # Координатный клик может попасть в невидимый элемент поверх
             # затемнения (аналитика-пиксель, декор) - сайт слушает клик именно
@@ -4815,7 +4814,7 @@ def _закрыть_модалку_способ(page, modal, способ: str, 
                 page.wait_for_timeout(500)
             except Exception:  # noqa: BLE001
                 pass
-            return not _модалка_видна(modal)
+            return not _ещё_видна()
         else:
             return False
         page.wait_for_timeout(500)
