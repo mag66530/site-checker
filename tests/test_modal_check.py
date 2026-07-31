@@ -61,7 +61,11 @@ class _FakeCloseBtn:
 
 class _FakeHandle:
     """Снимок КОНКРЕТНОГО DOM-узла (element_handle): его видимость живёт
-    отдельно от того, что показывает динамический локатор."""
+    отдельно от того, что показывает динамический локатор.
+
+    На узле выполняются три разных скрипта - различаем их по маркерам:
+    проверка реальной видимости (учитывает opacity), описание tag#id.class
+    и разбор стилей для улики в вердикте."""
     def __init__(self, state, desc="div#callback.modal.fade"):
         self._state = state
         self._desc = desc
@@ -70,7 +74,17 @@ class _FakeHandle:
         return self._state["visible"]
 
     def evaluate(self, script):
-        return self._desc
+        прозрачный = bool(self._state.get("opacity0"))
+        if "pointerEvents" in script:
+            видна = self._state["visible"]
+            return {"display": "block" if видна else "none",
+                    "visibility": "visible",
+                    "opacity": "0" if прозрачный else ("1" if видна else "0"),
+                    "pe": "none" if прозрачный else "auto",
+                    "w": 300, "h": 200, "x": 100, "y": 100}
+        if "tagName" in script:
+            return self._desc
+        return self._state["visible"] and not прозрачный
 
 
 class _FakeModal:
@@ -81,12 +95,16 @@ class _FakeModal:
     воспроизвести расхождение: наше окно закрылось, а локатор '.modal:visible'
     показывает соседнюю видимую модалку страницы."""
     def __init__(self, state, has_fields=True, close_selector=None,
-                 box=(100, 100, 300, 200), node_state=None):
+                 box=(100, 100, 300, 200), node_state=None,
+                 closes_by_opacity=False):
         self._state = state
         self._has_fields = has_fields
         self._close_selector = close_selector
         self._box = box
         self._node_state = node_state if node_state is not None else state
+        # Сайт «закрывает» окно, не убирая его из потока: opacity:0 +
+        # pointer-events:none, display остаётся block.
+        self._closes_by_opacity = closes_by_opacity
 
     def count(self):
         return 1 if self._state["visible"] else 0
@@ -101,8 +119,10 @@ class _FakeModal:
         if sel == "input, textarea, select":
             return _CountingLoc(1) if self._has_fields else _CountingLoc(0)
         if self._close_selector and sel == self._close_selector:
+            ключ = "opacity0" if self._closes_by_opacity else "visible"
+            значение = True if self._closes_by_opacity else False
             return _FakeCloseBtn(
-                lambda: self._node_state.__setitem__("visible", False))
+                lambda: self._node_state.__setitem__(ключ, значение))
         return _FakeMissingLoc()
 
     def bounding_box(self):
@@ -218,6 +238,34 @@ def test_вердикт_нет_показывает_какой_контейне�
     page = _FakePage(state)
     _, способ = t._проба_закрытия_модалки(page, modal)
     assert "div#callback.modal.fade" in способ
+
+
+def test_закрылась_через_opacity_ноль():
+    # Частый способ закрытия: сайт ставит opacity:0 + pointer-events:none, а
+    # display остаётся block. Playwright is_visible() такой узел считает
+    # ВИДИМЫМ - и все три способа получали ложное «не закрылась». Проверка
+    # видимости смотрит на opacity сама (_JS_УЗЕЛ_ВИДЕН) → вердикт «Да».
+    state = {"visible": True}
+    modal = _FakeModal(state, close_selector=".modal-close",
+                       closes_by_opacity=True)
+    page = _FakePage(state)
+    статус, способ = t._проба_закрытия_модалки(page, modal)
+    assert статус == "Да"
+    assert способ == "крестик/кнопка закрытия"
+    # Узел никуда не делся и для Playwright всё ещё «видим» - вердикт верный
+    # именно из-за собственной проверки стилей.
+    assert state["visible"] is True
+
+
+def test_вердикт_нет_объясняет_почему_узел_считается_видимым():
+    # В улику идут стили: без них «контейнер тот, а закрытия нет» упирается
+    # в ручной прогон.
+    state = {"visible": True}
+    modal = _FakeModal(state, close_selector=None)
+    page = _FakePage(state)
+    _, способ = t._проба_закрытия_модалки(page, modal)
+    assert "после попыток:" in способ
+    assert "opacity:" in способ and "display:" in способ
 
 
 def test_закрылась_хотя_локатор_показывает_соседнюю_модалку():

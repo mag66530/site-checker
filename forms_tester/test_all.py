@@ -4616,15 +4616,63 @@ def _снимок_узла(loc):
         return None
 
 
+# Виден ли узел ПО-НАСТОЯЩЕМУ (для пользователя), а не по меркам Playwright.
+# is_visible() смотрит только display/visibility/размер и считает ВИДИМЫМ узел
+# с opacity:0 - а масса модалок закрывается именно так (opacity:0 +
+# pointer-events:none, display остаётся block) или уезжает за край экрана
+# трансформом. Из-за этого закрытое окно оставалось «видимым», и все три
+# способа подряд получали ложное «не закрылась». Те же критерии уже
+# применяются к сообщениям об ошибке (_видна_ошибка_отправки).
+_JS_УЗЕЛ_ВИДЕН = """
+el => {
+  const s = getComputedStyle(el);
+  if (s.display === 'none' || s.visibility === 'hidden') return false;
+  if (parseFloat(s.opacity || '1') < 0.05) return false;
+  const r = el.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return false;
+  if (r.bottom <= 0 || r.right <= 0
+      || r.top >= innerHeight || r.left >= innerWidth) return false;
+  return true;
+}
+"""
+
+
 def _узел_виден(h) -> bool:
     """Виден ли ЗАФИКСИРОВАННЫЙ узел. Удалён из DOM (detached) - значит окно
     закрылось, это не ошибка."""
     if h is None:
         return False
     try:
-        return bool(h.is_visible())
+        return bool(h.evaluate(_JS_УЗЕЛ_ВИДЕН))
     except Exception:  # noqa: BLE001
-        return False
+        # Узла уже нет в DOM (detached) - закрылось. Если же дело в самом
+        # evaluate, падать в «видна» нельзя: это вернуло бы ложный ✗.
+        try:
+            return bool(h.is_visible())
+        except Exception:  # noqa: BLE001
+            return False
+
+
+def _почему_виден(h) -> str:
+    """Стили узла, из-за которых он ещё считается видимым - в вердикт «Нет».
+    Без этого следующий шаг разбора снова упирается в ручной прогон."""
+    if h is None:
+        return ''
+    try:
+        d = h.evaluate(
+            "el => { const s = getComputedStyle(el);"
+            " const r = el.getBoundingClientRect();"
+            " return {display: s.display, visibility: s.visibility,"
+            "         opacity: s.opacity, pe: s.pointerEvents,"
+            "         w: Math.round(r.width), h: Math.round(r.height),"
+            "         x: Math.round(r.x), y: Math.round(r.y)}; }")
+    except Exception:  # noqa: BLE001
+        return ''
+    if not isinstance(d, dict):
+        return ''
+    return (f"display:{d.get('display')}, opacity:{d.get('opacity')}, "
+            f"visibility:{d.get('visibility')}, pointer-events:{d.get('pe')}, "
+            f"{d.get('w')}x{d.get('h')} @ {d.get('x')},{d.get('y')}")
 
 
 def _описание_узла(h) -> str:
@@ -4843,8 +4891,12 @@ def _проба_закрытия_модалки(page, modal) -> tuple:
     # В вердикт - что именно тул считал модалкой: ложный ✗ почти всегда
     # означает «взят не тот контейнер», и без этой улики спор не разобрать.
     что = _описание_узла(узел)
+    почему = _почему_виден(узел)
+    хвост = "; ".join(x for x in (f"контейнер: {что}" if что else "",
+                                  f"после попыток: {почему}" if почему else "")
+                      if x)
     return "Нет", ("не закрылась ни крестиком, ни Esc, ни кликом вне модалки"
-                   + (f" (контейнер: {что})" if что else ""))
+                   + (f" ({хвост})" if хвост else ""))
 
 
 # Попап выбора города/региона (Sotbit select-city / RegionsChoose) на СНГ-
