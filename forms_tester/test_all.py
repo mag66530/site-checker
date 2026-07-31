@@ -1123,13 +1123,18 @@ f => {
 }
 """
 
-# JS: перехватчик submit с preventDefault - ловим ФАКТ попытки отправки и ОТМЕНЯЕМ её.
+# JS: перехватчик submit - ловим ФАКТ попытки отправки и ОТМЕНЯЕМ реальный uход
+# (preventDefault). ВАЖНО: НЕ делаем stopPropagation - иначе гасим собственную
+# JS-валидацию сайта (Magento Validation тоже висит на submit), и подсказки
+# «обязательно» НЕ появляются - тул их не видит и пишет ложное «нет». Без
+# stopPropagation валидация сайта отрабатывает и рисует ошибки, а POST всё равно
+# не уходит (наш preventDefault + route.abort ниже).
 _JS_VAL_ARM = r"""
 f => {
   const g = f.tagName==='FORM' ? f : f.querySelector('form');
   if (!g) return 'noform';
   window.__valSub = false;
-  window.__valH = function(e){ window.__valSub=true; e.preventDefault(); e.stopPropagation(); };
+  window.__valH = function(e){ window.__valSub=true; e.preventDefault(); };
   g.addEventListener('submit', window.__valH, true);
   return 'ok';
 }
