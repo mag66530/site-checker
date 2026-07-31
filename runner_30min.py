@@ -1675,7 +1675,10 @@ def run_check(pid, params, creds, log, progress):
         # ── Отзывы: приоритет докупки (Я.Бизнес + 2ГИС) - отдельный процесс ──
         _review_priority = None
         if params.get('check_review_priority'):
-            _review_priority = _run_review_priority(pid, proxy_url, log)
+            # Прокси проекта - только для его собственного сайта (обходит блок
+            # зарубежного IP); Яндекс.Бизнес/2ГИС к сайту проекта отношения не
+            # имеют и доступны напрямую - тот же прокси там лишь риск таймаута.
+            _review_priority = _run_review_priority(pid, None, log)
             if (_review_priority or {}).get('available'):
                 log(f'✓ Отзывы: филиалов с рейтингом < 4.7 '
                     f'{_review_priority.get("low_rating_count", 0)} из '

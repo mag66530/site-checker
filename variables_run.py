@@ -975,8 +975,14 @@ def main() -> int:
         _stamp(f'Сверка с картами ({_what})'
                + (' - параллельно с сайтом' if _site_future else '') + ' …')
         try:
+            # Прокси проекта существует ТОЛЬКО чтобы достать до ЕГО СОБСТВЕННОГО
+            # сайта (use_proxy=true у проектов, блокирующих зарубежный IP) - к
+            # Яндекс.Картам/2ГИС/Google эта причина не относится, они доступны
+            # напрямую. Раньше прокси тут тоже подставлялся - если сам прокси
+            # медленный/недоступен, карты падали таймаутом (Page.goto 45000ms)
+            # хотя карта грузилась бы нормально без него.
             map_results = asyncio.run(_проверить_карты(
-                domains, proxy, a.check_yandex_maps, a.check_2gis_maps,
+                domains, None, a.check_yandex_maps, a.check_2gis_maps,
                 a.check_google_maps, log=_stamp))
             _n_map_err = sum(1 for r in map_results if r.is_error)
             _n_map_warn = sum(1 for r in map_results if r.is_warning)
