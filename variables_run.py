@@ -1102,6 +1102,8 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
     так и увидели на проде."""
     from openpyxl.styles import Font, Alignment, Border
     from openpyxl.chart import BarChart, Reference
+    from openpyxl.chart.data_source import (
+        AxDataSource, NumData, NumVal, StrData, StrRef, StrVal)
 
     ws = wb.create_sheet("Дашборд", 0)
     ws.sheet_view.showGridLines = False
@@ -1146,10 +1148,11 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
             r += 1
         return hr, r - 1   # (строка заголовка таблицы, последняя строка данных)
 
+    _table_items = [(label, meta["var_bug_count"].get(label, 0))
+                    for label, _ in meta["var_cols"]]
     _hdr1, _last1 = _small_table(
         9, "Расхождения по типу данных",
-        ["Показатель", "Расхождений (✗)"],
-        [(label, meta["var_bug_count"].get(label, 0)) for label, _ in meta["var_cols"]])
+        ["Показатель", "Расхождений (✗)"], _table_items)
 
     ws.column_dimensions["A"].width = 2
     ws.column_dimensions["B"].width = 20
@@ -1167,6 +1170,26 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
         cats = Reference(ws, min_col=2, min_row=_hdr1 + 1, max_row=_last1)
         bar.add_data(data, titles_from_data=True)
         bar.set_categories(cats)
+        # openpyxl пишет в график только ССЫЛКУ на диапазон, без закешированных
+        # значений (numCache/strCache) - просмотрщики, которые сами не читают
+        # данные ячеек за пределами того, что уже в кеше графика (напр. Google
+        # Таблицы при импорте xlsx), тогда рисуют пустой график без подписей -
+        # именно это увидели на проде. Прописываем кеш вручную теми же
+        # данными, что уже в таблице рядом - тогда график верный везде.
+        _ser = bar.series[0]
+        _ser.val.numRef.numCache = NumData(
+            formatCode="General", ptCount=len(_table_items),
+            pt=[NumVal(idx=i, v=v) for i, (_, v) in enumerate(_table_items)])
+        # set_categories() кладёт ссылку в cat.numRef независимо от того, что
+        # там текст (openpyxl не смотрит на тип ячеек) - пересобираем как
+        # строковую ссылку с тем же диапазоном, чтобы подписи категорий тоже
+        # были в кеше.
+        _cat_f = _ser.cat.numRef.f
+        _ser.cat = AxDataSource(strRef=StrRef(
+            f=_cat_f,
+            strCache=StrData(ptCount=len(_table_items),
+                             pt=[StrVal(idx=i, v=lbl)
+                                 for i, (lbl, _) in enumerate(_table_items)])))
         # Якорь - строка ЗАГОЛОВКА ТАБЛИЦЫ (не строка секции с названием
         # таблицы выше), колонка E - с отступом в одну пустую колонку (D) от
         # самой таблицы, чтобы график не наезжал на неё.

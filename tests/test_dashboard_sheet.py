@@ -144,6 +144,34 @@ def test_report_round_trips_without_corruption(tmp_path):
     print('✓ файл с дашбордом и графиками сохраняется/открывается без ошибок')
 
 
+def test_chart_has_cached_values_not_just_a_range_reference(tmp_path):
+    """openpyxl по умолчанию пишет в график только ССЫЛКУ на диапазон, без
+    закешированных значений (numCache/strCache) - просмотрщики, которые сами
+    не подтягивают данные ячеек (напр. Google Таблицы при импорте xlsx),
+    тогда рисуют пустой график без подписей (баг увидели на проде, скрин с
+    одной палкой без осей). Кеш должен быть заполнен теми же числами и
+    подписями, что и в таблице рядом."""
+    out = tmp_path / 'test.xlsx'
+    r = MapCheckResult(source='2gis', city='Город0', url='u', available=True,
+                       country='Россия', phone_match=False, address_match=True,
+                       site_match=True, issues=['x'],
+                       details=[{'field': 'телефон', 'kp': '1', 'card': '–'}])
+    vr._записать_xlsx(out, 'СМУ', _результаты(4), per_city=False, map_results=[r])
+    from openpyxl import load_workbook
+    wb = load_workbook(out)
+    ws = wb['Дашборд']
+    chart = ws._charts[0]
+    s = chart.series[0]
+    assert s.val.numRef.numCache is not None, 'нет кеша значений - график будет пустым в части просмотрщиков'
+    vals = [pt.v for pt in s.val.numRef.numCache.pt]
+    assert len(vals) == 9, '8 полей сайта + 1 карта (2ГИС) = 9 показателей'
+    assert 1.0 in vals, 'расхождение по 2ГИС должно попасть в кеш значений'
+    assert s.cat.strRef is not None, 'категории должны быть строковой ссылкой (не numRef) - иначе подписи не попадут в кеш'
+    labels = [pt.v for pt in s.cat.strRef.strCache.pt]
+    assert '2ГИС' in labels and 'Город' in labels
+    print('✓ у графика есть закешированные значения/подписи - не только ссылка на диапазон')
+
+
 def test_chart_anchored_below_section_title_not_overlapping(tmp_path):
     """Раньше график садился на строку 9 - ту же, где секционный заголовок
     «Расхождения по типу данных…» (объединённая ячейка B9:E9) - и наезжал на
