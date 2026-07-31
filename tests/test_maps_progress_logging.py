@@ -56,7 +56,8 @@ def _domains(n):
     rows = [(f"host{i}.ru",
              KPRow(domain=f"host{i}.ru", city=f"Город{i}",
                   yandex_map_url=f"https://yandex.ru/{i}",
-                  twogis_map_url=f"https://2gis.ru/{i}"))
+                  twogis_map_url=f"https://2gis.ru/{i}",
+                  google_map_url=f"https://google.com/maps/place/{i}"))
             for i in range(n)]
     return rows
 
@@ -111,6 +112,50 @@ def test_progress_denominator_covers_both_sources(monkeypatch):
     denominators = {int(re.search(r'\[(\d+)/(\d+)\]', ln).group(2)) for ln in progress_lines}
     assert denominators == {6}, f'знаменатель должен быть 6 (3×2) везде: {denominators}'
     print('✓ оба источника включены - знаменатель 6 (3 города × 2), не 3')
+
+
+def test_progress_denominator_covers_all_three_sources(monkeypatch):
+    """Яндекс + 2ГИС + Google - знаменатель 3×города (все три фазы), не 2."""
+    _install_fake_playwright(monkeypatch)
+    import yandex_map_check
+    import twogis_map_check
+    import google_map_check
+
+    async def _fake(ctx, sem, url):
+        return {"available": True, "name": "X", "phone": "", "address": "", "site": ""}
+
+    monkeypatch.setattr(yandex_map_check, "afetch", _fake)
+    monkeypatch.setattr(twogis_map_check, "afetch", _fake)
+    monkeypatch.setattr(google_map_check, "afetch", _fake)
+
+    logs = []
+    domains = _domains(3)
+    results = asyncio.run(vr._проверить_карты(
+        domains, None, do_yandex=True, do_2gis=True, do_google=True, log=logs.append))
+
+    assert len(results) == 9  # 3 города × 3 источника
+    progress_lines = [ln for ln in logs if re.search(r'\[\d+/\d+\]', ln)]
+    assert len(progress_lines) == 9
+    denominators = {int(re.search(r'\[(\d+)/(\d+)\]', ln).group(2)) for ln in progress_lines}
+    assert denominators == {9}
+    labels = {ln.split(' - ', 1)[1] for ln in progress_lines}
+    assert labels == {'Яндекс.Карты', '2ГИС', 'Google'}
+    print('✓ все три источника - знаменатель 9 (3 города × 3), в логе все три подписи')
+
+
+def test_google_maps_only(monkeypatch):
+    _install_fake_playwright(monkeypatch)
+    import google_map_check
+
+    async def _fake(ctx, sem, url):
+        return {"available": True, "name": "X", "phone": "", "address": "", "site": ""}
+    monkeypatch.setattr(google_map_check, "afetch", _fake)
+
+    results = asyncio.run(vr._проверить_карты(
+        _domains(3), None, do_yandex=False, do_2gis=False, do_google=True))
+    assert len(results) == 3
+    assert all(r.source == 'google' for r in results)
+    print('✓ только Google - 3 результата, источник "google"')
 
 
 def test_no_progress_lines_when_nothing_selected(monkeypatch):

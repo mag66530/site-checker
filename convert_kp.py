@@ -167,6 +167,7 @@ def convert(project_id: str, xlsx_path: str) -> Path:
     _map_cols = _map_link_columns(section_row, headers)
     ci_yandex_map = _map_cols.get('яндекс бизнес')
     ci_twogis_map = _map_cols.get('2гис')
+    ci_google_map = _map_cols.get('google')
 
     ci_city = _col(headers, exact='город') or _col(headers, 'город')
     ci_addr = _col(headers, exact='адрес') or _col(headers, 'адрес')
@@ -322,6 +323,7 @@ def convert(project_id: str, xlsx_path: str) -> Path:
             'whatsapp': clean_msgr(cell(row, ci_wa)),
             'yandex_map_url': cell(row, ci_yandex_map),
             'twogis_map_url': cell(row, ci_twogis_map),
+            'google_map_url': cell(row, ci_google_map),
         })
     wb.close()
 
@@ -332,7 +334,8 @@ def convert(project_id: str, xlsx_path: str) -> Path:
                                           'phone_ad', 'phone_common', 'all_phones',
                                           'email', 'address',
                                           'country', 'telegram', 'whatsapp',
-                                          'yandex_map_url', 'twogis_map_url'])
+                                          'yandex_map_url', 'twogis_map_url',
+                                          'google_map_url'])
         w.writeheader()
         w.writerows(rows_out)
     print(f'{project_id}: {len(rows_out)} городов → {out}')

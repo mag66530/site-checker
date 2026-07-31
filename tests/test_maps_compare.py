@@ -79,6 +79,23 @@ def test_site_subdomain_counts_as_match():
     print('✓ поддомен того же домена - совпадение')
 
 
+def test_site_root_domain_on_card_is_mismatch_when_kp_wants_subdomain():
+    """Реальный случай (2ГИС, Севастополь/Ижевск): карточка показывает
+    КОРНЕВОЙ домен stalmetural.ru, а КП для ЭТОГО города явно ждёт свой
+    поддомен (sevastopol.stalmetural.ru/izhevsk.stalmetural.ru). Это НЕ тот
+    же случай, что «карта = поддомен КП» (test_site_subdomain_counts_as_match) -
+    здесь КП точно указывает нужный сайт для карточки, и корневой домен вместо
+    него - реальная проблема (карточку не обновили под город), а не «тот же
+    бренд». Подтверждено заказчиком на реальных карточках дважды."""
+    row = KPRow(domain='sevastopol.stalmetural.ru', city='Севастополь',
+               phone_common='+7 499 130-36-69', address='Хрусталёва, 74а')
+    card = dict(_CARD_MATCH, site='stalmetural.ru')
+    r = mc.compare('2gis', 'Севастополь', 'u', card, row)
+    assert r.site_match is False
+    assert r.is_error
+    print('✓ карточка на корневой домен при поддомене в КП - расхождение, не совпадение')
+
+
 def test_city_missing_from_kp_reports_but_does_not_crash():
     """Города нет в КП вообще (kp_row=None) - показываем данные карточки,
     явно помечаем «сверять не с чем», не притворяемся совпадением."""
@@ -179,6 +196,47 @@ def test_garbage_common_is_always_error_not_dash():
     d = next(d for d in r.details if d['field'] == 'телефон')
     assert d['kp'] == '2'
     print('✓ мусор («2») в Общем → ✗, не «–»')
+
+
+# ── «отсутствует» vs «не совпал» - одна и та же логика для телефона/адреса/
+# сайта: на карточке ПУСТО (значения нет вовсе) - это не «другое значение»,
+# формулировка должна отличаться от случая, когда карточка нашла ЧТО-ТО, но
+# не то, что в КП.
+
+
+def test_phone_absent_on_card_says_missing_not_mismatch():
+    card = dict(_CARD_MATCH, phone='')
+    r = mc.compare('yandex', 'Москва', 'u', card, _KP_MOSCOW)
+    assert r.phone_match is False
+    issue = next(i for i in r.issues if 'телефон' in i)
+    assert 'отсутствует' in issue
+    assert 'не совпал' not in issue
+    print('✓ телефона на карточке нет вовсе → «отсутствует», не «не совпал»')
+
+
+def test_phone_different_value_on_card_says_mismatch_not_missing():
+    card = dict(_CARD_MATCH, phone='+7 000 000-00-00')
+    r = mc.compare('yandex', 'Москва', 'u', card, _KP_MOSCOW)
+    issue = next(i for i in r.issues if 'телефон' in i)
+    assert 'не совпал' in issue
+    assert 'отсутствует' not in issue
+    print('✓ на карточке ДРУГОЙ телефон → «не совпал», не «отсутствует»')
+
+
+def test_address_absent_on_card_says_missing():
+    card = dict(_CARD_MATCH, address='')
+    r = mc.compare('yandex', 'Москва', 'u', card, _KP_MOSCOW)
+    issue = next(i for i in r.issues if 'адрес' in i)
+    assert 'отсутствует' in issue
+    print('✓ адреса на карточке нет вовсе → «отсутствует»')
+
+
+def test_site_absent_on_card_says_missing():
+    card = dict(_CARD_MATCH, site='')
+    r = mc.compare('yandex', 'Москва', 'u', card, _KP_MOSCOW)
+    issue = next(i for i in r.issues if 'сайт' in i)
+    assert 'отсутствует' in issue
+    print('✓ сайта на карточке нет вовсе → «отсутствует»')
 
 
 def test_genuinely_empty_common_is_dash_not_error():

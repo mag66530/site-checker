@@ -6,10 +6,14 @@ variables_run.py - фоновый прогон «Проверки КП» (пун
   • город / страна - нет ли чужого (region_checker);
   • телефоны (поиск/реклама/общий) - номер на сайте входит в набор КП города;
   • почта, адрес, Telegram, WhatsApp - совпадают с КП.
-Результат пишется в cache/variables/<proj>/variables.xlsx (лист «Проверка КП»,
-плюс «Карты» - если включали сверку с Яндекс.Картами/2ГИС). Расхождения видно
-прямо в ячейках: цвет + комментарий при наведении, отдельного листа под них
-нет. Прогресс идёт в stdout, откуда его читает вкладка.
+Результат пишется в cache/variables/<proj>/variables.xlsx (лист «Проверка КП» +
+«Расхождения»; колонки карт - Яндекс.Карты/2ГИС/Google, если включали - на том
+же листе «Проверка КП»). Расхождения видно прямо в ячейках: цвет + комментарий
+при наведении. Прогресс идёт в stdout, откуда его читает вкладка.
+
+Сайт (HTTP, потоки) и карты (Playwright/браузер) друг другу не мешают -
+выполняются ПАРАЛЛЕЛЬНО (сайт - в фоновом потоке, карты - в основном через
+asyncio), а не по очереди.
 
 Запуск:
     python variables_run.py --project smu
@@ -585,12 +589,20 @@ def _проверить_живую_подмену(domains, результаты,
                            dial=t.get('dial', '7'))
 
 
-async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis, log=None):
-    """Карточки Яндекс.Карт/2ГИС по ссылкам из КП → список MapCheckResult.
+_MAP_PHASES = [
+    ('yandex', 'yandex_map_url', 'Яндекс.Карты'),
+    ('2gis', 'twogis_map_url', '2ГИС'),
+    ('google', 'google_map_url', 'Google'),
+]
+
+
+async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis, do_google=False, log=None):
+    """Карточки Яндекс.Карт/2ГИС/Google по ссылкам из КП → список MapCheckResult.
     Один общий браузерный контекст на весь прогон (как review_priority.py) -
-    открывать браузер заново на каждую карточку в разы дороже. Яндекс и 2ГИС
-    гоняются раздельными фазами (сперва весь Яндекс, потом весь 2ГИС) - тот же
-    порядок, что в review_priority._fetch_all, для одинаковой нагрузки.
+    открывать браузер заново на каждую карточку в разы дороже. Источники
+    гоняются раздельными фазами (сперва весь Яндекс, потом 2ГИС, потом
+    Google) - тот же порядок, что в review_priority._fetch_all, для
+    одинаковой нагрузки.
 
     log - пишет «[i/N]» после КАЖДОЙ карточки (не только «начали»/«готово»
     один раз на всю фазу): без этого лог на 15-30 минут молчал совсем, и со
@@ -599,7 +611,12 @@ async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis,
     from playwright.async_api import async_playwright
     import yandex_map_check
     import twogis_map_check
+    import google_map_check
     import maps_compare
+
+    _AFETCH = {'yandex': yandex_map_check.afetch, '2gis': twogis_map_check.afetch,
+              'google': google_map_check.afetch}
+    _DO = {'yandex': do_yandex, '2gis': do_2gis, 'google': do_google}
 
     log = log or (lambda *a, **k: None)
     UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/148 Safari/537.36'
@@ -607,19 +624,19 @@ async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis,
     if proxy_url:
         ctx_kw['proxy'] = {'server': proxy_url}
     out = []
-    total = len(domains) * (int(bool(do_yandex)) + int(bool(do_2gis)))
+    total = len(domains) * sum(1 for src, _, _ in _MAP_PHASES if _DO[src])
     done = 0
 
-    async def _run_phase(source, url_attr, afetch):
+    async def _run_phase(source, url_attr, label):
         nonlocal done
         sem = asyncio.Semaphore(4)
+        afetch = _AFETCH[source]
 
         async def _one(row):
             nonlocal done
             card = await afetch(ctx, sem, getattr(row, url_attr))
             done += 1
-            log(f'[{done}/{total}] Карты: {row.city} - '
-                f'{"Яндекс.Карты" if source == "yandex" else "2ГИС"}')
+            log(f'[{done}/{total}] Карты: {row.city} - {label}')
             return maps_compare.compare(source, row.city, getattr(row, url_attr), card, row)
 
         return await asyncio.gather(*[_one(row) for _, row in domains])
@@ -628,10 +645,9 @@ async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis,
         br = await pw.chromium.launch(headless=True)
         try:
             ctx = await br.new_context(**ctx_kw)
-            if do_yandex:
-                out += await _run_phase('yandex', 'yandex_map_url', yandex_map_check.afetch)
-            if do_2gis:
-                out += await _run_phase('2gis', 'twogis_map_url', twogis_map_check.afetch)
+            for source, url_attr, label in _MAP_PHASES:
+                if _DO[source]:
+                    out += await _run_phase(source, url_attr, label)
         finally:
             await br.close()
     return out
@@ -825,12 +841,14 @@ def main() -> int:
     # BooleanOptionalAction сам даёт пару --check-site/--no-check-site.
     ap.add_argument('--check-site', action=argparse.BooleanOptionalAction, default=True)
     # Карты - отдельный, необязательный шаг ПОСЛЕ основной сверки сайта:
-    # открывает карточку организации в браузере (Яндекс.Карты/2ГИС) и сверяет
-    # телефон/адрес/сайт с КП (см. yandex_map_check.py/twogis_map_check.py).
-    # Выключено по умолчанию - это браузерная проверка, дороже обычной сверки
-    # по HTTP, включают по запросу с той же страницы «Проверка КП».
+    # открывает карточку организации в браузере (Яндекс.Карты/2ГИС/Google) и
+    # сверяет телефон/адрес/сайт с КП (см. yandex_map_check.py/
+    # twogis_map_check.py/google_map_check.py). Выключено по умолчанию - это
+    # браузерная проверка, дороже обычной сверки по HTTP, включают по запросу
+    # с той же страницы «Проверка КП».
     ap.add_argument('--check-yandex-maps', action='store_true')
     ap.add_argument('--check-2gis-maps', action='store_true')
+    ap.add_argument('--check-google-maps', action='store_true')
     a = ap.parse_args()
 
     sys.path.insert(0, str(ROOT))
@@ -929,32 +947,51 @@ def main() -> int:
     # _check_site - дешёвая функция (просмотр статичного KP_LAYOUT), вызываем
     # в обоих местах, не тащим через возврат ради одного bool.
     _per_city_mode = _per_city(a.project)
+
+    # Сайт (потоки/HTTP) и карты (Playwright/браузер) друг другу не мешают -
+    # запускаем сайт в фоновом потоке и параллельно гоняем карты в основном
+    # (там свой asyncio-цикл для Playwright). Раньше шло строго
+    # последовательно - на прогоне с картами это удваивало время просто так.
+    _site_pool = None
+    _site_future = None
     if a.check_site:
-        результаты = _check_site(a, domains, proxy)
+        from concurrent.futures import ThreadPoolExecutor
+        _site_pool = ThreadPoolExecutor(max_workers=1)
+        _site_future = _site_pool.submit(_check_site, a, domains, proxy)
     else:
-        результаты = []
         _stamp('Сайт (сверка с КП) пропущен - галочка снята, страницы сайта '
                'не скачивались вовсе.')
 
-    # Карты (Яндекс/2ГИС) - отдельный необязательный шаг: открывает карточку
-    # организации в браузере, сверяет телефон/адрес/сайт с той же строкой КП.
-    # Не мешает основному отчёту, если сломается - лист «Карты» просто не
-    # появится (проверка сайта уже готова и сохранится в любом случае).
+    # Карты (Яндекс/2ГИС/Google) - отдельный необязательный шаг: открывает
+    # карточку организации в браузере, сверяет телефон/адрес/сайт с той же
+    # строкой КП. Не мешает основному отчёту, если сломается - карты просто
+    # не появятся (проверка сайта уже готова и сохранится в любом случае).
     map_results = []
-    if a.check_yandex_maps or a.check_2gis_maps:
+    if a.check_yandex_maps or a.check_2gis_maps or a.check_google_maps:
         _what = ' + '.join(filter(None, [
             'Яндекс.Карты' if a.check_yandex_maps else '',
-            '2ГИС' if a.check_2gis_maps else '']))
-        _stamp(f'Сверка с картами ({_what}) …')
+            '2ГИС' if a.check_2gis_maps else '',
+            'Google' if a.check_google_maps else '']))
+        _stamp(f'Сверка с картами ({_what})'
+               + (' - параллельно с сайтом' if _site_future else '') + ' …')
         try:
             map_results = asyncio.run(_проверить_карты(
-                domains, proxy, a.check_yandex_maps, a.check_2gis_maps, log=_stamp))
+                domains, proxy, a.check_yandex_maps, a.check_2gis_maps,
+                a.check_google_maps, log=_stamp))
             _n_map_err = sum(1 for r in map_results if r.is_error)
             _n_map_warn = sum(1 for r in map_results if r.is_warning)
             _stamp(f'Карты: проверено {len(map_results)} карточек - '
                    f'{_n_map_err} расхождений, {_n_map_warn} недоступно.')
         except Exception as _e:  # noqa: BLE001
-            _stamp(f'⚠ Проверка карт не удалась ({_e}) - отчёт по сайту готов.')
+            _stamp(f'⚠ Проверка карт не удалась ({_e}).')
+
+    # Дожидаемся сайта (если проверяли) - к этому моменту карты (если были)
+    # уже отработали параллельно, ждать почти нечего.
+    if _site_future is not None:
+        результаты = _site_future.result()
+        _site_pool.shutdown()
+    else:
+        результаты = []
 
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
@@ -1001,19 +1038,17 @@ _ЛЕГЕНДА = [
     ("✗  – расхождение. Любой из случаев: значение на сайте ДРУГОЕ, чем в КП; "
      "в КП есть, а на сайте нет; на сайте есть, а в КП нет (пусто/«2»/мусор). "
      "В примечании ячейки видно, ЧТО в КП и ЧТО на сайте: «КП / Сайт».", False),
-    ("Наведи курсор на ✗ или ⚠ - во всплывающем комментарии видно, что именно "
-     "разошлось. Совпало - комментария нет, отдельного списка расхождений тоже нет.",
-     False),
+    ("Все ✗ также собраны списком на листе «Расхождения».", False),
     ("–  – проверять нечего: значения нет НИ в КП, НИ на сайте (либо у слота нет "
      "своего номера - напр. рекламного номера города в КП нет).", False),
     ("✗ по ВСЕЙ строке – сайт этого города не загрузился (HTTP 500 / обрыв / "
      "таймаут). В примечании ячейки – причина. Это НЕ ошибка КП, а недоступность "
      "сайта: перезапусти позже или проверь, открывается ли сайт в браузере.", False),
     ("", False),
-    ("Лист «Карты» (если включали сверку с картами)", True),
-    ("Колонка на источник (Яндекс.Карты/Google/2ГИС): ✓/✗/⚠ - как выше, "
-     "пустая ячейка – источник в этом прогоне не проверяли (галочка была снята).",
-     False),
+    ("Колонки «Карты» (если включали сверку с Яндекс.Картами/2ГИС)", True),
+    ("Тот же принцип: ✓/✗/⚠/– в колонке на источник. Пустая ячейка – источник в "
+     "этом прогоне не проверяли (галочка была снята). Расхождения по картам - "
+     "тоже в общем списке на листе «Расхождения».", False),
 ]
 
 
@@ -1029,130 +1064,223 @@ def _написать_легенду(ws) -> None:
 _MAP_SOURCES = [("yandex", "Яндекс.Карты"), ("google", "Google"), ("2gis", "2ГИС")]
 
 
-def _записать_карты_лист(wb, hdr_fill, thin, map_results: list) -> None:
-    """Лист «Карты» - ОДНА строка на город (как «Проверка КП»), колонка на
-    каждый источник (Яндекс.Карты/Google/2ГИС). Оформление то же, что у
-    «Проверки КП»: символ ✓/✗/⚠/– цветным шрифтом, заливка и комментарий с
-    подробностями - ТОЛЬКО на несовпадении; совпало - ячейка чистая, без
-    комментария. Источник, который в этом прогоне не включали (галочка снята),
-    показывает пустую ячейку - это не «не совпало», а «не проверяли».
-
-    Пишется, только если карты вообще проверяли (map_results непустой) -
-    иначе лист не нужен, не засорять отчёт пустой вкладкой."""
-    from openpyxl.comments import Comment
-    from openpyxl.styles import Font, Alignment, PatternFill, Border
-
-    if not map_results:
-        return
-    ws = wb.create_sheet("Карты")
-    BUG_FILL = PatternFill("solid", fgColor="FDE3E3")   # тот же цвет, что в «Проверке КП»
-    WARN_FILL = PatternFill("solid", fgColor="FFF2DA")
-
-    # Группируем по городу - сохраняя порядок первого появления (тот же
-    # порядок, что и у строк «Проверки КП», т.к. источник тот же список domains).
-    by_city: dict[str, dict] = {}
-    order: list[str] = []
-    for r in map_results:
-        if r.city not in by_city:
-            by_city[r.city] = {'country': r.country}
-            order.append(r.city)
-        by_city[r.city][r.source] = r
-
-    _cols = ["Страна", "Город"] + [label for _, label in _MAP_SOURCES] + ["Детали"]
-    _DETAILS_COL = 3 + len(_MAP_SOURCES)
-    _SEP_AFTER = {2, _DETAILS_COL - 1}   # после «Город» и перед «Детали»
-    for c, t in enumerate(_cols, 1):
-        cell = ws.cell(1, c, t)
-        cell.font = Font(bold=True)
-        cell.fill = hdr_fill
-        cell.border = Border(right=thin if c in _SEP_AFTER else None)
-    ws.freeze_panes = "A2"
-
-    for i, city in enumerate(order, 2):
-        row = by_city[city]
-        ws.cell(i, 1, row.get('country', '') or '').border = \
-            Border(right=thin if 1 in _SEP_AFTER else None)
-        ws.cell(i, 2, city).border = Border(right=thin if 2 in _SEP_AFTER else None)
-        _detail_lines = []   # видимая колонка, не только всплывающая подсказка
-        for j, (src_key, label) in enumerate(_MAP_SOURCES):
-            c = 3 + j
-            r = row.get(src_key)
-            cell = ws.cell(i, c)
-            if r is None:
-                # Источник не включали в этот прогон - пусто, не путать с «–»
-                # (у КП «–» значит «сверить нечего»; здесь «не проверяли вовсе»).
-                cell.alignment = Alignment(horizontal="center")
-                continue
-            if r.no_link:
-                # Ссылки на карту в КП просто нет - норма, не ⚠ и не ✗.
-                cell.value = "–"
-                cell.font = Font(color="9E9E9E")
-                cell.alignment = Alignment(horizontal="center")
-                continue
-            if r.is_ok:
-                symbol, color, fill, note = "✓", "1E8E3E", None, ""
-            elif r.is_warning:
-                symbol, color, fill = "⚠", "B26A00", WARN_FILL
-                note = r.error or "карточка недоступна"
-            else:
-                symbol, color, fill = "✗", "C62828", BUG_FILL
-                note = "; ".join(r.issues) or "расхождение с КП"
-            cell.value = symbol
-            cell.font = Font(color=color, bold=True)
-            cell.alignment = Alignment(horizontal="center")
-            if fill:
-                if len(note) > 220:
-                    note = note[:210].rstrip() + "…"
-                body = f"{note}\n\n{r.name or ''}\n{r.url}".strip()
-                cm = Comment(body, "1.4")
-                cm.width, cm.height = 340, 170
-                cell.comment = cm
-                cell.fill = fill
-                for d in r.details:
-                    _detail_lines.append(
-                        f'{label} - {d["field"]}: КП «{d["kp"]}» / '
-                        f'на карточке «{d["card"]}»')
-
-        dcell = ws.cell(i, _DETAILS_COL, "\n".join(_detail_lines))
-        dcell.alignment = Alignment(wrap_text=True, vertical="top")
-
-    _widths = [("A", 16), ("B", 20)] + \
-        [(chr(ord("C") + j), 12) for j in range(len(_MAP_SOURCES))] + \
-        [(chr(ord("C") + len(_MAP_SOURCES)), 60)]
-    for col, w in _widths:
-        ws.column_dimensions[col].width = w
-
-
 def _записать_xlsx(path: Path, proj_name: str, результаты: list,
                    per_city: bool = False, map_results: list | None = None) -> None:
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.styles import PatternFill, Side
 
+    map_results = map_results or []
     wb = Workbook()
     # Лист-подсказка «Как читать результат» - первым (перед данными). Просьба заказчика.
     _написать_легенду(wb.active)
     wb.active.title = "Как читать результат"
-    from openpyxl.styles import Border, Side
     hdr_fill = PatternFill("solid", fgColor="EEF3FB")
     # Единый НЕЯРКИЙ цвет границ по всему отчёту (просьба заказчика: везде
     # одинаковый и не сильно яркий).
     _thin = Side(style="thin", color="C9CFDB")
 
-    # Лист «Проверка КП» - только если сайт вообще проверяли (--check-site).
-    # Пустой лист с одной шапкой не нужен: если снята галочка «Сайт» и смотрели
-    # только карты, отчёт должен состоять из карт, а не из пустой вкладки.
-    if результаты:
-        _записать_проверку_кп_лист(wb, hdr_fill, _thin, результаты, per_city)
+    # Лист «Проверка КП» - только если вообще есть что показать (сайт и/или
+    # карты). Пустой лист с одной шапкой не нужен: если ни то ни другое не
+    # проверяли, отчёту нечего показать.
+    расхождения: list = []
+    if результаты or map_results:
+        расхождения, _meta = _записать_проверку_кп_лист(
+            wb, hdr_fill, _thin, результаты, per_city, map_results)
+        _написать_расхождения_лист(wb, hdr_fill, _thin, расхождения)
+        _записать_дашборд_лист(wb, hdr_fill, _thin, _meta, расхождения)
 
-    _записать_карты_лист(wb, hdr_fill, _thin, map_results or [])
-
+    wb.active = 0   # открывать сразу на «Дашборд» (если есть) / на легенду
     wb.save(path)
 
 
-def _записать_проверку_кп_лист(wb, hdr_fill, _thin, результаты: list,
-                               per_city: bool) -> None:
+def _главный_вывод(расхождения: list) -> str:
+    """Одна строка-итог для «Дашборда» - не формула Excel (искать формулой
+    «самую частую категорию по имени» сложнее и менее прозрачно, чем один раз
+    посчитать при генерации отчёта), просто обычный текст на момент прогона."""
+    if not расхождения:
+        return ("Главный вывод: расхождений не найдено - все проверенные "
+                "данные совпадают с КП.")
+    from collections import Counter
+    _by_src = Counter(d.get("площадка", "") for d in расхождения)
+    _top_src, _top_n = _by_src.most_common(1)[0]
+    _total = len(расхождения)
+    _pct = round(100 * _top_n / _total)
+    return (f"Главный вывод: больше всего расхождений даёт «{_top_src}» - "
+           f"{_top_n} из {_total} ({_pct}%).")
+
+
+def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, расхождения: list) -> None:
+    """Лист «Дашборд» - первым в файле: 4 KPI-показателя + таблица и график
+    расхождений по типу данных (лист «Проверка КП»). Числа - формулы Excel
+    (пересчитаются сами, если открыть отчёт и поправить строку вручную),
+    кроме итогового вывода - он посчитан один раз при генерации, не формула."""
+    from openpyxl.styles import Font, Alignment, Border
+    from openpyxl.chart import BarChart, Reference
+
+    ws = wb.create_sheet("Дашборд", 0)
+    ws.sheet_view.showGridLines = False
+    last_row = meta["last_row"]
+    last_var_col = meta["last_var_col_letter"]
+    err_col = meta["err_col_letter"]
+    _hdr_border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    _grey10 = Font(name="Arial", size=10, color="595959")
+    _grey9 = Font(name="Arial", size=9, color="595959")
+
+    ws["B2"] = "Проверка КП vs сайт — сводка"
+    ws["B2"].font = Font(name="Arial", size=16, bold=True, color="1155CC")
+    ws.merge_cells("B3:H3")
+    ws["B3"] = ("Автоматический отчёт по данным листов «Проверка КП» и «Расхождения». "
+               "Обновляется при пересчёте файла (F9 / открытие в Excel).")
+    ws["B3"].font = _grey10
+
+    for lbl_coord, lbl_text, val_coord, formula, color in (
+        ("B5", "Городов/доменов проверено", "B6",
+         f"=COUNTA('Проверка КП'!B3:B{last_row})", "1155CC"),
+        ("D5", "Всего расхождений (✗)", "D6",
+         f'=COUNTIF(\'Проверка КП\'!C3:{last_var_col}{last_row},"✗")', "C62828"),
+        ("F5", "Строк без единого расхождения", "F6",
+         f"=COUNTIF('Проверка КП'!{err_col}3:{err_col}{last_row},0)", "1E8E3E"),
+        ("H5", "Строк с 3+ расхождениями", "H6",
+         f'=COUNTIF(\'Проверка КП\'!{err_col}3:{err_col}{last_row},">=3")', "9C7A00"),
+    ):
+        ws[lbl_coord] = lbl_text
+        ws[lbl_coord].font = _grey9
+        ws[val_coord] = formula
+        ws[val_coord].font = Font(name="Arial", size=20, bold=True, color=color)
+
+    def _small_table(top_row, title, col_headers, items):
+        # Мёрдж на всю ширину блока (как у подзаголовка B3:H3) - иначе длинный
+        # заголовок таблицы обрезался в узком B:E.
+        ws.merge_cells(start_row=top_row, start_column=2, end_row=top_row, end_column=8)
+        tcell = ws.cell(top_row, 2, title)
+        tcell.font = Font(name="Arial", size=12, bold=True)
+        hr = top_row + 1
+        for ci, h in enumerate(col_headers, 2):
+            c = ws.cell(hr, ci, h)
+            c.font = Font(name="Arial", size=10, bold=True)
+            c.fill = hdr_fill
+            c.alignment = Alignment(horizontal="center")
+            c.border = _hdr_border
+        r = hr + 1
+        for label, formula in items:
+            ws.cell(r, 2, label).border = _hdr_border
+            ws.cell(r, 3, formula).border = _hdr_border
+            r += 1
+        return hr, r - 1   # (строка заголовка таблицы, последняя строка данных)
+
+    _hdr1, _last1 = _small_table(
+        9, "Расхождения по типу данных",
+        ["Показатель", "Расхождений (✗)"],
+        [(label, f'=COUNTIF(\'Проверка КП\'!{col}3:{col}{last_row},"✗")')
+         for label, col in meta["var_cols"]])
+
+    ws.column_dimensions["A"].width = 2
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 3
+    ws.row_dimensions[2].height = 19.5
+    ws.row_dimensions[6].height = 24
+
+    if _last1 >= _hdr1 + 1:
+        bar = BarChart()
+        bar.title = "Расхождения по типу данных"
+        bar.height, bar.width = 8, 14
+        bar.legend = None
+        data = Reference(ws, min_col=3, min_row=_hdr1, max_row=_last1)
+        cats = Reference(ws, min_col=2, min_row=_hdr1 + 1, max_row=_last1)
+        bar.add_data(data, titles_from_data=True)
+        bar.set_categories(cats)
+        # Якорь - строка ЗАГОЛОВКА ТАБЛИЦЫ (не строка секции с названием
+        # таблицы выше), колонка E - с отступом в одну пустую колонку (D) от
+        # самой таблицы, чтобы график не наезжал на неё.
+        ws.add_chart(bar, f"E{_hdr1}")
+
+    _concl_row = _last1 + 2
+    ws.merge_cells(start_row=_concl_row, start_column=2,
+                   end_row=_concl_row + 2, end_column=8)
+    ccell = ws.cell(_concl_row, 2, _главный_вывод(расхождения))
+    ccell.font = _grey10
+    ccell.alignment = Alignment(wrap_text=True, vertical="top")
+
+
+# Цвет по площадке (фон + цвет текста) - в колонке «Где проверяли», по
+# образцу присланного файла (там это условное форматирование по значению
+# ячейки; здесь ставим цвет сразу при генерации - площадка каждой строки уже
+# известна, условное форматирование не нужно).
+_ПЛОЩАДКА_ЦВЕТ = {
+    "2ГИС": ("D9E8FB", "1155CC"),
+    "Яндекс.Карты": ("FFF3CD", "9C7A00"),
+    "Google": ("E8D9FB", "6A1B9A"),
+    "Сайт": ("FDE3E3", "C62828"),
+}
+
+
+def _написать_расхождения_лист(wb, hdr_fill, thin, расхождения: list) -> None:
+    """Лист «Расхождения» - только проблемные ячейки (сайт + карты вместе),
+    для быстрого разбора без похода по всей сетке «Проверка КП». Площадка
+    («Сайт»/«Яндекс.Карты»/«2ГИС»/«Google») и поле - раздельными колонками
+    (не склеены через «: »), плюс кликабельная ссылка на проверенное место.
+    Площадка подсвечена своим цветом (см. _ПЛОЩАДКА_ЦВЕТ)."""
     from openpyxl.styles import Font, PatternFill, Alignment, Border
 
+    ws2 = wb.create_sheet("Расхождения")
+    LINK_FONT = Font(name="Arial", size=10, color="1155CC", underline="single")
+    _headers = ["Поддомен (что проверяли)", "Город", "Где проверяли",
+               "Что сверяли", "Должно быть (КП)", "Фактически на площадке",
+               "Примечание", "Ссылка на проверенное место"]
+    for c, t in enumerate(_headers, 1):
+        cell = ws2.cell(1, c, t)
+        cell.font = Font(name="Arial", size=10, bold=True)
+        cell.fill = hdr_fill
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    _border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    for i, d in enumerate(расхождения, 2):
+        _dom = d.get("domain") or ""
+        _площадка = d.get("площадка", "")
+        vals = [_dom, d.get("city", ""), _площадка, d.get("поле", ""),
+               d.get("кп", ""), d.get("факт", ""), d.get("примечание", "")]
+        for c, v in enumerate(vals, 1):
+            cell = ws2.cell(i, c, v)
+            cell.border = _border
+            cell.alignment = Alignment(vertical="center", wrap_text=False)
+        _fill_color, _font_color = _ПЛОЩАДКА_ЦВЕТ.get(_площадка, (None, None))
+        pcell = ws2.cell(i, 3)
+        pcell.font = Font(name="Arial", size=10, bold=True, color=_font_color)
+        if _fill_color:
+            pcell.fill = PatternFill("solid", fgColor=_fill_color)
+        if _dom:
+            ws2.cell(i, 1).hyperlink = f"https://{_dom}/"
+            ws2.cell(i, 1).font = LINK_FONT
+        # Ссылка на проверенное место - карточка карты или сам сайт.
+        _link = d.get("ссылка") or ""
+        _label = f"Открыть {'сайт' if _площадка == 'Сайт' else 'карточку ' + _площадка}"
+        lcell = ws2.cell(i, 8, _label)
+        lcell.border = _border
+        lcell.alignment = Alignment(vertical="center")
+        if _link:
+            lcell.hyperlink = _link
+            lcell.font = LINK_FONT
+    for col, w in (("A", 30), ("B", 18), ("C", 20), ("D", 16), ("E", 30),
+                   ("F", 34), ("G", 44), ("H", 24)):
+        ws2.column_dimensions[col].width = w
+    ws2.freeze_panes = "C2"
+    if not расхождения:
+        ws2.cell(2, 1, "Расхождений не найдено 🎉")
+
+
+def _записать_проверку_кп_лист(wb, hdr_fill, _thin, результаты: list,
+                               per_city: bool, map_results: list | None = None) -> list:
+    """Лист «Проверка КП» - одна строка на город. Карты (Яндекс.Карты/2ГИС),
+    если их проверяли, идут ДОПОЛНИТЕЛЬНЫМИ колонками в ТОЙ ЖЕ строке - то же
+    оформление, что и у сайта (✓/✗/⚠/– цветным шрифтом, заливка + комментарий
+    только на проблемных ячейках), отдельного листа/колонки под них нет.
+    Возвращает список расхождений (сайт + карты вместе) для листа «Расхождения»."""
+    from openpyxl.styles import Font, PatternFill, Alignment, Border
+    from openpyxl.comments import Comment
+    from openpyxl.utils import get_column_letter
+
+    map_results = map_results or []
     ws = wb.create_sheet("Проверка КП")
 
     # Колонки отчёта: (заголовок, ключ поля из check_variables). «Тел.» в подписи
@@ -1175,7 +1303,23 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
                  ("Telegram", "Telegram"), ("WhatsApp", "WhatsApp")]
         _GROUPS = [("Телефония/Почта", 5, 8), ("Мессенджеры", 9, 10)]
         _SEP_AFTER = {4, 8}   # разделитель после «Адрес» и после «Почта»
-    n_cols = len(_ID) + len(_VARS)
+
+    # Карты - только источники, которые реально проверяли в этом прогоне
+    # (иначе колонка на выключенный источник только зря засоряла бы сетку).
+    _MAP_COLS = [(src, label) for src, label in _MAP_SOURCES
+                if any(r.source == src for r in map_results)]
+    _FIRST_VAR_COL = 3   # A=Страна(КП), B=Город(КП), переменные с C
+    _FIRST_MAP_COL = _FIRST_VAR_COL + len(_VARS)
+    if _MAP_COLS:
+        _GROUPS = _GROUPS + [("Карты", _FIRST_MAP_COL,
+                              _FIRST_MAP_COL + len(_MAP_COLS) - 1)]
+        _SEP_AFTER = _SEP_AFTER | {_FIRST_MAP_COL - 1}
+    # «Ошибок (✗)» - служебная колонка сразу после всех вар/карт-колонок:
+    # формула COUNTIF по всей строке, дашборд ссылается на неё (строки без
+    # единого расхождения / строки с 3+ расхождениями).
+    _ERR_COL = _FIRST_MAP_COL + len(_MAP_COLS)
+    _SEP_AFTER = _SEP_AFTER | {_ERR_COL - 1}
+    n_cols = _ERR_COL
 
     def _bdr(col, bottom=False):
         return Border(right=_thin if col in _SEP_AFTER else None,
@@ -1189,33 +1333,58 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
         gc = ws.cell(1, c1, txt)
         gc.font = Font(bold=True); gc.alignment = Alignment(horizontal="center")
     # Строка 2 - заголовки колонок (нижняя граница отделяет шапку от данных).
-    for c, t in enumerate(_ID + [d for d, _ in _VARS], 1):
+    _headers = (_ID + [d for d, _ in _VARS] + [label for _, label in _MAP_COLS]
+               + ["Ошибок (✗)"])
+    for c, t in enumerate(_headers, 1):
         cell = ws.cell(2, c, t)
         cell.font = Font(bold=True); cell.fill = hdr_fill
         cell.alignment = Alignment(horizontal="center")
         cell.border = _bdr(c, bottom=True)
     ws.freeze_panes = "C3"
+    _last_var_col_letter = get_column_letter(_ERR_COL - 1)
 
-    from openpyxl.comments import Comment
     LINK_FONT = Font(color="1155CC", underline="single")
     # Заливка только у проблемных ячеек, чтобы зелёные ✓ оставались чистыми
     # (без «тревожного» красного уголка-примечания на каждой ячейке).
     BUG_FILL = PatternFill("solid", fgColor="FDE3E3")   # мягкий красный
     WARN_FILL = PatternFill("solid", fgColor="FFF2DA")  # мягкий оранжевый
-    _FIRST_VAR_COL = 3   # A=Страна(КП), B=Город(КП), переменные с C
 
+    # Карты группируем по городу (источник → результат) - тот же город может
+    # встретиться и без сайта (если сайт не проверяли, «--no-check-site»).
+    _map_by_city: dict[str, dict] = {}
+    _map_order: list[str] = []
+    for m in map_results:
+        if m.city not in _map_by_city:
+            _map_by_city[m.city] = {'country': m.country}
+            _map_order.append(m.city)
+        _map_by_city[m.city][m.source] = m
+
+    # Строки листа - обычные (из результаты, сайт проверяли) + «доборные» для
+    # городов, которых нет в результаты (сайт не проверяли вовсе, есть только
+    # карты) - показываем город, колонки сайта у него просто «–».
+    _site_cities = {(res.get("city") or res.get("domain") or "") for res in результаты}
+    _extra_rows = [{"domain": None, "city": city,
+                    "country": _map_by_city[city].get("country", ""),
+                    "fields": [], "error": None}
+                  for city in _map_order if city not in _site_cities]
+    _all_rows = list(результаты) + _extra_rows
+
+    расхождения: list = []
     r = 3
-    for res in результаты:
+    for res in _all_rows:
         cc = ws.cell(r, 1, res.get("country", "")); cc.border = _bdr(1)
-        # Город(КП) - текст города, кликом ведёт на домен/поддомен.
-        gcell = ws.cell(r, 2, res.get("city", "") or res["domain"])
-        gcell.hyperlink = f'https://{res["domain"]}'
-        gcell.font = LINK_FONT; gcell.border = _bdr(2)
+        # Город(КП) - текст города, кликом ведёт на домен/поддомен (если есть).
+        city_disp = res.get("city", "") or res.get("domain") or ""
+        gcell = ws.cell(r, 2, city_disp)
+        if res.get("domain"):
+            gcell.hyperlink = f'https://{res["domain"]}'
+            gcell.font = LINK_FONT
+        gcell.border = _bdr(2)
         by = {f["field"]: f for f in res.get("fields", [])}
         if res.get("error"):
-            # Сайт не загрузился - ✗ по ВСЕМ колонкам + причина в примечании
-            # каждой ячейки (не путаем с «телефон ✓, адрес ⚠» у частично
-            # загруженной страницы: тут упал весь сайт).
+            # Сайт не загрузился - ✗ по ВСЕМ колонкам сайта + причина в
+            # примечании каждой ячейки (не путаем с «телефон ✓, адрес ⚠» у
+            # частично загруженной страницы: тут упал весь сайт).
             reason = f"Сайт не загрузился: {res['error']}"
             for c in range(_FIRST_VAR_COL, _FIRST_VAR_COL + len(_VARS)):
                 cell = ws.cell(r, c, "✗")
@@ -1225,43 +1394,130 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
                 cm = Comment(reason, "1.4")
                 cm.width, cm.height = 340, 90
                 cell.comment = cm
-            r += 1
-            continue
-        for i, (_disp, name) in enumerate(_VARS):
-            c = _FIRST_VAR_COL + i
-            f = by.get(name)
-            if not f:
-                cell = ws.cell(r, c, "–")
+        else:
+            for i, (_disp, name) in enumerate(_VARS):
+                c = _FIRST_VAR_COL + i
+                f = by.get(name)
+                if not f:
+                    cell = ws.cell(r, c, "–")
+                    cell.alignment = Alignment(horizontal="center")
+                    cell.border = _bdr(c)
+                    continue
+                status = f["status"]
+                cell = ws.cell(r, c, _SYMBOL.get(status, "?"))
+                cell.font = Font(color=_COLOR.get(status, "000000"), bold=True)
                 cell.alignment = Alignment(horizontal="center")
                 cell.border = _bdr(c)
-                continue
-            status = f["status"]
-            cell = ws.cell(r, c, _SYMBOL.get(status, "?"))
-            cell.font = Font(color=_COLOR.get(status, "000000"), bold=True)
-            cell.alignment = Alignment(horizontal="center")
-            cell.border = _bdr(c)
-            # Примечание + заливку вешаем ТОЛЬКО на проблемные ячейки (✗ и ⚠) -
-            # тогда зелёные ✓ чистые, а красные сразу видно (красная заливка +
-            # уголок-примечание с деталями). Просьба заказчика.
-            if status in ("bug", "warn"):
-                # Примечание - ВВЕРХУ (сразу видно, в чём дело), ниже - что ждали
-                # и что по факту на сайте.
-                note = (f.get("note") or "").strip()
-                подпись = f"{note}\n\n" if note else ""
-                подпись += (f"КП: {f['expected']}\n"
-                            f"Сайт: {f['found']}")
-                if len(подпись) > 220:
-                    подпись = подпись[:210].rstrip() + "…"
-                cm = Comment(подпись, "1.4")
-                cm.width, cm.height = 340, 170   # чтобы текст влезал в окошко
-                cell.comment = cm
-                cell.fill = BUG_FILL if status == "bug" else WARN_FILL
+                # Примечание + заливку вешаем ТОЛЬКО на проблемные ячейки (✗ и
+                # ⚠) - тогда зелёные ✓ чистые, а красные сразу видно (красная
+                # заливка + уголок-примечание с деталями). Просьба заказчика.
+                if status in ("bug", "warn"):
+                    # Примечание - ВВЕРХУ (сразу видно, в чём дело), ниже -
+                    # что ждали и что по факту на сайте.
+                    note = (f.get("note") or "").strip()
+                    подпись = f"{note}\n\n" if note else ""
+                    подпись += (f"КП: {f['expected']}\n"
+                                f"Сайт: {f['found']}")
+                    if len(подпись) > 220:
+                        подпись = подпись[:210].rstrip() + "…"
+                    cm = Comment(подпись, "1.4")
+                    cm.width, cm.height = 340, 170   # чтобы текст влезал в окошко
+                    cell.comment = cm
+                    cell.fill = BUG_FILL if status == "bug" else WARN_FILL
+                    расхождения.append({
+                        "domain": res["domain"], "city": res.get("city", ""),
+                        "площадка": "Сайт", "поле": name.replace("Тел. ", ""),
+                        "кп": f["expected"], "факт": f["found"],
+                        "примечание": f.get("note", ""),
+                        "ссылка": f'https://{res["domain"]}/',
+                    })
+
+        # Карты - той же строкой, тот же принцип оформления.
+        if _MAP_COLS:
+            _map_key = res.get("city") or res.get("domain") or ""
+            _row_map = _map_by_city.get(_map_key, {})
+            for j, (src, label) in enumerate(_MAP_COLS):
+                c = _FIRST_MAP_COL + j
+                cell = ws.cell(r, c)
+                cell.border = _bdr(c)
+                rmap = _row_map.get(src)
+                if rmap is None:
+                    # Источник не включали в этот прогон - пусто, не «–»
+                    # («–» у КП значит «сверить нечего»; тут «не проверяли»).
+                    cell.alignment = Alignment(horizontal="center")
+                    continue
+                if rmap.no_link:
+                    # Ссылки на карту в КП просто нет - норма, не ⚠ и не ✗.
+                    cell.value = "–"
+                    cell.font = Font(color="9E9E9E")
+                    cell.alignment = Alignment(horizontal="center")
+                    continue
+                if rmap.is_ok:
+                    symbol, color, fill, note = "✓", "1E8E3E", None, ""
+                elif rmap.is_warning:
+                    symbol, color, fill = "⚠", "B26A00", WARN_FILL
+                    note = rmap.error or "карточка недоступна"
+                else:
+                    symbol, color, fill = "✗", "C62828", BUG_FILL
+                    note = "; ".join(rmap.issues) or "расхождение с КП"
+                cell.value = symbol
+                cell.font = Font(color=color, bold=True)
+                cell.alignment = Alignment(horizontal="center")
+                if fill:
+                    body = f"{note}\n\n{rmap.name or ''}\n{rmap.url}".strip()
+                    if len(body) > 220:
+                        body = body[:210].rstrip() + "…"
+                    cm = Comment(body, "1.4")
+                    cm.width, cm.height = 340, 170
+                    cell.comment = cm
+                    cell.fill = fill
+                    if rmap.is_error:
+                        for d in rmap.details:
+                            # Пусто/прочерк на карточке - это НЕ то же самое,
+                            # что «другое значение»: явно пишем причину в
+                            # примечании, а не оставляем его пустым.
+                            _card_val = (d.get("card") or "").strip()
+                            if _card_val in ("", "–", "-"):
+                                _note = f'{d["field"]} не найден на карточке {label}'
+                            else:
+                                _note = f'{d["field"]} на карточке {label} не совпадает с КП'
+                            расхождения.append({
+                                "domain": res.get("domain") or "", "city": _map_key,
+                                "площадка": label, "поле": d["field"],
+                                "кп": d["kp"], "факт": d["card"],
+                                "примечание": _note, "ссылка": rmap.url,
+                            })
+
+        # «Ошибок (✗)» - формула, не питоновский подсчёт: должна пересчитываться
+        # прямо в Excel, если кто-то вручную поправит ячейку на листе.
+        _err_cell = ws.cell(r, _ERR_COL, f'=COUNTIF(C{r}:{_last_var_col_letter}{r},"✗")')
+        _err_cell.alignment = Alignment(horizontal="center")
+        _err_cell.border = _bdr(_ERR_COL)
         r += 1
 
-    # Ширины колонок (как в согласованном образце).
+    # Ширины колонок (как в согласованном образце) + карты пошире, там текст.
     for _col, _w in (("A", 16), ("B", 26), ("C", 9), ("D", 13), ("E", 18),
                      ("F", 19.5), ("G", 19), ("H", 12), ("I", 9.5), ("J", 10.5)):
         ws.column_dimensions[_col].width = _w
+    for j in range(len(_MAP_COLS)):
+        ws.column_dimensions[get_column_letter(_FIRST_MAP_COL + j)].width = 14
+    ws.column_dimensions[get_column_letter(_ERR_COL)].width = 13
+
+    # Метаданные для листа «Дашборд» - какие колонки за что отвечают, где
+    # заканчиваются данные (формулы COUNTIF дашборда ссылаются на эти диапазоны).
+    _var_cols_meta = [(disp, get_column_letter(_FIRST_VAR_COL + i))
+                      for i, (disp, _) in enumerate(_VARS)]
+    _var_cols_meta += [(label, get_column_letter(_FIRST_MAP_COL + j))
+                       for j, (_, label) in enumerate(_MAP_COLS)]
+    _sources = (["Сайт"] if результаты else []) + [label for _, label in _MAP_COLS]
+    meta = {
+        "last_row": r - 1,
+        "last_var_col_letter": _last_var_col_letter,
+        "err_col_letter": get_column_letter(_ERR_COL),
+        "var_cols": _var_cols_meta,
+        "sources": _sources,
+    }
+    return расхождения, meta
 
 
 if __name__ == '__main__':
