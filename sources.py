@@ -337,6 +337,7 @@ def build_plan(
     mandatory_city: str = 'Москва',
     mandatory_hosts: Optional[list[str]] = None,  # домены, всегда в выборке (напр. smg.az)
     cis_extra_subdomains: int = 0,      # сколько доп. СНГ-доменов помимо mandatory_hosts
+    trailing_slash: bool = True,        # каноническая форма адресов сайта
     seed: Optional[int] = None,
     rotation_history: Optional[set[str]] = None,  # pathname'ы проверенные за 7 дней
 ) -> Plan:
@@ -346,6 +347,11 @@ def build_plan(
     mandatory_hosts - хосты, которые включаем ВСЕГДА (напр. ['smg.az'] для СМУ).
     cis_extra_subdomains - сколько ещё СНГ-доменов (country != «Россия») гарантированно
         добавить помимо mandatory_hosts (0 для быстрой, 1 для стандартной/полной).
+    trailing_slash - есть ли слеш в конце адресов у этого сайта. Пути категорий
+        берутся из каталога как есть, а вот раздел каталога мы собираем сами -
+        и на сайте без слеша (напр. Next.js: /catalog) запрос «/catalog/» уходит
+        в редирект на каноническую форму. Раньше это выглядело как «дубль без
+        слэша», хотя дубля нет: мы сами ходили по неканоническому адресу.
 
     Если передана rotation_history - pathname'ы из неё получают меньший
     вес (в 3 раза реже попадают в выборку), но не исключаются полностью.
@@ -386,6 +392,8 @@ def build_plan(
             return _pick_random(items, n, rng)
         return weighted_sample(items, n, recent, rng)
 
+    catalog_path = '/catalog/' if trailing_slash else '/catalog'
+
     tasks = []
     for sub in selected:
         base = sub.url.rstrip('/')
@@ -407,7 +415,7 @@ def build_plan(
             ))
         if check_catalog:
             tasks.append(CheckTask(
-                url=f'{base}/catalog/', city=sub.city, subdomain=sub.host,
+                url=f'{base}{catalog_path}', city=sub.city, subdomain=sub.host,
                 type_code='catalog', type_label=TYPE_LABELS['catalog'],
             ))
         if check_categories and sub_categories:

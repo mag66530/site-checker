@@ -29,7 +29,9 @@
     "metpromintex.az": "catalogs/mpi-cat-cis.csv"
   },
   "mandatory_city": "Москва",
-  "has_filters": false,
+  "has_filters": true,
+  "has_products": false,
+  "trailing_slash": false,
   "use_proxy": false,
   "kp_sheet_url": "https://docs.google.com/spreadsheets/d/1Hb7R1scmyhSPyROUa2mWMzD4jDcdgBcs1IGu0WQ48O4/edit?gid=0#gid=0"
 }

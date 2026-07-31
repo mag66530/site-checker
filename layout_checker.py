@@ -39,6 +39,8 @@ import re
 from typing import Optional
 from urllib.parse import urljoin, urlsplit
 
+import platform_profile as _platform
+
 _RE_VIEWPORT = re.compile(
     r'<meta\b[^>]*name\s*=\s*["\']viewport["\'][^>]*>', re.I)
 _RE_STYLE_BLOCK = re.compile(r'<style\b[^>]*>(.*?)</style>', re.I | re.S)
@@ -147,15 +149,20 @@ def _norm_host(h: str) -> str:
 
 
 def check_layout(html: Optional[str], css_infos: Optional[list],
-                 base_url: str = '') -> dict:
+                 base_url: str = '', platform: str = '') -> dict:
     """Проверка вёрстки одной страницы.
 
     css_infos - список {'url', 'status', 'has_media', 'minified'} по
     подключённым CSS (из кэша http_checker). base_url - адрес страницы (для
-    определения СВОИХ CSS/JS). Возвращает dict для CheckResult.layout."""
+    определения СВОИХ CSS/JS). platform - движок сайта ('nextjs', 'bitrix', …):
+    часть правил на chunk-сборках неприменима и даёт ложные срабатывания, см.
+    platform_profile. Пусто - определяем по HTML. Возвращает dict для
+    CheckResult.layout."""
     html = html or ''
     css_infos = css_infos or []
     issues, warnings = [], []
+    platform = platform or _platform.detect_platform(html)
+    _rule = lambda name: _platform.rule_applies(name, platform)  # noqa: E731
 
     # 1. viewport (ТЗ 2.1.1)
     viewport = bool(_RE_VIEWPORT.search(html[:300_000]))
@@ -206,8 +213,12 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'css_not_min': len(css_not_min), 'js_not_min': len(js_not_min),
     }
     if own_host:
-        # Объединение: много отдельных своих файлов.
-        if len(css_own) > _CSS_COMBINE_LIMIT or len(js_own) > _JS_COMBINE_LIMIT:
+        # Объединение: много отдельных своих файлов. На chunk-сборках (Next.js
+        # и подобных) файлов много ПО ЗАМЫСЛУ - роут грузит свой чанк, и
+        # «объединить» означает ухудшить загрузку. Там правило не применяем.
+        if (_rule('assets_bundling')
+                and (len(css_own) > _CSS_COMBINE_LIMIT
+                     or len(js_own) > _JS_COMBINE_LIMIT)):
             warnings.append(
                 f'CSS/JS похоже не объединены (своих файлов: CSS {len(css_own)}, '
                 f'JS {len(js_own)}) - если применимо, объедините для скорости')
@@ -217,7 +228,12 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
                 f'не минифицированы CSS-файлы: {len(css_not_min)} из '
                 f'{len(css_own)} (лишние пробелы/переносы)')
         # Минификация JS (по имени файла - грубо, если совсем нет .min).
-        if len(js_own) >= 3 and len(js_not_min) == len(js_own):
+        # Судить по имени можно только там, где имя вообще что-то значит:
+        # сборщики именуют чанки хешем (webpack-c9bf0eab….js) и минифицируют
+        # их всегда, так что «.min» не появится никогда - ложное срабатывание
+        # на каждой странице.
+        if (_rule('js_min_by_name')
+                and len(js_own) >= 3 and len(js_not_min) == len(js_own)):
             warnings.append(
                 f'JS-файлы без признака минификации (.min в имени): все '
                 f'{len(js_own)} - проверить, минифицированы ли')
@@ -243,8 +259,11 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
                             'должен быть один на страницу')
 
     # 6. Инлайн-стили: визуальные стили должны жить в CSS, не в style="…".
+    # На chunk-сборках атрибут проставляет сам фреймворк (next/image вешает
+    # style="color:transparent" на КАЖДУЮ картинку) - счёт улетает за порог,
+    # хотя рукописного инлайна на странице может не быть вовсе.
     inline_styles = len(_RE_INLINE_STYLE.findall(body))
-    if inline_styles > _INLINE_STYLE_LIMIT:
+    if _rule('inline_style_count') and inline_styles > _INLINE_STYLE_LIMIT:
         warnings.append(
             'много инлайн-стилей (атрибут style="…" в HTML) - визуальные '
             'стили лучше вынести в CSS-файлы')
@@ -286,7 +305,11 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
     if inline_style_kb > _INLINE_STYLE_KB:
         warnings.append('большие inline-<style> блоки - стили не кешируются, '
                         'вынести во внешний CSS-файл')
-    if inline_script_kb > _INLINE_SCRIPT_KB:
+    # На chunk-сборках основной объём inline-скриптов - это не код, а
+    # сериализованные ДАННЫЕ страницы (self.__next_f.push с деревом серверных
+    # компонентов). Вынести их во внешний файл физически нельзя - они у каждой
+    # страницы свои, поэтому правило там не применяем.
+    if _rule('inline_script_size') and inline_script_kb > _INLINE_SCRIPT_KB:
         warnings.append('большие inline-<script> блоки - скрипты не '
                         'кешируются, вынести во внешний JS-файл')
 

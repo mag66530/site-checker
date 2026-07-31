@@ -412,8 +412,13 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
         elif proxy_url:
             append_log(f'Прокси: включён для проекта {cfg["name"]}')
 
-        # Товары: база листингов → fallback sitemap
-        if not src.products:
+        # Товары: база листингов → fallback sitemap. Если карточек товара у
+        # проекта нет вовсе (has_products=false - напр. МПИ, где весь каталог
+        # плоский), не ходим за sitemap и не пишем пугающее «0 товаров».
+        if not cfg.get('has_products', True):
+            append_log('Товары: у проекта нет карточек товаров - '
+                       'тип «Товар» не проверяется.')
+        elif not src.products:
             base_links = load_product_links(pid)
             if base_links and base_links['pathnames']:
                 src.products = base_links['pathnames']
@@ -448,6 +453,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             mandatory_city=cfg.get('mandatory_city', 'Москва'),
             mandatory_hosts=cfg.get('mandatory_hosts'),
             cis_extra_subdomains=int(flags.get('cis_extra', 0)),
+            trailing_slash=cfg.get('trailing_slash', True),
             rotation_history=recent,
         )
         append_log(f'Города: {", ".join(s.city for s in plan.selected_subdomains)}')

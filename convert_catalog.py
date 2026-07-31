@@ -15,8 +15,9 @@ catalogs/{proj}-subdomains.csv из уже готовой КП.
 обновляется из Google-таблицы перед каждым прогоном), и так список доменов
 гарантированно совпадает с тем, по которому идут остальные проверки.
 """
+import argparse
 import csv
-import sys
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -37,6 +38,17 @@ CATALOG_LAYOUT = {
             'РФ':  'mpi-catalog.csv',
             'СНГ': 'mpi-cat-cis.csv',
         },
+        # Каким листом дополняем лонгтейл из sitemap (sitemap у нас один -
+        # главного домена) и какой префикс считаем каталогом.
+        'sitemap_sheet': 'РФ',
+        'catalog_prefix': '/catalog/',
+        # Раздел услуг (резка, гибка, цинкование - 45 страниц). В структурной
+        # выгрузке его нет, и до сих пор он не проверялся ничем. Кладём типом
+        # «категория»: это такие же разводящие посадочные, и проверки категории
+        # (крошки, H1, подзаголовки, SEO-текст) к ним подходят один в один.
+        # В тех. страницы не идут намеренно - те проверяются ВСЕ и на каждом
+        # прогоне, а 45 страниц раздела правильнее просматривать выборкой.
+        'extra_category_prefix': '/services/',
     },
 }
 
@@ -57,9 +69,9 @@ def _convert_sheet(ws, dst: Path) -> int:
     """Лист каталога → CSV (url, type). Строки без http пропускаем - так
     отсеиваются шапка, строка счётчиков и «ссылка на правила» под ней.
 
-    Тип у всех строк - «категория»: тегов/фильтров в каталоге МПИ нет (колонка
-    «подбор по параметрам» пустая). Если в будущей выгрузке появятся теги -
-    сюда добавится их распознавание, как у ИМП (parse_catalog читает тип)."""
+    Тип строк из xlsx - «категория»: это структурная выгрузка (уровни 1-5).
+    Лонгтейл-страницы в неё не попадают и добираются из sitemap - см.
+    _sitemap_tags."""
     col = _url_column(ws)
     rows, seen = [], set()
     for row in ws.iter_rows(values_only=True):
@@ -71,21 +83,61 @@ def _convert_sheet(ws, dst: Path) -> int:
             continue
         seen.add(u)
         rows.append([u, 'категория'])
+    return rows
 
+
+def _write_catalog(rows: list, dst: Path) -> None:
     with open(dst, 'w', encoding='utf-8', newline='') as f:
         w = csv.writer(f)
         w.writerow(['url', 'type'])
         w.writerows(rows)
-    return len(rows)
 
 
-def convert(project_id: str, xlsx_path: str) -> list[Path]:
-    """Каталог проекта из xlsx → CSV-файлы в catalogs/. Возвращает пути."""
+def _sitemap_urls(sitemap_path: str) -> list[str]:
+    """Все <loc> из сохранённого sitemap.xml. Файл берём с диска - на сайте
+    может стоять антибот, который отдаёт нам challenge вместо XML."""
+    text = Path(sitemap_path).read_text(encoding='utf-8', errors='replace')
+    return [u.strip() for u in re.findall(r'<loc>\s*([^<]+?)\s*</loc>', text)]
+
+
+def _sitemap_by_prefix(sitemap_path: str, prefix: str, type_name: str,
+                       known: set) -> list:
+    """Строки [url, type] из sitemap по префиксу раздела, минус уже известные."""
+    rows, seen = [], set()
+    for u in _sitemap_urls(sitemap_path):
+        path = urlparse(u).path
+        if not path.startswith(prefix) or path in known or u in seen:
+            continue
+        seen.add(u)
+        rows.append([u, type_name])
+    return rows
+
+
+def _sitemap_tags(sitemap_path: str, known: set, prefix: str) -> list:
+    """Страницы каталога из sitemap, которых НЕТ в структурной выгрузке.
+
+    Это лонгтейл-посадочные («/catalog/abraziv-r40», «/catalog/32-mm-truba-
+    dlya-kanalizatsii»): в xlsx их не отдают, а в индексе они и составляют
+    основную массу. Помечаем типом «тег» - ровно как у ИМП, где таких страниц
+    14555 против 1454 категорий. Без этого чек-лист видел бы пятую часть сайта.
+
+    known - множество УЖЕ известных путей (категории из xlsx), prefix -
+    раздел каталога ('/catalog/')."""
+    return _sitemap_by_prefix(sitemap_path, prefix, 'тег', known)
+
+
+def convert(project_id: str, xlsx_path: str,
+            sitemap_path: str = '') -> list[Path]:
+    """Каталог проекта из xlsx (+ необязательный sitemap) → CSV в catalogs/."""
     if project_id not in CATALOG_LAYOUT:
         raise SystemExit(f'Нет раскладки каталога для проекта «{project_id}». '
                          f'Известные: {", ".join(CATALOG_LAYOUT)}')
     layout = CATALOG_LAYOUT[project_id]
     wb = load_workbook(xlsx_path, read_only=True, data_only=True)
+    # Sitemap у нас один - главного домена, поэтому дополняем им только
+    # основной каталог. Каталог СНГ живёт на других хостах, и его лонгтейл
+    # добавится, когда придёт sitemap СНГ-домена.
+    main_sheet = layout.get('sitemap_sheet')
 
     out = []
     for sheet, filename in layout['sheets'].items():
@@ -93,8 +145,24 @@ def convert(project_id: str, xlsx_path: str) -> list[Path]:
             raise SystemExit(f'в таблице нет листа «{sheet}» '
                              f'(есть: {", ".join(wb.sheetnames)})')
         dst = CATALOGS_DIR / filename
-        n = _convert_sheet(wb[sheet], dst)
-        print(f'{project_id}: лист «{sheet}» → {dst.name}, категорий: {n}')
+        rows = _convert_sheet(wb[sheet], dst)
+        n_cat, n_tag, n_svc = len(rows), 0, 0
+        if sitemap_path and sheet == main_sheet:
+            known = {urlparse(u).path for u, _ in rows}
+            tags = _sitemap_tags(sitemap_path, known, layout['catalog_prefix'])
+            rows += tags
+            n_tag = len(tags)
+            svc_prefix = layout.get('extra_category_prefix')
+            if svc_prefix:
+                svc = _sitemap_by_prefix(sitemap_path, svc_prefix,
+                                         'категория', known)
+                rows += svc
+                n_svc = len(svc)
+        _write_catalog(rows, dst)
+        tail = ''.join((f', тегов из sitemap: {n_tag}' if n_tag else '',
+                        f', услуг: {n_svc}' if n_svc else ''))
+        print(f'{project_id}: лист «{sheet}» → {dst.name}, '
+              f'категорий: {n_cat}{tail}')
         out.append(dst)
     return out
 
@@ -128,13 +196,16 @@ def build_subdomains(project_id: str) -> Path:
 
 
 def main():
-    if len(sys.argv) != 3:
-        projects = '|'.join(CATALOG_LAYOUT)
-        print(f'Использование: python convert_catalog.py <{projects}> <путь_к_xlsx>')
-        sys.exit(1)
-    project_id, xlsx_path = sys.argv[1], sys.argv[2]
-    convert(project_id, xlsx_path)
-    build_subdomains(project_id)
+    ap = argparse.ArgumentParser(
+        description='Каталог проекта из xlsx (+ sitemap) в catalogs/*.csv')
+    ap.add_argument('project', choices=sorted(CATALOG_LAYOUT))
+    ap.add_argument('xlsx', help='структурная выгрузка каталога')
+    ap.add_argument('--sitemap', default='',
+                    help='сохранённый sitemap.xml - добавит лонгтейл-страницы '
+                         'каталога, которых нет в структурной выгрузке')
+    a = ap.parse_args()
+    convert(a.project, a.xlsx, a.sitemap)
+    build_subdomains(a.project)
 
 
 if __name__ == '__main__':
