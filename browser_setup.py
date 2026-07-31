@@ -13,16 +13,24 @@ Cloud по packages.txt. Локально (где браузер уже стои
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
 import sys
 
 
 async def _браузер_на_месте_async() -> bool:
+    """Реальный запуск+закрытие браузера - не просто проверка наличия файла
+    по executable_path. Причина: этот путь указывает на «обычный» Chromium,
+    а headless-запуск (везде в проекте - headless=True, без channel) у
+    новых Playwright по умолчанию использует ОТДЕЛЬНЫЙ бинарник
+    chromium-headless-shell - executable_path его не видит, из-за чего
+    проверка врала «браузер готов», пока реальный запуск падал с
+    «Executable doesn't exist» (карты в «Проверке КП» ни разу не звали
+    ensure_browser() - на облаке ничего не доставилось вовсе)."""
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
-        path = p.chromium.executable_path
-        return bool(path and os.path.exists(path))
+        browser = await p.chromium.launch(headless=True)
+        await browser.close()
+        return True
 
 
 last_error: str = ''    # реальный текст последней ошибки - см. ensure_browser()

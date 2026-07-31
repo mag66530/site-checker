@@ -393,10 +393,26 @@ _effective_proxy = auth.fill_proxy_slot(pid_key)
 
 _nothing_selected = not (_check_site or _check_yandex_maps or _check_2gis_maps
                         or _check_google_maps)
+
+# Карты гоняются Playwright-браузером (Chromium) - на облаке его нет по
+# умолчанию, нужно доустановить в рантайме (как для «Проверки форм»/«Проверки
+# целей»). Раньше эта проверка тут не звалась вовсе - карты запускались
+# «вслепую», падая на первом же прогоне с «Executable doesn't exist».
+_check_maps = _check_yandex_maps or _check_2gis_maps or _check_google_maps
+_browser_ok, _browser_msg = True, ''
+if _check_maps and not _alive:
+    with st.spinner('Готовлю браузер для карт (первый запуск в облаке - до минуты)…'):
+        import browser_setup
+        _browser_ok, _browser_msg = browser_setup.ensure_browser()
+    if not _browser_ok:
+        st.warning(f'Браузер для карт ещё не готов: {_browser_msg}. Если это '
+                  'первый запуск в облаке - подождите минуту и обновите страницу.')
+
 _c1, _c2 = st.columns([3, 1])
 with _c1:
     if st.button('▶ Запустить проверку', use_container_width=True,
-                 type='primary', disabled=_alive or _none_chosen or _nothing_selected):
+                 type='primary',
+                 disabled=_alive or _none_chosen or _nothing_selected or not _browser_ok):
         if not _deps_ready():
             st.error('В этом окружении нет нужных библиотек (requests/bs4/openpyxl).')
         else:
