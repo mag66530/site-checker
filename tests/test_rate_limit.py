@@ -200,6 +200,47 @@ def test_колонки_лимита_в_шапке_лога():
     assert len(t.LOG_HEADERS) == len(t.LOG_KEYS_ORDER)
 
 
+# ── «Форма заказа» по адресу: лид-формы больше не попадают под перестраховку ──
+# Регресс ИМП: сайт на OpenCart шлёт ЛИД-заявки на index.php?route=checkout/…,
+# и тул считал заказом все формы подряд - у каждой в отчёте стояло ⚠ «форма
+# заказа», активная проба спама и серверная валидация молча пропускались.
+
+def test_лид_форма_с_checkout_в_адресе_отправки_не_заказ():
+    assert not t._ds_похоже_на_заказ(
+        "https://inmetprom.ru/", "index.php?route=checkout/callback")
+    assert not t._ds_похоже_на_заказ(
+        "https://site.ru/vakansii/", "/ajax/order.php")
+
+
+def test_страница_корзины_и_чекаута_остаётся_заказом():
+    # Тут перестраховка обязана работать: второй заказ на боевом сайте не создаём.
+    assert t._ds_похоже_на_заказ("https://inmetprom.ru/cart/", "")
+    assert t._ds_похоже_на_заказ("https://site.ru/checkout/", "")
+    assert t._ds_маркер_заказа("https://site.ru/cart/", "") == "/cart"
+
+
+def test_однозначные_признаки_заказа_в_адресе_отправки_остаются():
+    assert t._ds_похоже_на_заказ("https://site.ru/", "/bitrix/saveorder.php")
+    assert t._ds_похоже_на_заказ("https://site.ru/", "?action=opc_submit")
+
+
+def test_маркер_заказа_называет_причину():
+    # Причину показываем человеку - иначе пометка «форма заказа» необъяснима.
+    assert t._ds_маркер_заказа("https://site.ru/checkout/", "") == "/checkout"
+    assert t._ds_маркер_заказа("https://site.ru/", "") == ""
+
+
+# ── Понятный текст, когда проверить не вышло ──
+
+def test_первая_отправка_не_дошла_текст_объясняет_причину():
+    ст, дет = t.лимит_активно_вердикт(
+        [{"n": 1, "успех": False, "блок": False},
+         {"n": 2, "успех": False, "блок": False}])
+    assert ст == "Проверить"
+    assert "первая отправка не дошла" in дет.lower()
+    assert "3-4 раза" in дет
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

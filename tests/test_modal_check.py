@@ -59,15 +59,52 @@ class _FakeCloseBtn:
         return self
 
 
+class _FakeHandle:
+    """Снимок КОНКРЕТНОГО DOM-узла (element_handle): его видимость живёт
+    отдельно от того, что показывает динамический локатор.
+
+    На узле выполняются три разных скрипта - различаем их по маркерам:
+    проверка реальной видимости (учитывает opacity), описание tag#id.class
+    и разбор стилей для улики в вердикте."""
+    def __init__(self, state, desc="div#callback.modal.fade"):
+        self._state = state
+        self._desc = desc
+
+    def is_visible(self):
+        return self._state["visible"]
+
+    def evaluate(self, script):
+        прозрачный = bool(self._state.get("opacity0"))
+        if "pointerEvents" in script:
+            видна = self._state["visible"]
+            return {"display": "block" if видна else "none",
+                    "visibility": "visible",
+                    "opacity": "0" if прозрачный else ("1" if видна else "0"),
+                    "pe": "none" if прозрачный else "auto",
+                    "w": 300, "h": 200, "x": 100, "y": 100}
+        if "tagName" in script:
+            return self._desc
+        return self._state["visible"] and not прозрачный
+
+
 class _FakeModal:
     """Заглушка модалки: state['visible'] управляет _модалка_видна/_открылась
-    и меняется «закрытием» (клик по кнопке / esc / клик вне - через page)."""
+    и меняется «закрытием» (клик по кнопке / esc / клик вне - через page).
+
+    node_state - отдельное состояние ЗАФИКСИРОВАННОГО узла. Задают, когда надо
+    воспроизвести расхождение: наше окно закрылось, а локатор '.modal:visible'
+    показывает соседнюю видимую модалку страницы."""
     def __init__(self, state, has_fields=True, close_selector=None,
-                 box=(100, 100, 300, 200)):
+                 box=(100, 100, 300, 200), node_state=None,
+                 closes_by_opacity=False):
         self._state = state
         self._has_fields = has_fields
         self._close_selector = close_selector
         self._box = box
+        self._node_state = node_state if node_state is not None else state
+        # Сайт «закрывает» окно, не убирая его из потока: opacity:0 +
+        # pointer-events:none, display остаётся block.
+        self._closes_by_opacity = closes_by_opacity
 
     def count(self):
         return 1 if self._state["visible"] else 0
@@ -75,16 +112,28 @@ class _FakeModal:
     def is_visible(self):
         return self._state["visible"]
 
+    def element_handle(self, timeout=None):
+        return _FakeHandle(self._node_state)
+
     def locator(self, sel):
         if sel == "input, textarea, select":
             return _CountingLoc(1) if self._has_fields else _CountingLoc(0)
         if self._close_selector and sel == self._close_selector:
-            return _FakeCloseBtn(lambda: self._state.__setitem__("visible", False))
+            ключ = "opacity0" if self._closes_by_opacity else "visible"
+            значение = True if self._closes_by_opacity else False
+            return _FakeCloseBtn(
+                lambda: self._node_state.__setitem__(ключ, значение))
         return _FakeMissingLoc()
 
     def bounding_box(self):
         x, y, w, h = self._box
         return {"x": x, "y": y, "width": w, "height": h}
+
+    def evaluate(self, _js):
+        # _модалка_видна() теперь ещё проверяет _реально_видим() (прозрачность
+        # по opacity, не только display/visibility) - заглушка отражает тот же
+        # флаг state["visible"], что и is_visible()/count().
+        return self._state["visible"]
 
 
 class _FakeKeyboard:
@@ -115,6 +164,11 @@ class _FakePage:
 
     def wait_for_timeout(self, ms):
         pass
+
+    def locator(self, sel):
+        # Крестик ищется и по всей странице (он часто вне контейнера модалки).
+        # В заглушке страница пустая - находит только модалка.
+        return _FakeMissingLoc()
 
 
 # ── _модалка_видна / _модалка_открылась ───────────────────────────────────
@@ -179,7 +233,63 @@ def test_не_закрывается_ничем_жёсткое_нет_без_п�
     статус, способ = t._проба_закрытия_модалки(page, modal)
     assert статус == "Нет"
     assert "вручную" not in способ
-    assert способ == "не закрылась ни крестиком, ни Esc, ни кликом вне модалки"
+    assert способ.startswith("не закрылась ни крестиком, ни Esc, ни кликом вне модалки")
+
+
+def test_вердикт_нет_показывает_какой_контейнер_считали_модалкой():
+    # Ложный ✗ почти всегда = «взят не тот контейнер». В вердикт идёт улика,
+    # иначе спор «окно закрывается вручную, а тул пишет нет» не разобрать.
+    state = {"visible": True}
+    modal = _FakeModal(state, close_selector=None)
+    page = _FakePage(state)
+    _, способ = t._проба_закрытия_модалки(page, modal)
+    assert "div#callback.modal.fade" in способ
+
+
+def test_закрылась_через_opacity_ноль():
+    # Частый способ закрытия: сайт ставит opacity:0 + pointer-events:none, а
+    # display остаётся block. Playwright is_visible() такой узел считает
+    # ВИДИМЫМ - и все три способа получали ложное «не закрылась». Проверка
+    # видимости смотрит на opacity сама (_JS_УЗЕЛ_ВИДЕН) → вердикт «Да».
+    state = {"visible": True}
+    modal = _FakeModal(state, close_selector=".modal-close",
+                       closes_by_opacity=True)
+    page = _FakePage(state)
+    статус, способ = t._проба_закрытия_модалки(page, modal)
+    assert статус == "Да"
+    assert способ == "крестик/кнопка закрытия"
+    # Узел никуда не делся и для Playwright всё ещё «видим» - вердикт верный
+    # именно из-за собственной проверки стилей.
+    assert state["visible"] is True
+
+
+def test_вердикт_нет_объясняет_почему_узел_считается_видимым():
+    # В улику идут стили: без них «контейнер тот, а закрытия нет» упирается
+    # в ручной прогон.
+    state = {"visible": True}
+    modal = _FakeModal(state, close_selector=None)
+    page = _FakePage(state)
+    _, способ = t._проба_закрытия_модалки(page, modal)
+    assert "после попыток:" in способ
+    assert "opacity:" in способ and "display:" in способ
+
+
+def test_закрылась_хотя_локатор_показывает_соседнюю_модалку():
+    # Корень бага ложного ✗ на проекте АПС («Заказать звонок», «Экспресс
+    # заявка»): modal - ДИНАМИЧЕСКИЙ локатор ('.modal:visible'.last). Наше окно
+    # закрылось крестиком, но на странице осталась другая видимая модалка
+    # (попап региона / поиск / cookie-баннер), и локатор подхватывал её -
+    # проверка «закрылась?» отвечала «нет» на всех трёх способах подряд.
+    # Снимок узла держит ИМЕННО закрываемое окно → вердикт «Да».
+    видна_соседняя = {"visible": True}       # что показывает локатор - всегда True
+    наше_окно = {"visible": True}            # реальный узел, его и закрываем
+    modal = _FakeModal(видна_соседняя, close_selector=".modal-close",
+                       node_state=наше_окно)
+    page = _FakePage(видна_соседняя)
+    статус, способ = t._проба_закрытия_модалки(page, modal)
+    assert статус == "Да"
+    assert способ == "крестик/кнопка закрытия"
+    assert наше_окно["visible"] is False
 
 
 def test_уже_не_видна_до_проверки():
@@ -201,8 +311,9 @@ def test_уже_не_видна_до_проверки():
 # кандидата и часто не находит ничего, даже когда форма реально внутри.
 
 class _FakeAncestorResult:
-    def __init__(self, n):
+    def __init__(self, n, всплывает=True):
         self._n = n
+        self._всплывает = всплывает
 
     def count(self):
         return self._n
@@ -211,13 +322,18 @@ class _FakeAncestorResult:
     def first(self):
         return self
 
+    def evaluate(self, js, *a):
+        # заглушка _это_всплывающее_окно: лежит ли элемент поверх страницы
+        return self._всплывает
+
 
 class _FakeForm:
-    def __init__(self, n_found):
+    def __init__(self, n_found, всплывает=True):
         self._n = n_found
+        self._всплывает = всплывает
 
     def locator(self, sel):
-        return _FakeAncestorResult(self._n)
+        return _FakeAncestorResult(self._n, self._всплывает)
 
 
 def test_форма_вне_модалки_none():
@@ -228,6 +344,14 @@ def test_форма_вне_модалки_none():
 def test_форма_внутри_модалки_найдена():
     form = _FakeForm(n_found=1)
     assert t._найти_модалку_вокруг(form) is not None
+
+
+def test_обычный_блок_с_классом_modal_не_считается_модалкой():
+    # Регресс ИМП: класс с «modal» висел на ОБЫЧНОМ блоке с формой на странице.
+    # Тул считал его модалкой и писал ✗ «не закрывается» - закрывать там нечего.
+    # Теперь контейнер должен ещё и ВСПЛЫВАТЬ над страницей (fixed/absolute).
+    form = _FakeForm(n_found=1, всплывает=False)
+    assert t._найти_модалку_вокруг(form) is None
 
 
 def test_детектор_модалки_ловит_fancybox_и_aria():

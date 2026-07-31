@@ -4,7 +4,8 @@
 
 Для выбранного проекта фоново качает главные страницы поддоменов и сверяет с КП
 (catalogs/{proj}-kp.csv): город/страна, телефоны (поиск/реклама/общий), почта,
-адрес, Telegram, WhatsApp. Результат - Excel «Проверка КП» + «Расхождения».
+адрес, Telegram, WhatsApp. Результат - Excel «Проверка КП» + «Расхождения»;
+если включали сверку с Яндекс.Картами/2ГИС - те же колонки на том же листе.
 Сделана по образцу страницы «Проверка форм» (фоновый процесс variables_run.py).
 """
 import importlib.util
@@ -18,10 +19,13 @@ from pathlib import Path
 
 import streamlit as st
 
+import site_access
+
 ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from checklists import page_templates as _tpl
+from checklists import ui_widgets as _ui
 PY = sys.executable
 LOG_FILE = ROOT / 'cache' / 'variables.log'
 PID_FILE = ROOT / 'cache' / 'variables.pid'
@@ -199,9 +203,9 @@ st.caption(f'В КП проекта: **{len(_cities)}** поддоменов, с
 
 # ── Проектные шаблоны ────────────────────────────────────────────────
 def _vc_tpl_apply(_tpl_data):
-    # Шаблон уже проставил vc_mode + галочки городов (vc_cb_*) в session_state.
-    # Помечаем инициализацию сетки выполненной, иначе дефолт «отметить всё»
-    # перетёр бы галочки из шаблона.
+    # Шаблон уже проставил vc_mode + список городов (vc_ms_*) в session_state.
+    # Помечаем инициализацию выполненной, иначе дефолт «отметить всё» перетёр
+    # бы выбор из шаблона.
     st.session_state[f'vc_init_{pid_key}'] = True
 
 
@@ -209,18 +213,14 @@ def _vc_tpl_apply(_tpl_data):
 # ПРЯМО по клику «Сохранить» (значения виджетов уже в session_state).
 def _vc_tpl_reset():
     # Сброс к стандартным: охват → «Все домены+поддомены», выбор городов заново
-    # (снимаем флаг инициализации и чистим галочки городов).
-    for _k in ([f'vc_mode_{pid_key}', f'vc_init_{pid_key}']
-               + [_kk for _kk in list(st.session_state.keys())
-                  if _kk.startswith(f'vc_cb_{pid_key}_')]):
+    # (снимаем флаг инициализации и список выбранных городов).
+    for _k in (f'vc_mode_{pid_key}', f'vc_init_{pid_key}', f'vc_ms_{pid_key}'):
         st.session_state.pop(_k, None)
 
 
 _tpl.render_panel(
     'variables', pid_key, on_apply=_vc_tpl_apply, on_reset=_vc_tpl_reset,
-    save_keys=lambda: [f'vc_mode_{pid_key}'] + [
-        _k for _k in list(st.session_state.keys())
-        if _k.startswith(f'vc_cb_{pid_key}_')],
+    save_keys=lambda: [f'vc_mode_{pid_key}', f'vc_ms_{pid_key}'],
     help_text='Шаблон запоминает охват (все домены / выбранные города) и какие '
               'города отмечены. Хранится на сервере проекта **до перезапуска '
               'приложения** - после может сброситься.')
@@ -292,45 +292,82 @@ _mode = st.radio('Охват', ['Все домены+поддомены', 'Вы�
                  key=f'vc_mode_{pid_key}')
 _chosen = []
 if _mode == 'Выбрать города':
-    def _vk(city):
-        return f'vc_cb_{pid_key}_{city}'
+    _ms_key = f'vc_ms_{pid_key}'
     # Дефолт (один раз на проект): отмечены все города. Дальше правки сохраняются.
     if not st.session_state.get(f'vc_init_{pid_key}'):
-        for _nm in _all_city_names:
-            st.session_state[_vk(_nm)] = True
+        st.session_state[_ms_key] = list(_all_city_names)
         st.session_state[f'vc_init_{pid_key}'] = True
+
+    # Подпись с флагом+страной для читаемости в раскрывающемся списке -
+    # реальное значение (что уходит в --cities) остаётся голым именем города.
+    _city_label = {_nm: f"{_COUNTRY_FLAG.get(_country, '🏳')} {_nm}"
+                  for _country, _names in _vc_groups.items() for _nm in _names}
+
+    # Строка выбора (чипы) растягивается по высоте, не обрезается/не
+    # наезжает на остальной контент - общий CSS-фикс, см. ui_widgets.py.
+    _ui.multiselect_grows_css()
 
     _b1, _b2, _ = st.columns([1, 1, 4])
     if _b1.button('Выбрать все', use_container_width=True, key=f'vc_all_{pid_key}'):
-        for _nm in _all_city_names:
-            st.session_state[_vk(_nm)] = True
+        st.session_state[_ms_key] = list(_all_city_names)
         st.rerun()
     if _b2.button('Снять все', use_container_width=True, key=f'vc_none_{pid_key}'):
-        for _nm in _all_city_names:
-            st.session_state[_vk(_nm)] = False
+        st.session_state[_ms_key] = []
         st.rerun()
 
-    _sel = []
-    for _country, _names in _vc_groups.items():
-        st.markdown(f"**{_COUNTRY_FLAG.get(_country, '🏳')} {_country}**  ·  {len(_names)}")
-        _cols = st.columns(6)
-        for _i, _nm in enumerate(_names):
-            if _cols[_i % 6].checkbox(_nm, key=_vk(_nm)):
-                _sel.append(_nm)
-    _chosen = _sel
-    st.caption(f'Выбрано: **{len(_sel)} / {len(_all_city_names)}** городов.')
+    _chosen = st.multiselect(
+        'Города', options=_all_city_names, format_func=lambda c: _city_label.get(c, c),
+        key=_ms_key, placeholder='Выберите города…', label_visibility='collapsed')
+    st.caption(f'Выбрано: **{len(_chosen)} / {len(_all_city_names)}** городов.')
 else:
     st.caption(f'Будут проверены все {len(_cities)} доменов и поддоменов проекта.')
 
 st.divider()
+st.markdown('**Источники для сверки**')
+st.caption('Можно снять «Сайт», если нужны только карты - тогда страницы '
+          'сайта вообще не скачиваются, прогон короче.')
+_mc1, _mc2, _mc3, _mc4 = st.columns(4)
+_check_site = _mc1.checkbox(
+    'Сайт (сверка с КП)', value=True, key=f'vc_check_site_{pid_key}',
+    help='Скачивает главные страницы поддоменов, сверяет с КП. Это основная '
+         'проверка страницы - снимай, только если сейчас нужны исключительно '
+         'карты, без затрат времени на сайт.')
+_check_yandex_maps = _mc2.checkbox(
+    'Яндекс.Карты', key=f'vc_map_yandex_{pid_key}',
+    help='Карточка организации на yandex.ru/maps/org/… - сверяем название, '
+         'телефон, адрес, сайт с КП. Ссылка берётся из колонки «Карта» под '
+         '«Яндекс Бизнес» в таблице КП; если у города её нет - город просто '
+         'пропускается (не ошибка).')
+_check_2gis_maps = _mc3.checkbox(
+    '2ГИС', key=f'vc_map_2gis_{pid_key}',
+    help='Карточка организации на 2gis.ru/…/firm/… - те же поля, что и для '
+         'Яндекс.Карт. Ссылка - из колонки «Карта» под «2ГИС» в таблице КП.')
+_check_google_maps = _mc4.checkbox(
+    'Google', key=f'vc_map_google_{pid_key}',
+    help='Карточка организации на google.com/maps/place/… - те же поля, что '
+         'и для Яндекс.Карт/2ГИС. Ссылка - из колонки «Карта» под «Google» в '
+         'таблице КП; если у города её нет - город просто пропускается '
+         '(не ошибка).')
+if not (_check_site or _check_yandex_maps or _check_2gis_maps or _check_google_maps):
+    st.warning('Выбери хотя бы один источник - иначе прогону нечего делать.')
+if _check_yandex_maps or _check_2gis_maps or _check_google_maps:
+    st.caption('⚠ Карты проверяются в браузере - это заметно дольше обычной '
+              'сверки сайта (десятки секунд на карточку).')
+
+st.divider()
 st.subheader('Запуск')
-_proxy = _secret('proxy_url')
-if _proxy:
-    st.caption('Прокси из секретов будет использован (нужен проектам, которые '
-               'блокируют зарубежный IP, напр. СМУ).')
+# Прокси проекта - единый механизм (proxy_config.py): БД личного кабинета →
+# proxy_url_<pid> → proxy_url → HTTP_PROXY, С УЧЁТОМ use_proxy проекта.
+# Раньше здесь брали общий _secret('proxy_url') НАПРЯМУЮ и игнорировали
+# use_proxy - подпись «прокси будет использован» показывалась даже проектам
+# с выключенным прокси, а сам адрес не учитывал личный кабинет.
+from proxy_config import resolve_proxy
+if not resolve_proxy(pid_key):
+    st.caption('У проекта не настроен прокси («Настройки проекта») - '
+               'страницы качаются напрямую.')
 else:
-    st.caption('proxy_url в секретах не задан - если проект блокирует зарубежный '
-               'IP, часть страниц не загрузится (это будет видно в отчёте).')
+    st.caption('Прокси настроен - включить его для этого прогона можно '
+               'чек-боксом в сайдбаре слева.')
 
 _alive = _pid_alive(_read_pid())
 # Прошлый прогон уже завершён (в логе метка), но pid-файл остался, а на облаке
@@ -349,34 +386,54 @@ if _alive:
             pass
 _none_chosen = (_mode == 'Выбрать города' and not _chosen)
 
-# Прокси + проверка доступности сайта (над кнопкой запуска)
-try:
-    from site_access import render_proxy_access
-    _dom = _cities[0][1] if _cities else ''
-    render_proxy_access(f'vars_{pid_key}',
-                        default_url=(f"https://{_dom}/" if _dom else ''),
-                        pid=pid_key)
-except Exception as _e_pa:
-    st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
+# Прокси - чек-бокс дорисовывается в место, оставленное render_account_ui
+# в сайдбаре (см. auth.fill_proxy_slot) - теперь с уже известным ЗДЕСЬ pid.
+import auth
+_effective_proxy = auth.fill_proxy_slot(pid_key)
+
+_nothing_selected = not (_check_site or _check_yandex_maps or _check_2gis_maps
+                        or _check_google_maps)
+
+# Карты гоняются Playwright-браузером (Chromium) - на облаке его нет по
+# умолчанию, нужно доустановить в рантайме (как для «Проверки форм»/«Проверки
+# целей»). Раньше эта проверка тут не звалась вовсе - карты запускались
+# «вслепую», падая на первом же прогоне с «Executable doesn't exist».
+_check_maps = _check_yandex_maps or _check_2gis_maps or _check_google_maps
+_browser_ok, _browser_msg = True, ''
+if _check_maps and not _alive:
+    with st.spinner('Готовлю браузер для карт (первый запуск в облаке - до минуты)…'):
+        import browser_setup
+        _browser_ok, _browser_msg = browser_setup.ensure_browser()
+    if not _browser_ok:
+        st.warning(f'Браузер для карт ещё не готов: {_browser_msg}. Если это '
+                  'первый запуск в облаке - подождите минуту и обновите страницу.')
 
 _c1, _c2 = st.columns([3, 1])
 with _c1:
     if st.button('▶ Запустить проверку', use_container_width=True,
-                 type='primary', disabled=_alive or _none_chosen):
+                 type='primary',
+                 disabled=_alive or _none_chosen or _nothing_selected or not _browser_ok):
         if not _deps_ready():
             st.error('В этом окружении нет нужных библиотек (requests/bs4/openpyxl).')
         else:
-            args = ['variables_run.py', '--project', pid_key]
+            args = ['variables_run.py', '--project', pid_key,
+                    '--check-site' if _check_site else '--no-check-site']
             if _mode == 'Выбрать города' and _chosen:
                 args += ['--cities', ','.join(_chosen)]
+            if _check_yandex_maps:
+                args += ['--check-yandex-maps']
+            if _check_2gis_maps:
+                args += ['--check-2gis-maps']
+            if _check_google_maps:
+                args += ['--check-google-maps']
             # На свежем деплое папки cache/ ещё нет - создаём перед очисткой лога.
             LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
             LOG_FILE.write_text('', encoding='utf-8')
             # Прокидываем в фоновый процесс: прокси + ссылку на КП-таблицу +
             # JSON сервисного аккаунта (для приватных таблиц) - из секретов.
             _env = {}
-            if _proxy:
-                _env['proxy_url'] = _proxy
+            if _effective_proxy:
+                _env['proxy_url'] = _effective_proxy
             try:
                 if _kp_url:
                     _env[f'kp_sheet_url_{pid_key}'] = _kp_url
@@ -413,10 +470,14 @@ with st.expander('Как читать результат'):
     st.markdown(
         '- **✓** - значение на сайте совпадает с КП (для телефона: номер входит в '
         'набор номеров города из КП).\n'
-        '- **✗** - расхождение (в примечании ячейки: «ожидалось / на сайте»); '
-        'все расхождения собраны на листе «Расхождения».\n'
+        '- **✗** - расхождение. Наведи курсор на ячейку - во всплывающем '
+        'комментарии видно «ожидалось / на сайте».\n'
         '- **⚠** - на сайте не найдено (телефон/почта/адрес/мессенджер).\n'
-        '- **–** - в КП этого поля нет (проверять не с чем).')
+        '- **–** - в КП этого поля нет (проверять не с чем).\n\n'
+        'Все ✗/⚠ также собраны списком на листе «Расхождения». Колонки карт '
+        '(Яндекс.Карты/2ГИС) - на том же листе «Проверка КП», тот же принцип; '
+        'пустая ячейка у источника значит «не проверяли в этом прогоне» '
+        '(галочка была снята) - не путать с «–».')
 
 st.divider()
 st.subheader('Прогресс')
@@ -456,16 +517,20 @@ else:
             file_name=f'Проверка-КП-{pid_key.capitalize()}-{_date}.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             use_container_width=True)
-        # быстрый предпросмотр
+        # быстрый предпросмотр - лист «Расхождения» (сайт + карты вместе).
         try:
             from openpyxl import load_workbook
             wb = load_workbook(xlsx, read_only=True)
             if 'Расхождения' in wb.sheetnames:
                 ws = wb['Расхождения']
                 rows = [[c.value for c in r] for r in ws.iter_rows(values_only=False)]
-                if len(rows) > 1:
+                # Пустой отчёт пишет одну "плашку-заглушку" вместо строк
+                # расхождений - её не считаем расхождением.
+                _placeholder = (len(rows) == 2
+                                and rows[1][0] == 'Расхождений не найдено 🎉')
+                if len(rows) > 1 and not _placeholder:
                     st.caption(f'Найдено расхождений: {len(rows) - 1}. '
-                               'Открой лист «Расхождения» в файле.')
+                              'Открой лист «Расхождения» в файле.')
                 else:
                     st.success('Расхождений не найдено 🎉')
             wb.close()

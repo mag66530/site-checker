@@ -21,16 +21,18 @@ ROOT = Path(__file__).parent
 
 
 def _forms_uses_proxy(base: str) -> bool:
-    """У проекта форм включён прокси (config ИСПОЛЬЗОВАТЬ_ПРОКСИ = True)? Такие
-    сайты (напр. ИМП/inmetprom.ru) режут прямое подключение из дата-центра и
-    требуют российский IP. Читаем флаг текстом - без импорта чужого config."""
-    cfg = ROOT / 'forms_tester' / 'projects' / base / 'config.py'
+    """У проекта форм включён прокси? Такие сайты (напр. ИМП/inmetprom.ru,
+    МПК/metpromko.ru) режут прямое подключение из дата-центра и требуют
+    российский IP. Источник - ЕДИНЫЙ use_proxy из projects/<id>.json (тот же
+    флаг, что у чек-листа/форм/«Проверки КП»), а не отдельная константа
+    ИСПОЛЬЗОВАТЬ_ПРОКСИ из forms_tester/projects/<id>/config.py - два флага на
+    один проект расходились. base - id форм-тестера (напр. 'metpromko') -
+    отображаем на канонический id через proxy_config.canonical_project_id."""
     try:
-        txt = cfg.read_text(encoding='utf-8')
+        from proxy_config import canonical_project_id, project_use_proxy
+        return project_use_proxy(canonical_project_id(base))
     except Exception:  # noqa: BLE001
         return False
-    m = re.search(r'ИСПОЛЬЗОВАТЬ_ПРОКСИ\s*=\s*(True|False)', txt)
-    return bool(m and m.group(1) == 'True')
 
 
 def _stamp(msg):

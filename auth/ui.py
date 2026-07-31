@@ -57,11 +57,11 @@ def tab_label(key: str) -> str:
 # Имена совпадают с ключами секретов, которые читают проверки (_secret_pid):
 # значение из БД имеет ПРИОРИТЕТ над st.secrets.
 PROJECT_SETTING_FIELDS = [
+    ("kp_sheet_url", "Ссылка на Google-таблицу КП (Карта присутствия)", "text"),
     ("proxy_url", "Прокси (http://user:pass@host:port)", "text"),
     ("textru_key", "Ключ Text.ru (антиплагиат)", "password"),
     ("arsenkin_token", "Токен Арсенкина", "password"),
     ("pagespeed_api_key", "Ключ PageSpeed API", "password"),
-    ("telegram_bot_token", "Токен Telegram-бота (уведомления)", "password"),
     ("metrika_counter", "Номер счётчика Метрики", "text"),
     ("metrika_oauth", "OAuth-токен Метрики", "password"),
     ("webmaster_oauth", "OAuth-токен Вебмастера", "password"),
@@ -102,6 +102,19 @@ def project_label(key: str) -> str:
         if p["id"] == key:
             return p["name"]
     return key
+
+
+def project_main_url(key: str) -> str:
+    """Главная страница проекта - подставляем в проверку доступа к сайту,
+    чтобы не заставлять вбивать адрес руками."""
+    try:
+        with open(os.path.join("projects", f"{key}.json"), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return ""
+    if data.get("main_url"):
+        return data["main_url"]
+    return f"https://{data['root_domain']}/" if data.get("root_domain") else ""
 
 
 def _app_base_url() -> str:
@@ -590,10 +603,42 @@ def render_account_ui() -> None:
         st.markdown(f"👤 **{user['first_name']} {user['last_name']}**")
         st.caption(f"{user['email']} · {ROLE_LABELS.get(user['role'], user['role'])}")
         if user["projects"]:
-            st.caption("Проекты: " + ", ".join(project_label(p) for p in user["projects"]))
+            # Только аббревиатура («СМУ»), не полное «СМУ - Стальметурал» -
+            # здесь это просто список для ориентировки, длинное имя не нужно.
+            st.caption("Проекты: " + ", ".join(
+                project_label(p).split(" - ")[0].strip() for p in user["projects"]))
+
+        # Прокси - здесь же, как часть настроек аккаунта (не на каждой
+        # странице по отдельности). render_account_ui выполняется РАНЬШЕ
+        # скрипта конкретной страницы (app.py зовёт её до st.navigation().run()),
+        # поэтому в этот момент ещё не известно, какой проект выбран НА
+        # СТРАНИЦЕ - показывать чек-бокс прямо тут означало бы всегда видеть
+        # проект с ПРЕДЫДУЩЕГО захода. Вместо этого оставляем пустое место
+        # (st.empty) и заполняем его позже, когда сама страница вызовет
+        # fill_proxy_slot(pid) с уже известным pid - тогда и позиция (здесь,
+        # над «Выйти»), и содержимое (актуальный проект) верные одновременно.
+        global _proxy_slot
+        _proxy_slot = st.empty()
+
         if st.button("Выйти", key="logout_btn", use_container_width=True):
             logout()
             st.rerun()
+
+
+_proxy_slot = None
+
+
+def fill_proxy_slot(pid: str | None) -> str | None:
+    """Вызывается со страницы прогона, когда её собственный pid уже известен:
+    дорисовывает чек-бокс прокси в место, оставленное render_account_ui (см.
+    её докстринг). Если render_account_ui почему-то не вызывалась в этом
+    запуске (страница открыта отдельно/до входа) - тихо возвращает None,
+    ничего не рисуя."""
+    if _proxy_slot is None:
+        return None
+    import site_access
+    with _proxy_slot.container():
+        return site_access.render_proxy_toggle(pid)
 
 
 def render_manager_team(user: dict) -> None:
@@ -762,6 +807,27 @@ def project_settings_page() -> None:
     pid = st.selectbox("Проект", allowed, format_func=project_label,
                        key="ps_project")
     cur = dict(_c_proj_settings(pid))
+
+    def _effective_hint(name: str, pid: str):
+        """Что реально используется СЕЙЧАС, если поле в БД пустое (секрет/
+        projects.json/переменные окружения). Есть только для полей, у которых
+        есть отдельная функция чтения «эффективного» значения - остальные
+        читаются точечно внутри своих модулей, обобщать не на чем."""
+        try:
+            if name == "proxy_url":
+                from proxy_config import resolve_proxy
+                v = resolve_proxy(pid)
+                if not v:
+                    return None
+                from site_access import _mask
+                return _mask(v)
+            if name == "kp_sheet_url":
+                from kp_sheets import kp_sheet_url
+                return kp_sheet_url(pid) or None
+        except Exception:
+            return None
+        return None
+
     with st.form(key=f"ps_form_{pid}"):
         vals = {}
         for name, label, kind in PROJECT_SETTING_FIELDS:
@@ -775,6 +841,15 @@ def project_settings_page() -> None:
             else:
                 vals[name] = st.text_input(label, value=cur.get(name, ""),
                                            key=f"ps_{pid}_{name}")
+            # Поле в БД пустое - значит, вопреки виду, оно НЕ «ничего не
+            # настроено»: приложение всё ещё работает через секрет/конфиг.
+            # Показываем это явно, иначе (просьба заказчика) непонятно, откуда
+            # данные вообще берутся, если тут пусто.
+            if not cur.get(name):
+                _eff = _effective_hint(name, pid)
+                if _eff:
+                    st.caption(f"↳ сейчас используется (из секретов/конфига), "
+                              f"поле здесь пустое: `{_eff}`")
         if st.form_submit_button("💾 Сохранить ключи"):
             try:
                 db.set_project_settings(pid, vals)
@@ -782,6 +857,18 @@ def project_settings_page() -> None:
                 st.success(f"✅ Настройки проекта «{project_label(pid)}» сохранены")
             except Exception as e:
                 st.error(f"❌ Не удалось сохранить: {e}")
+
+    # Проверка доступа к сайту - здесь, рядом с полем прокси. Раньше этот блок
+    # висел на каждой странице чек-листов; убрали, чтобы настройки прокси были
+    # ровно в одном месте.
+    try:
+        from site_access import render_access_check
+        # cur уже загружен выше - передаём готовый адрес, чтобы блок не ходил
+        # в базу второй раз за той же настройкой.
+        render_access_check(pid, default_url=project_main_url(pid),
+                            known_proxy=cur.get("proxy_url") or None)
+    except Exception as e:  # noqa: BLE001
+        st.caption(f"⚠ Блок проверки доступа не загрузился: {e}")
 
 
 def admin_panel_page() -> None:

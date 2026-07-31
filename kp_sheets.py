@@ -40,10 +40,31 @@ def export_url(url: str) -> str:
             if sid else '')
 
 
+def _db_kp_sheet_url(project: str):
+    """Ссылка на КП-таблицу из БД (личный кабинет, «Настройки проекта»).
+    None, если auth/БД недоступны или pid пуст - тогда просто пропускаем
+    эту ступень (тот же паттерн, что proxy_config._db_proxy)."""
+    if not project:
+        return None
+    try:
+        import auth
+        return auth.project_setting(project, 'kp_sheet_url') or None
+    except Exception:
+        return None
+
+
 def kp_sheet_url(project: str) -> str:
-    """Ссылка на КП-таблицу проекта. Приоритет: окружение kp_sheet_url_<proj>
+    """Ссылка на КП-таблицу проекта. Приоритет: настройки проекта из личного
+    кабинета (БД, страница «Настройки проекта») → окружение kp_sheet_url_<proj>
     (прокидывает страница из секрета) → st.secrets (Streamlit-контекст) → поле
-    kp_sheet_url в projects/<proj>.json. '' если не задана."""
+    kp_sheet_url в projects/<proj>.json. '' если не задана.
+
+    БД - первым приоритетом, тот же порядок, что у остальных настроек проекта
+    (proxy_url и т.п., см. proxy_config.py/_secret_pid в checklist_30min.py) -
+    иначе правка ссылки в «Настройках проекта» молча ничего бы не меняла."""
+    v = _db_kp_sheet_url(project)
+    if v:
+        return str(v).strip()
     env = (os.environ.get(f'kp_sheet_url_{project}') or '').strip()
     if env:
         return env

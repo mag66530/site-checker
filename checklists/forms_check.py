@@ -28,6 +28,9 @@ from urllib.parse import urlparse
 import streamlit as st
 
 ROOT = Path(__file__).parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from checklists import ui_widgets as _ui
 PY = sys.executable
 LOG_FILE = ROOT / 'cache' / 'forms.log'
 PID_FILE = ROOT / 'cache' / 'forms.pid'
@@ -194,20 +197,6 @@ def _project_has_admin(project: str) -> bool:
         m = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(m)
         return bool(getattr(m, 'АДМИН_ЗОНЫ', None))
-    except Exception:
-        return False
-
-
-def _project_uses_proxy(project: str) -> bool:
-    """True, если у проекта в config.py задан ИСПОЛЬЗОВАТЬ_ПРОКСИ (сайт режет
-    прямое подключение, напр. Метпромко) - тогда галочка «Вкл. Прокси» стартует
-    включённой. Остальным проектам флага нет - прокси по умолчанию выключен."""
-    p = ROOT / 'forms_tester' / 'projects' / project / 'config.py'
-    try:
-        spec = importlib.util.spec_from_file_location(f'cfg_prx_{project}', p)
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)
-        return bool(getattr(m, 'ИСПОЛЬЗОВАТЬ_ПРОКСИ', False))
     except Exception:
         return False
 
@@ -495,10 +484,9 @@ def _tpl_apply(tpl: dict):
 
     # Режим «Основные домены»: какие СТРАНЫ отмечены.
     _countries = tpl.get('countries') or {}
-    for c in _mains:
-        if c['country'] in _countries:
-            st.session_state[f'fc_main_{pid_key}_{c["country"]}'] = \
-                bool(_countries[c['country']])
+    if _countries:
+        st.session_state[f'fc_main_ms_{pid_key}'] = [
+            c['city'] for c in _mains if bool(_countries.get(c['country'], True))]
 
     # Режим «Выбрать города»: какие ГОРОДА отмечены. Ставим init-флаг, чтобы дефолт
     # (основные домены каждой страны) не перетёр наш выбор. Применяем ТОЛЬКО если в
@@ -506,14 +494,12 @@ def _tpl_apply(tpl: dict):
     # домены», где список городов пустой) при переключении на «Выбрать города»
     # показался бы пустой список вместо привычного дефолта.
     _city_cb = tpl.get('city_cb')
-    if _city_cb and any(_city_cb.values()):
-        for nm in _all_names:
-            st.session_state[f'fc_cb_{pid_key}_{nm}'] = bool(_city_cb.get(nm, False))
+    if _city_cb and any(_city_cb.values()):      # старый формат шаблона: карта город→bool
+        st.session_state[f'fc_ms_{pid_key}'] = [nm for nm in _all_names if _city_cb.get(nm)]
         st.session_state[f'fc_init_osn_{pid_key}'] = True
-    elif tpl.get('cities'):                  # старый формат шаблона: только список
+    elif tpl.get('cities'):                       # список выбранных городов
         _cset = {c for c in (tpl.get('cities') or []) if c in _all_names}
-        for nm in _all_names:
-            st.session_state[f'fc_cb_{pid_key}_{nm}'] = (nm in _cset)
+        st.session_state[f'fc_ms_{pid_key}'] = [nm for nm in _all_names if nm in _cset]
         st.session_state[f'fc_init_osn_{pid_key}'] = True
 
     # Режим «Случайные города»: числа по странам + общее.
@@ -558,10 +544,9 @@ def _tpl_collect() -> dict:
         'mode': st.session_state.get(f'fc_mode_{pid_key}', _MODE_OPTIONS[0]),
         'forms_mode': st.session_state.get(f'fc_forms_mode_{pid_key}',
                                            _FORMS_MODE_OPTIONS[0]),
-        'countries': {c['country']: bool(st.session_state.get(
-            f'fc_main_{pid_key}_{c["country"]}', True)) for c in _mains},
-        'city_cb': {nm: bool(st.session_state.get(f'fc_cb_{pid_key}_{nm}', False))
-                    for nm in _all_names},
+        'countries': {c['country']: (c['city'] in st.session_state.get(
+            f'fc_main_ms_{pid_key}', [c2['city'] for c2 in _mains])) for c in _mains},
+        'cities': list(st.session_state.get(f'fc_ms_{pid_key}', [])),
         'random': {
             'total': int(st.session_state.get(f'fc_rnd_total_{pid_key}', 0) or 0),
             'per': {c: int(st.session_state.get(f'fc_rnd_{pid_key}_{c}', 0) or 0)
@@ -582,14 +567,11 @@ def _tpl_reset():
                 f'fc_rnd_total_{pid_key}', f'fc_clear_{pid_key}',
                 f'fc_fileprobe_{pid_key}', f'fc_xss_{pid_key}',
                 f'fc_srvval_{pid_key}', f'fc_ratelimit_{pid_key}',
-                f'fc_mail_mode_{pid_key}', f'fc_admin_on_{pid_key}']:
+                f'fc_mail_mode_{pid_key}', f'fc_admin_on_{pid_key}',
+                f'fc_ms_{pid_key}', f'fc_main_ms_{pid_key}']:
         st.session_state.pop(_kk, None)
-    for c in _mains:
-        st.session_state.pop(f'fc_main_{pid_key}_{c["country"]}', None)
     for c in _groups:
         st.session_state.pop(f'fc_rnd_{pid_key}_{c}', None)
-    for nm in _all_names:
-        st.session_state.pop(f'fc_cb_{pid_key}_{nm}', None)
     for nm in _all_form_names:
         st.session_state.pop(f'ff_cb_{pid_key}_{nm}', None)
 
@@ -749,36 +731,30 @@ if _cities:
     )
 
     if _mode == 'Основные домены (по странам)':
-        # Одна строка на страну: галочка «Страна - домен». Галочки уже стоят.
-        def _mk(country):
-            return f'fc_main_{pid_key}_{country}'
-        for c in _mains:                       # дефолт: все страны включены
-            if _mk(c['country']) not in st.session_state:
-                st.session_state[_mk(c['country'])] = True
+        # Раскрывающийся список доменов (чипы) - один пункт на страну.
+        _main_ms_key = f'fc_main_ms_{pid_key}'
+        _main_names = [c['city'] for c in _mains]
+        if _main_ms_key not in st.session_state:        # дефолт: все страны включены
+            st.session_state[_main_ms_key] = list(_main_names)
 
-        # Список доменов СЛЕВА, кнопка-переключатель СПРАВА (в той же строке -
-        # без пустого пространства над списком). «Снять все», если всё отмечено,
-        # иначе «Выбрать все».
-        _all_on = all(st.session_state.get(_mk(c['country']), True) for c in _mains)
+        _main_label = {c['city']: f"{_COUNTRY_FLAG.get(c['country'], '🏳')} "
+                                  f"{c['country']} - {_host(c['url'])}"
+                      for c in _mains}
+
+        _ui.multiselect_grows_css()
+        _all_on = len(st.session_state.get(_main_ms_key, [])) == len(_main_names)
         _left, _right = st.columns([4.2, 1.3], vertical_alignment='top')
         with _right:
             if st.button('Снять все' if _all_on else 'Выбрать все',
                          use_container_width=True, key=f'fc_main_toggle_{pid_key}'):
-                for c in _mains:
-                    st.session_state[_mk(c['country'])] = not _all_on
+                st.session_state[_main_ms_key] = [] if _all_on else list(_main_names)
                 st.rerun()
-        _sel = []
         with _left:
-            for c in _mains:
-                _lbl = (f"{_COUNTRY_FLAG.get(c['country'], '🏳')} **{c['country']}** - "
-                        f"`{_host(c['url'])}`")
-                _hlp = f"Главный сайт страны, город: {c['city']}."
-                if c.get('mail'):
-                    _hlp += f" Заявка должна прийти на {c['mail']}."
-                if st.checkbox(_lbl, key=_mk(c['country']), help=_hlp):
-                    _sel.append(c['city'])
-        _chosen_cities = _sel
-        st.caption(f'Выбрано доменов: **{len(_sel)} / {len(_mains)}**.')
+            _chosen_cities = st.multiselect(
+                'Домены', options=_main_names, format_func=lambda c: _main_label.get(c, c),
+                key=_main_ms_key, placeholder='Выберите домены…',
+                label_visibility='collapsed')
+        st.caption(f'Выбрано доменов: **{len(_chosen_cities)} / {len(_main_names)}**.')
 
     elif _mode == 'Случайные города':
         # Один экран: сверху общее число (само распределяется по странам),
@@ -869,42 +845,33 @@ if _cities:
         st.caption('Числа запоминаются для этого проекта и подставятся при '
                    'следующем заходе.')
 
-    else:  # Выбрать города - СЕТКА ЧЕКБОКСОВ по странам
+    else:  # Выбрать города - раскрывающийся список (чипы), не сетка чекбоксов
         _main_cities = {c['city'] for c in _mains}
-
-        def _ck(city):
-            return f'fc_cb_{pid_key}_{city}'
+        _ms_key = f'fc_ms_{pid_key}'
         # один раз ставим дефолт: отмечены ОСНОВНЫЕ домены каждой страны
         # (Москва, aviastal.kz, Минск…), остальные города добираются вручную.
         if not st.session_state.get(f'fc_init_osn_{pid_key}'):
-            for nm in _all_names:
-                st.session_state[_ck(nm)] = (nm in _main_cities)
+            st.session_state[_ms_key] = [nm for nm in _all_names if nm in _main_cities]
             st.session_state[f'fc_init_osn_{pid_key}'] = True
 
+        # Подпись с флагом+страной для читаемости в списке - реальное
+        # значение (что попадает в _chosen_cities) остаётся голым именем.
+        _city_label = {nm: f"{_COUNTRY_FLAG.get(_country, '🏳')} {nm}"
+                      for _country, _names in _groups.items() for nm in _names}
+
+        _ui.multiselect_grows_css()
         _b1, _b2, _ = st.columns([1, 1, 4])
-        if _b1.button('Выбрать все', use_container_width=True):
-            for nm in _all_names:
-                st.session_state[_ck(nm)] = True
+        if _b1.button('Выбрать все', use_container_width=True, key=f'fc_all_{pid_key}'):
+            st.session_state[_ms_key] = list(_all_names)
             st.rerun()
-        if _b2.button('Снять все', use_container_width=True):
-            for nm in _all_names:
-                st.session_state[_ck(nm)] = False
+        if _b2.button('Снять все', use_container_width=True, key=f'fc_none_{pid_key}'):
+            st.session_state[_ms_key] = []
             st.rerun()
 
-        _sel = []
-        for _country, _names in _groups.items():
-            _dom = _host(_main_by_country.get(_country, {}).get('url', ''))
-            st.markdown(
-                f"**{_COUNTRY_FLAG.get(_country, '🏳')} {_country}**  ·  {len(_names)} "
-                f"<span title='Основной домен: {_dom}' "
-                f"style='color:#8A8782;cursor:help;font-size:.85em'>?</span>",
-                unsafe_allow_html=True)
-            _cols = st.columns(6)
-            for _i, _nm in enumerate(_names):
-                if _cols[_i % 6].checkbox(_nm, key=_ck(_nm)):
-                    _sel.append(_nm)
-        _chosen_cities = _sel
-        st.caption(f'Выбрано: **{len(_sel)} / {len(_all_names)}** городов.')
+        _chosen_cities = st.multiselect(
+            'Города', options=_all_names, format_func=lambda c: _city_label.get(c, c),
+            key=_ms_key, placeholder='Выберите города…', label_visibility='collapsed')
+        st.caption(f'Выбрано: **{len(_chosen_cities)} / {len(_all_names)}** городов.')
 
     st.divider()
 
@@ -1113,8 +1080,11 @@ rate_limit_probe = st.checkbox(
 _alive = _pid_alive(_read_pid())
 
 
-@st.cache_resource(show_spinner=False)
 def _ensure_browser_forms():
+    # Без st.cache_resource: ensure_browser() уже кэширует УСПЕХ сама (модуль
+    # browser_setup.py) - двойное кэширование поверх нельзя (Streamlit кэшировал
+    # бы и НЕУДАЧУ навсегда, до перезапуска приложения, даже если браузер уже
+    # работает).
     import browser_setup
     return browser_setup.ensure_browser()
 
@@ -1131,16 +1101,13 @@ if _forms_none:
 if _cities_none:
     st.warning('Не выбрано ни одного домена/города - отметь хотя бы один, чтобы запустить.')
 
-# Прокси + проверка доступности сайта (над кнопкой запуска)
-_forms_proxy = None
-try:
-    from site_access import render_proxy_access
-    _forms_proxy = render_proxy_access(
-        f'forms_{pid_key}',
-        default_url=f"https://{proj['domain']}/", pid=pid_key,
-        default_on=_project_uses_proxy(pid_key))
-except Exception as _e_pa:
-    st.caption(f'⚠ Блок прокси/доступа не загрузился: {_e_pa}')
+# Прокси - чек-бокс дорисовывается в место, оставленное render_account_ui
+# в сайдбаре (см. auth.fill_proxy_slot). pid_key - id ЭТОЙ страницы (напр.
+# 'metpromko'), а личный кабинет и projects/*.json знают проект как 'mpk' -
+# передаём канонический id, иначе настройки искались бы под чужим именем.
+import auth
+from proxy_config import canonical_project_id
+_forms_proxy = auth.fill_proxy_slot(canonical_project_id(pid_key))
 
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:

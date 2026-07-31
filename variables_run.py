@@ -7,7 +7,13 @@ variables_run.py - фоновый прогон «Проверки КП» (пун
   • телефоны (поиск/реклама/общий) - номер на сайте входит в набор КП города;
   • почта, адрес, Telegram, WhatsApp - совпадают с КП.
 Результат пишется в cache/variables/<proj>/variables.xlsx (лист «Проверка КП» +
-лист «Расхождения»). Прогресс идёт в stdout, откуда его читает вкладка.
+«Расхождения»; колонки карт - Яндекс.Карты/2ГИС/Google, если включали - на том
+же листе «Проверка КП»). Расхождения видно прямо в ячейках: цвет + комментарий
+при наведении. Прогресс идёт в stdout, откуда его читает вкладка.
+
+Сайт (HTTP, потоки) и карты (Playwright/браузер) друг другу не мешают -
+выполняются ПАРАЛЛЕЛЬНО (сайт - в фоновом потоке, карты - в основном через
+asyncio), а не по очереди.
 
 Запуск:
     python variables_run.py --project smu
@@ -15,6 +21,7 @@ variables_run.py - фоновый прогон «Проверки КП» (пун
 Прокси (для проектов, блокирующих зарубежный IP) - через env proxy_url.
 """
 import argparse
+import asyncio
 import json
 import os
 import re
@@ -26,6 +33,8 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).parent
 WORK_ROOT = ROOT / 'cache' / 'variables'
+
+from proxy_config import project_use_proxy, resolve_proxy
 
 PROJECT_NAMES = {
     'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром',
@@ -46,14 +55,6 @@ _COLOR = {"ok": "1E8E3E", "ok_set": "1E8E3E", "bug": "C62828",
 
 def _stamp(msg):
     print(f'[{datetime.now().strftime("%H:%M:%S")}] {msg}', flush=True)
-
-
-def _use_proxy(project: str) -> bool:
-    p = ROOT / 'projects' / f'{project}.json'
-    try:
-        return bool(json.loads(p.read_text(encoding='utf-8')).get('use_proxy'))
-    except Exception:
-        return False
 
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -588,96 +589,78 @@ def _проверить_живую_подмену(domains, результаты,
                            dial=t.get('dial', '7'))
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--project', required=True, choices=list(PROJECT_NAMES))
-    ap.add_argument('--cities', default='', help='города через запятую (пусто = все)')
-    a = ap.parse_args()
+_MAP_PHASES = [
+    ('yandex', 'yandex_map_url', 'Яндекс.Карты'),
+    ('2gis', 'twogis_map_url', '2ГИС'),
+    ('google', 'google_map_url', 'Google'),
+]
 
-    sys.path.insert(0, str(ROOT))
+
+async def _проверить_карты(domains, proxy_url, do_yandex, do_2gis, do_google=False, log=None):
+    """Карточки Яндекс.Карт/2ГИС/Google по ссылкам из КП → список MapCheckResult.
+    Один общий браузерный контекст на весь прогон (как review_priority.py) -
+    открывать браузер заново на каждую карточку в разы дороже. Источники
+    гоняются раздельными фазами (сперва весь Яндекс, потом 2ГИС, потом
+    Google) - тот же порядок, что в review_priority._fetch_all, для
+    одинаковой нагрузки.
+
+    log - пишет «[i/N]» после КАЖДОЙ карточки (не только «начали»/«готово»
+    один раз на всю фазу): без этого лог на 15-30 минут молчал совсем, и со
+    стороны прогон выглядел зависшим, хотя реально работал - страница как раз
+    парсит из лога последнюю строку вида [i/N] для прогресс-бара."""
+    from playwright.async_api import async_playwright
+    import yandex_map_check
+    import twogis_map_check
+    import google_map_check
+    import maps_compare
+
+    _AFETCH = {'yandex': yandex_map_check.afetch, '2gis': twogis_map_check.afetch,
+              'google': google_map_check.afetch}
+    _DO = {'yandex': do_yandex, '2gis': do_2gis, 'google': do_google}
+
+    log = log or (lambda *a, **k: None)
+    UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/148 Safari/537.36'
+    ctx_kw = {'user_agent': UA, 'locale': 'ru-RU'}
+    if proxy_url:
+        ctx_kw['proxy'] = {'server': proxy_url}
+    out = []
+    total = len(domains) * sum(1 for src, _, _ in _MAP_PHASES if _DO[src])
+    done = 0
+
+    async def _run_phase(source, url_attr, label):
+        nonlocal done
+        sem = asyncio.Semaphore(4)
+        afetch = _AFETCH[source]
+
+        async def _one(row):
+            nonlocal done
+            card = await afetch(ctx, sem, getattr(row, url_attr))
+            done += 1
+            log(f'[{done}/{total}] Карты: {row.city} - {label}')
+            return maps_compare.compare(source, row.city, getattr(row, url_attr), card, row)
+
+        return await asyncio.gather(*[_one(row) for _, row in domains])
+
+    async with async_playwright() as pw:
+        br = await pw.chromium.launch(headless=True)
+        try:
+            ctx = await br.new_context(**ctx_kw)
+            for source, url_attr, label in _MAP_PHASES:
+                if _DO[source]:
+                    out += await _run_phase(source, url_attr, label)
+        finally:
+            await br.close()
+    return out
+
+
+def _check_site(a, domains, proxy) -> list:
+    """Сверка сайта с КП (пункт 1.4) - скачивает главные (и «Контакты» при
+    нужде) поддоменов, сравнивает с КП. Отдельная функция - раньше это была
+    ветка внутри main(), выполнявшаяся ВСЕГДА; теперь сайт можно пропустить
+    (--check-site/--no-check-site), например если нужны только карты, не
+    скачивая ни одной страницы сайта."""
     import kp as kpmod
     from region_checker import build_region_context
-
-    # Источник КП: Google-таблица или снапшот CSV. Логируем ЯВНО - иначе не
-    # видно, подтянулись ли правки из таблицы (частая причина «поменял данные в
-    # Google, а проверка их не заметила» = обновление молча не прошло).
-    _kp_url = ''
-    try:
-        import kp_sheets as _kps
-        _kp_url = _kps.kp_sheet_url(a.project)
-    except Exception:
-        _kps = None
-    if _kp_url and _kps:
-        try:
-            _ok, _msg = _kps.refresh_project(a.project, log=lambda *x, **k: None)
-            _stamp('КП ← Google-таблица: '
-                   + ('обновлено из таблицы' if _ok
-                      else f'НЕ удалось ({_msg}) - беру прежний снапшот CSV'))
-        except Exception as _e:
-            _stamp(f'КП ← Google: ошибка обновления ({_e}) - беру снапшот CSV')
-    else:
-        _stamp(f'⚠️ КП: ссылка на Google-таблицу НЕ задана (секрет '
-               f'kp_sheet_url_{a.project}) - беру СНАПШОТ '
-               f'catalogs/{a.project}-kp.csv. Правки в Google так НЕ '
-               f'подхватятся - обнови снапшот или задай секрет!')
-
-    # Города КП списком - по одному городу-владельцу на сайт. У СНГ-стран все
-    # города делят один сайт (stalmetural.kz/.by/.uz - поддоменов нет): в отчёт
-    # берём только город со своей ссылкой, безссылочные города-спутники убираем
-    # (иначе сверялись бы с чужим городским сайтом и давали ложные ошибки).
-    kp_rows = kpmod.load_kp_rows(a.project)   # уже обновили выше
-    if not kp_rows:
-        _stamp(f'✗ Нет базы КП catalogs/{a.project}-kp.csv')
-        return 2
-    try:
-        _csvp = ROOT / 'catalogs' / f'{a.project}-kp.csv'
-        _mt = (datetime.fromtimestamp(_csvp.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
-               if _csvp.exists() else '–')
-    except Exception:
-        _mt = '–'
-    _stamp(f'КП загружена: {len(kp_rows)} городов, снапшот обновлён {_mt}')
-
-    wanted = {c.strip().lower() for c in a.cities.split(',') if c.strip()}
-    domains = [(row.domain, row) for row in kp_rows
-               if not wanted or (row.city or '').lower() in wanted]
-    # Порядок как в КП: страны в порядке появления в КП, но Россия первой;
-    # внутри страны сохраняем исходный порядок КП (сортировка стабильная).
-    _country_seq = []
-    for _row in kp_rows:
-        _c = (_row.country or '').strip()
-        if _c and _c not in _country_seq:
-            _country_seq.append(_c)
-
-    def _crank(row):
-        c = (row.country or '').strip()
-        if c.lower() in ('россия', 'рф'):
-            return -1
-        return _country_seq.index(c) if c in _country_seq else 10 ** 6
-    domains.sort(key=lambda x: _crank(x[1]))
-
-    # Прокси используем ТОЛЬКО для проектов с use_proxy=true (напр. ИМП, который
-    # блокирует зарубежный IP). СМУ/МПЭ (use_proxy=false) качаем напрямую - им
-    # прокси не нужен, а сломанный proxy_url иначе давал бы им ложный 407.
-    proxy = (os.environ.get('proxy_url') or '').strip() or None
-    if _use_proxy(a.project):
-        if not proxy:
-            _stamp('⚠️ У проекта use_proxy=true, а proxy_url не задан - '
-                   'зарубежный IP может блокироваться (будут ошибки загрузки).')
-    else:
-        if proxy:
-            _stamp(f'Проект {a.project}: use_proxy=false - страницы качаем '
-                   'напрямую, без прокси.')
-        proxy = None
-    # Диагностика прокси (без вывода самих логина/пароля).
-    _pp = _proxy_parts(proxy)
-    if _pp:
-        _ph, _pport, _phdrs = _pp
-        _stamp(f'Прокси: {_ph}:{_pport}; авторизация в proxy_url: '
-               + ('есть' if _phdrs.get('Proxy-Authorization')
-                  else 'НЕТ - в ссылке нет логина:пароля (будет 407)'))
-    elif proxy:
-        _stamp('⚠️ proxy_url задан, но не разобрался '
-               '(ожидается http://логин:пароль@хост:порт).')
 
     # Регион-контекст строим из dict-КП (по одному городу на домен) - ему нужен
     # набор городов/телефонов для сверки «чужой город на странице».
@@ -845,11 +828,182 @@ def main() -> int:
         _проверить_живую_подмену(domains, результаты, html_map, proxy, _stamp)
     except Exception as _e:  # noqa: BLE001
         _stamp(f'⚠ Живая проверка подмены пропущена ({_e}).')
+    return результаты
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--project', required=True, choices=list(PROJECT_NAMES))
+    ap.add_argument('--cities', default='', help='города через запятую (пусто = все)')
+    # Сайт (сверка с КП) - раньше выполнялся ВСЕГДА, без вариантов. Теперь
+    # можно снять галочку и проверять ТОЛЬКО карты - не тратить время на
+    # скачивание страниц сайта, если карты и есть весь интерес прогона.
+    # BooleanOptionalAction сам даёт пару --check-site/--no-check-site.
+    ap.add_argument('--check-site', action=argparse.BooleanOptionalAction, default=True)
+    # Карты - отдельный, необязательный шаг ПОСЛЕ основной сверки сайта:
+    # открывает карточку организации в браузере (Яндекс.Карты/2ГИС/Google) и
+    # сверяет телефон/адрес/сайт с КП (см. yandex_map_check.py/
+    # twogis_map_check.py/google_map_check.py). Выключено по умолчанию - это
+    # браузерная проверка, дороже обычной сверки по HTTP, включают по запросу
+    # с той же страницы «Проверка КП».
+    ap.add_argument('--check-yandex-maps', action='store_true')
+    ap.add_argument('--check-2gis-maps', action='store_true')
+    ap.add_argument('--check-google-maps', action='store_true')
+    a = ap.parse_args()
+
+    sys.path.insert(0, str(ROOT))
+    import kp as kpmod
+    from region_checker import build_region_context
+
+    # Источник КП: Google-таблица или снапшот CSV. Логируем ЯВНО - иначе не
+    # видно, подтянулись ли правки из таблицы (частая причина «поменял данные в
+    # Google, а проверка их не заметила» = обновление молча не прошло).
+    _kp_url = ''
+    try:
+        import kp_sheets as _kps
+        _kp_url = _kps.kp_sheet_url(a.project)
+    except Exception:
+        _kps = None
+    if _kp_url and _kps:
+        try:
+            _ok, _msg = _kps.refresh_project(a.project, log=lambda *x, **k: None)
+            _stamp('КП ← Google-таблица: '
+                   + ('обновлено из таблицы' if _ok
+                      else f'НЕ удалось ({_msg}) - беру прежний снапшот CSV'))
+        except Exception as _e:
+            _stamp(f'КП ← Google: ошибка обновления ({_e}) - беру снапшот CSV')
+    else:
+        _stamp(f'⚠️ КП: ссылка на Google-таблицу НЕ задана (секрет '
+               f'kp_sheet_url_{a.project}) - беру СНАПШОТ '
+               f'catalogs/{a.project}-kp.csv. Правки в Google так НЕ '
+               f'подхватятся - обнови снапшот или задай секрет!')
+
+    # Города КП списком - по одному городу-владельцу на сайт. У СНГ-стран все
+    # города делят один сайт (stalmetural.kz/.by/.uz - поддоменов нет): в отчёт
+    # берём только город со своей ссылкой, безссылочные города-спутники убираем
+    # (иначе сверялись бы с чужим городским сайтом и давали ложные ошибки).
+    kp_rows = kpmod.load_kp_rows(a.project)   # уже обновили выше
+    if not kp_rows:
+        _stamp(f'✗ Нет базы КП catalogs/{a.project}-kp.csv')
+        return 2
+    try:
+        _csvp = ROOT / 'catalogs' / f'{a.project}-kp.csv'
+        _mt = (datetime.fromtimestamp(_csvp.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
+               if _csvp.exists() else '–')
+    except Exception:
+        _mt = '–'
+    _stamp(f'КП загружена: {len(kp_rows)} городов, снапшот обновлён {_mt}')
+
+    wanted = {c.strip().lower() for c in a.cities.split(',') if c.strip()}
+    domains = [(row.domain, row) for row in kp_rows
+               if not wanted or (row.city or '').lower() in wanted]
+    # Порядок как в КП: страны в порядке появления в КП, но Россия первой;
+    # внутри страны сохраняем исходный порядок КП (сортировка стабильная).
+    _country_seq = []
+    for _row in kp_rows:
+        _c = (_row.country or '').strip()
+        if _c and _c not in _country_seq:
+            _country_seq.append(_c)
+
+    def _crank(row):
+        c = (row.country or '').strip()
+        if c.lower() in ('россия', 'рф'):
+            return -1
+        return _country_seq.index(c) if c in _country_seq else 10 ** 6
+    domains.sort(key=lambda x: _crank(x[1]))
+
+    # Прокси используем ТОЛЬКО для проектов с use_proxy=true (напр. ИМП, который
+    # блокирует зарубежный IP). СМУ/МПЭ (use_proxy=false) качаем напрямую - им
+    # прокси не нужен, а сломанный proxy_url иначе давал бы им ложный 407.
+    # Адрес - env proxy_url (страница «Проверка КП» уже кладёт сюда эффективный
+    # прокси из личного кабинета/секретов перед запуском); если запущено
+    # напрямую из CLI без env - падаем на единый механизм (proxy_config.py: БД
+    # личного кабинета → proxy_url_<pid> → proxy_url → HTTP_PROXY).
+    proxy = (os.environ.get('proxy_url') or '').strip() or None
+    if project_use_proxy(a.project):
+        if not proxy:
+            proxy = resolve_proxy(a.project)
+        if not proxy:
+            _stamp('⚠️ У проекта use_proxy=true, а прокси не задан (ни в env, ни в '
+                   'личном кабинете/секретах) - зарубежный IP может блокироваться '
+                   '(будут ошибки загрузки).')
+    else:
+        if proxy:
+            _stamp(f'Проект {a.project}: use_proxy=false - страницы качаем '
+                   'напрямую, без прокси.')
+        proxy = None
+    # Диагностика прокси (без вывода самих логина/пароля).
+    _pp = _proxy_parts(proxy)
+    if _pp:
+        _ph, _pport, _phdrs = _pp
+        _stamp(f'Прокси: {_ph}:{_pport}; авторизация в proxy_url: '
+               + ('есть' if _phdrs.get('Proxy-Authorization')
+                  else 'НЕТ - в ссылке нет логина:пароля (будет 407)'))
+    elif proxy:
+        _stamp('⚠️ proxy_url задан, но не разобрался '
+               '(ожидается http://логин:пароль@хост:порт).')
+
+    # _per_city_mode нужен и здесь (ниже, для _записать_xlsx), и внутри
+    # _check_site - дешёвая функция (просмотр статичного KP_LAYOUT), вызываем
+    # в обоих местах, не тащим через возврат ради одного bool.
+    _per_city_mode = _per_city(a.project)
+
+    # Сайт (потоки/HTTP) и карты (Playwright/браузер) друг другу не мешают -
+    # запускаем сайт в фоновом потоке и параллельно гоняем карты в основном
+    # (там свой asyncio-цикл для Playwright). Раньше шло строго
+    # последовательно - на прогоне с картами это удваивало время просто так.
+    _site_pool = None
+    _site_future = None
+    if a.check_site:
+        from concurrent.futures import ThreadPoolExecutor
+        _site_pool = ThreadPoolExecutor(max_workers=1)
+        _site_future = _site_pool.submit(_check_site, a, domains, proxy)
+    else:
+        _stamp('Сайт (сверка с КП) пропущен - галочка снята, страницы сайта '
+               'не скачивались вовсе.')
+
+    # Карты (Яндекс/2ГИС/Google) - отдельный необязательный шаг: открывает
+    # карточку организации в браузере, сверяет телефон/адрес/сайт с той же
+    # строкой КП. Не мешает основному отчёту, если сломается - карты просто
+    # не появятся (проверка сайта уже готова и сохранится в любом случае).
+    map_results = []
+    if a.check_yandex_maps or a.check_2gis_maps or a.check_google_maps:
+        _what = ' + '.join(filter(None, [
+            'Яндекс.Карты' if a.check_yandex_maps else '',
+            '2ГИС' if a.check_2gis_maps else '',
+            'Google' if a.check_google_maps else '']))
+        _stamp(f'Сверка с картами ({_what})'
+               + (' - параллельно с сайтом' if _site_future else '') + ' …')
+        try:
+            # Прокси проекта существует ТОЛЬКО чтобы достать до ЕГО СОБСТВЕННОГО
+            # сайта (use_proxy=true у проектов, блокирующих зарубежный IP) - к
+            # Яндекс.Картам/2ГИС/Google эта причина не относится, они доступны
+            # напрямую. Раньше прокси тут тоже подставлялся - если сам прокси
+            # медленный/недоступен, карты падали таймаутом (Page.goto 45000ms)
+            # хотя карта грузилась бы нормально без него.
+            map_results = asyncio.run(_проверить_карты(
+                domains, None, a.check_yandex_maps, a.check_2gis_maps,
+                a.check_google_maps, log=_stamp))
+            _n_map_err = sum(1 for r in map_results if r.is_error)
+            _n_map_warn = sum(1 for r in map_results if r.is_warning)
+            _stamp(f'Карты: проверено {len(map_results)} карточек - '
+                   f'{_n_map_err} расхождений, {_n_map_warn} недоступно.')
+        except Exception as _e:  # noqa: BLE001
+            _stamp(f'⚠ Проверка карт не удалась ({_e}).')
+
+    # Дожидаемся сайта (если проверяли) - к этому моменту карты (если были)
+    # уже отработали параллельно, ждать почти нечего.
+    if _site_future is not None:
+        результаты = _site_future.result()
+        _site_pool.shutdown()
+    else:
+        результаты = []
 
     work = WORK_ROOT / a.project
     work.mkdir(parents=True, exist_ok=True)
     xlsx = work / 'variables.xlsx'
-    _записать_xlsx(xlsx, PROJECT_NAMES[a.project], результаты, per_city=_per_city_mode)
+    _записать_xlsx(xlsx, PROJECT_NAMES[a.project], результаты,
+                   per_city=_per_city_mode, map_results=map_results)
     _stamp(f'Отчёт сохранён: {xlsx}')
     # Telegram: отчёт КП получателям проекта (креды - в окружении, их проставляет
     # страница из секретов). Подпись унифицирована с формами и целями. Без
@@ -896,6 +1050,11 @@ _ЛЕГЕНДА = [
     ("✗ по ВСЕЙ строке – сайт этого города не загрузился (HTTP 500 / обрыв / "
      "таймаут). В примечании ячейки – причина. Это НЕ ошибка КП, а недоступность "
      "сайта: перезапусти позже или проверь, открывается ли сайт в браузере.", False),
+    ("", False),
+    ("Колонки «Карты» (если включали сверку с Яндекс.Картами/2ГИС)", True),
+    ("Тот же принцип: ✓/✗/⚠/– в колонке на источник. Пустая ячейка – источник в "
+     "этом прогоне не проверяли (галочка была снята). Расхождения по картам - "
+     "тоже в общем списке на листе «Расхождения».", False),
 ]
 
 
@@ -908,21 +1067,265 @@ def _написать_легенду(ws) -> None:
         cell.alignment = Alignment(wrap_text=True, vertical="top")
 
 
-def _записать_xlsx(path: Path, proj_name: str, результаты: list,
-                   per_city: bool = False) -> None:
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
+_MAP_SOURCES = [("yandex", "Яндекс.Карты"), ("google", "Google"), ("2gis", "2ГИС")]
 
+
+def _записать_xlsx(path: Path, proj_name: str, результаты: list,
+                   per_city: bool = False, map_results: list | None = None) -> None:
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Side
+
+    map_results = map_results or []
     wb = Workbook()
     # Лист-подсказка «Как читать результат» - первым (перед данными). Просьба заказчика.
     _написать_легенду(wb.active)
     wb.active.title = "Как читать результат"
-    ws = wb.create_sheet("Проверка КП")
-    from openpyxl.styles import Border, Side
     hdr_fill = PatternFill("solid", fgColor="EEF3FB")
     # Единый НЕЯРКИЙ цвет границ по всему отчёту (просьба заказчика: везде
     # одинаковый и не сильно яркий).
     _thin = Side(style="thin", color="C9CFDB")
+
+    # Лист «Проверка КП» - только если вообще есть что показать (сайт и/или
+    # карты). Пустой лист с одной шапкой не нужен: если ни то ни другое не
+    # проверяли, отчёту нечего показать.
+    расхождения: list = []
+    if результаты or map_results:
+        расхождения, _meta = _записать_проверку_кп_лист(
+            wb, hdr_fill, _thin, результаты, per_city, map_results)
+        _написать_расхождения_лист(wb, hdr_fill, _thin, расхождения)
+        _записать_дашборд_лист(wb, hdr_fill, _thin, _meta, расхождения)
+
+    wb.active = 0   # открывать сразу на «Дашборд» (если есть) / на легенду
+    wb.save(path)
+
+
+def _нарисовать_barchart_png(title: str, items: list[tuple[str, int]]) -> "io.BytesIO":
+    """Горизонтальный bar-chart КАРТИНКОЙ (Pillow), не «родным» графиком Excel.
+
+    «Родной» openpyxl-график (BarChart) на локалке рендерился нормально, а
+    на проде - криво (без подписей, одна сплошная полоса) на ОДНОМ И ТОМ ЖЕ
+    файле в одном и том же Excel - т.е. дело не в коде отчёта, а в разнице
+    окружений при генерации (скорее всего разные версии openpyxl: локально
+    и на облаке ставятся из одного requirements.txt с '>=', могут разойтись).
+    Три попытки почистить это через openpyxl (кеш значений, ориентация,
+    ось) не дали результата на проде - картинка рендерится одинаковыми
+    байтами везде, независимо от того, чем и где она создана."""
+    import io
+    import os
+    from PIL import Image, ImageDraw, ImageFont
+
+    # Шрифт - СВОЙ (fonts/DejaVuSans*.ttf в репозитории), не системный: на
+    # проде (Linux) ни arial.ttf, ни системного шрифта с кириллицей у Pillow
+    # нет вовсе - без явного файла шрифта Pillow откатывается на свой
+    # встроенный битмап-шрифт, а он кириллицу не знает и рисует крестики
+    # вместо букв. DejaVu Sans - кириллицу знает, лицензия свободная,
+    # позаимствован из matplotlib (см. fonts/LICENSE_DEJAVU.txt).
+    _FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+
+    def _font(bold, size):
+        name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+        try:
+            return ImageFont.truetype(os.path.join(_FONTS_DIR, name), size)
+        except Exception:
+            pass
+        try:
+            return ImageFont.load_default(size=size)
+        except TypeError:
+            return ImageFont.load_default()
+
+    SCALE = 2   # рисуем в 2x и не даунскейлим - резче в Excel при масштабе
+    font_title = _font(True, 15 * SCALE)
+    font = _font(False, 13 * SCALE)
+
+    row_h = 30 * SCALE
+    top_pad, bottom_pad = 44 * SCALE, 14 * SCALE
+    label_w = 150 * SCALE
+    bar_area_w = 300 * SCALE
+    val_w = 34 * SCALE
+    W = label_w + bar_area_w + val_w + 20 * SCALE
+    H = top_pad + row_h * max(len(items), 1) + bottom_pad
+
+    img = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(img)
+    d.text((14 * SCALE, 12 * SCALE), title, font=font_title, fill="#000000")
+
+    _max = max((v for _, v in items), default=0) or 1
+    y = top_pad
+    for label, value in items:
+        _tb = d.textbbox((0, 0), label, font=font)
+        _tw = _tb[2] - _tb[0]
+        d.text((label_w - _tw - 10 * SCALE, y + 6 * SCALE), label, font=font, fill="#333333")
+        bar_len = int(bar_area_w * value / _max) if value else 0
+        x0 = label_w
+        x1 = x0 + bar_len
+        color = "#C62828" if value else "#E0E0E0"
+        if bar_len > 0:
+            d.rectangle([x0, y + 4 * SCALE, x1, y + row_h - 10 * SCALE], fill=color)
+        d.text((x1 + 8 * SCALE, y + 6 * SCALE), str(value), font=font, fill="#000000")
+        y += row_h
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+
+def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, расхождения: list) -> None:
+    """Лист «Дашборд» - первым в файле: 4 KPI-показателя + таблица и график
+    расхождений по типу данных (лист «Проверка КП»). Числа - готовые (посчитаны
+    в Python при генерации), НЕ формулы. График - КАРТИНКОЙ, см.
+    _нарисовать_barchart_png - «родной» график Excel рендерился по-разному
+    локально и на проде, картинка рендерится одинаково везде."""
+    from openpyxl.styles import Font, Alignment, Border
+    from openpyxl.drawing.image import Image as _XLImage
+
+    ws = wb.create_sheet("Дашборд", 0)
+    ws.sheet_view.showGridLines = False
+    _hdr_border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    _grey10 = Font(name="Arial", size=10, color="595959")
+    _grey9 = Font(name="Arial", size=9, color="595959")
+
+    ws["B2"] = "Проверка КП vs сайт — сводка"
+    ws["B2"].font = Font(name="Arial", size=16, bold=True, color="1155CC")
+    ws.merge_cells("B3:H3")
+    ws["B3"] = "Автоматический отчёт по данным листов «Проверка КП» и «Расхождения»."
+    ws["B3"].font = _grey10
+
+    for lbl_coord, lbl_text, val_coord, value, color in (
+        ("B5", "Городов/доменов проверено", "B6", meta["n_rows"], "1155CC"),
+        ("D5", "Всего расхождений (✗)", "D6", meta["total_bug"], "C62828"),
+        ("F5", "Строк без единого расхождения", "F6", meta["rows_no_bugs"], "1E8E3E"),
+        ("H5", "Строк с 3+ расхождениями", "H6", meta["rows_3plus_bugs"], "9C7A00"),
+    ):
+        ws[lbl_coord] = lbl_text
+        ws[lbl_coord].font = _grey9
+        ws[val_coord] = value
+        ws[val_coord].font = Font(name="Arial", size=20, bold=True, color=color)
+
+    def _small_table(top_row, title, col_headers, items):
+        # Мёрдж на всю ширину блока (как у подзаголовка B3:H3) - иначе длинный
+        # заголовок таблицы обрезался в узком B:E.
+        ws.merge_cells(start_row=top_row, start_column=2, end_row=top_row, end_column=8)
+        tcell = ws.cell(top_row, 2, title)
+        tcell.font = Font(name="Arial", size=12, bold=True)
+        hr = top_row + 1
+        for ci, h in enumerate(col_headers, 2):
+            c = ws.cell(hr, ci, h)
+            c.font = Font(name="Arial", size=10, bold=True)
+            c.fill = hdr_fill
+            c.alignment = Alignment(horizontal="center")
+            c.border = _hdr_border
+        r = hr + 1
+        for label, value in items:
+            ws.cell(r, 2, label).border = _hdr_border
+            ws.cell(r, 3, value).border = _hdr_border
+            r += 1
+        return hr, r - 1   # (строка заголовка таблицы, последняя строка данных)
+
+    _table_items = [(label, meta["var_bug_count"].get(label, 0))
+                    for label, _ in meta["var_cols"]]
+    _hdr1, _last1 = _small_table(
+        9, "Расхождения по типу данных",
+        ["Показатель", "Расхождений (✗)"], _table_items)
+
+    ws.column_dimensions["A"].width = 2
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 3
+    ws.row_dimensions[2].height = 19.5
+    ws.row_dimensions[6].height = 24
+
+    if _last1 >= _hdr1 + 1:
+        png = _нарисовать_barchart_png("Расхождения по типу данных", _table_items)
+        img = _XLImage(png)
+        SCALE = 2   # рисовали в 2x (см. _нарисовать_barchart_png) - тут делим обратно
+        img.width = img.width / SCALE
+        img.height = img.height / SCALE
+        # Якорь - строка ЗАГОЛОВКА ТАБЛИЦЫ (не строка секции с названием
+        # таблицы выше), колонка E - с отступом в одну пустую колонку (D) от
+        # самой таблицы, чтобы картинка не наезжала на неё.
+        ws.add_image(img, f"E{_hdr1}")
+
+
+# Цвет по площадке (фон + цвет текста) - в колонке «Где проверяли», по
+# образцу присланного файла (там это условное форматирование по значению
+# ячейки; здесь ставим цвет сразу при генерации - площадка каждой строки уже
+# известна, условное форматирование не нужно).
+_ПЛОЩАДКА_ЦВЕТ = {
+    "2ГИС": ("D9E8FB", "1155CC"),
+    "Яндекс.Карты": ("FFF3CD", "9C7A00"),
+    "Google": ("E8D9FB", "6A1B9A"),
+    "Сайт": ("FDE3E3", "C62828"),
+}
+
+
+def _написать_расхождения_лист(wb, hdr_fill, thin, расхождения: list) -> None:
+    """Лист «Расхождения» - только проблемные ячейки (сайт + карты вместе),
+    для быстрого разбора без похода по всей сетке «Проверка КП». Площадка
+    («Сайт»/«Яндекс.Карты»/«2ГИС»/«Google») и поле - раздельными колонками
+    (не склеены через «: »), плюс кликабельная ссылка на проверенное место.
+    Площадка подсвечена своим цветом (см. _ПЛОЩАДКА_ЦВЕТ)."""
+    from openpyxl.styles import Font, PatternFill, Alignment, Border
+
+    ws2 = wb.create_sheet("Расхождения")
+    LINK_FONT = Font(name="Arial", size=10, color="1155CC", underline="single")
+    _headers = ["Поддомен (что проверяли)", "Город", "Где проверяли",
+               "Что сверяли", "Должно быть (КП)", "Фактически на площадке",
+               "Примечание", "Ссылка на проверенное место"]
+    for c, t in enumerate(_headers, 1):
+        cell = ws2.cell(1, c, t)
+        cell.font = Font(name="Arial", size=10, bold=True)
+        cell.fill = hdr_fill
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    _border = Border(top=thin, bottom=thin, left=thin, right=thin)
+    for i, d in enumerate(расхождения, 2):
+        _dom = d.get("domain") or ""
+        _площадка = d.get("площадка", "")
+        vals = [_dom, d.get("city", ""), _площадка, d.get("поле", ""),
+               d.get("кп", ""), d.get("факт", ""), d.get("примечание", "")]
+        for c, v in enumerate(vals, 1):
+            cell = ws2.cell(i, c, v)
+            cell.border = _border
+            cell.alignment = Alignment(vertical="center", wrap_text=False)
+        _fill_color, _font_color = _ПЛОЩАДКА_ЦВЕТ.get(_площадка, (None, None))
+        pcell = ws2.cell(i, 3)
+        pcell.font = Font(name="Arial", size=10, bold=True, color=_font_color)
+        if _fill_color:
+            pcell.fill = PatternFill("solid", fgColor=_fill_color)
+        if _dom:
+            ws2.cell(i, 1).hyperlink = f"https://{_dom}/"
+            ws2.cell(i, 1).font = LINK_FONT
+        # Ссылка на проверенное место - карточка карты или сам сайт.
+        _link = d.get("ссылка") or ""
+        _label = f"Открыть {'сайт' if _площадка == 'Сайт' else 'карточку ' + _площадка}"
+        lcell = ws2.cell(i, 8, _label)
+        lcell.border = _border
+        lcell.alignment = Alignment(vertical="center")
+        if _link:
+            lcell.hyperlink = _link
+            lcell.font = LINK_FONT
+    for col, w in (("A", 30), ("B", 18), ("C", 20), ("D", 16), ("E", 30),
+                   ("F", 34), ("G", 44), ("H", 24)):
+        ws2.column_dimensions[col].width = w
+    ws2.freeze_panes = "C2"
+    if not расхождения:
+        ws2.cell(2, 1, "Расхождений не найдено 🎉")
+
+
+def _записать_проверку_кп_лист(wb, hdr_fill, _thin, результаты: list,
+                               per_city: bool, map_results: list | None = None) -> list:
+    """Лист «Проверка КП» - одна строка на город. Карты (Яндекс.Карты/2ГИС),
+    если их проверяли, идут ДОПОЛНИТЕЛЬНЫМИ колонками в ТОЙ ЖЕ строке - то же
+    оформление, что и у сайта (✓/✗/⚠/– цветным шрифтом, заливка + комментарий
+    только на проблемных ячейках), отдельного листа/колонки под них нет.
+    Возвращает список расхождений (сайт + карты вместе) для листа «Расхождения»."""
+    from openpyxl.styles import Font, PatternFill, Alignment, Border
+    from openpyxl.comments import Comment
+    from openpyxl.utils import get_column_letter
+
+    map_results = map_results or []
+    ws = wb.create_sheet("Проверка КП")
 
     # Колонки отчёта: (заголовок, ключ поля из check_variables). «Тел.» в подписи
     # телефонов не пишем - над ними стоит групповой заголовок «Телефония/Почта».
@@ -944,7 +1347,23 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
                  ("Telegram", "Telegram"), ("WhatsApp", "WhatsApp")]
         _GROUPS = [("Телефония/Почта", 5, 8), ("Мессенджеры", 9, 10)]
         _SEP_AFTER = {4, 8}   # разделитель после «Адрес» и после «Почта»
-    n_cols = len(_ID) + len(_VARS)
+
+    # Карты - только источники, которые реально проверяли в этом прогоне
+    # (иначе колонка на выключенный источник только зря засоряла бы сетку).
+    _MAP_COLS = [(src, label) for src, label in _MAP_SOURCES
+                if any(r.source == src for r in map_results)]
+    _FIRST_VAR_COL = 3   # A=Страна(КП), B=Город(КП), переменные с C
+    _FIRST_MAP_COL = _FIRST_VAR_COL + len(_VARS)
+    if _MAP_COLS:
+        _GROUPS = _GROUPS + [("Карты", _FIRST_MAP_COL,
+                              _FIRST_MAP_COL + len(_MAP_COLS) - 1)]
+        _SEP_AFTER = _SEP_AFTER | {_FIRST_MAP_COL - 1}
+    # «Ошибок (✗)» - служебная колонка сразу после всех вар/карт-колонок:
+    # формула COUNTIF по всей строке, дашборд ссылается на неё (строки без
+    # единого расхождения / строки с 3+ расхождениями).
+    _ERR_COL = _FIRST_MAP_COL + len(_MAP_COLS)
+    _SEP_AFTER = _SEP_AFTER | {_ERR_COL - 1}
+    n_cols = _ERR_COL
 
     def _bdr(col, bottom=False):
         return Border(right=_thin if col in _SEP_AFTER else None,
@@ -958,36 +1377,72 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
         gc = ws.cell(1, c1, txt)
         gc.font = Font(bold=True); gc.alignment = Alignment(horizontal="center")
     # Строка 2 - заголовки колонок (нижняя граница отделяет шапку от данных).
-    for c, t in enumerate(_ID + [d for d, _ in _VARS], 1):
+    _headers = (_ID + [d for d, _ in _VARS] + [label for _, label in _MAP_COLS]
+               + ["Ошибок (✗)"])
+    for c, t in enumerate(_headers, 1):
         cell = ws.cell(2, c, t)
         cell.font = Font(bold=True); cell.fill = hdr_fill
         cell.alignment = Alignment(horizontal="center")
         cell.border = _bdr(c, bottom=True)
     ws.freeze_panes = "C3"
+    _last_var_col_letter = get_column_letter(_ERR_COL - 1)
 
-    from openpyxl.comments import Comment
     LINK_FONT = Font(color="1155CC", underline="single")
     # Заливка только у проблемных ячеек, чтобы зелёные ✓ оставались чистыми
     # (без «тревожного» красного уголка-примечания на каждой ячейке).
     BUG_FILL = PatternFill("solid", fgColor="FDE3E3")   # мягкий красный
     WARN_FILL = PatternFill("solid", fgColor="FFF2DA")  # мягкий оранжевый
-    _FIRST_VAR_COL = 3   # A=Страна(КП), B=Город(КП), переменные с C
 
-    расхождения = []
+    # Карты группируем по городу (источник → результат) - тот же город может
+    # встретиться и без сайта (если сайт не проверяли, «--no-check-site»).
+    _map_by_city: dict[str, dict] = {}
+    _map_order: list[str] = []
+    for m in map_results:
+        if m.city not in _map_by_city:
+            _map_by_city[m.city] = {'country': m.country}
+            _map_order.append(m.city)
+        _map_by_city[m.city][m.source] = m
+
+    # Строки листа - обычные (из результаты, сайт проверяли) + «доборные» для
+    # городов, которых нет в результаты (сайт не проверяли вовсе, есть только
+    # карты) - показываем город, колонки сайта у него просто «–».
+    _site_cities = {(res.get("city") or res.get("domain") or "") for res in результаты}
+    _extra_rows = [{"domain": None, "city": city,
+                    "country": _map_by_city[city].get("country", ""),
+                    "fields": [], "error": None}
+                  for city in _map_order if city not in _site_cities]
+    _all_rows = list(результаты) + _extra_rows
+
+    # Счётчики для «Дашборда» - считаем ✗ сразу в Python (не формулами Excel),
+    # чтобы KPI и график по типу данных были готовыми числами: график,
+    # построенный на формулах без закешированного значения, у некоторых
+    # просмотрщиков (не пересчитывающих файл перед показом) рисуется пустым/
+    # без подписей - ровно это и увидели на проде.
+    _var_bug_count = {disp: 0 for disp, _ in _VARS}
+    _var_bug_count.update({label: 0 for _, label in _MAP_COLS})
+    _total_bug = 0
+    _row_bug_counts: list[int] = []
+
+    расхождения: list = []
     r = 3
-    for res in результаты:
+    for res in _all_rows:
+        _row_bug = 0
         cc = ws.cell(r, 1, res.get("country", "")); cc.border = _bdr(1)
-        # Город(КП) - текст города, кликом ведёт на домен/поддомен.
-        gcell = ws.cell(r, 2, res.get("city", "") or res["domain"])
-        gcell.hyperlink = f'https://{res["domain"]}'
-        gcell.font = LINK_FONT; gcell.border = _bdr(2)
+        # Город(КП) - текст города, кликом ведёт на домен/поддомен (если есть).
+        city_disp = res.get("city", "") or res.get("domain") or ""
+        gcell = ws.cell(r, 2, city_disp)
+        if res.get("domain"):
+            gcell.hyperlink = f'https://{res["domain"]}'
+            gcell.font = LINK_FONT
+        gcell.border = _bdr(2)
         by = {f["field"]: f for f in res.get("fields", [])}
         if res.get("error"):
-            # Сайт не загрузился - ✗ по ВСЕМ колонкам + причина в примечании
-            # каждой ячейки (не путаем с «телефон ✓, адрес ⚠» у частично
-            # загруженной страницы: тут упал весь сайт).
+            # Сайт не загрузился - ✗ по ВСЕМ колонкам сайта + причина в
+            # примечании каждой ячейки (не путаем с «телефон ✓, адрес ⚠» у
+            # частично загруженной страницы: тут упал весь сайт).
             reason = f"Сайт не загрузился: {res['error']}"
-            for c in range(_FIRST_VAR_COL, _FIRST_VAR_COL + len(_VARS)):
+            for i, (_disp, _name) in enumerate(_VARS):
+                c = _FIRST_VAR_COL + i
                 cell = ws.cell(r, c, "✗")
                 cell.font = Font(color=_COLOR.get("bug", "C62828"), bold=True)
                 cell.alignment = Alignment(horizontal="center")
@@ -995,70 +1450,148 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
                 cm = Comment(reason, "1.4")
                 cm.width, cm.height = 340, 90
                 cell.comment = cm
-            r += 1
-            continue
-        for i, (_disp, name) in enumerate(_VARS):
-            c = _FIRST_VAR_COL + i
-            f = by.get(name)
-            if not f:
-                cell = ws.cell(r, c, "–")
+                _var_bug_count[_disp] += 1
+                _row_bug += 1
+            _total_bug += len(_VARS)
+        else:
+            for i, (_disp, name) in enumerate(_VARS):
+                c = _FIRST_VAR_COL + i
+                f = by.get(name)
+                if not f:
+                    cell = ws.cell(r, c, "–")
+                    cell.alignment = Alignment(horizontal="center")
+                    cell.border = _bdr(c)
+                    continue
+                status = f["status"]
+                cell = ws.cell(r, c, _SYMBOL.get(status, "?"))
+                cell.font = Font(color=_COLOR.get(status, "000000"), bold=True)
                 cell.alignment = Alignment(horizontal="center")
                 cell.border = _bdr(c)
-                continue
-            status = f["status"]
-            cell = ws.cell(r, c, _SYMBOL.get(status, "?"))
-            cell.font = Font(color=_COLOR.get(status, "000000"), bold=True)
-            cell.alignment = Alignment(horizontal="center")
-            cell.border = _bdr(c)
-            # Примечание + заливку вешаем ТОЛЬКО на проблемные ячейки (✗ и ⚠) -
-            # тогда зелёные ✓ чистые, а красные сразу видно (красная заливка +
-            # уголок-примечание с деталями). Просьба заказчика.
-            if status in ("bug", "warn"):
-                # Примечание - ВВЕРХУ (сразу видно, в чём дело), ниже - что ждали
-                # и что по факту на сайте.
-                note = (f.get("note") or "").strip()
-                подпись = f"{note}\n\n" if note else ""
-                подпись += (f"КП: {f['expected']}\n"
-                            f"Сайт: {f['found']}")
-                # Длинное не расписываем в ячейке - отсылаем на лист «Расхождения».
-                if len(подпись) > 220:
-                    подпись = подпись[:210].rstrip() + "…\n→ см. лист «Расхождения»"
-                cm = Comment(подпись, "1.4")
-                cm.width, cm.height = 340, 170   # чтобы текст влезал в окошко
-                cell.comment = cm
-                cell.fill = BUG_FILL if status == "bug" else WARN_FILL
-                # На лист «Расхождения» - И красные (✗), И жёлтые (⚠). Имя
-                # переменной - без префикса «Тел.» (в отдельном столбце и так
-                # понятно, что это телефон): «Реклама Город», «SEO Город» и т.п.
-                расхождения.append((res["domain"], res.get("city", ""),
-                                    name.replace("Тел. ", ""),
-                                    f["expected"], f["found"], f.get("note", "")))
+                # Примечание + заливку вешаем ТОЛЬКО на проблемные ячейки (✗ и
+                # ⚠) - тогда зелёные ✓ чистые, а красные сразу видно (красная
+                # заливка + уголок-примечание с деталями). Просьба заказчика.
+                if status in ("bug", "warn"):
+                    # Примечание - ВВЕРХУ (сразу видно, в чём дело), ниже -
+                    # что ждали и что по факту на сайте.
+                    note = (f.get("note") or "").strip()
+                    подпись = f"{note}\n\n" if note else ""
+                    подпись += (f"КП: {f['expected']}\n"
+                                f"Сайт: {f['found']}")
+                    if len(подпись) > 220:
+                        подпись = подпись[:210].rstrip() + "…"
+                    cm = Comment(подпись, "1.4")
+                    cm.width, cm.height = 340, 170   # чтобы текст влезал в окошко
+                    cell.comment = cm
+                    cell.fill = BUG_FILL if status == "bug" else WARN_FILL
+                    расхождения.append({
+                        "domain": res["domain"], "city": res.get("city", ""),
+                        "площадка": "Сайт", "поле": name.replace("Тел. ", ""),
+                        "кп": f["expected"], "факт": f["found"],
+                        "примечание": f.get("note", ""),
+                        "ссылка": f'https://{res["domain"]}/',
+                    })
+                    if status == "bug":
+                        _var_bug_count[_disp] += 1
+                        _row_bug += 1
+                        _total_bug += 1
+
+        # Карты - той же строкой, тот же принцип оформления.
+        if _MAP_COLS:
+            _map_key = res.get("city") or res.get("domain") or ""
+            _row_map = _map_by_city.get(_map_key, {})
+            for j, (src, label) in enumerate(_MAP_COLS):
+                c = _FIRST_MAP_COL + j
+                cell = ws.cell(r, c)
+                cell.border = _bdr(c)
+                rmap = _row_map.get(src)
+                if rmap is None:
+                    # Источник не включали в этот прогон - пусто, не «–»
+                    # («–» у КП значит «сверить нечего»; тут «не проверяли»).
+                    cell.alignment = Alignment(horizontal="center")
+                    continue
+                if rmap.no_link:
+                    # Ссылки на карту в КП просто нет - норма, не ⚠ и не ✗.
+                    cell.value = "–"
+                    cell.font = Font(color="9E9E9E")
+                    cell.alignment = Alignment(horizontal="center")
+                    continue
+                if rmap.is_ok:
+                    symbol, color, fill, note = "✓", "1E8E3E", None, ""
+                elif rmap.is_warning:
+                    symbol, color, fill = "⚠", "B26A00", WARN_FILL
+                    note = rmap.error or "карточка недоступна"
+                else:
+                    symbol, color, fill = "✗", "C62828", BUG_FILL
+                    note = "; ".join(rmap.issues) or "расхождение с КП"
+                    _var_bug_count[label] += 1
+                    _row_bug += 1
+                    _total_bug += 1
+                cell.value = symbol
+                cell.font = Font(color=color, bold=True)
+                cell.alignment = Alignment(horizontal="center")
+                if fill:
+                    body = f"{note}\n\n{rmap.name or ''}\n{rmap.url}".strip()
+                    if len(body) > 220:
+                        body = body[:210].rstrip() + "…"
+                    cm = Comment(body, "1.4")
+                    cm.width, cm.height = 340, 170
+                    cell.comment = cm
+                    cell.fill = fill
+                    if rmap.is_error:
+                        for d in rmap.details:
+                            # Пусто/прочерк на карточке - это НЕ то же самое,
+                            # что «другое значение»: явно пишем причину в
+                            # примечании, а не оставляем его пустым.
+                            _card_val = (d.get("card") or "").strip()
+                            if _card_val in ("", "–", "-"):
+                                _note = f'{d["field"]} не найден на карточке {label}'
+                            else:
+                                _note = f'{d["field"]} на карточке {label} не совпадает с КП'
+                            расхождения.append({
+                                "domain": res.get("domain") or "", "city": _map_key,
+                                "площадка": label, "поле": d["field"],
+                                "кп": d["kp"], "факт": d["card"],
+                                "примечание": _note, "ссылка": rmap.url,
+                            })
+
+        # «Ошибок (✗)» - формула, не питоновский подсчёт: должна пересчитываться
+        # прямо в Excel, если кто-то вручную поправит ячейку на листе.
+        _err_cell = ws.cell(r, _ERR_COL, f'=COUNTIF(C{r}:{_last_var_col_letter}{r},"✗")')
+        _err_cell.alignment = Alignment(horizontal="center")
+        _err_cell.border = _bdr(_ERR_COL)
+        _row_bug_counts.append(_row_bug)
         r += 1
 
-    # Ширины колонок (как в согласованном образце).
+    # Ширины колонок (как в согласованном образце) + карты пошире, там текст.
     for _col, _w in (("A", 16), ("B", 26), ("C", 9), ("D", 13), ("E", 18),
                      ("F", 19.5), ("G", 19), ("H", 12), ("I", 9.5), ("J", 10.5)):
         ws.column_dimensions[_col].width = _w
+    for j in range(len(_MAP_COLS)):
+        ws.column_dimensions[get_column_letter(_FIRST_MAP_COL + j)].width = 14
+    ws.column_dimensions[get_column_letter(_ERR_COL)].width = 13
 
-    # Лист «Расхождения» - только проблемные ячейки, для быстрого разбора.
-    ws2 = wb.create_sheet("Расхождения")
-    for c, t in enumerate(["Поддомен", "Город", "Что проверяем", "КП",
-                           "На сайте", "Примечание"], 1):
-        cell = ws2.cell(1, c, t)
-        cell.font = Font(bold=True)
-        cell.fill = hdr_fill
-    for i, row in enumerate(расхождения, 2):
-        for c, v in enumerate(row, 1):
-            cell = ws2.cell(i, c, v)
-            if c in (4, 5, 6):     # «Ожидалось», «На сайте», «Примечание» - переносим
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
-    for col, w in (("A", 32), ("B", 16), ("C", 14), ("D", 34), ("E", 34), ("F", 70)):
-        ws2.column_dimensions[col].width = w
-    ws2.freeze_panes = "A2"
-    if not расхождения:
-        ws2.cell(2, 1, "Расхождений не найдено 🎉")
-
-    wb.save(path)
+    # Метаданные для листа «Дашборд» - какие колонки за что отвечают, где
+    # заканчиваются данные (формулы COUNTIF дашборда ссылаются на эти диапазоны).
+    _var_cols_meta = [(disp, get_column_letter(_FIRST_VAR_COL + i))
+                      for i, (disp, _) in enumerate(_VARS)]
+    _var_cols_meta += [(label, get_column_letter(_FIRST_MAP_COL + j))
+                       for j, (_, label) in enumerate(_MAP_COLS)]
+    _sources = (["Сайт"] if результаты else []) + [label for _, label in _MAP_COLS]
+    meta = {
+        "last_row": r - 1,
+        "last_var_col_letter": _last_var_col_letter,
+        "err_col_letter": get_column_letter(_ERR_COL),
+        "var_cols": _var_cols_meta,
+        "sources": _sources,
+        # Готовые числа для «Дашборда» - не формулы (см. комментарий выше про
+        # график на пустых кешах).
+        "n_rows": len(_all_rows),
+        "var_bug_count": _var_bug_count,
+        "total_bug": _total_bug,
+        "rows_no_bugs": sum(1 for n in _row_bug_counts if n == 0),
+        "rows_3plus_bugs": sum(1 for n in _row_bug_counts if n >= 3),
+    }
+    return расхождения, meta
 
 
 if __name__ == '__main__':

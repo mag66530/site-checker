@@ -403,24 +403,42 @@ def get_project_settings(project_key: str) -> dict:
 
 @_retry
 def set_project_settings(project_key: str, values: dict) -> None:
-    """Upsert настроек проекта; пустое значение = удалить настройку."""
+    """Upsert настроек проекта; пустое значение = удалить настройку.
+
+    Форма шлёт ВСЕ поля разом (сейчас их 11), поэтому пишем двумя запросами:
+    один пакетный upsert и один пакетный delete. Раньше был отдельный запрос
+    на каждое поле - на удалённой базе это 11 сетевых round-trip'ов подряд,
+    и кнопка «Сохранить» заметно подвисала (см. комментарий к _conn: скорость
+    берём сокращением ЧИСЛА запросов).
+    """
     _ensure_proj_settings_table()
+    to_set, to_del = [], []
+    for name, val in (values or {}).items():
+        val = (val or "").strip()
+        if val:
+            to_set.append((project_key, name, security.encrypt_secret(val)))
+        else:
+            to_del.append(name)
+    if not to_set and not to_del:
+        return
     with _conn() as c, c.cursor() as cur:
-        for name, val in (values or {}).items():
-            val = (val or "").strip()
-            if not val:
-                cur.execute(
-                    "DELETE FROM project_settings WHERE project_key = %s AND name = %s",
-                    (project_key, name),
-                )
-            else:
-                cur.execute(
-                    """INSERT INTO project_settings (project_key, name, value)
-                       VALUES (%s, %s, %s)
-                       ON CONFLICT (project_key, name)
-                       DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
-                    (project_key, name, security.encrypt_secret(val)),
-                )
+        if to_set:
+            # Плейсхолдеры генерим по КОЛИЧЕСТВУ строк, значения уходят
+            # параметрами - подстановки пользовательских данных в SQL нет.
+            rows = ",".join(["(%s, %s, %s)"] * len(to_set))
+            cur.execute(
+                f"""INSERT INTO project_settings (project_key, name, value)
+                    VALUES {rows}
+                    ON CONFLICT (project_key, name)
+                    DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                [p for row in to_set for p in row],
+            )
+        if to_del:
+            cur.execute(
+                "DELETE FROM project_settings "
+                "WHERE project_key = %s AND name = ANY(%s)",
+                (project_key, to_del),
+            )
 
 
 # ---------- делегирование права менять настройки проекта ----------
