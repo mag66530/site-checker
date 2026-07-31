@@ -1105,14 +1105,23 @@ def _нарисовать_barchart_png(title: str, items: list[tuple[str, int]])
     ось) не дали результата на проде - картинка рендерится одинаковыми
     байтами везде, независимо от того, чем и где она создана."""
     import io
+    import os
     from PIL import Image, ImageDraw, ImageFont
 
+    # Шрифт - СВОЙ (fonts/DejaVuSans*.ttf в репозитории), не системный: на
+    # проде (Linux) ни arial.ttf, ни системного шрифта с кириллицей у Pillow
+    # нет вовсе - без явного файла шрифта Pillow откатывается на свой
+    # встроенный битмап-шрифт, а он кириллицу не знает и рисует крестики
+    # вместо букв. DejaVu Sans - кириллицу знает, лицензия свободная,
+    # позаимствован из matplotlib (см. fonts/LICENSE_DEJAVU.txt).
+    _FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+
     def _font(bold, size):
-        for name in (("arialbd.ttf" if bold else "arial.ttf"),):
-            try:
-                return ImageFont.truetype(name, size)
-            except Exception:
-                pass
+        name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+        try:
+            return ImageFont.truetype(os.path.join(_FONTS_DIR, name), size)
+        except Exception:
+            pass
         try:
             return ImageFont.load_default(size=size)
         except TypeError:
