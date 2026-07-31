@@ -59,15 +59,34 @@ class _FakeCloseBtn:
         return self
 
 
+class _FakeHandle:
+    """Снимок КОНКРЕТНОГО DOM-узла (element_handle): его видимость живёт
+    отдельно от того, что показывает динамический локатор."""
+    def __init__(self, state, desc="div#callback.modal.fade"):
+        self._state = state
+        self._desc = desc
+
+    def is_visible(self):
+        return self._state["visible"]
+
+    def evaluate(self, script):
+        return self._desc
+
+
 class _FakeModal:
     """Заглушка модалки: state['visible'] управляет _модалка_видна/_открылась
-    и меняется «закрытием» (клик по кнопке / esc / клик вне - через page)."""
+    и меняется «закрытием» (клик по кнопке / esc / клик вне - через page).
+
+    node_state - отдельное состояние ЗАФИКСИРОВАННОГО узла. Задают, когда надо
+    воспроизвести расхождение: наше окно закрылось, а локатор '.modal:visible'
+    показывает соседнюю видимую модалку страницы."""
     def __init__(self, state, has_fields=True, close_selector=None,
-                 box=(100, 100, 300, 200)):
+                 box=(100, 100, 300, 200), node_state=None):
         self._state = state
         self._has_fields = has_fields
         self._close_selector = close_selector
         self._box = box
+        self._node_state = node_state if node_state is not None else state
 
     def count(self):
         return 1 if self._state["visible"] else 0
@@ -75,11 +94,15 @@ class _FakeModal:
     def is_visible(self):
         return self._state["visible"]
 
+    def element_handle(self, timeout=None):
+        return _FakeHandle(self._node_state)
+
     def locator(self, sel):
         if sel == "input, textarea, select":
             return _CountingLoc(1) if self._has_fields else _CountingLoc(0)
         if self._close_selector and sel == self._close_selector:
-            return _FakeCloseBtn(lambda: self._state.__setitem__("visible", False))
+            return _FakeCloseBtn(
+                lambda: self._node_state.__setitem__("visible", False))
         return _FakeMissingLoc()
 
     def bounding_box(self):
@@ -115,6 +138,11 @@ class _FakePage:
 
     def wait_for_timeout(self, ms):
         pass
+
+    def locator(self, sel):
+        # Крестик ищется и по всей странице (он часто вне контейнера модалки).
+        # В заглушке страница пустая - находит только модалка.
+        return _FakeMissingLoc()
 
 
 # ── _модалка_видна / _модалка_открылась ───────────────────────────────────
@@ -179,7 +207,35 @@ def test_не_закрывается_ничем_жёсткое_нет_без_п�
     статус, способ = t._проба_закрытия_модалки(page, modal)
     assert статус == "Нет"
     assert "вручную" not in способ
-    assert способ == "не закрылась ни крестиком, ни Esc, ни кликом вне модалки"
+    assert способ.startswith("не закрылась ни крестиком, ни Esc, ни кликом вне модалки")
+
+
+def test_вердикт_нет_показывает_какой_контейнер_считали_модалкой():
+    # Ложный ✗ почти всегда = «взят не тот контейнер». В вердикт идёт улика,
+    # иначе спор «окно закрывается вручную, а тул пишет нет» не разобрать.
+    state = {"visible": True}
+    modal = _FakeModal(state, close_selector=None)
+    page = _FakePage(state)
+    _, способ = t._проба_закрытия_модалки(page, modal)
+    assert "div#callback.modal.fade" in способ
+
+
+def test_закрылась_хотя_локатор_показывает_соседнюю_модалку():
+    # Корень бага ложного ✗ на проекте АПС («Заказать звонок», «Экспресс
+    # заявка»): modal - ДИНАМИЧЕСКИЙ локатор ('.modal:visible'.last). Наше окно
+    # закрылось крестиком, но на странице осталась другая видимая модалка
+    # (попап региона / поиск / cookie-баннер), и локатор подхватывал её -
+    # проверка «закрылась?» отвечала «нет» на всех трёх способах подряд.
+    # Снимок узла держит ИМЕННО закрываемое окно → вердикт «Да».
+    видна_соседняя = {"visible": True}       # что показывает локатор - всегда True
+    наше_окно = {"visible": True}            # реальный узел, его и закрываем
+    modal = _FakeModal(видна_соседняя, close_selector=".modal-close",
+                       node_state=наше_окно)
+    page = _FakePage(видна_соседняя)
+    статус, способ = t._проба_закрытия_модалки(page, modal)
+    assert статус == "Да"
+    assert способ == "крестик/кнопка закрытия"
+    assert наше_окно["visible"] is False
 
 
 def test_уже_не_видна_до_проверки():
