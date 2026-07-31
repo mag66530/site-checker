@@ -198,7 +198,7 @@ def test_форма_заказа_пропускается_без_браузер�
 def test_виды_нарушений_покрывают_имя_телефон_почту_длину():
     виды = dict(t._SRVVAL_ВИДЫ)
     assert set(виды) == {"empty", "empty_name", "empty_phone", "short_phone",
-                         "bad_email", "bad_phone", "too_long"}
+                         "bad_email", "bad_email_no_tld", "bad_phone", "too_long"}
 
 
 def test_детали_человеческий_текст_без_бэктиков():
