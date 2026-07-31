@@ -17,6 +17,10 @@ if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit" >nul 2>
 >"%USERPROFILE%\.streamlit\credentials.toml" echo [general]
 >>"%USERPROFILE%\.streamlit\credentials.toml" echo email = ""
 
+rem -- keep localhost out of the system proxy (HTTP_PROXY is set globally) --
+set "NO_PROXY=localhost,127.0.0.1,::1"
+set "no_proxy=localhost,127.0.0.1,::1"
+
 echo Starting... A browser tab will open.
 echo To stop - just close this window.
 echo.
