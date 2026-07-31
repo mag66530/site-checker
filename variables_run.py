@@ -1093,35 +1093,18 @@ def _записать_xlsx(path: Path, proj_name: str, результаты: lis
     wb.save(path)
 
 
-def _главный_вывод(расхождения: list) -> str:
-    """Одна строка-итог для «Дашборда» - не формула Excel (искать формулой
-    «самую частую категорию по имени» сложнее и менее прозрачно, чем один раз
-    посчитать при генерации отчёта), просто обычный текст на момент прогона."""
-    if not расхождения:
-        return ("Главный вывод: расхождений не найдено - все проверенные "
-                "данные совпадают с КП.")
-    from collections import Counter
-    _by_src = Counter(d.get("площадка", "") for d in расхождения)
-    _top_src, _top_n = _by_src.most_common(1)[0]
-    _total = len(расхождения)
-    _pct = round(100 * _top_n / _total)
-    return (f"Главный вывод: больше всего расхождений даёт «{_top_src}» - "
-           f"{_top_n} из {_total} ({_pct}%).")
-
-
 def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, расхождения: list) -> None:
     """Лист «Дашборд» - первым в файле: 4 KPI-показателя + таблица и график
-    расхождений по типу данных (лист «Проверка КП»). Числа - формулы Excel
-    (пересчитаются сами, если открыть отчёт и поправить строку вручную),
-    кроме итогового вывода - он посчитан один раз при генерации, не формула."""
+    расхождений по типу данных (лист «Проверка КП»). Числа - готовые (посчитаны
+    в Python при генерации), НЕ формулы: график, построенный на формулах без
+    закешированного значения, у просмотрщиков, которые не пересчитывают файл
+    перед показом (не «живой» Excel), рисуется пустым/без подписей - именно
+    так и увидели на проде."""
     from openpyxl.styles import Font, Alignment, Border
     from openpyxl.chart import BarChart, Reference
 
     ws = wb.create_sheet("Дашборд", 0)
     ws.sheet_view.showGridLines = False
-    last_row = meta["last_row"]
-    last_var_col = meta["last_var_col_letter"]
-    err_col = meta["err_col_letter"]
     _hdr_border = Border(top=thin, bottom=thin, left=thin, right=thin)
     _grey10 = Font(name="Arial", size=10, color="595959")
     _grey9 = Font(name="Arial", size=9, color="595959")
@@ -1129,23 +1112,18 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
     ws["B2"] = "Проверка КП vs сайт — сводка"
     ws["B2"].font = Font(name="Arial", size=16, bold=True, color="1155CC")
     ws.merge_cells("B3:H3")
-    ws["B3"] = ("Автоматический отчёт по данным листов «Проверка КП» и «Расхождения». "
-               "Обновляется при пересчёте файла (F9 / открытие в Excel).")
+    ws["B3"] = "Автоматический отчёт по данным листов «Проверка КП» и «Расхождения»."
     ws["B3"].font = _grey10
 
-    for lbl_coord, lbl_text, val_coord, formula, color in (
-        ("B5", "Городов/доменов проверено", "B6",
-         f"=COUNTA('Проверка КП'!B3:B{last_row})", "1155CC"),
-        ("D5", "Всего расхождений (✗)", "D6",
-         f'=COUNTIF(\'Проверка КП\'!C3:{last_var_col}{last_row},"✗")', "C62828"),
-        ("F5", "Строк без единого расхождения", "F6",
-         f"=COUNTIF('Проверка КП'!{err_col}3:{err_col}{last_row},0)", "1E8E3E"),
-        ("H5", "Строк с 3+ расхождениями", "H6",
-         f'=COUNTIF(\'Проверка КП\'!{err_col}3:{err_col}{last_row},">=3")', "9C7A00"),
+    for lbl_coord, lbl_text, val_coord, value, color in (
+        ("B5", "Городов/доменов проверено", "B6", meta["n_rows"], "1155CC"),
+        ("D5", "Всего расхождений (✗)", "D6", meta["total_bug"], "C62828"),
+        ("F5", "Строк без единого расхождения", "F6", meta["rows_no_bugs"], "1E8E3E"),
+        ("H5", "Строк с 3+ расхождениями", "H6", meta["rows_3plus_bugs"], "9C7A00"),
     ):
         ws[lbl_coord] = lbl_text
         ws[lbl_coord].font = _grey9
-        ws[val_coord] = formula
+        ws[val_coord] = value
         ws[val_coord].font = Font(name="Arial", size=20, bold=True, color=color)
 
     def _small_table(top_row, title, col_headers, items):
@@ -1162,17 +1140,16 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
             c.alignment = Alignment(horizontal="center")
             c.border = _hdr_border
         r = hr + 1
-        for label, formula in items:
+        for label, value in items:
             ws.cell(r, 2, label).border = _hdr_border
-            ws.cell(r, 3, formula).border = _hdr_border
+            ws.cell(r, 3, value).border = _hdr_border
             r += 1
         return hr, r - 1   # (строка заголовка таблицы, последняя строка данных)
 
     _hdr1, _last1 = _small_table(
         9, "Расхождения по типу данных",
         ["Показатель", "Расхождений (✗)"],
-        [(label, f'=COUNTIF(\'Проверка КП\'!{col}3:{col}{last_row},"✗")')
-         for label, col in meta["var_cols"]])
+        [(label, meta["var_bug_count"].get(label, 0)) for label, _ in meta["var_cols"]])
 
     ws.column_dimensions["A"].width = 2
     ws.column_dimensions["B"].width = 20
@@ -1194,13 +1171,6 @@ def _записать_дашборд_лист(wb, hdr_fill, thin, meta: dict, р
         # таблицы выше), колонка E - с отступом в одну пустую колонку (D) от
         # самой таблицы, чтобы график не наезжал на неё.
         ws.add_chart(bar, f"E{_hdr1}")
-
-    _concl_row = _last1 + 2
-    ws.merge_cells(start_row=_concl_row, start_column=2,
-                   end_row=_concl_row + 2, end_column=8)
-    ccell = ws.cell(_concl_row, 2, _главный_вывод(расхождения))
-    ccell.font = _grey10
-    ccell.alignment = Alignment(wrap_text=True, vertical="top")
 
 
 # Цвет по площадке (фон + цвет текста) - в колонке «Где проверяли», по
@@ -1369,9 +1339,20 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
                   for city in _map_order if city not in _site_cities]
     _all_rows = list(результаты) + _extra_rows
 
+    # Счётчики для «Дашборда» - считаем ✗ сразу в Python (не формулами Excel),
+    # чтобы KPI и график по типу данных были готовыми числами: график,
+    # построенный на формулах без закешированного значения, у некоторых
+    # просмотрщиков (не пересчитывающих файл перед показом) рисуется пустым/
+    # без подписей - ровно это и увидели на проде.
+    _var_bug_count = {disp: 0 for disp, _ in _VARS}
+    _var_bug_count.update({label: 0 for _, label in _MAP_COLS})
+    _total_bug = 0
+    _row_bug_counts: list[int] = []
+
     расхождения: list = []
     r = 3
     for res in _all_rows:
+        _row_bug = 0
         cc = ws.cell(r, 1, res.get("country", "")); cc.border = _bdr(1)
         # Город(КП) - текст города, кликом ведёт на домен/поддомен (если есть).
         city_disp = res.get("city", "") or res.get("domain") or ""
@@ -1386,7 +1367,8 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
             # примечании каждой ячейки (не путаем с «телефон ✓, адрес ⚠» у
             # частично загруженной страницы: тут упал весь сайт).
             reason = f"Сайт не загрузился: {res['error']}"
-            for c in range(_FIRST_VAR_COL, _FIRST_VAR_COL + len(_VARS)):
+            for i, (_disp, _name) in enumerate(_VARS):
+                c = _FIRST_VAR_COL + i
                 cell = ws.cell(r, c, "✗")
                 cell.font = Font(color=_COLOR.get("bug", "C62828"), bold=True)
                 cell.alignment = Alignment(horizontal="center")
@@ -1394,6 +1376,9 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
                 cm = Comment(reason, "1.4")
                 cm.width, cm.height = 340, 90
                 cell.comment = cm
+                _var_bug_count[_disp] += 1
+                _row_bug += 1
+            _total_bug += len(_VARS)
         else:
             for i, (_disp, name) in enumerate(_VARS):
                 c = _FIRST_VAR_COL + i
@@ -1431,6 +1416,10 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
                         "примечание": f.get("note", ""),
                         "ссылка": f'https://{res["domain"]}/',
                     })
+                    if status == "bug":
+                        _var_bug_count[_disp] += 1
+                        _row_bug += 1
+                        _total_bug += 1
 
         # Карты - той же строкой, тот же принцип оформления.
         if _MAP_COLS:
@@ -1460,6 +1449,9 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
                 else:
                     symbol, color, fill = "✗", "C62828", BUG_FILL
                     note = "; ".join(rmap.issues) or "расхождение с КП"
+                    _var_bug_count[label] += 1
+                    _row_bug += 1
+                    _total_bug += 1
                 cell.value = symbol
                 cell.font = Font(color=color, bold=True)
                 cell.alignment = Alignment(horizontal="center")
@@ -1493,6 +1485,7 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
         _err_cell = ws.cell(r, _ERR_COL, f'=COUNTIF(C{r}:{_last_var_col_letter}{r},"✗")')
         _err_cell.alignment = Alignment(horizontal="center")
         _err_cell.border = _bdr(_ERR_COL)
+        _row_bug_counts.append(_row_bug)
         r += 1
 
     # Ширины колонок (как в согласованном образце) + карты пошире, там текст.
@@ -1516,6 +1509,13 @@ def _записать_проверку_кп_лист(wb, hdr_fill, _thin, рез
         "err_col_letter": get_column_letter(_ERR_COL),
         "var_cols": _var_cols_meta,
         "sources": _sources,
+        # Готовые числа для «Дашборда» - не формулы (см. комментарий выше про
+        # график на пустых кешах).
+        "n_rows": len(_all_rows),
+        "var_bug_count": _var_bug_count,
+        "total_bug": _total_bug,
+        "rows_no_bugs": sum(1 for n in _row_bug_counts if n == 0),
+        "rows_3plus_bugs": sum(1 for n in _row_bug_counts if n >= 3),
     }
     return расхождения, meta
 

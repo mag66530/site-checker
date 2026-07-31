@@ -1,8 +1,11 @@
 """Тесты листа «Дашборд» в отчёте variables_run.py - сводка по данным
 «Проверка КП»/«Расхождения»: 4 KPI, таблица+график по типу данных (только они -
-таблицу/график «по источнику» убрали по просьбе заказчика), вывод-строка.
-Сделан по образцу файла, который прислал заказчик (КП-сму-...-улучшено.xlsx) -
-структура и формулы должны совпадать."""
+таблицу/график «по источнику» убрали по просьбе заказчика). Числа - готовые
+(посчитаны в Python при генерации), не формулы Excel: график на формулах без
+закешированного значения у части просмотрщиков рисовался пустым/без подписей
+(увидели на проде) - поэтому KPI и таблица под графиком тоже стали обычными
+числами. Сделан по образцу файла, который прислал заказчик
+(КП-сму-...-улучшено.xlsx) - структура должна совпадать."""
 import sys
 from pathlib import Path
 
@@ -36,17 +39,19 @@ def test_no_dashboard_when_nothing_checked(tmp_path):
     print('✓ ничего не проверяли → дашборда нет (нечего показывать)')
 
 
-def test_kpi_formulas_reference_correct_ranges(tmp_path):
+def test_kpi_values_are_plain_numbers(tmp_path):
+    """KPI - готовые числа, не формулы: график/KPI на формулах без закешированного
+    значения у части просмотрщиков рисуется пустым (баг увидели на проде)."""
     out = tmp_path / 'test.xlsx'
     vr._записать_xlsx(out, 'СМУ', _результаты(5), per_city=False, map_results=[])
     from openpyxl import load_workbook
     wb = load_workbook(out)
     ws = wb['Дашборд']
-    assert ws['B6'].value == "=COUNTA('Проверка КП'!B3:B7)"
-    assert '"✗"' in ws['D6'].value and 'Проверка КП' in ws['D6'].value
-    assert ws['F6'].value == "=COUNTIF('Проверка КП'!K3:K7,0)"
-    assert ws['H6'].value == '=COUNTIF(\'Проверка КП\'!K3:K7,">=3")'
-    print('✓ KPI-формулы ссылаются на верный диапазон строк (5 городов → 3:7)')
+    assert ws['B6'].value == 5
+    assert ws['D6'].value == 0
+    assert ws['F6'].value == 5
+    assert ws['H6'].value == 0
+    print('✓ KPI - обычные числа (не формулы), посчитаны при генерации')
 
 
 def test_type_breakdown_table_matches_var_columns(tmp_path):
@@ -61,9 +66,9 @@ def test_type_breakdown_table_matches_var_columns(tmp_path):
     assert ws['B10'].value == 'Показатель' and ws['C10'].value == 'Расхождений (✗)'
     labels = [ws.cell(r, 2).value for r in range(11, 20) if ws.cell(r, 2).value]
     assert 'Город' in labels and 'Адрес' in labels and '2ГИС' in labels
-    # Формула для «2ГИС» должна смотреть на колонку 2ГИС на листе «Проверка КП»
+    # Значение для «2ГИС» - готовое число расхождений по этому источнику.
     _2gis_row = next(r for r in range(11, 20) if ws.cell(r, 2).value == '2ГИС')
-    assert "'Проверка КП'!K" in ws.cell(_2gis_row, 3).value
+    assert isinstance(ws.cell(_2gis_row, 3).value, int)
     print('✓ таблица «по типу данных» построена по фактическим колонкам отчёта')
 
 
@@ -86,9 +91,10 @@ def test_only_one_table_and_chart_on_dashboard(tmp_path):
     print('✓ на дашборде только одна таблица+график (по типу данных)')
 
 
-def test_conclusion_line_mentions_top_source(tmp_path):
+def test_no_conclusion_line(tmp_path):
+    """«Главный вывод» убрали с дашборда целиком по просьбе заказчика - никакой
+    текстовой строки-вывода под таблицей/графиком быть не должно."""
     out = tmp_path / 'test.xlsx'
-    # 3 расхождения по 2ГИС, 0 по сайту - «главный вывод» должен назвать 2ГИС.
     maps = [
         MapCheckResult(source='2gis', city=f'Город{i}', url='u', available=True,
                        country='Россия', phone_match=False, address_match=True,
@@ -101,9 +107,8 @@ def test_conclusion_line_mentions_top_source(tmp_path):
     wb = load_workbook(out)
     ws = wb['Дашборд']
     all_text = ' '.join(str(ws.cell(r, 2).value or '') for r in range(1, 45))
-    assert 'Главный вывод' in all_text and '2ГИС' in all_text
-    assert 'Подробности' not in all_text, 'лишнюю подпись-уточнение убрали'
-    print('✓ вывод-строка называет источник, без лишней подписи-уточнения')
+    assert 'Главный вывод' not in all_text
+    print('✓ строки-вывода «Главный вывод» на дашборде больше нет')
 
 
 def test_table_title_has_no_extra_caption_and_is_not_truncated(tmp_path):
