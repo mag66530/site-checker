@@ -129,6 +129,12 @@ class _FakeModal:
         x, y, w, h = self._box
         return {"x": x, "y": y, "width": w, "height": h}
 
+    def evaluate(self, _js):
+        # _модалка_видна() теперь ещё проверяет _реально_видим() (прозрачность
+        # по opacity, не только display/visibility) - заглушка отражает тот же
+        # флаг state["visible"], что и is_visible()/count().
+        return self._state["visible"]
+
 
 class _FakeKeyboard:
     def __init__(self, closes):
