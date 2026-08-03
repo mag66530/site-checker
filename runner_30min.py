@@ -101,6 +101,96 @@ def _parse_wm_recheck_log():
     return out
 
 
+def _os_name() -> str:
+    import platform
+    return platform.system()
+
+
+def _kill_proc_tree(proc):
+    """Убить подпроцесс вместе с дочерними (headless-браузер) - обычный
+    proc.kill() дочерние процессы не трогает."""
+    import subprocess as _sp
+    if _os_name() == 'Windows':
+        try:
+            _sp.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                    capture_output=True)
+        except Exception:
+            pass
+    else:
+        import os as _os
+        import signal as _signal
+        try:
+            _os.killpg(_os.getpgid(proc.pid), _signal.SIGKILL)
+        except Exception:
+            pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+
+
+def _run_subprocess_with_timeout(args, cwd, env, log, prefix, timeout_sec):
+    """Popen + построчный лог, но с жёстким дедлайном на весь прогон.
+    2026-08-03: 404-индекс на проде завис намертво в облаке - headless
+    Chromium подвис (не упал), а обычный `for line in proc.stdout` без
+    тайм-аута ждал вывода вечно и остановил весь чек-лист. Если подпроцесс
+    не пишет в stdout дольше timeout_sec, принудительно убиваем его вместе
+    с дочерними процессами, а не ждём бесконечно.
+    Возвращает (returncode|None, timed_out: bool)."""
+    import queue
+    import subprocess
+    import threading
+    import time as _time
+
+    popen_kwargs = dict(cwd=cwd, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, text=True,
+                         encoding='utf-8', errors='replace', env=env)
+    if _os_name() != 'Windows':
+        popen_kwargs['start_new_session'] = True
+    proc = subprocess.Popen(args, **popen_kwargs)
+
+    q = queue.Queue()
+
+    def _reader():
+        try:
+            for line in proc.stdout:
+                q.put(line)
+        except Exception:
+            pass
+        q.put(None)
+
+    threading.Thread(target=_reader, daemon=True).start()
+
+    deadline = _time.monotonic() + timeout_sec
+    timed_out = False
+    while True:
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            break
+        try:
+            line = q.get(timeout=min(remaining, 5))
+        except queue.Empty:
+            continue
+        if line is None:
+            break
+        log(f'{prefix}{line.rstrip()}')
+
+    if timed_out:
+        log(f'{prefix}⚠ нет вывода {timeout_sec}с - похоже, браузер завис '
+            f'(не упал, а именно завис, обычно из-за нехватки памяти в '
+            f'облаке). Принудительно завершаю…')
+        _kill_proc_tree(proc)
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            pass
+        return None, True
+
+    proc.wait()
+    return proc.returncode, False
+
+
 def _run_autoclicker(pid, params, log, session_b64=None):
     """Прокликать ошибки (Вебмастер/ГСК) и дождаться завершения.
     Локальный залогиненный Chrome (CDP 9222) в приоритете; нет его, но есть
@@ -173,7 +263,6 @@ def _run_index404_download(pid, params, log, session_b64=None):
     нуля нет (у Яндекса капча) - только сохранённая сессия.
     Возвращает dict в форме листа «404 в индексе»."""
     import os as _os
-    import subprocess
     import sys as _sys
     root = Path(__file__).parent
     _env = dict(_os.environ)
@@ -207,16 +296,17 @@ def _run_index404_download(pid, params, log, session_b64=None):
         args += ['--max-hosts', str(params['index_404_max_hosts'])]
     log('404 в индексе: запускаю браузер, качаю выгрузки «Страницы в поиске»…')
     try:
-        proc = subprocess.Popen(
-            args, cwd=str(root), stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
-            errors='replace', env=_env)
-        for line in proc.stdout:
-            log(f'  [404-индекс] {line.rstrip()}')
-        proc.wait()
+        _, _timed_out = _run_subprocess_with_timeout(
+            args, cwd=str(root), env=_env, log=log, prefix='  [404-индекс] ',
+            timeout_sec=1200)
     except Exception as e:
         return {'available': False, 'source': 'yandex_export', 'hosts': [],
                 'error': str(e)}
+    if _timed_out:
+        return {'available': False, 'source': 'yandex_export', 'hosts': [],
+                'error': ('браузер завис в облаке (нет вывода 20 мин) - '
+                          'процесс принудительно остановлен, повторите '
+                          'проверку позже')}
     try:
         return json.loads(_res_file.read_text(encoding='utf-8'))
     except Exception as e:
@@ -624,7 +714,13 @@ def run_check(pid, params, creds, log, progress):
         elif proxy_url:
             log(f'Прокси: включён для {cfg["name"]}')
 
-        if not src.products:
+        # Карточек товара у проекта может не быть вовсе: у МПИ весь каталог -
+        # плоские разделы /catalog/<slug>, товарных страниц в sitemap ноль.
+        # Тогда «отфильтровано 0 товаров» - не сбой загрузки, а устройство
+        # сайта, и грузить sitemap ради товаров незачем.
+        if not cfg.get('has_products', True):
+            log('Товары: у проекта нет карточек товаров - тип «Товар» не проверяется.')
+        elif not src.products:
             base_links = load_product_links(pid)
             if base_links and base_links['pathnames']:
                 src.products = base_links['pathnames']
@@ -658,6 +754,7 @@ def run_check(pid, params, creds, log, progress):
             mandatory_city=cfg.get('mandatory_city', 'Москва'),
             mandatory_hosts=cfg.get('mandatory_hosts'),
             cis_extra_subdomains=int(params.get('cis_extra', 0)),
+            trailing_slash=cfg.get('trailing_slash', True),
             rotation_history=recent,
         )
         # Свой список URL - добавляем к выборке проекта (тип по адресу).

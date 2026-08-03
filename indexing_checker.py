@@ -7,8 +7,10 @@ indexing_checker.py - проверка индексации страниц (пу
   • Страница из выборки (главная/каталог/категория/фильтр/товар/тех.) - это
     SEO-страница, она должна быть ОТКРЫТА:
       - закрыта Disallow в robots.txt        → баг
-      - <meta name="robots" … noindex>       → баг (противоречит robots)
-      - заголовок X-Robots-Tag: noindex      → баг
+      - <meta name="robots" … noindex> / заголовок X-Robots-Tag: noindex →
+        НЕ баг сам по себе: noindex - самостоятельный, более надёжный сигнал
+        (Disallow мешает роботу увидеть noindex), закрывать ЕЩЁ и в robots.txt
+        не обязательно; сигнал только фиксируется в отчёте
       - rel=canonical на URL, закрытый в robots → баг (канонизируем в «никуда»)
       - rel=canonical на ДРУГОЙ открытый URL → предупреждение (для фильтров
         каноникл на категорию бывает намеренным)
@@ -327,10 +329,11 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
     """Сверить сигналы индексации страницы с robots.txt (эталоном).
 
     Ошибка = РАСХОЖДЕНИЕ с robots.txt:
-      • в robots страница открыта, а на ней noindex (meta / X-Robots-Tag);
       • canonical ведёт на URL, закрытый в robots.
-    Закрыта в robots + noindex = согласовано (так задумано) - молчим.
-    Закрыта в robots без noindex = тоже задумано (robots прав) - молчим;
+    noindex (meta / X-Robots-Tag) сам по себе - НЕ ошибка, независимо от
+    robots.txt: страница не обязана быть закрыта Disallow, если её защищает
+    noindex (сигналы равноправны, не должны совпадать один-в-один).
+    Закрыта в robots без noindex - тоже задумано (robots прав) - молчим;
     противоречия «в sitemap, но под Disallow» ловит отдельная кросс-проверка.
     Возвращает dict для CheckResult.indexing."""
     out = {
@@ -347,36 +350,30 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
     issues, warnings = out['issues'], out['warnings']
 
     # 1. robots.txt - ЭТАЛОН. Disallow сам по себе не ошибка: так задумано.
-    closed_by_robots = False
     if robots is not None and robots.ok:
         dis, rule, agent = robots_verdict(robots, url)
         out['robots_disallowed'] = dis
         out['robots_rule'] = rule
         out['robots_agent'] = agent
-        closed_by_robots = dis
     elif robots is not None and robots.fetched and robots.status != 200:
         warnings.append(f'robots.txt отдаёт {robots.status} - правила не применяются')
     elif robots is not None and not robots.fetched:
         warnings.append('robots.txt не удалось скачать')
 
-    # 2. meta robots (в т.ч. name=yandex / name=googlebot) - сверяем с robots:
-    # noindex на открытой в robots странице = расхождение = ошибка;
-    # noindex на закрытой в robots = согласовано, молчим.
+    # 2. meta robots (в т.ч. name=yandex / name=googlebot). Открыта в robots +
+    # noindex - НЕ расхождение: страница не обязана быть закрыта в robots.txt,
+    # если её саму защищает noindex (это даже надёжнее - Disallow мешает
+    # роботу увидеть noindex и страница может попасть в индекс без сниппета).
+    # Просто фиксируем сигнал для колонки «Сигналы» отчёта, без issue.
     if html:
         meta_val, meta_noidx = _find_meta_robots(html)
         out['meta_robots'] = meta_val
         out['meta_noindex'] = meta_noidx
-        if meta_noidx and not closed_by_robots:
-            issues.append('расхождение с robots.txt: в robots страница открыта, '
-                          'но на ней noindex (meta robots)')
 
-    # 3. X-Robots-Tag - так же сверяем с robots
+    # 3. X-Robots-Tag - тот же сигнал, тем же заголовком, без Disallow не ошибка.
     x_val, x_noidx = _x_robots_noindex(headers)
     out['x_robots'] = x_val
     out['x_robots_noindex'] = x_noidx
-    if x_noidx and not closed_by_robots:
-        issues.append('расхождение с robots.txt: в robots страница открыта, '
-                      'но на ней noindex (заголовок X-Robots-Tag)')
 
     # 4. canonical - «верно настроен rel=canonical»:
     #    ровно один тег; указывает на себя; не на чужой хост; не на URL,
@@ -609,6 +606,24 @@ def _sample_disallowed_by_rule(disallowed: list, limit: int = _DIRECTIVE_CHECK_L
     return sample
 
 
+def _junk_verdict(status: Optional[int], html: Optional[str],
+                  is_param: bool) -> bool:
+    """Найдена ли «мусорная» страница, открытая в robots (ТЗ 3.3.4.2).
+
+    Открыта в robots (проверено ДО вызова) И отвечает 200 - находка. Но для
+    параметрических дублей (is_param=True: сортировка/пагинация/UTM/печать/
+    AJAX/служебный экшен) rel=canonical на странице - тоже валидный способ
+    развести дубли, не только Disallow: тег есть (в т.ч. self-canonical) -
+    сайт мог осознанно не закрывать эти варианты robots.txt, не находка.
+    Для НЕ-параметрических (поиск/корзина/ЛК/админка…) canonical роли не
+    играет - находка по одному 200. ЧИСТАЯ функция (юнит-тест без сети)."""
+    if status != 200:
+        return False
+    if is_param and html and _find_canonicals(html):
+        return False
+    return True
+
+
 def _directive_compliance_verdict(status: Optional[int], noindex: bool) -> str:
     """'ok' (страница недоступна напрямую - нечего защищать по факту) /
     'protected' (200, но есть СВОЙ noindex - двойная защита) / 'robots_only'
@@ -657,7 +672,9 @@ async def check_paths_against_robots(host: str, paths: list, *,
         неё есть внешняя ссылка, поисковик может показать голый URL).
     2. Типовой мусор закрыт (ТЗ 3.3.4.2): пагинация/сортировка реальной
        категории + поиск/корзина/сравнение/ЛК. Открыт в robots И отвечает
-       200 = находка.
+       200 = находка - КРОМЕ параметрических дублей (сортировка/пагинация/
+       UTM/печать/AJAX/служебный экшен): для них rel=canonical на странице
+       (даже self-canonical) - тоже валидная защита, не только Disallow.
     3. Sitemap-директивы (ТЗ 3.3.6): есть хотя бы одна; каждая отдаёт 200;
        совпадает ли с sitemap проекта.
     4. Доп. чек-лист «Robots.txt»:
@@ -779,8 +796,9 @@ async def check_paths_against_robots(host: str, paths: list, *,
                 ('служебный экшен', f'{_base}?change_password=yes'),
                 ('служебный экшен', f'{_base}?back_url_admin=/'),
             ]
-            junk = _param_junk + list(_JUNK_FIXED)
-            for label, path in junk:
+            junk = ([(label, path, True) for label, path in _param_junk]
+                    + [(label, path, False) for label, path in _JUNK_FIXED])
+            for label, path, is_param in junk:
                 # одна находка на сущность: «сортировка» открыта - хватит
                 # одного примера, варианты параметров не перечисляем
                 if any(j['label'] == label for j in out['junk_open']):
@@ -788,11 +806,16 @@ async def check_paths_against_robots(host: str, paths: list, *,
                 dis, _rule, _agent = robots_verdict(info, f'https://{host}{path}')
                 if dis:
                     continue                     # закрыт - как и должно быть
-                status = await _status_direct(
-                    session, f'https://{host}{path}', proxy_url)
-                if status == 200:                # существует И открыт = находка
-                    out['junk_open'].append(
-                        {'label': label, 'path': path})
+                _url = f'https://{host}{path}'
+                if is_param:
+                    _status, _hdrs, _html = await _fetch_for_directive_check(
+                        session, _url, proxy_url)
+                    if _junk_verdict(_status, _html, is_param=True):
+                        out['junk_open'].append({'label': label, 'path': path})
+                else:
+                    status = await _status_direct(session, _url, proxy_url)
+                    if _junk_verdict(status, None, is_param=False):
+                        out['junk_open'].append({'label': label, 'path': path})
 
             # ── 2а. Спорные для индекса страницы (noindex-кандидаты) ──
             # Чек-лист: старые акции/новости/политики лучше закрывать

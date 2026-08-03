@@ -2,7 +2,10 @@
 чистые функции без сети. Живой запрос (_fetch_for_directive_check) юнит-
 тестом не покрывается - только смоук-тестом на реальном HTTP (см.
 scratchpad прошлых сессий)."""
-from indexing_checker import _sample_disallowed_by_rule, _directive_compliance_verdict
+from indexing_checker import (
+    _sample_disallowed_by_rule, _directive_compliance_verdict,
+    _junk_verdict, analyze_page_indexing, parse_robots,
+)
 
 
 # ── _sample_disallowed_by_rule ──────────────────────────────────────────
@@ -56,6 +59,56 @@ def test_отвечает_200_без_noindex_robots_only():
     # Главный кейс находки: страница реально доступна и держится ТОЛЬКО на
     # честном слове robots.txt, без собственной подстраховки noindex'ом.
     assert _directive_compliance_verdict(200, False) == 'robots_only'
+
+
+# ── _junk_verdict ────────────────────────────────────────────────────────
+
+def test_параметрический_дубль_с_canonical_не_находка():
+    # Открыта в robots, отвечает 200, НО есть rel=canonical (даже self) -
+    # правки по чек-листу: это тоже валидная защита, не находка.
+    html = '<html><head><link rel="canonical" href="/catalog/x/?sort=price"></head></html>'
+    assert _junk_verdict(200, html, is_param=True) is False
+
+
+def test_параметрический_дубль_без_canonical_находка():
+    assert _junk_verdict(200, '<html><head></head></html>', is_param=True) is True
+    assert _junk_verdict(200, None, is_param=True) is True
+
+
+def test_не_параметрическая_страница_canonical_не_спасает():
+    # /admin/, /basket/, /search/ и т.п. - canonical тут ни при чём.
+    html = '<html><head><link rel="canonical" href="/basket/"></head></html>'
+    assert _junk_verdict(200, html, is_param=False) is True
+
+
+def test_статус_не_200_не_находка():
+    assert _junk_verdict(404, None, is_param=True) is False
+    assert _junk_verdict(None, None, is_param=False) is False
+
+
+# ── analyze_page_indexing: noindex на открытой в robots странице ────────
+
+def _open_robots():
+    return parse_robots('User-agent: *\nDisallow: /admin/\n', host='example.ru')
+
+
+def test_meta_noindex_на_открытой_в_robots_странице_не_ошибка():
+    # Правки по чек-листу: страница не обязана быть закрыта в robots.txt,
+    # если её защищает noindex - это не расхождение, а валидная альтернатива.
+    html = '<html><head><meta name="robots" content="noindex"></head></html>'
+    out = analyze_page_indexing(html, {}, 'https://example.ru/catalog/x/',
+                                 _open_robots())
+    assert out['meta_noindex'] is True
+    assert out['robots_disallowed'] is False
+    assert out['issues'] == []
+
+
+def test_x_robots_tag_noindex_на_открытой_в_robots_странице_не_ошибка():
+    out = analyze_page_indexing('<html></html>', {'x-robots-tag': 'noindex'},
+                                'https://example.ru/catalog/x/', _open_robots())
+    assert out['x_robots_noindex'] is True
+    assert out['robots_disallowed'] is False
+    assert out['issues'] == []
 
 
 # ── Секция 3а отчёта (reporter.py) не падает на новой структуре данных ──
