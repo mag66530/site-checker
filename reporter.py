@@ -21,6 +21,10 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter, range_boundaries
 
+from report_priorities import (
+    PRIORITY_LABEL, collect_findings, group_into_tasks, extra_site_tasks,
+)
+
 
 # ── Стили (цвета как в Node.js версии) ──────────────────────────────
 
@@ -6826,6 +6830,156 @@ def _build_uniqueness_sheet(wb, uniqueness):
         row += 1
 
 
+# ── Лист «Проблемы» - плоский список всех находок (report_priorities) ──
+
+
+_LEVEL_COLOR = {'Ошибка': 'err', 'Предупреждение': 'warn'}
+
+
+def _build_problems_sheet(wb, findings):
+    """Лист «Проблемы»: одна строка = одна находка на одной странице (все
+    проверки чек-листа - report_priorities.collect_findings). Фильтруется
+    по любой колонке (автофильтр)."""
+    _MAX_ROWS = 3000
+    ws = wb.create_sheet('Проблемы')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if any(
+        f.level == 'Ошибка' for f in findings) else (C.warn if findings else C.ok)
+
+    for col, w in (('A', 3), ('B', 4), ('C', 14), ('D', 20), ('E', 46),
+                  ('F', 12), ('G', 14), ('H', 55), ('I', 40)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:I2')
+    c = ws['B2']
+    c.value = 'Все находки по страницам - одна строка = одна проблема на одной странице'
+    c.font = _font(size=14, bold=True)
+    ws.row_dimensions[2].height = 24
+
+    ws.merge_cells('B3:I3')
+    c = ws['B3']
+    c.value = ('Фильтруйте столбцы: «Уровень» - что критично, «Раздел» - чья '
+              'зона ответственности, «Проблема» - конкретная задача. '
+              'Ошибка = чинить, Предупреждение = улучшение.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 30
+
+    hdr = 5
+    headers = (('B', '№'), ('C', 'Уровень'), ('D', 'Раздел'),
+              ('E', 'Проблема'), ('F', 'Город'), ('G', 'Тип страницы'),
+              ('H', 'Адрес страницы'), ('I', 'Подробности'))
+    for col, title in headers:
+        cell = ws[f'{col}{hdr}']
+        cell.value = title
+        cell.font = _font(size=10, bold=True, color=C.text)
+        cell.fill = _fill(C.surface)
+        cell.border = _border()
+        cell.alignment = _align(indent=1)
+    ws.row_dimensions[hdr].height = 20
+
+    ordered = sorted(findings, key=lambda f: (f.level != 'Ошибка', f.section,
+                                              f.problem, f.url))
+    row = hdr + 1
+    for i, f in enumerate(ordered[:_MAX_ROWS], 1):
+        color = getattr(C, _LEVEL_COLOR.get(f.level, 'text_soft'))
+        vals = (i, f.level, f.section, f.problem, f.city, f.page_type,
+               f.url, f.detail)
+        for col_i, (col, _) in enumerate(headers):
+            cell = ws[f'{col}{row}']
+            cell.value = vals[col_i]
+            cell.font = _font(size=9, color=color if col == 'C' else C.text_soft)
+            cell.alignment = _align(wrap=(col in ('E', 'H', 'I')),
+                                    vertical='top', indent=1)
+            cell.border = _border(color=C.border_light)
+        if f.url:
+            u = ws[f'H{row}']
+            u.hyperlink = f.url
+            u.font = _font(size=9, color=C.accent, underline='single')
+        ws.row_dimensions[row].height = 15
+        row += 1
+
+    last = row - 1
+    if last >= hdr + 1:
+        ws.auto_filter.ref = f'B{hdr}:I{last}'
+        ws.freeze_panes = f'B{hdr + 1}'
+    if len(ordered) > _MAX_ROWS:
+        row += 1
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        c = ws.cell(row=row, column=2)
+        c.value = f'…показаны первые {_MAX_ROWS} из {len(ordered)} находок.'
+        c.font = _font(size=10, italic=True, color=C.text_muted)
+
+
+# ── Лист «План работ» - приоритезированные задачи (report_priorities) ──
+
+
+def _build_work_plan_sheet(wb, tasks):
+    """Лист «План работ»: находки, сгруппированные в задачи и
+    отсортированные по приоритету (report_priorities.group_into_tasks +
+    extra_site_tasks)."""
+    ws = wb.create_sheet('План работ')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = (
+        C.err if any(t.priority == 1 for t in tasks)
+        else C.warn if tasks else C.ok)
+
+    for col, w in (('A', 3), ('B', 14), ('C', 34), ('D', 55), ('E', 10),
+                  ('F', 50), ('G', 20), ('H', 40)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:H2')
+    c = ws['B2']
+    c.value = 'План работ - что чинить и в каком порядке'
+    c.font = _font(size=14, bold=True)
+    ws.row_dimensions[2].height = 24
+
+    ws.merge_cells('B3:H3')
+    c = ws['B3']
+    c.value = ('Сверху вниз: сначала «Критично» - то, что прямо сейчас теряет '
+              'заказы и позиции. Столбец «Объём» показывает, сколько страниц '
+              'или объектов затронуто.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 30
+
+    hdr = 5
+    headers = (('B', 'Приоритет'), ('C', 'Задача'), ('D', 'Что именно не так'),
+              ('E', 'Объём'), ('F', 'Почему это важно'), ('G', 'Кому'),
+              ('H', 'Где смотреть детали'))
+    for col, title in headers:
+        cell = ws[f'{col}{hdr}']
+        cell.value = title
+        cell.font = _font(size=10, bold=True, color=C.text)
+        cell.fill = _fill(C.surface)
+        cell.border = _border()
+        cell.alignment = _align(indent=1)
+    ws.row_dimensions[hdr].height = 20
+
+    _PRIO_COLOR = {1: C.err, 2: C.warn, 3: C.text_muted}
+    row = hdr + 1
+    for t in tasks:
+        color = _PRIO_COLOR.get(t.priority, C.text_muted)
+        vals = (PRIORITY_LABEL.get(t.priority, str(t.priority)), t.title,
+               t.what, t.volume, t.why, t.owner, t.where)
+        for col_i, (col, _) in enumerate(headers):
+            cell = ws[f'{col}{row}']
+            cell.value = vals[col_i]
+            cell.font = _font(size=10, bold=(col == 'B'),
+                              color=color if col == 'B' else C.text_soft)
+            cell.alignment = _align(wrap=(col in ('C', 'D', 'F', 'H')),
+                                    vertical='top', indent=1,
+                                    horizontal='center' if col == 'E' else 'left')
+            cell.border = _border(color=C.border_light)
+        ws.row_dimensions[row].height = 32
+        row += 1
+
+    last = row - 1
+    if last >= hdr + 1:
+        ws.auto_filter.ref = f'B{hdr}:H{last}'
+        ws.freeze_panes = f'B{hdr + 1}'
+
+
 # ── Главная функция ────────────────────────────────────────────────
 
 
@@ -6916,6 +7070,20 @@ def build_report(
                        + sum(1 for d in ((meta_summary or {})
                                          .get('url_duplicates') or [])
                              if d.get('problem') != 'not_301'))
+
+    # Находки со всех проверок (лист «Проблемы») + приоритезированный план
+    # работ (лист «План работ») - report_priorities.py. wm_metrics/ps_filters/
+    # service_issues - задачи уровня сайта/хоста, в «Проблемы» не попадают
+    # (там колонки заточены под конкретную страницу).
+    _findings = collect_findings(results, console_check=console_check,
+                                 index_404_check=index_404_check)
+    _tasks = (group_into_tasks(_findings)
+             + extra_site_tasks(indexing_summary=indexing_summary,
+                                wm_metrics=wm_metrics,
+                                service_issues=service_issues,
+                                ps_filters=ps_filters))
+    _tasks.sort(key=lambda t: (t.priority, -t.volume))
+    _critical_tasks = sum(1 for t in _tasks if t.priority == 1)
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 1: Обзор
@@ -7155,6 +7323,8 @@ def build_report(
     # Отчёт собран в 7 тематических листов (каждый - несколько блоков-секций).
     nav_items = [
         ('Обзор', 'эта страница: сколько проверено, сколько работает и сколько сломано.'),
+        ('План работ', 'все задачи по приоритету: что чинить, почему это важно и кому передать.'),
+        ('Проблемы', 'каждая находка отдельной строкой: уровень, раздел, адрес страницы. Фильтруется как угодно.'),
         ('Структура страниц', 'что чинить в контенте по типам страниц (главная/каталог/листинг/разделы/карточки товаров/технические) - где нет цены, кнопок заказа, заголовка. Красное = баг.'),
         ('Техничка', 'SEO-техничка: индексация (robots/sitemap/canonical), метаданные и единственность заголовков, микроразметка (OG/Schema), безопасность и редиректы, ошибки JavaScript, валидность W3C и скорость, страница 404 и 404 в индексе, санкции ПС, нагрузка/парсинг, битые переменные.'),
         ('Верстка', 'вёрстка и адаптивность: viewport, CSS, сетка на пк/моб/планшет, переходы из меню, работа фильтров товаров, поиск по категориям.'),
@@ -7178,6 +7348,43 @@ def build_report(
         v.value = desc
         v.font = _font(size=10, color=C.text_soft)
         v.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+
+    # ─── С чего начать - первые 6 задач (report_priorities) ─────────
+    top_row = nav_row + len(nav_items) + 2
+    ws1.row_dimensions[top_row].height = 22
+    ws1.merge_cells(f'B{top_row}:E{top_row}')
+    c = ws1[f'B{top_row}']
+    c.value = (f'С чего начать - первые задачи (критичных задач всего: '
+              f'{_critical_tasks})' if _tasks else
+              'С чего начать - критичных задач не найдено')
+    c.font = _font(size=10, bold=True, color=C.text_muted)
+    c.alignment = _align()
+
+    _top6 = _tasks[:6]
+    if _top6:
+        top_hdr = top_row + 1
+        for col, title in (('B', '№'), ('C', 'Задача'), ('D', 'Почему сейчас')):
+            cell = ws1[f'{col}{top_hdr}']
+            cell.value = title
+            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.alignment = _align()
+        ws1.row_dimensions[top_hdr].height = 18
+        for i, t in enumerate(_top6, 1):
+            r = top_hdr + i
+            ws1.row_dimensions[r].height = 28
+            ws1[f'B{r}'].value = i
+            ws1[f'B{r}'].alignment = _align()
+            ws1[f'C{r}'].value = t.title
+            ws1[f'C{r}'].font = _font(size=10, bold=True)
+            ws1[f'C{r}'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+            ws1.merge_cells(f'D{r}:E{r}')
+            ws1[f'D{r}'].value = t.what
+            ws1[f'D{r}'].font = _font(size=10, color=C.text_soft)
+            ws1[f'D{r}'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+
+    # ─── Листы «План работ» и «Проблемы» (report_priorities) ────────
+    _build_work_plan_sheet(wb, _tasks)
+    _build_problems_sheet(wb, _findings)
 
     # ─── Лист структурной проверки (идёт сразу после «Обзора») ──────
     _build_structure_sheet(wb, results)
