@@ -1450,7 +1450,8 @@ if pid:
                                             for _k in _sm_keys:
                                                 st.session_state[_k] = False
                                     for _u, _sm_key in zip(_urls, _sm_keys):
-                                        st.checkbox(_u, value=True, key=_sm_key)
+                                        st.session_state.setdefault(_sm_key, True)
+                                        st.checkbox(_u, key=_sm_key)
                         else:
                             st.caption(f'Будет случайно выбрано {len(_sm_groups)} '
                                       'карт - по одной на каждый найденный вид.')
