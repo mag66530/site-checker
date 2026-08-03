@@ -76,6 +76,13 @@ SPEED_COLOR = {
     'very_slow': C.err,
 }
 
+SPEED_FILL = {
+    'fast': C.ok_soft,
+    'normal': C.ok_soft,
+    'slow': C.warn_soft,
+    'very_slow': C.err_soft,
+}
+
 _NOTIF_CAT_DEPT = {
     'server':    ['разработка'],
     'speed':     ['разработка'],
@@ -4598,6 +4605,8 @@ def _build_traffic_sheet(wb, traffic):
         n[8] = _fmt_duration(n[8])   # время: секунды → м:сс
         return n
 
+    _DELTA_FILL = {C.ok: C.ok_soft, C.err: C.err_soft, C.text_muted: None}
+
     def _delta(cur, prev, invert=False):
         # invert=True для «отказов»: рост - плохо (красный), падение - хорошо.
         if not prev:
@@ -4611,11 +4620,13 @@ def _build_traffic_sheet(wb, traffic):
             return f'+{pct}%', up_color
         return f'{pct}%', down_color
 
-    def _put(row, idx, value, **fkw):
+    def _put(row, idx, value, fill=None, **fkw):
         cell = ws.cell(row=row, column=2 + idx, value=value)
         cell.font = _font(size=9, **fkw)
         cell.alignment = _align(horizontal='center', vertical='center')
         cell.border = _border()
+        if fill:
+            cell.fill = _fill(fill)
         return cell
 
     order = ['День', 'Месяц', 'Год']
@@ -4672,7 +4683,8 @@ def _build_traffic_sheet(wb, traffic):
                 cn, pn = _nums(cur), _nums(prev)
                 for j in range(len(cn)):
                     txt, clr = _delta(cn[j], pn[j], invert=(j == 6))
-                    _put(row, 2 + j, txt, color=clr, bold=True)
+                    _put(row, 2 + j, txt, color=clr, bold=True,
+                        fill=_DELTA_FILL.get(clr))
                 ws.row_dimensions[row].height = 16
                 row += 1
             row += 1   # разделитель между периодами
@@ -7112,38 +7124,59 @@ def build_report(
     ws1 = wb.create_sheet('Обзор')
     ws1.sheet_view.showGridLines = False
 
-    # Ширины колонок
+    # Ширины колонок - B..H под 7 карточек метрик, дальше секции идут тем же
+    # диапазоном (описания смёрджены на всю ширину B:H).
     ws1.column_dimensions['A'].width = 3
-    for col in ('B', 'C', 'D', 'E'):
-        ws1.column_dimensions[col].width = 22
-    ws1.column_dimensions['F'].width = 3
+    for col, w in (('B', 20), ('C', 17), ('D', 13), ('E', 13),
+                  ('F', 13), ('G', 13), ('H', 20)):
+        ws1.column_dimensions[col].width = w
+    ws1.column_dimensions['I'].width = 3
 
     # Заголовок
-    ws1.merge_cells('B2:E2')
+    ws1.merge_cells('B2:H2')
     c = ws1['B2']
     c.value = 'Отчёт по проверке сайта'
     c.font = _font(size=20, bold=True)
     ws1.row_dimensions[2].height = 30
 
-    ws1.merge_cells('B3:E3')
+    ws1.merge_cells('B3:H3')
     started_dt = datetime.fromtimestamp(started_at_ms / 1000)
     c = ws1['B3']
     c.value = f'{project_name} · {started_dt.strftime("%d.%m.%Y, %H:%M:%S")}'
     c.font = _font(size=11, color=C.text_muted)
     ws1.row_dimensions[3].height = 20
 
-    # ─── 4 карточки метрик ─────────────────────────────────────────
+    # ─── 7 карточек метрик ───────────────────────────────────────────
     card_row = 6
     ws1.row_dimensions[card_row].height = 22
     ws1.row_dimensions[card_row + 1].height = 38
 
+    _total_findings = len(_findings)
+    _err_findings = sum(1 for f in _findings if f.level == 'Ошибка')
+    _warn_findings = sum(1 for f in _findings if f.level == 'Предупреждение')
+
+    def _card_fill(kind: str, value: int) -> str:
+        # 'good' - позитивная метрика (всегда зелёная), 'bad' - красная, пока
+        # значение > 0 (иначе зелёная - нечего чинить), 'warn' - жёлтая при
+        # значении > 0, 'neutral' - нейтральная заливка (просто счётчик).
+        if kind == 'good':
+            return C.ok_soft
+        if kind == 'bad':
+            return C.err_soft if value else C.ok_soft
+        if kind == 'warn':
+            return C.warn_soft if value else C.ok_soft
+        return C.surface
+
     metrics = [
-        ('B', 'ВСЕГО ПРОВЕРОК', total, C.text),
-        ('C', 'РАБОТАЕТ', ok_count, C.ok),
-        ('D', 'НЕ РАБОТАЕТ', err_count, C.err),
-        ('E', 'ПРЕДУПРЕЖДЕНИЯ', warn_count, C.warn),
+        ('B', 'СТРАНИЦ ПРОВЕРЕНО', total, C.text, 'neutral'),
+        ('C', 'ОТКРЫВАЮТСЯ', ok_count, C.ok, 'good'),
+        ('D', 'НЕ ОТКРЫВАЮТСЯ', err_count, C.err, 'bad'),
+        ('E', 'ВСЕГО НАХОДОК', _total_findings, C.text, 'neutral'),
+        ('F', 'ИЗ НИХ ОШИБОК', _err_findings, C.err, 'bad'),
+        ('G', 'ПРЕДУПРЕЖДЕНИЙ', _warn_findings, C.warn, 'warn'),
+        ('H', 'КРИТИЧНЫХ ЗАДАЧ', _critical_tasks, C.err, 'bad'),
     ]
-    for col, label, value, color in metrics:
+    for col, label, value, color, kind in metrics:
         top = ws1[f'{col}{card_row}']
         top.value = label
         top.font = _font(size=9, bold=True, color=C.text_muted)
@@ -7153,29 +7186,24 @@ def build_report(
 
         bot = ws1[f'{col}{card_row + 1}']
         bot.value = value
-        bot.font = _font(size=26, bold=True, color=color)
+        bot.font = _font(size=22, bold=True, color=color)
         bot.alignment = _align()
-        bot.fill = _fill(C.bg_elev)
+        bot.fill = _fill(_card_fill(kind, value))
         bot.border = _border()
 
-    # ─── Сводка ────────────────────────────────────────────────────
+    # ─── Коротко о главном (сводка) ──────────────────────────────────
     sum_row = card_row + 3
     ws1.row_dimensions[sum_row].height = 26
-    ws1.merge_cells(f'B{sum_row}:E{sum_row}')
+    ws1.merge_cells(f'B{sum_row}:H{sum_row}')
     c = ws1[f'B{sum_row}']
-    c.value = 'Сводка'
+    c.value = 'Коротко о главном'
     c.font = _font(size=12, bold=True)
     c.alignment = _align()
     c.fill = _fill(C.surface)
     c.border = _border()
 
     sum_body_row = sum_row + 1
-    _extra = ((1 if total_text_issues > 0 else 0)
-              + (1 if total_content_bugs > 0 else 0)
-              + (1 if (indexing_bad_pages or indexing_sitemap_conflicts) else 0)
-              + (1 if (meta_bad_pages or meta_dup_groups) else 0))
-    ws1.row_dimensions[sum_body_row].height = 44 + _extra * 17
-    ws1.merge_cells(f'B{sum_body_row}:E{sum_body_row}')
+    ws1.merge_cells(f'B{sum_body_row}:H{sum_body_row}')
     c = ws1[f'B{sum_body_row}']
     summary_text = (
         f'Из {total} проверенных страниц: '
@@ -7304,10 +7332,21 @@ def build_report(
     c.fill = _fill(C.bg_elev)
     c.border = _border()
 
+    # Высота строки - по факту переносов, а не по числу условных «доп.
+    # абзацев»: считаем, сколько визуальных строк займёт текст при реальной
+    # ширине смёрженных колонок (грубая, но честная оценка - без Excel не
+    # измерить точные пиксели).
+    _sum_chars_per_line = max(20, sum(
+        ws1.column_dimensions[c_].width or 0 for c_ in 'BCDEFGH') - 2)
+    _sum_lines = sum(
+        max(1, -(-len(line) // _sum_chars_per_line))
+        for line in summary_text.split('\n'))
+    ws1.row_dimensions[sum_body_row].height = max(30, _sum_lines * 15 + 10)
+
     # ─── Параметры прогона ─────────────────────────────────────────
     param_row = sum_body_row + 2
     ws1.row_dimensions[param_row].height = 22
-    ws1.merge_cells(f'B{param_row}:E{param_row}')
+    ws1.merge_cells(f'B{param_row}:H{param_row}')
     c = ws1[f'B{param_row}']
     c.value = 'Параметры прогона'
     c.font = _font(size=10, bold=True, color=C.text_muted)
@@ -7326,7 +7365,7 @@ def build_report(
         k.font = _font(size=10, color=C.text_muted)
         k.alignment = Alignment(horizontal='left', vertical='top', indent=1)
 
-        ws1.merge_cells(f'C{r}:E{r}')
+        ws1.merge_cells(f'C{r}:H{r}')
         v = ws1[f'C{r}']
         v.value = value
         v.font = _font(size=10, color=C.text_soft)
@@ -7335,7 +7374,7 @@ def build_report(
     # ─── Навигация по отчёту (для тех, кто открыл впервые) ──────────
     nav_row = param_row + len(params) + 2
     ws1.row_dimensions[nav_row].height = 22
-    ws1.merge_cells(f'B{nav_row}:E{nav_row}')
+    ws1.merge_cells(f'B{nav_row}:H{nav_row}')
     c = ws1[f'B{nav_row}']
     c.value = 'Из чего состоит отчёт'
     c.font = _font(size=10, bold=True, color=C.text_muted)
@@ -7357,23 +7396,40 @@ def build_report(
         ('Я.Бизнес и GMB', 'если есть лист - каждый поддомен (город) зарегистрирован в Яндекс.Бизнесе под своим регионом; поддомены без организации.'),
         ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
     ]
+    nav_hdr = nav_row + 1
+    for col, title in (('B', 'Лист'), ('C', 'Что там')):
+        cell = ws1[f'{col}{nav_hdr}']
+        cell.value = title
+        cell.font = _font(size=9, bold=True, color=C.bg_elev)
+        cell.fill = _fill(C.accent)
+        cell.border = _border()
+        cell.alignment = _align(indent=1)
+    ws1.merge_cells(f'C{nav_hdr}:H{nav_hdr}')
+    ws1.row_dimensions[nav_hdr].height = 20
     for i, (sheet_name, desc) in enumerate(nav_items):
-        r = nav_row + 1 + i
+        r = nav_hdr + 1 + i
         ws1.row_dimensions[r].height = 30
         k = ws1[f'B{r}']
         k.value = sheet_name
-        k.font = _font(size=10, bold=True, color=C.accent)
+        k.font = _font(size=10, bold=True, color=C.accent, underline='single')
         k.alignment = Alignment(horizontal='left', vertical='top', indent=1)
-        ws1.merge_cells(f'C{r}:E{r}')
+        k.border = _border(color=C.border_light)
+        # Ссылка на лист ставится безусловно: на момент сборки «Обзора»
+        # остальные листы (План работ/Проблемы/группы/Все детали) ещё не
+        # созданы - появятся ниже по коду, но к моменту сохранения файла
+        # будут существовать все, внутренняя ссылка на них верна.
+        k.hyperlink = f"#'{sheet_name}'!A1"
+        ws1.merge_cells(f'C{r}:H{r}')
         v = ws1[f'C{r}']
         v.value = desc
         v.font = _font(size=10, color=C.text_soft)
         v.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        v.border = _border(color=C.border_light)
 
     # ─── С чего начать - первые 6 задач (report_priorities) ─────────
-    top_row = nav_row + len(nav_items) + 2
+    top_row = nav_hdr + len(nav_items) + 1
     ws1.row_dimensions[top_row].height = 22
-    ws1.merge_cells(f'B{top_row}:E{top_row}')
+    ws1.merge_cells(f'B{top_row}:H{top_row}')
     c = ws1[f'B{top_row}']
     c.value = (f'С чего начать - первые задачи (критичных задач всего: '
               f'{_critical_tasks})' if _tasks else
@@ -7382,26 +7438,49 @@ def build_report(
     c.alignment = _align()
 
     _top6 = _tasks[:6]
+    _TOP_FILL = {1: C.err_soft, 2: C.warn_soft, 3: C.surface}
     if _top6:
         top_hdr = top_row + 1
-        for col, title in (('B', '№'), ('C', 'Задача'), ('D', 'Почему сейчас')):
+        for col, title in (('B', '№'), ('C', 'Задача'), ('D', 'Почему сейчас'),
+                           ('G', 'Кому')):
             cell = ws1[f'{col}{top_hdr}']
             cell.value = title
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
+            cell.font = _font(size=9, bold=True, color=C.bg_elev)
+            cell.fill = _fill(C.accent)
+            cell.border = _border()
             cell.alignment = _align()
-        ws1.row_dimensions[top_hdr].height = 18
+        ws1.merge_cells(f'D{top_hdr}:F{top_hdr}')
+        ws1.merge_cells(f'G{top_hdr}:H{top_hdr}')
+        ws1.row_dimensions[top_hdr].height = 20
         for i, t in enumerate(_top6, 1):
             r = top_hdr + i
-            ws1.row_dimensions[r].height = 28
-            ws1[f'B{r}'].value = i
-            ws1[f'B{r}'].alignment = _align()
-            ws1[f'C{r}'].value = t.title
-            ws1[f'C{r}'].font = _font(size=10, bold=True)
-            ws1[f'C{r}'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
-            ws1.merge_cells(f'D{r}:E{r}')
-            ws1[f'D{r}'].value = t.what
-            ws1[f'D{r}'].font = _font(size=10, color=C.text_soft)
-            ws1[f'D{r}'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+            ws1.row_dimensions[r].height = 30
+            num = ws1[f'B{r}']
+            num.value = i
+            num.font = _font(size=10, bold=True)
+            num.alignment = _align()
+            num.fill = _fill(_TOP_FILL.get(t.priority, C.surface))
+            num.border = _border(color=C.border_light)
+
+            task_c = ws1[f'C{r}']
+            task_c.value = t.title
+            task_c.font = _font(size=10, bold=True)
+            task_c.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+            task_c.border = _border(color=C.border_light)
+
+            ws1.merge_cells(f'D{r}:F{r}')
+            why_c = ws1[f'D{r}']
+            why_c.value = t.what
+            why_c.font = _font(size=10, color=C.text_soft)
+            why_c.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+            why_c.border = _border(color=C.border_light)
+
+            ws1.merge_cells(f'G{r}:H{r}')
+            owner_c = ws1[f'G{r}']
+            owner_c.value = t.owner
+            owner_c.font = _font(size=10, color=C.text_soft)
+            owner_c.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+            owner_c.border = _border(color=C.border_light)
 
     # ─── Листы «План работ» и «Проблемы» (report_priorities) ────────
     _build_work_plan_sheet(wb, _tasks)
@@ -7560,16 +7639,21 @@ def build_report(
             issue_cell.font = _font(size=10, bold=True, color=C.warn)
             issue_cell.fill = _fill(C.warn_soft)
 
-        # Оценка скорости - цвет по уровню
+        # Оценка скорости - цвет и заливка по уровню (ОК - зелёным, медленно -
+        # жёлтым, долгий ответ сервера - красным)
         if r.speed_rating:
             speed_cell = ws2.cell(row=row_idx, column=8)
             color = SPEED_COLOR[r.speed_rating]
             bold = r.speed_rating in ('slow', 'very_slow')
             speed_cell.font = _font(size=10, bold=bold, color=color)
+            speed_cell.fill = _fill(SPEED_FILL[r.speed_rating])
 
-        # Статус - цвет по результату
+        # Статус - цвет и заливка по результату
         status_color = C.ok if r.is_ok else C.warn if r.is_warning else C.err
-        ws2.cell(row=row_idx, column=6).font = _font(size=10, bold=True, color=status_color)
+        status_fill = C.ok_soft if r.is_ok else C.warn_soft if r.is_warning else C.err_soft
+        status_cell = ws2.cell(row=row_idx, column=6)
+        status_cell.font = _font(size=10, bold=True, color=status_color)
+        status_cell.fill = _fill(status_fill)
 
     ws2.auto_filter.ref = f'A1:K{len(sorted_results) + 1}'
 

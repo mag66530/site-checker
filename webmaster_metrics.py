@@ -115,10 +115,18 @@ def analyze_crawl(indicators):
         latest = vals[-1]
         base = _median(vals[:-1]) if len(vals) >= 2 else 0
         if latest >= floor and latest >= max(CRAWL_SPIKE_FACTOR * (base or 0), floor):
+            if code == 'HTTP_5XX':
+                text = (f'Робот получил ошибку сервера (5xx) на {latest} URL '
+                       f'при обходе (обычно ~{int(base or 0)}) - сайт '
+                       f'нестабильно отвечает роботу, такие страницы рискуют '
+                       f'выпасть из индекса.')
+            else:
+                text = (f'Робот получил ошибку 404 на {latest} URL при '
+                       f'обходе (обычно ~{int(base or 0)}) - удалённые или '
+                       f'битые страницы, которые ещё не выпали из индекса.')
             out.append({'metric': label, 'before': int(base or 0),
                         'after': latest, 'delta_pct': None, 'severity': sev,
-                        'text': f'всплеск: было ~{int(base or 0)}, стало {latest} - '
-                                f'{"сервер отдаёт ошибки роботу" if code == "HTTP_5XX" else "рост 404, страницы недоступны"}'})
+                        'text': text})
     return out
 
 
