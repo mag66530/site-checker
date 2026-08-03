@@ -84,6 +84,57 @@ def test_soft_404_это_одна_находка_а_не_список_блоко
     assert 'soft-404' in out[0].problem
 
 
+def test_meta_unique_findings_заголовки_и_мета():
+    r = _result(meta_unique={'issues': ['H1 содержит вложенные теги'], 'warnings': []})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].section == 'Заголовки и мета'
+    assert out[0].level == 'Ошибка'
+
+
+def test_cis_findings_снг_домены():
+    r = _result(cis={'issues': ['упоминание «Россия» на СНГ-домене'], 'warnings': []})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].section == 'СНГ-домены'
+
+
+def test_kp_result_bug_даёт_находку_ok_не_даёт():
+    r = _result(kp_result={'issues': [
+        {'field': 'Телефон', 'status': 'bug', 'comment': 'номер не из КП'},
+        {'field': 'Email', 'status': 'ok', 'comment': 'совпало'},
+    ]})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].section == 'Контакты по городам'
+    assert 'Телефон' in out[0].problem
+    assert out[0].level == 'Ошибка'
+
+
+def test_page_phone_critical_даёт_ошибку():
+    r = _result(page_phone={'status': 'critical', 'comment': 'в КП нет номера'})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+
+
+def test_page_phone_ok_ничего_не_даёт():
+    r = _result(page_phone={'status': 'ok', 'comment': ''})
+    assert collect_findings([r]) == []
+
+
+def test_contacts_addr_mismatched_даёт_находку_на_город():
+    r = _result(contacts_addr={'on_page': 2, 'matched': 1,
+                               'mismatched': [{'city': 'Норильск',
+                                              'site': 'ул. Ленина, 1',
+                                              'kp': 'ул. Ленина, 2'}],
+                               'not_in_kp': []})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert 'Норильск' in out[0].problem
+    assert 'Ленина, 1' in out[0].detail and 'Ленина, 2' in out[0].detail
+
+
 def test_console_check_ошибки_js_и_адаптивность():
     console = {'pages': [
         {'url': 'https://example.ru/', 'errors': ['TypeError: x is undefined'],

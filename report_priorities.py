@@ -133,6 +133,44 @@ def _console_findings(console_check: Optional[dict]) -> list:
     return out
 
 
+def _kp_findings(kp_result: Optional[dict], *, city, page_type, url) -> list:
+    """Сверка контактов главной с КП (kp.check_against_kp): issues -
+    [{field, status, comment}], status='ok' - не находка."""
+    out = []
+    for i in (kp_result or {}).get('issues') or []:
+        status = i.get('status')
+        if status == 'ok':
+            continue
+        level = 'Ошибка' if status in ('bug', 'critical') else 'Предупреждение'
+        out.append(Finding(level, 'Контакты по городам',
+                           f'{i.get("field", "")}: {i.get("comment", "")}',
+                           city, page_type, url))
+    return out
+
+
+def _page_phone_findings(page_phone: Optional[dict], *, city, page_type, url) -> list:
+    """Сверка телефона в контенте тех. страницы с КП: {status, comment}."""
+    if not page_phone or page_phone.get('status') == 'ok':
+        return []
+    level = 'Ошибка' if page_phone.get('status') in ('bug', 'critical') else 'Предупреждение'
+    return [Finding(level, 'Контакты по городам', page_phone.get('comment', ''),
+                    city, page_type, url)]
+
+
+def _contacts_addr_findings(contacts_addr: Optional[dict], *, city, page_type,
+                            url) -> list:
+    """Сверка адресов всех городов на странице «Контакты»:
+    {on_page, matched, mismatched:[{city,site,kp}], not_in_kp}."""
+    out = []
+    for m in (contacts_addr or {}).get('mismatched') or []:
+        out.append(Finding(
+            'Ошибка', 'Контакты по городам',
+            f'адрес города «{m.get("city", "")}» на странице не совпадает с КП',
+            city, page_type, url,
+            detail=f'на сайте: «{m.get("site", "")}», в КП: «{m.get("kp", "")}»'))
+    return out
+
+
 def _availability_findings(r) -> list:
     """Страница не открывается вовсе - самая базовая находка."""
     if r.is_ok:
@@ -177,10 +215,21 @@ def collect_findings(results, *, console_check: dict = None,
                                     city=city, page_type=page_type, url=url))
         out.extend(_from_issue_dict(r.images, section='Изображения',
                                     city=city, page_type=page_type, url=url))
+        out.extend(_from_issue_dict(getattr(r, 'meta_unique', None),
+                                    section='Заголовки и мета',
+                                    city=city, page_type=page_type, url=url))
+        out.extend(_from_issue_dict(getattr(r, 'cis', None), section='СНГ-домены',
+                                    city=city, page_type=page_type, url=url))
         out.extend(_region_findings(r.region, city=city, page_type=page_type,
                                     url=url))
         out.extend(_content_findings(r.content, city=city, page_type=page_type,
                                      url=url))
+        out.extend(_kp_findings(getattr(r, 'kp_result', None), city=city,
+                                page_type=page_type, url=url))
+        out.extend(_page_phone_findings(getattr(r, 'page_phone', None), city=city,
+                                        page_type=page_type, url=url))
+        out.extend(_contacts_addr_findings(getattr(r, 'contacts_addr', None),
+                                           city=city, page_type=page_type, url=url))
     out.extend(_console_findings(console_check))
     out.extend(_index_404_findings(index_404_check))
     return out
@@ -355,6 +404,14 @@ _RULES = [
     ('Регион и город', '', 1, 'SEO + разработка', 'region_wrong_city',
      'Убрать чужой город со страницы',
      'Смешение городов путает и покупателя, и региональное ранжирование.'),
+
+    ('СНГ-домены', '', 1, 'SEO + разработка', 'cis_purity',
+     'Убрать упоминания РФ/СНГ/чужих стран с СНГ-домена',
+     'СНГ-домен должен выглядеть как локальный сайт этой страны, а не филиал РФ-сайта.'),
+
+    ('Контакты по городам', '', 1, 'SEO + разработка', 'kp_contacts',
+     'Свести контакты страницы с картой присутствия (КП)',
+     'Неверный телефон/адрес города путает покупателя и портит доверие к сайту.'),
 ]
 
 
