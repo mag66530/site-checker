@@ -193,7 +193,8 @@ def test_every_detail_sheet_is_grouped():
     src = (Path(__file__).parent.parent / 'reporter.py').read_text(encoding='utf-8')
     literal_sheets = set(_re.findall(r"create_sheet\('([^']+)'\)", src))
     covered = ({m for _, ms in _SHEET_GROUPS for m in ms}
-               | {'Обзор', 'Все детали', 'Структура страниц', 'Я.Бизнес и GMB'})
+               | {'Обзор', 'Все детали', 'Структура страниц', 'Я.Бизнес и GMB',
+                 'План работ', 'Проблемы'})
     orph = literal_sheets - covered
     assert not orph, f'листы вне групп (потеряются): {sorted(orph)}'
     print(f'✓ Все {len(literal_sheets)} листов распределены по группам')
@@ -291,9 +292,10 @@ def test_tech_section_mandatory_bug_and_broken_links():
                      selected_subdomains=selected, results=results, output_path=out)
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        # «Структура страниц» - отдельный лист (не в группе), сразу после «Обзора».
+        # «Структура страниц» - отдельный лист (не в группе), сразу после
+        # «Обзора», «Плана работ» и «Проблем».
         assert 'Структура страниц' in wb.sheetnames
-        assert wb.sheetnames[1] == 'Структура страниц'
+        assert wb.sheetnames[:4] == ['Обзор', 'План работ', 'Проблемы', 'Структура страниц']
         ws = wb['Структура страниц']
         blob = ' | '.join(str(c) for row in ws.iter_rows(values_only=True)
                           for c in row if c)
