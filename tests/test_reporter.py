@@ -292,9 +292,10 @@ def test_tech_section_mandatory_bug_and_broken_links():
                      selected_subdomains=selected, results=results, output_path=out)
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        # «Структура страниц» - отдельный лист (не в группе), сразу после «Обзора».
+        # «Структура страниц» - отдельный лист (не в группе), сразу после
+        # «Обзора», «Плана работ» и «Проблем».
         assert 'Структура страниц' in wb.sheetnames
-        assert wb.sheetnames[1] == 'Структура страниц'
+        assert wb.sheetnames[:4] == ['Обзор', 'План работ', 'Проблемы', 'Структура страниц']
         ws = wb['Структура страниц']
         blob = ' | '.join(str(c) for row in ws.iter_rows(values_only=True)
                           for c in row if c)

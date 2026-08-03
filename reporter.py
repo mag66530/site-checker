@@ -6617,7 +6617,8 @@ def _append_sheet_as_section(dst, src, start_row, title, gap=2):
 
 def _regroup_into_groups(wb):
     """Собрать детальные листы в 7 тематических групповых листов.
-    Обзор остаётся первым, «Все детали» - последним."""
+    Обзор остаётся первым (следом - План работ и Проблемы), «Все детали» -
+    последним."""
     for group_name, members in _SHEET_GROUPS:
         present = [m for m in members if m in wb.sheetnames]
         note = _GROUP_NOTES.get(group_name)
@@ -6656,8 +6657,9 @@ def _regroup_into_groups(wb):
         if grp.title != group_name:
             grp.title = group_name
 
-    # Порядок: Обзор → Структура страниц → 7 групп → Я.Бизнес/GMB → Все детали.
-    order = (['Обзор', 'Структура страниц']
+    # Порядок: Обзор → План работ → Проблемы → Структура страниц → 7 групп →
+    # Я.Бизнес/GMB → Все детали.
+    order = (['Обзор', 'План работ', 'Проблемы', 'Структура страниц']
              + [g for g, _ in _SHEET_GROUPS if g in wb.sheetnames]
              + ['Я.Бизнес и GMB', 'Все детали'])
     ordered = [wb[n] for n in order if n in wb.sheetnames]
