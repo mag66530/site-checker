@@ -6060,7 +6060,10 @@ def _append_log_row_impl(path: str, row: dict) -> None:
     if not row.get("где"):
         try:
             from form_locations import where as _where_form
-            row = {**row, "где": _where_form(row.get("название", ""))}
+            # id проекта кладёт forms_run.py (FORMS_PROJECT): по нему берём
+            # описания того проекта, если имя формы у проектов пересекается.
+            row = {**row, "где": _where_form(row.get("название", ""),
+                                             os.environ.get("FORMS_PROJECT", ""))}
         except Exception:
             pass
 

@@ -304,9 +304,10 @@ def _list_forms(project: str):
 # формам - лежит в forms_tester/form_locations.py (тот же текст едет и в колонку
 # «Где находится» отчёта). Если формы нет в словаре, подсказка не показывается.
 try:
-    from forms_tester.form_locations import FORM_WHERE as _FORM_WHERE
+    from forms_tester.form_locations import where as _form_where
 except Exception:
-    _FORM_WHERE = {}
+    def _form_where(название, проект=''):   # noqa: D103
+        return ''
 
 
 def _rows_done(xlsx: Path):
@@ -912,7 +913,7 @@ if _all_forms:
         # Группировка по СТРАНИЦЕ сайта (без техназваний: Главная_расчёты и
         # Главная - это одна «Главная»). Всё в карточке с рамкой, между
         # группами тонкая линия. Подсказка «?» - где форма НА странице
-        # (шапка/подвал/кнопка-окно), только если она есть в _FORM_WHERE.
+        # (шапка/подвал/кнопка-окно), только если описание для формы известно.
         def _pg_group(page):
             return (page or '').split('_')[0] or 'Прочее'
 
@@ -942,7 +943,7 @@ if _all_forms:
                     unsafe_allow_html=True)
                 _fcols = _ccol.columns(3)
                 for _i, _f in enumerate(_items):
-                    _hint = _FORM_WHERE.get(_f['name'])
+                    _hint = _form_where(_f['name'], pid_key) or None
                     if _fcols[_i % 3].checkbox(
                             _disp_name(_f['name']), key=_fk(_f['name']),
                             help=_hint):

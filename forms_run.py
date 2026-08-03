@@ -254,6 +254,10 @@ def main() -> int:
         show_browser = False
 
     name = PROJECT_NAMES[a.project]
+    # id проекта в окружение: движок берёт по нему описания «где находится
+    # форма» из form_locations.FORM_WHERE_BY_PROJECT (одинаковые названия форм
+    # у разных проектов означают разные формы).
+    os.environ['FORMS_PROJECT'] = a.project
     src_config = PROJECTS_ROOT / a.project / 'config.py'
     if not src_config.is_file():
         _stamp(f'✗ Нет файла конфигурации: {src_config}')
