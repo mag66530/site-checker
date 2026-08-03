@@ -768,10 +768,11 @@ def run_check(pid, params, creds, log, progress):
             except Exception as e:
                 log(f'⚠ Свой список URL не разобран: {e}')
 
-        # Случайная проверка карт сайта: 1 файл на «вид» (products-1/-2/-3 -
-        # один вид) + случайный пул ссылок с каждого выбранного файла.
-        # Добавленные страницы типизируются по адресу и проходят все обычные
-        # проверки (как свой список URL выше).
+        # Случайная проверка карт сайта: «вручную» - 1 файл на «вид» среди не
+        # исключённых; «рандом» - минимум 1 файл на вид + добор случайными
+        # разными файлами до DEFAULT_RANDOM_TARGET. Добавленные страницы
+        # типизируются по адресу и проходят все обычные проверки (как свой
+        # список URL выше).
         _sm_sample = params.get('sitemap_sample') or {}
         if _sm_sample.get('enabled') and _sm_sample.get('groups'):
             try:
@@ -779,6 +780,7 @@ def run_check(pid, params, creds, log, progress):
                 _sampled = asyncio.run(pick_sample_urls(
                     _sm_sample['groups'], set(_sm_sample.get('excluded') or []),
                     int(_sm_sample.get('urls_per_map', 5)),
+                    mode=_sm_sample.get('mode', 'manual'),
                     proxy_url=proxy_url, log=lambda lvl, msg: log(msg)))
                 if _sampled:
                     extra = build_custom_tasks_typed(_sampled, src)

@@ -23,6 +23,7 @@ _RE_INDEX = re.compile(r'<sitemapindex\b', re.I)
 _RE_NONALPHA = re.compile(r'[-_\d]+')
 
 MAX_INDEX_FILES = 200  # защита от вырожденных случаев (индекс индексов)
+DEFAULT_RANDOM_TARGET = 4  # режим «рандом»: столько карт минимум за прогон
 
 
 def kind_of(sitemap_url: str) -> str:
@@ -54,6 +55,26 @@ def pick_one_per_kind(groups: dict[str, list[str]], excluded: set,
         if candidates:
             chosen.append(rng.choice(candidates))
     return chosen
+
+
+def pick_random_sitemaps(groups: dict[str, list[str]], excluded: set,
+                        target: int = DEFAULT_RANDOM_TARGET,
+                        rng: Optional[random.Random] = None) -> list[str]:
+    """Режим «Рандом»: минимум 1 файл на «вид» (гарантия разнообразия - вид
+    без вложенности берётся стопроцентно, это его единственный файл), затем
+    добор случайными РАЗНЫМИ файлами до `target` (если видов больше target -
+    минимум их уже покрывает, добора не требуется). Если файлов физически
+    меньше цели - берутся все доступные. ЧИСТАЯ функция."""
+    rng = rng or random
+    baseline = pick_one_per_kind(groups, excluded, rng=rng)
+    chosen = set(baseline)
+    need = max(0, target - len(baseline))
+    if need > 0:
+        pool = [u for urls in groups.values() for u in urls
+                if u not in excluded and u not in chosen]
+        rng.shuffle(pool)
+        chosen.update(pool[:need])
+    return baseline + [u for u in chosen if u not in baseline]
 
 
 # ── Сеть: находим листовые карты и качаем выбранные ─────────────────────
@@ -121,11 +142,18 @@ async def sample_urls_from_sitemaps(sitemap_urls: list[str], urls_per_map: int,
 
 
 async def pick_sample_urls(groups: dict[str, list[str]], excluded: set,
-                           urls_per_map: int, *, proxy_url=None,
+                           urls_per_map: int, *, mode: str = 'manual',
+                           target: int = DEFAULT_RANDOM_TARGET,
+                           proxy_url=None,
                            rng: Optional[random.Random] = None,
                            log=None) -> list[str]:
-    """Полный проход: 1 файл на вид → пул ссылок с каждого выбранного файла."""
-    chosen = pick_one_per_kind(groups, excluded, rng=rng)
+    """Полный проход: выбор файлов (manual - 1 на вид среди не исключённых;
+    random - минимум 1 на вид + добор до target) → пул ссылок с каждого
+    выбранного файла."""
+    if mode == 'random':
+        chosen = pick_random_sitemaps(groups, excluded, target=target, rng=rng)
+    else:
+        chosen = pick_one_per_kind(groups, excluded, rng=rng)
     if log:
         log('info', f'Карты сайта: выбрано {len(chosen)} файлов из {len(groups)} видов')
     return await sample_urls_from_sitemaps(

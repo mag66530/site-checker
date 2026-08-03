@@ -40,7 +40,9 @@ from run_estimate import estimate_run_seconds, format_estimate
 from sitemap import (
     load_product_pathnames, get_cached_products_info, invalidate_sitemap_cache,
 )
-from sitemap_sampling import discover_child_sitemaps, group_by_kind
+from sitemap_sampling import (
+    discover_child_sitemaps, group_by_kind, DEFAULT_RANDOM_TARGET,
+)
 from product_links import load_product_links
 from http_checker import run_batch
 from reporter import build_report, make_report_filename
@@ -764,6 +766,7 @@ def init_session():
         # Случайная проверка карт сайта (сэмпл по видам)
         'c30_check_sitemap_sample': False,
         'c30_sitemap_urls_per_map': 5,
+        'c30_sitemap_mode': 'Настроить вручную',
         # Уникальность контента (text.ru): объём выборки и порог.
         # SEO-текст лежит на КАТЕГОРИЯХ; в товарах текст генерится через
         # переменные - по умолчанию товары не проверяем (0).
@@ -1414,14 +1417,33 @@ if pid:
                     _sm_groups = st.session_state.get('c30_sitemap_groups')
                     if _sm_groups:
                         st.caption(f'Найдено видов: {len(_sm_groups)} '
-                                   f'({st.session_state.get("c30_sitemap_host", "")}). '
-                                   'Снимите галочку у карты, чтобы исключить её.')
-                        for _kind, _urls in _sm_groups.items():
-                            with st.expander(f'{_kind} ({len(_urls)})', expanded=False):
-                                for _u in _urls:
-                                    _sm_key = ('c30_sm_incl_'
-                                              + hashlib.md5(_u.encode()).hexdigest()[:12])
-                                    st.checkbox(_u, value=True, key=_sm_key)
+                                   f'({st.session_state.get("c30_sitemap_host", "")})')
+                        st.radio(
+                            'Как выбирать карты для проверки',
+                            ['Настроить вручную', 'Рандом'],
+                            key='c30_sitemap_mode', horizontal=True,
+                            help='**Вручную** - сами решаете, какие карты '
+                                 'проверять (галочки ниже; по умолчанию по '
+                                 'одной случайной карте на каждый вид).\n\n'
+                                 '**Рандом** - минимум одна карта на каждый '
+                                 'вид (вид без продолжений - берётся '
+                                 'стопроцентно), плюс добор случайными '
+                                 f'картами до {DEFAULT_RANDOM_TARGET} (или '
+                                 'больше, если видов больше) - при каждом '
+                                 'прогоне разный набор.')
+                        if st.session_state.c30_sitemap_mode == 'Настроить вручную':
+                            st.caption('Снимите галочку у карты, чтобы исключить её.')
+                            for _kind, _urls in _sm_groups.items():
+                                with st.expander(f'{_kind} ({len(_urls)})', expanded=False):
+                                    for _u in _urls:
+                                        _sm_key = ('c30_sm_incl_'
+                                                  + hashlib.md5(_u.encode()).hexdigest()[:12])
+                                        st.checkbox(_u, value=True, key=_sm_key)
+                        else:
+                            _sm_target = max(DEFAULT_RANDOM_TARGET, len(_sm_groups))
+                            st.caption(f'Будет случайно выбрано {_sm_target} '
+                                      'разных карт - минимум по одной на вид, '
+                                      'остальные добором.')
                     st.number_input('Ссылок с каждой выбранной карты', 1, 50,
                                     value=5, key='c30_sitemap_urls_per_map')
 
@@ -2387,17 +2409,20 @@ if pid:
                     ln.strip() for ln in st.session_state.c30_custom_urls_text.split('\n')
                     if ln.strip() and not ln.strip().startswith('#')
                 ]
-            # Случайная проверка карт сайта - список видов + исключённые файлы
-            # (снятые галочки), только на этот запуск.
+            # Случайная проверка карт сайта - список видов + режим отбора,
+            # только на этот запуск (не сохраняется).
             _sm_groups = st.session_state.get('c30_sitemap_groups') or {}
+            _sm_manual = st.session_state.get('c30_sitemap_mode',
+                                              'Настроить вручную') == 'Настроить вручную'
             _sm_excluded = [
                 u for _urls in _sm_groups.values() for u in _urls
                 if not st.session_state.get(
                     'c30_sm_incl_' + hashlib.md5(u.encode()).hexdigest()[:12], True)
-            ]
+            ] if _sm_manual else []
             sitemap_sample = {
                 'enabled': st.session_state.get('c30_check_sitemap_sample', False),
                 'groups': _sm_groups,
+                'mode': 'manual' if _sm_manual else 'random',
                 'excluded': _sm_excluded,
                 'urls_per_map': int(st.session_state.get('c30_sitemap_urls_per_map', 5)),
             }

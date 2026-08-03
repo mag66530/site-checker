@@ -6,7 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sitemap_sampling import kind_of, group_by_kind, pick_one_per_kind
+from sitemap_sampling import (
+    kind_of, group_by_kind, pick_one_per_kind, pick_random_sitemaps,
+)
 
 
 def test_kind_of_убирает_цифры_и_разделители():
@@ -81,6 +83,49 @@ def test_pick_one_per_kind_детерминирован_с_seed():
     a = pick_one_per_kind(groups, excluded=set(), rng=random.Random(42))
     b = pick_one_per_kind(groups, excluded=set(), rng=random.Random(42))
     assert a == b
+
+
+# ── pick_random_sitemaps (режим «Рандом») ───────────────────────────────
+
+
+def test_random_добирает_до_target_если_видов_меньше():
+    # 3 вида (как на инметпроме), target по умолчанию 4 → добор 1 файла.
+    groups = {
+        'teg': [f'https://a.ru/teg{i}.xml' for i in range(3)],
+        'category': ['https://a.ru/category.xml'],
+        'product': [f'https://a.ru/product{i}.xml' for i in range(181)],
+    }
+    chosen = pick_random_sitemaps(groups, excluded=set(), rng=random.Random(1))
+    assert len(chosen) == 4
+    assert len(set(chosen)) == 4                 # все разные
+    assert 'https://a.ru/category.xml' in chosen  # вид без вложенности - берётся стопроцентно
+
+
+def test_random_без_добора_если_видов_больше_target():
+    groups = {f'kind{i}': [f'https://a.ru/{i}-a.xml', f'https://a.ru/{i}-b.xml']
+              for i in range(6)}
+    chosen = pick_random_sitemaps(groups, excluded=set(), target=4,
+                                  rng=random.Random(1))
+    assert len(chosen) == 6                       # по одному на каждый из 6 видов
+    assert len(set(chosen)) == 6
+
+
+def test_random_не_может_добрать_больше_чем_есть_файлов():
+    groups = {'category': ['https://a.ru/category.xml'],
+              'filters': ['https://a.ru/filters.xml']}
+    chosen = pick_random_sitemaps(groups, excluded=set(), target=10,
+                                  rng=random.Random(1))
+    assert len(chosen) == 2                       # физически больше файлов нет
+
+
+def test_random_учитывает_исключённые():
+    groups = {'product': [f'https://a.ru/p{i}.xml' for i in range(5)]}
+    excluded = {'https://a.ru/p0.xml'}
+    chosen = pick_random_sitemaps(groups, excluded=excluded, target=4,
+                                  rng=random.Random(1))
+    assert 'https://a.ru/p0.xml' not in chosen
+    assert len(chosen) == 4
+    assert len(set(chosen)) == 4
 
 
 if __name__ == '__main__':
