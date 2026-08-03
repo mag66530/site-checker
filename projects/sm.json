@@ -5,10 +5,11 @@
   "main_url": "https://shopmet.ru/",
   "sitemap_url": "https://shopmet.ru/sitemap.xml",
   "subdomains_csv": "catalogs/sm-subdomains.csv",
-  "catalog_csv": null,
+  "catalog_csv": "catalogs/sm-catalog.csv",
   "categories_csv": null,
   "mandatory_city": "Москва",
+  "trailing_slash": false,
   "has_filters": false,
   "use_proxy": false,
-  "kp_sheet_url": null
+  "kp_sheet_url": "https://docs.google.com/spreadsheets/d/1FVf9tM1_V06n1VDQU7Fkk8HvvfimEuRwq8FtP8865xY/edit?usp=sharing"
 }
