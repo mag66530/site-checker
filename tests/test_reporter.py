@@ -23,6 +23,37 @@ def test_стили_не_прозрачные():
     assert _border('A8B2BD').top.color.rgb == 'FFA8B2BD'
 
 
+def test_проблемы_уровень_ошибка_красит_ячейку_заливкой():
+    """Колонка «Уровень» должна быть залита (не только цветной текст), чтобы
+    строку-ошибку было видно с первого взгляда."""
+    from openpyxl import Workbook
+    from reporter import _build_problems_sheet
+    from report_priorities import Finding
+    wb = Workbook()
+    findings = [Finding('Ошибка', 'Индексация', 'canonical на закрытый URL',
+                        url='https://a.ru/x/')]
+    _build_problems_sheet(wb, findings)
+    ws = wb['Проблемы']
+    level_cell = ws['C6']
+    assert level_cell.value == 'Ошибка'
+    assert level_cell.fill.fgColor.rgb == 'FFFEF2F2'
+
+
+def test_план_работ_приоритет_красит_ячейку_заливкой():
+    from openpyxl import Workbook
+    from reporter import _build_work_plan_sheet
+    from report_priorities import Task
+    wb = Workbook()
+    tasks = [Task(priority=1, task_group='x', title='Починить',
+                 what='...', volume=3, why='...', owner='Разработка',
+                 where='Лист «Проблемы»')]
+    _build_work_plan_sheet(wb, tasks)
+    ws = wb['План работ']
+    prio_cell = ws['B6']
+    assert prio_cell.value == '1. Критично'
+    assert prio_cell.fill.fgColor.rgb == 'FFFEF2F2'
+
+
 def make_result(**kw):
     """Хелпер для создания тестового CheckResult."""
     defaults = {

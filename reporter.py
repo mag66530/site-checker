@@ -6846,6 +6846,7 @@ def _build_uniqueness_sheet(wb, uniqueness):
 
 
 _LEVEL_COLOR = {'Ошибка': 'err', 'Предупреждение': 'warn'}
+_LEVEL_FILL = {'Ошибка': 'err_soft', 'Предупреждение': 'warn_soft'}
 
 
 def _build_problems_sheet(wb, findings):
@@ -6895,15 +6896,19 @@ def _build_problems_sheet(wb, findings):
     row = hdr + 1
     for i, f in enumerate(ordered[:_MAX_ROWS], 1):
         color = getattr(C, _LEVEL_COLOR.get(f.level, 'text_soft'))
+        fill_name = _LEVEL_FILL.get(f.level)
         vals = (i, f.level, f.section, f.problem, f.city, f.page_type,
                f.url, f.detail)
         for col_i, (col, _) in enumerate(headers):
             cell = ws[f'{col}{row}']
             cell.value = vals[col_i]
-            cell.font = _font(size=9, color=color if col == 'C' else C.text_soft)
+            cell.font = _font(size=9, color=color if col == 'C' else C.text_soft,
+                              bold=(col == 'C'))
             cell.alignment = _align(wrap=(col in ('E', 'H', 'I')),
                                     vertical='top', indent=1)
             cell.border = _border(color=C.border_light)
+            if col == 'C' and fill_name:
+                cell.fill = _fill(getattr(C, fill_name))
         if f.url:
             u = ws[f'H{row}']
             u.hyperlink = f.url
@@ -6969,9 +6974,11 @@ def _build_work_plan_sheet(wb, tasks):
     ws.row_dimensions[hdr].height = 20
 
     _PRIO_COLOR = {1: C.err, 2: C.warn, 3: C.text_muted}
+    _PRIO_FILL = {1: C.err_soft, 2: C.warn_soft, 3: C.surface}
     row = hdr + 1
     for t in tasks:
         color = _PRIO_COLOR.get(t.priority, C.text_muted)
+        fill_color = _PRIO_FILL.get(t.priority)
         vals = (PRIORITY_LABEL.get(t.priority, str(t.priority)), t.title,
                t.what, t.volume, t.why, t.owner, t.where)
         for col_i, (col, _) in enumerate(headers):
@@ -6983,6 +6990,8 @@ def _build_work_plan_sheet(wb, tasks):
                                     vertical='top', indent=1,
                                     horizontal='center' if col == 'E' else 'left')
             cell.border = _border(color=C.border_light)
+            if col == 'B' and fill_color:
+                cell.fill = _fill(fill_color)
         ws.row_dimensions[row].height = 32
         row += 1
 
