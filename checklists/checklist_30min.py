@@ -40,9 +40,7 @@ from run_estimate import estimate_run_seconds, format_estimate
 from sitemap import (
     load_product_pathnames, get_cached_products_info, invalidate_sitemap_cache,
 )
-from sitemap_sampling import (
-    discover_child_sitemaps, group_by_kind, DEFAULT_RANDOM_TARGET,
-)
+from sitemap_sampling import discover_child_sitemaps, group_by_kind
 from product_links import load_product_links
 from http_checker import run_batch
 from reporter import build_report, make_report_filename
@@ -1425,12 +1423,12 @@ if pid:
                             help='**Вручную** - сами решаете, какие карты '
                                  'проверять (галочки ниже; по умолчанию по '
                                  'одной случайной карте на каждый вид).\n\n'
-                                 '**Рандом** - минимум одна карта на каждый '
-                                 'вид (вид без продолжений - берётся '
-                                 'стопроцентно), плюс добор случайными '
-                                 f'картами до {DEFAULT_RANDOM_TARGET} (или '
-                                 'больше, если видов больше) - при каждом '
-                                 'прогоне разный набор.')
+                                 '**Рандом** - на каждый вид, найденный на '
+                                 'сайте, случайно выбирается одна карта (вид '
+                                 'без продолжений - берётся стопроцентно); '
+                                 'число карт не фиксировано - оно равно '
+                                 'числу видов, а не какому-то заданному '
+                                 'значению, при каждом прогоне набор разный.')
                         if st.session_state.c30_sitemap_mode == 'Настроить вручную':
                             st.caption('Снимите галочку у карты, чтобы исключить её.')
                             for _kind, _urls in _sm_groups.items():
@@ -1440,10 +1438,8 @@ if pid:
                                                   + hashlib.md5(_u.encode()).hexdigest()[:12])
                                         st.checkbox(_u, value=True, key=_sm_key)
                         else:
-                            _sm_target = max(DEFAULT_RANDOM_TARGET, len(_sm_groups))
-                            st.caption(f'Будет случайно выбрано {_sm_target} '
-                                      'разных карт - минимум по одной на вид, '
-                                      'остальные добором.')
+                            st.caption(f'Будет случайно выбрано {len(_sm_groups)} '
+                                      'карт - по одной на каждый найденный вид.')
                     st.number_input('Ссылок с каждой выбранной карты', 1, 50,
                                     value=5, key='c30_sitemap_urls_per_map')
 
