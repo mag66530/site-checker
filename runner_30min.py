@@ -768,6 +768,26 @@ def run_check(pid, params, creds, log, progress):
             except Exception as e:
                 log(f'⚠ Свой список URL не разобран: {e}')
 
+        # Случайная проверка карт сайта: 1 файл на «вид» (products-1/-2/-3 -
+        # один вид) + случайный пул ссылок с каждого выбранного файла.
+        # Добавленные страницы типизируются по адресу и проходят все обычные
+        # проверки (как свой список URL выше).
+        _sm_sample = params.get('sitemap_sample') or {}
+        if _sm_sample.get('enabled') and _sm_sample.get('groups'):
+            try:
+                from sitemap_sampling import pick_sample_urls
+                _sampled = asyncio.run(pick_sample_urls(
+                    _sm_sample['groups'], set(_sm_sample.get('excluded') or []),
+                    int(_sm_sample.get('urls_per_map', 5)),
+                    proxy_url=proxy_url, log=lambda lvl, msg: log(msg)))
+                if _sampled:
+                    extra = build_custom_tasks_typed(_sampled, src)
+                    plan.tasks.extend(extra)
+                    log(f'Карты сайта (сэмпл): добавлено {len(extra)} URL '
+                        f'из {len(_sm_sample["groups"])} видов карт')
+            except Exception as e:
+                log(f'⚠ Сэмпл карт сайта не выполнен: {e}')
+
         # Технические страницы (на главном домене) - проверяем ВСЕГДА, при любом
         # прогоне, вне зависимости от объёма выборки.
         _tech_paths = get_tech_paths(pid)
