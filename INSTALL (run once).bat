@@ -18,8 +18,11 @@ echo [1/3] Upgrading pip...
 %PY% -m pip install --upgrade pip
 
 echo.
-echo [2/3] Installing libraries (streamlit, playwright, openpyxl, ...)...
-%PY% -m pip install -r requirements-local.txt
+rem -- requirements.txt is the FULL app (incl. login: psycopg, bcrypt,
+rem -- extra-streamlit-components, cryptography). requirements-local.txt alone
+rem -- is not enough: START.bat would die with ModuleNotFoundError on import auth.
+echo [2/3] Installing libraries (streamlit, playwright, login, ...)...
+%PY% -m pip install -r requirements.txt -r requirements-local.txt
 if errorlevel 1 (
     echo [!] Failed to install libraries. Check internet and try again.
     pause

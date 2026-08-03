@@ -714,7 +714,13 @@ def run_check(pid, params, creds, log, progress):
         elif proxy_url:
             log(f'Прокси: включён для {cfg["name"]}')
 
-        if not src.products:
+        # Карточек товара у проекта может не быть вовсе: у МПИ весь каталог -
+        # плоские разделы /catalog/<slug>, товарных страниц в sitemap ноль.
+        # Тогда «отфильтровано 0 товаров» - не сбой загрузки, а устройство
+        # сайта, и грузить sitemap ради товаров незачем.
+        if not cfg.get('has_products', True):
+            log('Товары: у проекта нет карточек товаров - тип «Товар» не проверяется.')
+        elif not src.products:
             base_links = load_product_links(pid)
             if base_links and base_links['pathnames']:
                 src.products = base_links['pathnames']
@@ -748,6 +754,7 @@ def run_check(pid, params, creds, log, progress):
             mandatory_city=cfg.get('mandatory_city', 'Москва'),
             mandatory_hosts=cfg.get('mandatory_hosts'),
             cis_extra_subdomains=int(params.get('cis_extra', 0)),
+            trailing_slash=cfg.get('trailing_slash', True),
             rotation_history=recent,
         )
         # Свой список URL - добавляем к выборке проекта (тип по адресу).

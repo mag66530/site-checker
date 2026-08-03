@@ -300,6 +300,41 @@ def test_сшивка_заказа_берёт_вердикт_а_не_запол�
     assert str(ws2.cell(2, si + 1).value).startswith("ОШИБКА")
 
 
+def test_checkout_две_строки_в_одну_колонку(tmp_path):
+    # Пункт «Оформить заказ + Оформление заказа Метпромко объедини в одно»:
+    # после того как оба шага названы одинаково («Оформление заказа»),
+    # консолидация сводит их в ОДНУ строку «Логи», а матрица - в ОДНУ колонку.
+    from openpyxl import Workbook, load_workbook
+    path = tmp_path / "log_forms.xlsx"
+    wb = Workbook(); sv = wb.active; sv.title = "Сводка"
+    ws = wb.create_sheet("Логи"); ws.append(list(t.LOG_HEADERS))
+
+    def _row(status, **extra):
+        r = {h: "" for h in t.LOG_HEADERS}
+        r.update({"Город": "Москва", "Страница": "Товар_звонок",
+                  "URL": "https://metpromko.ru/onepagecheckout",
+                  "Название": "Оформление заказа", "Статус": status})
+        r.update(extra)
+        return [r[h] for h in t.LOG_HEADERS]
+
+    # шаг заполнения+отправки и шаг подтверждения - оба под одним именем
+    ws.append(_row("Успешно", **{"CSRF-защита": "Есть"}))
+    ws.append(_row("Успешно", **{"Данные дошли до сервера": "Да (заказ создан на сервере, ORDER_ID)"}))
+    wb.save(str(path))
+
+    t.консолидировать_форм_строки(str(path))
+    ws2 = load_workbook(str(path))["Логи"]
+    assert ws2.max_row == 2, "два шага заказа должны слиться в одну строку «Логи»"
+
+    t.построить_матрицу_проверок(str(path))
+    m = load_workbook(str(path))["Москва"]
+    # РОВНО одна форма-колонка (заголовки форм - со столбца 2)
+    заголовки = [m.cell(1, c).value for c in range(2, m.max_column + 1)
+                 if m.cell(1, c).value]
+    assert заголовки == ["Оформление заказа"], f"ожидали одну колонку, получили {заголовки}"
+    print("✓ checkout сведён в одну колонку «Оформление заказа»")
+
+
 def test_заметки_не_ужимаются_до_ячейки(tmp_path):
     # openpyxl пишет <x:SizeWithCells/>, из-за чего Excel обрезает длинный
     # комментарий до узкой ячейки. Матрица должна убрать этот флаг (оставив

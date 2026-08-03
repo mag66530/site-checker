@@ -1,9 +1,15 @@
-# Зависимости ТОЛЬКО для локального лаунчера автокликеров (launcher.py).
-# НЕ нужны облачному чек-листу – не добавляй в requirements.txt,
-# иначе Streamlit Cloud будет ставить тяжёлый playwright.
+# Локальные зависимости (лаунчер автокликеров, движок «Проверки форм»).
+#
+# ВНИМАНИЕ: одного этого файла для запуска приложения НЕ хватает - здесь нет
+# библиотек личного кабинета (psycopg, bcrypt, extra-streamlit-components,
+# cryptography), и START.bat падал бы на `import auth` с ModuleNotFoundError.
+# Полный набор - в requirements.txt; «INSTALL (run once).bat» ставит ОБА файла.
+# Исторически playwright держали только здесь, чтобы Streamlit Cloud не тянул
+# тяжёлый пакет, но с приходом облачных «Проверки форм»/«Проверки целей» он
+# всё равно переехал в requirements.txt - и этот файл стал его подмножеством.
 #
 # Установка (один раз):
-#   pip install -r requirements-local.txt
+#   pip install -r requirements.txt -r requirements-local.txt
 #   playwright install chromium
 #
 # (Chrome для автокликеров используется реальный, но playwright нужен как драйвер.)
