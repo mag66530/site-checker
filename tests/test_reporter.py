@@ -7,10 +7,20 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, '/home/claude/site-checker-py')
 
-from reporter import build_report, make_report_filename
+from reporter import build_report, make_report_filename, _font, _fill, _border
 from text_checker import TextIssue
 from http_checker import CheckResult, STATUS, SPEED
 from sources import Subdomain
+
+
+def test_стили_не_прозрачные():
+    """openpyxl подставляет альфу '00' (прозрачно), если отдать голый 6-значный
+    RGB в Font/PatternFill/Border - текст/заливка/границы становятся
+    невидимыми в клиентах, которые честно учитывают альфа-канал. _font/_fill/
+    _border обязаны отдавать 8-значный ARGB с 'FF' (непрозрачно)."""
+    assert _font(color='71717A').color.rgb == 'FF71717A'
+    assert _fill('FAFAFA').fgColor.rgb == 'FFFAFAFA'
+    assert _border('A8B2BD').top.color.rgb == 'FFA8B2BD'
 
 
 def make_result(**kw):

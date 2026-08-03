@@ -119,20 +119,30 @@ def _dept_notif(n) -> str:
     return ', '.join(_NOTIF_CAT_DEPT.get(n.category, ['SEO']))
 
 
+def _argb(color: str) -> str:
+    """6-значный RGB ('71717A') -> 8-значный ARGB с непрозрачной альфой
+    ('FF71717A'). Без этого openpyxl сам подставляет альфу '00' (прозрачно) -
+    Font(color='71717A').color.rgb == '0071717A', а не 'FF71717A' - из-за
+    этого текст/заливка/границы могут отрисовываться невидимыми в клиентах,
+    которые честно учитывают альфа-канал (не все версии Excel его игнорируют)."""
+    return color if len(color) == 8 else f'FF{color}'
+
+
 def _font(size=10, bold=False, italic=False, underline=None, color=C.text, name='Arial'):
     return Font(
         name=name, size=size, bold=bold, italic=italic,
-        underline=underline, color=color,
+        underline=underline, color=_argb(color),
     )
 
 
 def _border(color=C.border):
-    side = Side(style='thin', color=color)
+    side = Side(style='thin', color=_argb(color))
     return Border(top=side, left=side, bottom=side, right=side)
 
 
 def _fill(color):
-    return PatternFill(start_color=color, end_color=color, fill_type='solid')
+    argb = _argb(color)
+    return PatternFill(start_color=argb, end_color=argb, fill_type='solid')
 
 
 def _align(horizontal='left', vertical='center', wrap=False, indent=1):
