@@ -47,6 +47,7 @@ ROOT = Path(__file__).parent
 # форм-тестере/«Проверке целей».
 FORMS_PROJECT_ALIASES = {
     "metpromko": "mpk",
+    "shopmet": "sm",
 }
 
 
