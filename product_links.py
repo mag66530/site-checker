@@ -91,12 +91,21 @@ def _clean_href(href: str, page_url: str, page_host: str) -> str:
     return path if path.endswith('/') else path + '/'
 
 
+# Разделы, под которыми лежат карточки товаров отдельным префиксом:
+# у SHOPMET адрес карточки - /product/<slug>, тогда как /catalog/<slug> - это
+# РАЗДЕЛ (у СМУ/МПЭ наоборот: товар лежит глубже внутри /catalog/).
+_PRODUCT_PREFIXES = ('product', 'produkt', 'tovar', 'tovary')
+
+
 def _looks_like_product(path: str) -> bool:
-    """Похоже на товар: под /catalog/ с 3+ сегментами (СМУ/МПЭ) ЛИБО корневой
-    длинный slug с дефисами (ИМП: /list-otsinkovannyj-…-nlmk/), а не /about/."""
+    """Похоже на товар: под /catalog/ с 3+ сегментами (СМУ/МПЭ), под товарным
+    префиксом /product/<slug> (SHOPMET) ЛИБО корневой длинный slug с дефисами
+    (ИМП: /list-otsinkovannyj-…-nlmk/), а не /about/."""
     segs = [s for s in path.strip('/').split('/') if s]
     if not segs:
         return False
+    if segs[0].lower() in _PRODUCT_PREFIXES:
+        return len(segs) >= 2
     if path.startswith('/catalog/'):
         return len(segs) >= 3
     if len(segs) == 1:
@@ -163,14 +172,20 @@ def extract_product_paths(
                 consider(path)
                 break
 
-    # Фоллбэк для листингов без распознанных карточек - по ссылкам /catalog/,
-    # отбрасывая URL-фильтры (категория + /характеристика/значение/).
+    # Фоллбэк для листингов без распознанных карточек - по ссылкам /catalog/
+    # и по товарному префиксу (/product/… у SHOPMET: разметка на Tailwind, ни
+    # одного из известных классов-контейнеров карточки там нет), отбрасывая
+    # URL-фильтры (категория + /характеристика/значение/).
     if not found_cards:
         known = known_category_paths | known_filter_paths
         for m in _HREF_RE.finditer(html):
             path = _clean_href(m.group(1), page_url, page_host)
-            if (path and path.startswith('/catalog/')
-                    and not _is_facet_listing(path, known)):
+            if not path:
+                continue
+            первый = path.strip('/').split('/')[0].lower()
+            if первый in _PRODUCT_PREFIXES:
+                consider(path)
+            elif path.startswith('/catalog/') and not _is_facet_listing(path, known):
                 consider(path)
     return out
 
@@ -289,6 +304,14 @@ async def collect_product_links(
                 fetch_category(c, sem2, timeout2, failed_2, False) for c in failed_1
             ))
             failed_final = failed_2
+
+    # Каноническая форма адресов сайта. Пути мы собираем со слешем на конце
+    # (так исторически хранится база), но у сайта без слеша (Next.js: SHOPMET
+    # отдаёт 308 с /product/x/ на /product/x) это дало бы прогон по редиректам -
+    # приводим к форме проекта (trailing_slash в паспорте, как в build_plan).
+    if project.get('trailing_slash', True) is False:
+        for row in links:
+            row['url'] = row['url'].rstrip('/') or '/'
 
     if log:
         log('info', f'Собрано {len(links)} товарных ссылок '
