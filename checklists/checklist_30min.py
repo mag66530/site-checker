@@ -1433,9 +1433,23 @@ if pid:
                             st.caption('Снимите галочку у карты, чтобы исключить её.')
                             for _kind, _urls in _sm_groups.items():
                                 with st.expander(f'{_kind} ({len(_urls)})', expanded=False):
-                                    for _u in _urls:
-                                        _sm_key = ('c30_sm_incl_'
-                                                  + hashlib.md5(_u.encode()).hexdigest()[:12])
+                                    _kind_hash = hashlib.md5(_kind.encode()).hexdigest()[:8]
+                                    _sm_keys = [
+                                        'c30_sm_incl_' + hashlib.md5(_u.encode()).hexdigest()[:12]
+                                        for _u in _urls
+                                    ]
+                                    _bc1, _bc2 = st.columns(2)
+                                    with _bc1:
+                                        if st.button('Выбрать все', key=f'c30_sm_all_{_kind_hash}',
+                                                    use_container_width=True):
+                                            for _k in _sm_keys:
+                                                st.session_state[_k] = True
+                                    with _bc2:
+                                        if st.button('Снять все', key=f'c30_sm_none_{_kind_hash}',
+                                                    use_container_width=True):
+                                            for _k in _sm_keys:
+                                                st.session_state[_k] = False
+                                    for _u, _sm_key in zip(_urls, _sm_keys):
                                         st.checkbox(_u, value=True, key=_sm_key)
                         else:
                             st.caption(f'Будет случайно выбрано {len(_sm_groups)} '
