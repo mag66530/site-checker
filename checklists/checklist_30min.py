@@ -1259,7 +1259,7 @@ if pid:
         # должно открываться. Отсюда начинается любой прогон, поэтому раздел
         # первый и отделён от остальной технички.
         _SEC_DOST = ['c30_check_main', 'c30_check_catalog', 'c30_check_categories',
-                     'c30_check_products']
+                     'c30_check_products', 'c30_check_sitemap_sample']
         if stats['has_filters']:
             _SEC_DOST.insert(3, 'c30_check_filters')
         _SEC_TEH = ['c30_check_text', 'c30_check_indexing',
@@ -1374,6 +1374,56 @@ if pid:
                              '- кнопка заказа\n'
                              '- изображение\n'
                              '- описание')
+            st.checkbox(
+                'Случайная проверка карт сайта (сэмпл по видам)',
+                key='c30_check_sitemap_sample',
+                help='**Находит все карты сайта через robots.txt и добавляет '
+                     'в проверку случайную выборку страниц из них.**\n\n'
+                     '- карты группируются «по виду» по имени файла '
+                     '(products-1, products-2 - один вид; category без '
+                     'продолжений - свой вид)\n'
+                     '- на каждый вид - один случайный файл, из него - '
+                     'случайный пул ссылок\n'
+                     '- отобранные страницы проходят ВСЕ обычные проверки '
+                     'чек-листа (тип определяется по адресу)\n\n'
+                     'Список карт, исключения и число ссылок с каждой - '
+                     'только на этот запуск, не сохраняются.')
+            if st.session_state.get('c30_check_sitemap_sample'):
+                with st.container(border=True):
+                    _sm_main = next((s for s in src.subdomains if s.city == _mcity), None)
+                    _sm_host = _sm_main.host if _sm_main else None
+                    if st.button('🔎 Просканировать sitemap', key='c30_sitemap_scan_btn'):
+                        if not _sm_host:
+                            st.error('Не найден главный домен проекта.')
+                        else:
+                            with st.spinner(f'Ищу карты сайта на {_sm_host}…'):
+                                try:
+                                    _leaves = asyncio.run(discover_child_sitemaps(
+                                        _sm_host, proxy_url=_c30_effective_proxy))
+                                except Exception as e:
+                                    _leaves = None
+                                    st.error(f'Не удалось просканировать: {e}')
+                            if _leaves is not None:
+                                if _leaves:
+                                    st.session_state['c30_sitemap_groups'] = group_by_kind(_leaves)
+                                    st.session_state['c30_sitemap_host'] = _sm_host
+                                else:
+                                    st.session_state.pop('c30_sitemap_groups', None)
+                                    st.warning('Карты не найдены (нет строк Sitemap: в '
+                                               'robots.txt или карты не разобрались).')
+                    _sm_groups = st.session_state.get('c30_sitemap_groups')
+                    if _sm_groups:
+                        st.caption(f'Найдено видов: {len(_sm_groups)} '
+                                   f'({st.session_state.get("c30_sitemap_host", "")}). '
+                                   'Снимите галочку у карты, чтобы исключить её.')
+                        for _kind, _urls in _sm_groups.items():
+                            with st.expander(f'{_kind} ({len(_urls)})', expanded=False):
+                                for _u in _urls:
+                                    _sm_key = ('c30_sm_incl_'
+                                              + hashlib.md5(_u.encode()).hexdigest()[:12])
+                                    st.checkbox(_u, value=True, key=_sm_key)
+                    st.number_input('Ссылок с каждой выбранной карты', 1, 50,
+                                    value=5, key='c30_sitemap_urls_per_map')
 
         _sec_teh = st.container(key='c30_sec_teh')
         with _sec_teh.expander(f'⚙️  Техничка – индексация, дубли, метаданные, 404, скорость  `{_sec_n(_SEC_TEH)}/{len(_SEC_TEH)}`', expanded=True):
@@ -2040,57 +2090,6 @@ if pid:
                     _bt = ', '.join(f'{lbl}: {n}' for lbl, n
                                     in _Counter(t.type_label for t in _typed).items())
                     st.success(f'Будет добавлено {len(_typed)} URL - {_bt}')
-            # ── Случайная проверка карт сайта (сэмпл по видам) ──
-            st.checkbox(
-                'Случайная проверка карт сайта (сэмпл по видам)',
-                key='c30_check_sitemap_sample',
-                help='**Находит все карты сайта через robots.txt и добавляет '
-                     'в проверку случайную выборку страниц из них.**\n\n'
-                     '- карты группируются «по виду» по имени файла '
-                     '(products-1, products-2 - один вид; category без '
-                     'продолжений - свой вид)\n'
-                     '- на каждый вид - один случайный файл, из него - '
-                     'случайный пул ссылок\n'
-                     '- отобранные страницы проходят ВСЕ обычные проверки '
-                     'чек-листа (тип определяется по адресу)\n\n'
-                     'Список карт, исключения и число ссылок с каждой - '
-                     'только на этот запуск, не сохраняются.')
-            if st.session_state.get('c30_check_sitemap_sample'):
-                with st.container(border=True):
-                    _sm_main = next((s for s in src.subdomains if s.city == _mcity), None)
-                    _sm_host = _sm_main.host if _sm_main else None
-                    if st.button('🔎 Просканировать sitemap', key='c30_sitemap_scan_btn'):
-                        if not _sm_host:
-                            st.error('Не найден главный домен проекта.')
-                        else:
-                            with st.spinner(f'Ищу карты сайта на {_sm_host}…'):
-                                try:
-                                    _leaves = asyncio.run(discover_child_sitemaps(
-                                        _sm_host, proxy_url=_c30_effective_proxy))
-                                except Exception as e:
-                                    _leaves = None
-                                    st.error(f'Не удалось просканировать: {e}')
-                            if _leaves is not None:
-                                if _leaves:
-                                    st.session_state['c30_sitemap_groups'] = group_by_kind(_leaves)
-                                    st.session_state['c30_sitemap_host'] = _sm_host
-                                else:
-                                    st.session_state.pop('c30_sitemap_groups', None)
-                                    st.warning('Карты не найдены (нет строк Sitemap: в '
-                                               'robots.txt или карты не разобрались).')
-                    _sm_groups = st.session_state.get('c30_sitemap_groups')
-                    if _sm_groups:
-                        st.caption(f'Найдено видов: {len(_sm_groups)} '
-                                   f'({st.session_state.get("c30_sitemap_host", "")}). '
-                                   'Снимите галочку у карты, чтобы исключить её.')
-                        for _kind, _urls in _sm_groups.items():
-                            with st.expander(f'{_kind} ({len(_urls)})', expanded=False):
-                                for _u in _urls:
-                                    _sm_key = ('c30_sm_incl_'
-                                              + hashlib.md5(_u.encode()).hexdigest()[:12])
-                                    st.checkbox(_u, value=True, key=_sm_key)
-                    st.number_input('Ссылок с каждой выбранной карты', 1, 50,
-                                    value=5, key='c30_sitemap_urls_per_map')
             # ── Уникальность контента через text.ru (самый нижний пункт) ──
             st.checkbox(
                 'Уникальность контента через text.ru (с каким сайтом пересечение)',
