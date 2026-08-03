@@ -3664,13 +3664,25 @@ def _apply_container_expand(scope, форма_config: dict):
     return scope
 
 
+def _ffmap_locator(scope, ключ: str):
+    """Локатор поля по ключу карты «поля». Обычный ключ - это атрибут name
+    (как было всегда). Ключ с префиксом «css:» - произвольный CSS-селектор:
+    нужен сайтам на React/Next, где у полей формы вообще нет name и цеплять
+    их можно только по placeholder/типу (напр. shopmet.ru)."""
+    ключ = str(ключ)
+    if ключ.startswith("css:"):
+        return scope.locator(ключ[4:].strip())
+    esc = ключ.replace("\\", "\\\\").replace('"', '\\"')
+    return scope.locator(f'[name="{esc}"]')
+
+
 def _pw_fill_named_field(scope, name_attr: str, value: str) -> bool:
-    """Заполняет input/textarea/select по атрибуту name."""
+    """Заполняет input/textarea/select по атрибуту name (или по CSS-селектору,
+    если ключ дан как «css:<селектор>» - см. _ffmap_locator)."""
     if not (value or "").strip():
         return False
     v = value.strip()
-    esc = name_attr.replace("\\", "\\\\").replace('"', '\\"')
-    loc = scope.locator(f'[name="{esc}"]')
+    loc = _ffmap_locator(scope, name_attr)
     n = loc.count()
     if n == 0:
         return False
@@ -7483,6 +7495,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             }
             if _ffmap_rq:
                 for name_attr, tok in _ffmap_rq.items():
+                    # Ключи «css:…» - для браузерного пути (поля без name);
+                    # в POST-теле их отправить не по чему, пропускаем.
+                    if str(name_attr).startswith("css:"):
+                        continue
                     val = _resolve_form_field_token(tok, **_ctx_rq)
                     if not val:
                         continue
@@ -8137,7 +8153,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     if not _rval:
                         continue
                     try:
-                        _rloc = form.locator(f'[name="{_aname}"]')
+                        _rloc = _ffmap_locator(form, _aname)
                         if _rloc.count() == 0:
                             continue
                         _cur = _rloc.first.input_value(timeout=1500)
@@ -8187,6 +8203,17 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     _val = _resolve_form_field_token(_tok, **_ctx_ff)
                     if _val:
                         _pw_fill_named_field(form, _aname, _val)
+                    # Поле телефона, заданное картой как «css:…», по типовым
+                    # name/type ниже не найдётся (у React-форм их нет) - запомним
+                    # локатор сразу, чтобы проверка маски работала и на них.
+                    if (_phone_loc is None and str(_aname).startswith("css:")
+                            and str(_tok).strip().upper() == "ТЕЛЕФОН"):
+                        try:
+                            _cand = _ffmap_locator(form, _aname)
+                            if _cand.count() > 0:
+                                _phone_loc = _cand.first
+                        except Exception:  # noqa: BLE001
+                            pass
 
             _do_heur = True
             if _ffmap:
