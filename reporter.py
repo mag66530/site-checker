@@ -42,6 +42,7 @@ class C:
     bg_elev = 'FFFFFF'
     accent = '0052CC'
     accent_soft = 'EEF3FB'
+    header_navy = '1F3864'
     ok = '15803D'
     ok_soft = 'F0FDF4'
     warn = 'B45309'
@@ -150,6 +151,20 @@ def _border(color=C.border):
 def _fill(color):
     argb = _argb(color)
     return PatternFill(start_color=argb, end_color=argb, fill_type='solid')
+
+
+def _wrap_line_count(text: str, width_units: float) -> int:
+    """Сколько визуальных строк займёт text при переносе на ширину
+    width_units (сумма Excel-ширин колонок) - грубая, но честная оценка без
+    доступа к реальному измерению текста в Excel."""
+    chars_per_line = max(10, int(width_units) - 2)
+    return sum(max(1, -(-len(line) // chars_per_line))
+              for line in str(text or '').split('\n'))
+
+
+def _row_height_for(text: str, width_units: float, *, line_px: int = 15,
+                    min_px: int = 20) -> int:
+    return max(min_px, _wrap_line_count(text, width_units) * line_px + 8)
 
 
 def _align(horizontal='left', vertical='center', wrap=False, indent=1):
@@ -6897,8 +6912,8 @@ def _build_problems_sheet(wb, findings):
     for col, title in headers:
         cell = ws[f'{col}{hdr}']
         cell.value = title
-        cell.font = _font(size=10, bold=True, color=C.text)
-        cell.fill = _fill(C.surface)
+        cell.font = _font(size=10, bold=True, color=C.bg_elev)
+        cell.fill = _fill(C.header_navy)
         cell.border = _border()
         cell.alignment = _align(indent=1)
     ws.row_dimensions[hdr].height = 20
@@ -6979,8 +6994,8 @@ def _build_work_plan_sheet(wb, tasks):
     for col, title in headers:
         cell = ws[f'{col}{hdr}']
         cell.value = title
-        cell.font = _font(size=10, bold=True, color=C.text)
-        cell.fill = _fill(C.surface)
+        cell.font = _font(size=10, bold=True, color=C.bg_elev)
+        cell.fill = _fill(C.header_navy)
         cell.border = _border()
         cell.alignment = _align(indent=1)
     ws.row_dimensions[hdr].height = 20
@@ -7332,16 +7347,11 @@ def build_report(
     c.fill = _fill(C.bg_elev)
     c.border = _border()
 
-    # Высота строки - по факту переносов, а не по числу условных «доп.
-    # абзацев»: считаем, сколько визуальных строк займёт текст при реальной
-    # ширине смёрженных колонок (грубая, но честная оценка - без Excel не
-    # измерить точные пиксели).
-    _sum_chars_per_line = max(20, sum(
-        ws1.column_dimensions[c_].width or 0 for c_ in 'BCDEFGH') - 2)
-    _sum_lines = sum(
-        max(1, -(-len(line) // _sum_chars_per_line))
-        for line in summary_text.split('\n'))
-    ws1.row_dimensions[sum_body_row].height = max(30, _sum_lines * 15 + 10)
+    # Высота строки - по факту переносов при реальной ширине смёрженных
+    # колонок (грубая, но честная оценка - без Excel не измерить пиксели).
+    _obzor_width = sum(ws1.column_dimensions[c_].width or 0 for c_ in 'BCDEFGH')
+    ws1.row_dimensions[sum_body_row].height = _row_height_for(
+        summary_text, _obzor_width, min_px=30)
 
     # ─── Параметры прогона ─────────────────────────────────────────
     param_row = sum_body_row + 2
@@ -7406,9 +7416,10 @@ def build_report(
         cell.alignment = _align(indent=1)
     ws1.merge_cells(f'C{nav_hdr}:H{nav_hdr}')
     ws1.row_dimensions[nav_hdr].height = 20
+    _nav_desc_w = sum(ws1.column_dimensions[c_].width or 0 for c_ in 'CDEFGH')
     for i, (sheet_name, desc) in enumerate(nav_items):
         r = nav_hdr + 1 + i
-        ws1.row_dimensions[r].height = 30
+        ws1.row_dimensions[r].height = _row_height_for(desc, _nav_desc_w)
         k = ws1[f'B{r}']
         k.value = sheet_name
         k.font = _font(size=10, bold=True, color=C.accent, underline='single')
@@ -7452,9 +7463,15 @@ def build_report(
         ws1.merge_cells(f'D{top_hdr}:F{top_hdr}')
         ws1.merge_cells(f'G{top_hdr}:H{top_hdr}')
         ws1.row_dimensions[top_hdr].height = 20
+        _c_w = ws1.column_dimensions['C'].width or 17
+        _dg_w = sum(ws1.column_dimensions[c_].width or 0 for c_ in 'DEF')
+        _gh_w = sum(ws1.column_dimensions[c_].width or 0 for c_ in 'GH')
         for i, t in enumerate(_top6, 1):
             r = top_hdr + i
-            ws1.row_dimensions[r].height = 30
+            ws1.row_dimensions[r].height = max(
+                _row_height_for(t.title, _c_w),
+                _row_height_for(t.what, _dg_w),
+                _row_height_for(t.owner, _gh_w))
             num = ws1[f'B{r}']
             num.value = i
             num.font = _font(size=10, bold=True)

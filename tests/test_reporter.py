@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, '/home/claude/site-checker-py')
 
-from reporter import build_report, make_report_filename, _font, _fill, _border
+from reporter import (
+    build_report, make_report_filename, _font, _fill, _border,
+    _wrap_line_count, _row_height_for,
+)
 from text_checker import TextIssue
 from http_checker import CheckResult, STATUS, SPEED
 from sources import Subdomain
@@ -52,6 +55,30 @@ def test_план_работ_приоритет_красит_ячейку_зал
     prio_cell = ws['B6']
     assert prio_cell.value == '1. Критично'
     assert prio_cell.fill.fgColor.rgb == 'FFFEF2F2'
+
+
+def test_проблемы_и_план_работ_шапка_синяя():
+    """Шапка таблицы - navy-заливка с белым текстом (как на листе
+    «Страницы»), не светло-серая."""
+    from openpyxl import Workbook
+    from reporter import _build_problems_sheet, _build_work_plan_sheet
+    from report_priorities import Finding, Task
+    wb = Workbook()
+    _build_problems_sheet(wb, [Finding('Ошибка', 'X', 'y', url='https://a.ru/')])
+    _build_work_plan_sheet(wb, [Task(1, 'x', 'т', 'ч', 1, 'п', 'о', 'г')])
+    for sheet, cell_addr in (('Проблемы', 'C5'), ('План работ', 'B5')):
+        cell = wb[sheet][cell_addr]
+        assert cell.fill.fgColor.rgb == 'FF1F3864'
+        assert cell.font.color.rgb == 'FFFFFFFF'
+
+
+def test_wrap_line_count_растёт_с_длиной_текста():
+    from reporter import _wrap_line_count, _row_height_for
+    short = _wrap_line_count('коротко', 50)
+    long = _wrap_line_count('длинный текст ' * 20, 50)
+    assert short == 1
+    assert long > short
+    assert _row_height_for('длинный текст ' * 20, 50) > _row_height_for('x', 50)
 
 
 def make_result(**kw):
