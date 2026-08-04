@@ -1276,8 +1276,13 @@ def состав_формы(scope) -> dict:
 
 def _rgb_в_hex(s: str) -> str:
     """'rgb(61, 72, 88)' / 'rgba(...)' → '#3D4858'. Прозрачное → 'прозрачный'.
-    Прочее (named-цвет и т.п.) возвращаем как есть."""
+    Прочее (named-цвет, oklch/oklab/hsl и т.п.) возвращаем как есть."""
     try:
+        _low = (s or "").strip().lower()
+        # Современные цветовые записи (Tailwind v4 отдаёт oklch) - НЕ r,g,b:
+        # разбор первых трёх чисел давал бессмысленный «#00001B» вместо цвета.
+        if _low.startswith(("oklch", "oklab", "lab(", "lch(", "hsl", "color(")):
+            return s or ""
         m = re.findall(r"[\d.]+", s or "")
         if not m:
             return s or ""
@@ -1549,14 +1554,48 @@ f => {
   const vis = el => { const r=el.getBoundingClientRect(); const s=getComputedStyle(el);
     return r.width>0 && r.height>0 && s.visibility!=='hidden'
         && s.display!=='none' && s.opacity!=='0'; };
-  const red = c => { const m=(c||'').match(/[\d.]+/g); if(!m) return false;
-    const r=+m[0],g=+m[1],b=+m[2]; return r>=120 && r-g>=40 && r-b>=40; };
+  // Цвет «красный» в ЛЮБОЙ записи: rgb() и hsl() отдают старые браузеры/темы,
+  // а Tailwind v4 (SHOPMET) отдаёт oklch()/oklab() - на них разбор первых трёх
+  // чисел как r,g,b давал «не красный» даже у явного text-red-600.
+  const red = c => {
+    c = (c || '').toLowerCase();
+    const m = (c.match(/[-\d.]+/g) || []).map(Number);
+    if (m.length < 3) return false;
+    if (c.startsWith('oklch')) {          // L C H: красный - большая насыщенность у H≈0-60/330-360
+      const [, C, H] = m; return C >= 0.08 && (H <= 60 || H >= 330);
+    }
+    if (c.startsWith('oklab')) {          // L a b: a>0 - сдвиг в красный
+      const [, a, b] = m; return a >= 0.05 && b >= -0.02;
+    }
+    if (c.startsWith('hsl')) {
+      const [H, S, L] = m; return S >= 40 && L <= 75 && (H <= 20 || H >= 340);
+    }
+    const [r, g, b] = m; return r >= 120 && r - g >= 40 && r - b >= 40;
+  };
+  // Текст-подсказка валидации: сайты на Tailwind/React не ставят ни класс
+  // error/invalid, ни role=alert - подсказка это обычный <p class="text-red-500">
+  // с текстом «Укажите ФИО». Ловим и по классу цвета, и по формулировке.
+  const HINT = /(введите|укажите|заполн|обязат|не\s*менее|минимум|слишком|неверн|некоррект|ошибк|не заполнено|обязательное поле)/i;
   const sels = "[class*=error i],[class*=invalid i],[class*=advice i],[aria-invalid=true],"
     + ".errortext,.form-error,.field-error,.help-block,.invalid-feedback,"
-    + ".validation-advice,[generated=true],[role=alert]";
+    + ".validation-advice,[generated=true],[role=alert],"
+    + "[class*=red i],[class*=danger i],[class*=warn i]";
   for (const el of root.querySelectorAll(sels)) {
-    if (!vis(el)) continue; const t=(el.innerText||'').trim();
+    if (!vis(el) || el.children.length) continue;
+    const t=(el.innerText||'').trim();
     if (!t || t.length>160) continue;
+    const c=getComputedStyle(el).color;
+    // Класс с «red/danger/warn» бывает и у обычного текста (кнопка «Удалить»):
+    // от таких защищаемся - берём либо красный цвет, либо текст-подсказку.
+    if (!red(c) && !HINT.test(t)) continue;
+    return {found:true, text:t.slice(0,120), color:c, red:red(c), kind:'msg'};
+  }
+  // Фоллбэк: подсказка без «говорящего» класса - ищем по тексту среди коротких
+  // видимых узлов формы (React рисует её рядом с полем обычным <p>/<div>).
+  for (const el of root.querySelectorAll('p,div,span,small,label')) {
+    if (!vis(el) || el.children.length) continue;
+    const t=(el.innerText||'').trim();
+    if (!t || t.length>90 || !HINT.test(t)) continue;
     const c=getComputedStyle(el).color;
     return {found:true, text:t.slice(0,120), color:c, red:red(c), kind:'msg'};
   }
@@ -6263,7 +6302,13 @@ _МАТРИЦА_SKIP_NAME = ("согласие и политика", "cookie-у�
 _МАТРИЦА_SUBMIT_ST = ("успешно", "ошибка", "заполнено", "нет на сайте",
                       "проверить", "сработала", "не сработала",
                       "нет подтверждения", "недоступен", "не проверено",
-                      "заявка ушла")
+                      "заявка ушла",
+                      # Форма ПРОВЕРЕНА, но сервер отклонил отправку (троттлинг)
+                      # либо форму/селектор не нашли. Такие статусы правила
+                      # «Статус» уже трактуют (⚠/✗), а вот в матрицу строка не
+                      # попадала - форма молча пропадала из отчёта целым
+                      # столбцом (у SHOPMET так исчезла «Отправить заявку»).
+                      "отклонено", "форма не найдена", "нет селектора")
 
 # (колонка) -> [(паттерн_в_значении, символ, пояснение_на_✗_или_⚠|None), …]
 # Пояснение - ГОТОВАЯ фраза, НЕ повторяет сырое значение колонки. На ✓/– коммент
@@ -11196,7 +11241,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             )
             return
 
-        страница = определить_страницу(base_url)
+        # Тип страницы берём из БЛОКА конфига, а не по обратному поиску url в
+        # СТРАНИЦЫ: у проектов, где несколько типов делят ОДИН адрес (SHOPMET:
+        # «Главная»/«Главная_звонок» = /, четыре товарных типа = один товар),
+        # обратный поиск всегда возвращал первый ключ - и в отчёте у форм
+        # стояла чужая страница («Хочу скидку» → «Товар_1клик»).
+        страница = (тип_блока if тип_блока in СТРАНИЦЫ
+                    else определить_страницу(base_url))
         cap = (название_сценария or "").strip()
         if cap:
             print(f"   📜 Сценарий «{cap}»: {len(шаги)} шаг(ов), базовый URL: {base_url}")
