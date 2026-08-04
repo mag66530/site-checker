@@ -2597,326 +2597,11 @@ def _build_markup_sheet(wb, results):
             extra=_markup_extra)
 
 
-# ── Лист «Безопасность» (доп. 1.8: заголовки безопасности HTTP) ────
-
-
-def _build_security_sheet(wb, results):
-    """Лист заголовков безопасности: HSTS/CSP/X-Frame и т.п. по ответу
-    сервера. Добавляется только если проверка выполнялась."""
-    checked = [r for r in results if getattr(r, 'security', None)]
-    if not checked:
-        return
-
-    bad = [r for r in checked if r.security.get('issues')]
-    warned = [r for r in checked if (not r.security.get('issues')
-                                     and r.security.get('warnings'))]
-    has_bugs = bool(bad)
-
-    ws = wb.create_sheet('Безопасность')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 18
-    ws.column_dimensions['C'].width = 14
-    ws.column_dimensions['D'].width = 62
-    ws.column_dimensions['E'].width = 60
-    ws.column_dimensions['F'].width = 3
-
-    ws.merge_cells('B2:E2')
-    c = ws['B2']
-    c.value = 'Заголовки безопасности (1.8)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:E3')
-    c = ws['B3']
-    c.value = ('HTTP-заголовки безопасности ответа сервера. Нет HSTS, '
-               'Content-Security-Policy, X-Content-Type-Options: nosniff или '
-               'защиты от кликджекинга (X-Frame-Options / CSP '
-               'frame-ancestors) - предупреждение. '
-               'Битое значение (HSTS max-age=0, устаревший ALLOW-FROM, '
-               'X-Content-Type-Options не nosniff, конфликт дублей, CSP с '
-               'unsafe-inline+unsafe-eval) - баг/предупреждение: заголовок '
-               'есть, но работает во вред или впустую. '
-               'Полную оценку даёт securityheaders.com.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 60
-
-    row = 5
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    # Оценка A-F (в стиле securityheaders.com) - по главным страницам.
-    _grades = []
-    for r in checked:
-        if r.type_code == 'main' and r.security.get('grade'):
-            _grades.append(f'{r.security["grade"]} ({r.city})')
-    _gr_txt = (' · оценка (в стиле securityheaders.com): '
-               + ', '.join(_grades[:4]) if _grades else '')
-    c.value = (f'Проверено страниц: {len(checked)} · с багами: {len(bad)} · '
-               f'с предупреждениями: {len(warned)}{_gr_txt}')
-    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 26
-    row += 1
-
-    # Ссылка на точную оценку (их API - только по ключу, считаем локально).
-    _main_url = next((r.url for r in checked if r.type_code == 'main'), None)
-    if _main_url:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        _sh = f'https://securityheaders.com/?q={_main_url}&followRedirects=on'
-        c.value = ('Точная оценка: securityheaders.com (клик) - наша считается '
-                   'локально по наличию 6 заголовков.')
-        c.hyperlink = _sh
-        c.font = _font(size=9, color=C.accent, underline='single')
-        c.alignment = _align(wrap=True)
-        ws.row_dimensions[row].height = 16
-        row += 1
-    row += 1
-
-    def _sec_found(r):
-        present = (getattr(r, 'security', None) or {}).get('present') or []
-        return ('есть на странице: ' + ', '.join(present)
-                if present else 'заголовков безопасности нет вообще')
-
-    _meta_section_title(ws, row, f'Ошибки заголовков  ({len(bad)})',
-                        C.err if bad else C.ok)
-    row += 1
-    if not bad:
-        _meta_ok_line(ws, row, '✅ Битых значений заголовков безопасности нет.')
-        row += 2
-    else:
-        row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'security', 'issues'), C.err,
-            extra=_sec_found)
-
-    if warned:
-        _meta_section_title(ws, row, f'Рекомендации  ({len(warned)})', C.warn)
-        row += 1
-        row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'security', 'warnings'), C.warn,
-            extra=_sec_found)
-
-
-# ── Лист «Изображения» (п.1.15: alt, webp/avif, вес) ───────────────
-
-_IMG_HEAVY_KB = 300      # порог «тяжёлой» картинки (синхронно с image_checker)
-
-
-def _build_images_sheet(wb, results):
-    """Лист изображений: alt у картинок, современные форматы (webp/avif),
-    вес (оптимизация). Добавляется только если проверка выполнялась."""
-    checked = [r for r in results if getattr(r, 'images', None)]
-    if not checked:
-        return
-    bad = [r for r in checked if r.images.get('issues')]
-    warned = [r for r in checked if (not r.images.get('issues')
-                                     and r.images.get('warnings'))]
-    has_bugs = bool(bad)
-
-    ws = wb.create_sheet('Изображения')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 18
-    ws.column_dimensions['C'].width = 14
-    ws.column_dimensions['D'].width = 60
-    ws.column_dimensions['E'].width = 60
-    ws.column_dimensions['F'].width = 3
-
-    ws.merge_cells('B2:E2')
-    c = ws['B2']
-    c.value = 'Изображения (п.1.15)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:E3')
-    c = ws['B3']
-    c.value = ('Проверки по картинкам страницы: (1) Alt - у каждого <img> '
-               'есть содержательный alt (и пустой alt="", и полное отсутствие '
-               'атрибута = баг). (2) Современные форматы - используются '
-               'webp/avif, а не только jpg/png/gif (устаревшие без webp/avif = '
-               'предупреждение). (3) Оптимизация - вес ≤150 КБ; '
-               f'два порога: тяжелее 150 КБ - замечание, тяжелее {_IMG_HEAVY_KB} '
-               'КБ - «тяжёлые» с именами файлов. (4) Lazy loading - у '
-               'картинок/видео есть ленивая загрузка (loading="lazy"/data-src/'
-               'preload="none"). (5) Имена файлов - транслит из alt; хеш-имена '
-               'CMS (/upload/iblock/…) - одно предупреждение на страницу. '
-               '(6) Уникальные картинки категорий - «главная» картинка '
-               'категории (og:image / первая после h1) не повторяется на '
-               'других категориях того же поддомена и не заглушка. '
-               '(7) Уникальные фото товаров - изображения товаров в разных '
-               'категориях не дублируются: одно фото не встречается у товаров '
-               'из разных категорий (внутри одной категории общее фото - '
-               'норма для металлопроката; один товар в нескольких категориях '
-               'тоже норма, ему нужен rel=canonical). Вес берётся по '
-               'Content-Length.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
-
-    row = 5
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = (f'Проверено страниц: {len(checked)} · без alt: {len(bad)} · '
-               f'с предупреждениями (форматы/вес/lazy): {len(warned)}')
-    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 26
-    row += 2
-
-    def _cat_extra(r):
-        """Контекст находки по картинке категории: какая картинка."""
-        im = getattr(r, 'images', None) or {}
-        if im.get('cat_dup'):
-            return (f'та же картинка: {im["cat_dup"]["name"]} '
-                    f'(на {im["cat_dup"]["n"]} категориях)')
-        if im.get('cat_img'):
-            return f'заглушка: {im["cat_img"]["name"]}'
-        return ''
-
-    def _prod_extra(r):
-        """Контекст находки по фото товара: какое фото, в скольких категориях
-        и у скольких товаров оно встретилось."""
-        im = getattr(r, 'images', None) or {}
-        if im.get('prod_dup'):
-            d = im['prod_dup']
-            cats = d.get('cats')
-            cat_txt = f'в {cats} категориях, ' if cats else ''
-            return (f'та же картинка: {d["name"]} '
-                    f'({cat_txt}у {d["n"]} товаров)')
-        if im.get('prod_img'):
-            return f'заглушка: {im["prod_img"]["name"]}'
-        return ''
-
-    def _img_extra(r):
-        im = getattr(r, 'images', None) or {}
-        bits = []
-        if im.get('no_alt'):
-            bits.append('без alt: ' + ', '.join(im['no_alt'][:3])
-                        + (f' … +{len(im["no_alt"]) - 3}'
-                           if len(im['no_alt']) > 3 else ''))
-        if im.get('broken_imgs'):
-            bits.append('битые: ' + ', '.join(
-                b['url'].rsplit('/', 1)[-1]
-                for b in im['broken_imgs'][:3]))
-        if im.get('legacy'):
-            bits.append(f'устаревших: {len(im["legacy"])}')
-        if im.get('heavy'):
-            bits.append('тяжёлые: ' + ', '.join(
-                f'{h["url"].rsplit("/", 1)[-1]} {h["kb"]}КБ'
-                for h in im['heavy'][:3]))
-        if im.get('mid_heavy'):
-            bits.append(f'тяжелее 150КБ: {im["mid_heavy"]}')
-        _nm = im.get('names') or {}
-        if _nm.get('hashed', 0) >= 3 and _nm['hashed'] > _nm.get('readable', 0):
-            bits.append(f'хеш-имена: {_nm["hashed"]}')
-        if _nm.get('mismatch_n'):
-            bits.append('не по alt: ' + ', '.join(_nm.get('mismatch', [])[:2])
-                        + (f' … +{_nm["mismatch_n"] - 2}'
-                           if _nm['mismatch_n'] > 2 else ''))
-        if im.get('no_size') and im.get('img_total', 0) >= 4 \
-                and im['no_size'] > im['img_total'] // 2:
-            bits.append(f'без width/height: {im["no_size"]} из {im["img_total"]}')
-        if im.get('img_total') and not im.get('lazy_imgs'):
-            bits.append(f'без lazy: {im["img_total"]} картинок')
-        if im.get('media_total') and not im.get('lazy_media'):
-            bits.append(f'видео/iframe: {im["media_total"]}')
-        return ' · '.join(bits)
-
-    _meta_section_title(ws, row, f'Проблемы (alt, битые картинки)  ({len(bad)})',
-                        C.err if bad else C.ok)
-    row += 1
-    if not bad:
-        _meta_ok_line(ws, row, '✅ У всех картинок на проверенных страницах '
-                               'есть атрибут alt, битых картинок (404) нет.')
-        row += 2
-    else:
-        row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'images', 'issues'), C.err,
-            extra=_img_extra)
-
-    if warned:
-        _meta_section_title(ws, row,
-                            f'Форматы, вес, lazy loading (предупреждения)  '
-                            f'({len(warned)})', C.warn)
-        row += 1
-        row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'images', 'warnings'), C.warn,
-            extra=_img_extra)
-
-    # ── Уникальные картинки категорий/разделов ──
-    # Секция появляется, когда в прогоне были страницы категорий.
-    cats = [r for r in checked if getattr(r, 'type_code', '') == 'category']
-    if cats:
-        cat_bad = [r for r in cats if r.images.get('cat_warnings')]
-        recognized = sum(1 for r in cats if r.images.get('cat_img'))
-        _meta_section_title(
-            ws, row,
-            f'Картинки категорий/разделов - уникальность  ({len(cat_bad)})',
-            C.warn if cat_bad else C.ok)
-        row += 1
-        if cat_bad:
-            row = _render_issue_groups(
-                ws, row, _issue_groups(cat_bad, 'images', 'cat_warnings'),
-                C.warn, extra=_cat_extra)
-        elif recognized:
-            _meta_ok_line(ws, row,
-                          f'✅ У каждой категории своя картинка, дублей и '
-                          f'заглушек нет (категорий: {len(cats)}, картинка '
-                          f'распознана у {recognized}).')
-            row += 2
-        else:
-            ws.merge_cells(start_row=row, start_column=2,
-                           end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = ('· Картинка категории (og:image / первая после h1) '
-                       'не распознана ни на одной категории - пропуск.')
-            c.font = _font(size=10, color=C.text_muted)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 22
-            row += 2
-
-    # ── Фото товаров в разных категориях не дублируются ──
-    # Секция появляется, когда в прогоне были карточки товаров. Дубль - одно
-    # фото у товаров из РАЗНЫХ категорий; внутри одной категории общее фото -
-    # норма (металлопрокат: арматура/лист разных размеров с одним фото). Один
-    # товар в нескольких категориях (тот же slug) тоже не дубль - ему нужен
-    # rel=canonical.
-    prods = [r for r in checked if getattr(r, 'type_code', '') == 'product']
-    if prods:
-        prod_bad = [r for r in prods if r.images.get('prod_warnings')]
-        recognized_p = sum(1 for r in prods if r.images.get('prod_img'))
-        _meta_section_title(
-            ws, row,
-            f'Фото товаров в разных категориях - уникальность  '
-            f'({len(prod_bad)})',
-            C.warn if prod_bad else C.ok)
-        row += 1
-        if prod_bad:
-            row = _render_issue_groups(
-                ws, row, _issue_groups(prod_bad, 'images', 'prod_warnings'),
-                C.warn, extra=_prod_extra)
-        elif recognized_p:
-            _meta_ok_line(ws, row,
-                          f'✅ Фото товаров не дублируются между категориями, '
-                          f'заглушек нет (товаров: {len(prods)}, фото '
-                          f'распознано у {recognized_p}).')
-            row += 2
-        else:
-            ws.merge_cells(start_row=row, start_column=2,
-                           end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = ('· Фото товара (og:image / первое после h1) не '
-                       'распознано ни на одной карточке - пропуск.')
-            c.font = _font(size=10, color=C.text_muted)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 22
-            row += 2
+# Листы «Безопасность» и «Изображения» удалены (04.08.2026): их находки
+# полностью и итемизированно попадают в «Проблемы» через report_priorities.py
+# (generic-обработчик issues/warnings и _images_findings соответственно) -
+# см. build_report(). _issue_groups/_render_issue_groups остаются - их ещё
+# использует _build_layout_sheet и другие живые листы.
 
 
 # ── Лист «Валидация и скорость» (п.1.16: W3C HTML/CSS + время ресурсов) ─
@@ -6453,104 +6138,9 @@ def _build_region_sheet(wb, results):
             row += 1
 
 
-# ── Лист «Заголовки и мета» (п.1.3.1: единственные H1/Title/Description) ──
-
-_META_LABEL = {
-    'title': 'Title', 'description': 'Meta description',
-    'h1': 'H1', 'h2': 'H2', 'h3': 'H3', 'h4': 'H4', 'h5': 'H5', 'h6': 'H6',
-}
-
-
-def _build_meta_unique_sheet(wb, results):
-    """Лист единственности ключевых SEO-тегов: несколько или отсутствие
-    title/description/H1, дубли H2. Добавляется только если проверка выполнялась."""
-    checked = [r for r in results if getattr(r, 'meta_unique', None) is not None]
-    if not checked:
-        return
-    rows = []
-    for r in checked:
-        for i in (r.meta_unique.get('issues') or []):
-            rows.append((r, i))
-
-    ws = wb.create_sheet('Заголовки и мета')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if rows else C.ok
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 16   # Город
-    ws.column_dimensions['C'].width = 13   # Тип страницы
-    ws.column_dimensions['D'].width = 60   # URL
-    ws.column_dimensions['E'].width = 16   # Тег
-    ws.column_dimensions['F'].width = 66   # Что не так
-    ws.column_dimensions['G'].width = 3
-
-    ws.merge_cells('B2:F2')
-    c = ws['B2']
-    c.value = 'Заголовки и мета: единственность и «текстовость» (часть п.1.8)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:F3')
-    c = ws['B3']
-    c.value = ('На странице должны быть в единственном экземпляре <title>, '
-               '<meta name="description"> и <h1>: если их нет или больше одного - '
-               'баг. Также ловим дубли H2 (два H2 с одинаковым текстом; '
-               'несколько разных H2 - норма) и заголовки h2-h6 вне текста: '
-               'в шапке, подвале, меню или сайдбаре им не место.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 40
-
-    row = 5
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-    c = ws.cell(row=row, column=2)
-    pages_bad = len({id(r) for r, _ in rows})
-    c.value = (f'Проверено страниц: {len(checked)}  ·  с проблемами: {pages_bad}  '
-               f'·  всего замечаний: {len(rows)}')
-    c.font = _font(size=10, bold=True, color=C.err if rows else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 24
-    row += 2
-
-    if not rows:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        c = ws.cell(row=row, column=2)
-        c.value = ('✅ На всех проверенных страницах title, description и H1 - '
-                   'в единственном экземпляре, дублей H2 нет, заголовки '
-                   'h2-h6 только в тексте.')
-        c.font = _font(size=11, color=C.ok)
-        c.alignment = _align(indent=1)
-        return
-
-    for ci, h in enumerate(['Город', 'Тип', 'URL', 'Тег', 'Что не так'], 2):
-        cell = ws.cell(row=row, column=ci)
-        cell.value = h
-        cell.font = _font(size=9, bold=True, color=C.text_muted)
-        cell.fill = _fill(C.surface)
-        cell.alignment = _align()
-        cell.border = _border()
-    ws.row_dimensions[row].height = 20
-    row += 1
-    for r, i in rows:
-        ws.row_dimensions[row].height = 30
-        vals = [
-            (r.city or '-', {'size': 10, 'color': C.text}),
-            (r.type_label, {'size': 9, 'color': C.text_muted}),
-            (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
-            (_META_LABEL.get(i.get('тип'), i.get('тип', '')),
-             {'size': 10, 'bold': True, 'color': C.err}),
-            (i.get('пояснение', ''), {'size': 10, 'color': C.text}),
-        ]
-        for ci, (val, kw) in enumerate(vals, 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = val
-            cell.font = _font(**kw)
-            cell.alignment = _align(wrap=True, vertical='top')
-            cell.border = _border(color=C.border_light)
-            if ci == 4:
-                cell.hyperlink = r.url
-        row += 1
+# Лист «Заголовки и мета» удалён (04.08.2026): его находки полностью и
+# читаемо (не str(dict)) попадают в «Проблемы» через
+# report_priorities._meta_unique_findings.
 
 
 # ── Пересборка листов в тематические группы ─────────────────────────
@@ -6563,14 +6153,14 @@ _SHEET_GROUPS = [
     # «Структура страниц» - НЕ в группе: остаётся отдельным листом сразу
     # после «Обзора» (как было до пересборки).
     ('Техничка', [
-        'Индексация', 'Метаданные', 'Заголовки и мета',
+        'Индексация', 'Метаданные',
         'Разметка', 'Ошибки JavaScript',
         'Валидация и скорость', 'Страница 404', '404 в индексе',
         'Страницы в ГСК', 'Дубли главной', 'Индексация (Арсенкин)',
         'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
     ]),
     ('Верстка', ['Вёрстка']),
-    ('Безопасность', ['Безопасность']),
+    ('Безопасность', []),          # находки - в «Проблемы», лист удалён
     ('КП', ['Контакты по городам', 'Регион и СНГ']),
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
@@ -6579,7 +6169,7 @@ _SHEET_GROUPS = [
         'Траст проекта', 'Уведомления', 'Ошибки сервисов', 'Автокликер',
         'Ссылочный профиль', 'Замена рекл. номера', 'Аномалии',
     ]),
-    ('Контент', ['Изображения', 'Уникальность']),
+    ('Контент', ['Уникальность']),
 ]
 
 # Групповые листы, которым добавляем поясняющую секцию, даже если исходных
@@ -6588,18 +6178,19 @@ _GROUP_NOTES = {
     'Безопасность': ('Заголовки безопасности ответа сервера (HSTS, CSP, '
                      'X-Content-Type-Options, защита от кликджекинга) по '
                      'выборке страниц. Нет заголовка – предупреждение, '
-                     'битое значение – баг.'),
+                     'битое значение – баг. Находки – на листе «Проблемы» '
+                     '(раздел «Безопасность»), приоритет – на «План работ».'),
     'Формы': ('Детальная проверка форм – в отдельном отчёте форм-тестера '
               '(свой файл). Здесь, в основном отчёте, форма заявки/телефон '
               'проверяется как часть страниц (см. лист «Техничка» → блоки '
               'страниц и «Страница 404»).'),
     'Контент': ('Изображения (alt, современные форматы webp/avif, вес, '
                 'lazy, уникальность картинок категорий, фото товаров не '
-                'дублируются между категориями) – если проверка '
-                'выполнялась, показаны ниже. SEO-текст частотных категорий '
-                '(нейроответы) – на листе «Техничка» («Метаданные»); блоки '
-                'товара (похожие/отзывы/сортировка/цены) – на листе '
-                '«Структура страниц».'),
+                'дублируются между категориями) – находки на листе '
+                '«Проблемы» (раздел «Изображения»). SEO-текст частотных '
+                'категорий (нейроответы) – на листе «Техничка» '
+                '(«Метаданные»); блоки товара (похожие/отзывы/сортировка/'
+                'цены) – на листе «Структура страниц».'),
 }
 
 _GROUP_TAB_RANK = {C.err: 0, C.warn: 1}   # для агрегированного цвета вкладки
@@ -7547,8 +7138,10 @@ def build_report(
     # ─── Лист индексации (п.1.7) - если проверка выполнялась ────────
     _build_indexing_sheet(wb, results, indexing_summary)
 
-    # ─── Лист единственности тегов (п.1.3.1) - если проверялась ─────
-    _build_meta_unique_sheet(wb, results)
+    # Лист «Заголовки и мета» удалён - его находки (единственность title/
+    # description/H1, дубли H2, h2-h6 вне текста, иерархия заголовков)
+    # полностью и читаемо (не str(dict)) попадают в «Проблемы» через
+    # report_priorities._meta_unique_findings.
     _build_region_sheet(wb, results)
 
     # ─── Лист метаданных (п.1.8) - если проверка выполнялась ────────
@@ -7560,11 +7153,11 @@ def build_report(
     # ─── Лист разметки (п.1.12) - если проверка выполнялась ─────────
     _build_markup_sheet(wb, results)
 
-    # ─── Лист заголовков безопасности (доп. 1.8) - если проверялась ──
-    _build_security_sheet(wb, results)
-
-    # ─── Лист изображений (п.1.15) - если проверка выполнялась ──────
-    _build_images_sheet(wb, results)
+    # Листы «Безопасность» и «Изображения» удалены - находки (заголовки
+    # безопасности; конкретная картинка без alt/битая, дубли картинок
+    # категорий/товаров) полностью попадают в «Проблемы» через
+    # report_priorities.py (generic-обработчик issues/warnings и
+    # _images_findings соответственно).
 
     # ─── Лист ошибок JS в консоли (п.1.14) - если проверка выполнялась ──
     _build_console_sheet(wb, console_check)
