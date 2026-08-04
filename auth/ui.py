@@ -950,6 +950,8 @@ def project_settings_page() -> None:
             except Exception as e:
                 st.error(f"❌ Не удалось сохранить: {e}")
 
+    render_gdrive_account(pid, cur)
+
     # Google Диск для отчётов: сразу говорим, годится ли указанный ID. Личный
     # gmail и Общий диск снаружи выглядят одинаково, а пишет туда сервисный
     # аккаунт - разницу видно только пробной записью (см. drive_reports).
@@ -983,6 +985,92 @@ def project_settings_page() -> None:
                             known_proxy=cur.get("proxy_url") or None)
     except Exception as e:  # noqa: BLE001
         st.caption(f"⚠ Блок проверки доступа не загрузился: {e}")
+
+
+def _google_oauth_creds() -> tuple[str, str]:
+    """(client_id, client_secret) приложения для привязки аккаунтов проектов."""
+    try:
+        return (str(st.secrets.get("google_oauth_client_id") or "").strip(),
+                str(st.secrets.get("google_oauth_client_secret") or "").strip())
+    except Exception:
+        return "", ""
+
+
+def render_gdrive_account(pid: str, cur: dict) -> None:
+    """Блок «Google Диск проекта»: подключение ЛИЧНОГО аккаунта (обычный gmail).
+
+    Нужен там, где Общего диска нет: сервисный аккаунт не может писать в личный
+    Диск (нет своей квоты), а подключённый аккаунт создаёт папки и файлы сам."""
+    import google_oauth
+
+    st.markdown("**Google Диск проекта**")
+    acc = (cur.get("gdrive_account") or "").strip()
+    if cur.get("gdrive_refresh_token"):
+        st.success(f"Подключён аккаунт: {acc or 'Google'} - отчёты пойдут на его "
+                   f"«Мой диск», в папки проект/год/месяц.")
+        if st.button("Отключить аккаунт", key=f"gd_unlink_{pid}"):
+            db.set_project_settings(pid, {**cur, "gdrive_refresh_token": "",
+                                          "gdrive_account": ""})
+            _invalidate()
+            st.rerun()
+        return
+
+    cid, csec = _google_oauth_creds()
+    base = _app_base_url()
+    if not (cid and csec):
+        st.caption("Для подключения личного Google-аккаунта нужны секреты "
+                   "`google_oauth_client_id` и `google_oauth_client_secret`. "
+                   "Если у проекта есть Общий диск (Workspace) - подключение "
+                   "аккаунта не требуется, хватит поля с ID диска выше.")
+        return
+    if not base:
+        st.caption("Не задан `app.base_url` - без него Google некуда вернуть "
+                   "ответ авторизации.")
+        return
+    st.caption("Если у аккаунта проекта нет Общего диска - подключите сам "
+               "аккаунт: файлы будут созданы им и лягут на его Диск.")
+    st.link_button("Подключить Google-аккаунт проекта",
+                   google_oauth.auth_url(cid, base, pid))
+
+
+def handle_gdrive_oauth_redirect() -> None:
+    """Приём ответа Google после согласия: ?code=…&state=gdrive:<проект>.
+
+    Зовётся из app.py на КАЖДОЙ странице - Google возвращает человека на
+    базовый адрес приложения, а не на страницу настроек."""
+    import google_oauth
+    try:
+        params = st.query_params
+        code = params.get("code")
+        state = params.get("state")
+    except Exception:  # noqa: BLE001
+        return
+    pid = google_oauth.project_from_state(state or "")
+    if not (code and pid):
+        return
+    cid, csec = _google_oauth_creds()
+    base = _app_base_url()
+    if not (cid and csec and base):
+        return
+    try:
+        res = google_oauth.exchange_code(cid, csec, code, base)
+        vals = dict(db.get_project_settings(pid))
+        if res.get("refresh_token"):
+            vals["gdrive_refresh_token"] = res["refresh_token"]
+        vals["gdrive_account"] = res.get("email", "")
+        db.set_project_settings(pid, vals)
+        _invalidate()
+        st.success(f"✅ Google-аккаунт {res.get('email') or ''} подключён к "
+                   f"проекту «{project_label(pid)}»")
+    except Exception as e:  # noqa: BLE001
+        st.error(f"❌ Подключить Google не вышло: {e}")
+    finally:
+        # Код одноразовый - убираем из адреса, иначе обновление страницы
+        # пыталось бы обменять его повторно и падало.
+        try:
+            st.query_params.clear()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def admin_panel_page() -> None:

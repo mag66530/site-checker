@@ -114,28 +114,37 @@ def ensure_path(token: str, root_id: str, parts: list[str], *,
     return cur
 
 
-def upload_report(file_path: str, *, project_name: str, sa_info: dict,
-                  root_id: str, drive_id: str | None = None,
+def upload_report(file_path: str, *, project_name: str, sa_info: dict = None,
+                  root_id: str = "", drive_id: str | None = None,
                   when: datetime | None = None,
                   file_name: str | None = None,
-                  proxy_url: str | None = None) -> dict:
+                  proxy_url: str | None = None,
+                  oauth_token: str | None = None) -> dict:
     """Залить отчёт в <root>/<проект>/<год>/<месяц>/ и вернуть ссылку.
+
+    Два режима записи:
+      • sa_info - сервисный аккаунт, пишет в ОБЩИЙ диск (Workspace);
+      • oauth_token - готовый access-token аккаунта проекта (обычный gmail),
+        тогда root_id по умолчанию «root» = «Мой диск» этого аккаунта.
 
     → {'ok': True, 'id': …, 'link': …, 'path': 'Проект/2026/08 - август'}
       либо {'ok': False, 'error': 'текст'} - выкладка НЕ должна ронять прогон.
     """
     if not os.path.isfile(file_path):
         return {"ok": False, "error": f"файла нет: {file_path}"}
-    if not sa_info:
-        return {"ok": False, "error": "сервисный аккаунт Google не задан "
-                                      "(gcp_service_account_b64)"}
-    if not root_id:
-        return {"ok": False, "error": "не задан общий диск/папка "
-                                      "(gdrive_shared_drive_id)"}
+    if not oauth_token:
+        if not sa_info:
+            return {"ok": False, "error": "сервисный аккаунт Google не задан "
+                                          "(gcp_service_account_b64)"}
+        if not root_id:
+            return {"ok": False, "error": "не задан общий диск/папка "
+                                          "(gdrive_shared_drive_id)"}
+    else:
+        root_id = root_id or "root"      # «Мой диск» подключённого аккаунта
     dt = when or datetime.now()
     name = file_name or os.path.basename(file_path)
     try:
-        token = _token(sa_info, proxy_url)
+        token = oauth_token or _token(sa_info, proxy_url)
         parts = [project_name, str(dt.year), month_folder_name(dt)]
         folder_id = ensure_path(token, root_id, parts, drive_id=drive_id,
                                 proxy_url=proxy_url)

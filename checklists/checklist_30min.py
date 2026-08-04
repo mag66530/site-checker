@@ -2470,6 +2470,10 @@ if pid:
                 # задана, готовая папка проекта. Пусто = выкладка пропускается.
                 'gdrive_shared_drive_id': _secret_pid('gdrive_shared_drive_id', pid),
                 'gdrive_folder_id': _secret_pid('gdrive_folder_id', pid),
+                # Подключённый аккаунт проекта (обычный gmail): пишем от него.
+                'gdrive_refresh_token': _secret_pid('gdrive_refresh_token', pid),
+                'google_oauth_client_id': _secret('google_oauth_client_id'),
+                'google_oauth_client_secret': _secret('google_oauth_client_secret'),
                 'metrika': get_metrika_credentials(pid),
                 'gsc': get_gsc_credentials(pid),
                 # Сервисный аккаунт GSC для источника «Google» в «404 в индексе»

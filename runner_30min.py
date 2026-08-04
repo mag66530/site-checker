@@ -700,18 +700,28 @@ def _выложить_на_диск(report_path, cfg, creds, proxy_url, log) -> 
         return {}
     root_id = (creds.get('gdrive_folder_id') or creds.get('gdrive_root_id')
                or creds.get('gdrive_shared_drive_id') or '')
-    if not root_id:
-        log('Google Диск: не задан общий диск (gdrive_shared_drive_id) - '
-            'выкладка пропущена.')
+    # Личный аккаунт проекта (обычный gmail): пишем ОТ ЕГО ИМЕНИ - у сервисного
+    # аккаунта нет своего места на Диске, в личный Диск он писать не может.
+    _refresh = creds.get('gdrive_refresh_token') or ''
+    if not root_id and not _refresh:
+        log('Google Диск: не задан общий диск (gdrive_shared_drive_id) и не '
+            'подключён аккаунт проекта - выкладка пропущена.')
         return {}
     try:
         import drive_reports
         from kp_sheets import service_account_info
-        sa = service_account_info()
+        _oauth = None
+        if _refresh:
+            import google_oauth
+            _oauth = google_oauth.access_token(
+                creds.get('google_oauth_client_id') or '',
+                creds.get('google_oauth_client_secret') or '',
+                _refresh, proxy_url=proxy_url)
+        sa = None if _oauth else service_account_info()
         res = drive_reports.upload_report(
             str(report_path), project_name=cfg.get('name') or cfg.get('id') or 'Проект',
-            sa_info=sa, root_id=root_id,
-            drive_id=creds.get('gdrive_shared_drive_id') or None,
+            sa_info=sa, root_id=root_id, oauth_token=_oauth,
+            drive_id=(creds.get('gdrive_shared_drive_id') or None) if not _oauth else None,
             proxy_url=proxy_url)
     except Exception as e:  # noqa: BLE001
         log(f'⚠ Google Диск: выкладка не выполнена ({e})')
