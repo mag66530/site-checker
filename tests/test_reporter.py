@@ -406,14 +406,14 @@ def test_страницы_хосты_и_аномалии_трафик_созда
 def test_every_detail_sheet_is_grouped():
     """Защита от потери функционала: КАЖДЫЙ лист, создаваемый в reporter
     через create_sheet('литерал'), должен попадать либо в группу
-    (_SHEET_GROUPS), либо быть standalone (Обзор/Все детали). Иначе новый
-    лист «осиротеет» - появится после «Все детали» и потеряется в группировке."""
+    (_SHEET_GROUPS), либо быть standalone (Обзор/Страницы/...). Иначе новый
+    лист «осиротеет» - появится в конце и потеряется в группировке."""
     import re as _re
     from reporter import _SHEET_GROUPS
     src = (Path(__file__).parent.parent / 'reporter.py').read_text(encoding='utf-8')
     literal_sheets = set(_re.findall(r"create_sheet\('([^']+)'\)", src))
     covered = ({m for _, ms in _SHEET_GROUPS for m in ms}
-               | {'Обзор', 'Все детали', 'Структура страниц', 'Я.Бизнес и GMB',
+               | {'Обзор', 'Структура страниц', 'Я.Бизнес и GMB',
                  'План работ', 'Проблемы', 'Страницы', 'Хосты и аномалии',
                  'Трафик и траст'})
     orph = literal_sheets - covered
