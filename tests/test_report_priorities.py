@@ -271,6 +271,19 @@ def test_index_404_check_даёт_находку_на_каждый_dead_url():
     assert out[0].url == 'https://example.ru/old/'
 
 
+def test_index_404_check_errors_тоже_дают_находки_не_только_dead():
+    """'errors' (5xx/прочие ошибки у страниц из поиска) раньше не читался
+    вообще - только 'dead' (явные 404/410)."""
+    idx = {'hosts': [{'host': 'example.ru', 'errors': [
+        {'url': 'https://example.ru/heavy/', 'status': 503, 'source': 'GSC'},
+        {'url': 'https://example.ru/weird/', 'status': 0, 'source': 'Яндекс'},
+    ]}]}
+    out = collect_findings([], index_404_check=idx)
+    assert len(out) == 2
+    assert all(f.section == '404 в индексе' for f in out)
+    assert all('сервер не ответил' in f.problem for f in out)
+
+
 # ── classify / group_into_tasks ─────────────────────────────────────────
 
 def test_classify_известного_типа_находки():

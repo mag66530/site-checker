@@ -325,13 +325,33 @@ def _availability_findings(r) -> list:
                     detail=r.error_message or '')]
 
 
+def _index_404_code(status) -> int:
+    try:
+        return int(str(status).strip() or 0)
+    except (ValueError, TypeError):
+        return 0
+
+
 def _index_404_findings(index_404_check: Optional[dict]) -> list:
+    """404 в индексе: 'dead' (явные 404/410) и 'errors' (5xx/прочие ошибки
+    у страниц из поиска) - раньше 'errors' не читался вообще, только на
+    старом листе показывался."""
     out = []
     for h in (index_404_check or {}).get('hosts') or []:
         for e in h.get('dead') or []:
             out.append(Finding(
                 'Ошибка', '404 в индексе',
                 'страница есть в поиске, но открывается с ошибкой',
+                url=e.get('url', ''),
+                detail=f'код {e.get("status", "")} · источник: '
+                       f'{e.get("source", "")}'))
+        for e in h.get('errors') or []:
+            code = _index_404_code(e.get('status'))
+            problem = ('сервер не ответил на страницу из поиска'
+                      if code >= 500 or code == 0 else
+                      'страница из поиска недоступна (не 404, но и не открывается)')
+            out.append(Finding(
+                'Ошибка', '404 в индексе', problem,
                 url=e.get('url', ''),
                 detail=f'код {e.get("status", "")} · источник: '
                        f'{e.get("source", "")}'))
