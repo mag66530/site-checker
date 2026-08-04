@@ -117,6 +117,30 @@ def test_fix_where_refs_переписывает_ссылку_на_слитый_
     assert tasks[3].where == 'Лист «Техничка», раздел «Фильтры ПС»'
 
 
+def test_traffic_прямые_заходы_рост_красный_как_отказы():
+    """Рост «Прямых заходов» - плохой знак (обычно теряется UTM/referrer
+    разметка, трафик из рекламы/ПС проваливается в «прямой», а не реальный
+    органический рост) - красим красным, как и рост отказов, а не зелёным."""
+    from openpyxl import Workbook
+    from reporter import _build_traffic_sheet, C
+    wb = Workbook()
+    row_tpl = {'yandex': 0, 'google': 0, 'leads': 0, 'conv': 0, 'bounce': 0,
+              'depth': 0, 'duration': 0, 'pages': {}}
+    traffic = {'groups': [{'country': 'Россия', 'counters': 1, 'rows': [
+        {'period': 'День', 'kind': 'текущий', 'year': 2026,
+         'd1': '2026-08-04', 'visits': 100, 'direct': 76, **row_tpl},
+        {'period': 'День', 'kind': 'прошлый', 'year': 2026,
+         'd1': '2026-08-03', 'visits': 100, 'direct': 64, **row_tpl},
+    ]}]}
+    _build_traffic_sheet(wb, traffic)
+    ws = wb['Динамика трафика']
+    delta_row = next(row[0].row for row in ws.iter_rows(min_row=1, max_row=ws.max_row)
+                     if row[2].value == 'Δ, %')
+    cell = ws.cell(row=delta_row, column=5)   # E = «Прямые заходы»
+    assert cell.value == '+18.8%'
+    assert cell.font.color.rgb == 'FF' + C.err
+
+
 def test_wrap_line_count_растёт_с_длиной_текста():
     from reporter import _wrap_line_count, _row_height_for
     short = _wrap_line_count('коротко', 50)

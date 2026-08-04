@@ -4693,12 +4693,16 @@ def _build_traffic_sheet(wb, traffic):
                 row += 1
 
             # Строка динамики (%). Отказы (индекс 6) - рост плохой, наоборот.
+            # Прямые заходы (индекс 1) - тоже наоборот: рост непропорционально
+            # остальным каналам обычно значит, что теряется UTM/referrer-
+            # разметка (трафик из рекламы/ПС валится в «прямой»), а не
+            # реальный органический рост - падение доли прямых заходов - ок.
             if cur and prev:
                 _put(row, 0, '', color=C.text_muted)
                 _put(row, 1, 'Δ, %', color=C.text, bold=True)
                 cn, pn = _nums(cur), _nums(prev)
                 for j in range(len(cn)):
-                    txt, clr = _delta(cn[j], pn[j], invert=(j == 6))
+                    txt, clr = _delta(cn[j], pn[j], invert=(j in (1, 6)))
                     _put(row, 2 + j, txt, color=clr, bold=True,
                         fill=_DELTA_FILL.get(clr))
                 ws.row_dimensions[row].height = 16
