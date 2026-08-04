@@ -584,6 +584,107 @@ def extra_site_tasks(*, indexing_summary: dict = None,
             why='Sitemap говорит «в индекс», robots.txt - «нельзя»: страницы не попадут в поиск.',
             where='Лист «Индексация»'))
 
+    if (indexing_summary or {}).get('blanket_disallow'):
+        tasks.append(Task(
+            priority=1, task_group='robots_blanket_disallow',
+            title='Убрать «Disallow: /» из robots.txt',
+            what='User-agent(ы): ' + ', '.join(
+                sorted(indexing_summary['blanket_disallow'])),
+            volume=1, owner='SEO + разработка',
+            why='Директива закрывает сайт целиком - робот не проиндексирует ни одной страницы.',
+            where='Лист «Индексация»'))
+
+    _ac = (indexing_summary or {}).get('assets_closed') or []
+    if _ac:
+        tasks.append(Task(
+            priority=1, task_group='robots_assets_closed',
+            title='Открыть в robots.txt свои CSS/JS',
+            what=f'Закрыто файлов: {len(_ac)} из '
+                f'{(indexing_summary or {}).get("assets_checked", 0)}',
+            volume=len(_ac), owner='Разработка',
+            why='Google не сможет отрендерить страницу без стилей/скриптов - хуже ранжирование.',
+            where='Лист «Индексация»'))
+
+    _dc_f = ((indexing_summary or {}).get('directive_check') or {}).get('findings') or []
+    if _dc_f:
+        tasks.append(Task(
+            priority=2, task_group='robots_directive_weak',
+            title='Подстраховать закрытые в robots.txt страницы noindex',
+            what=f'Страниц отвечают 200 без noindex: {len(_dc_f)}',
+            volume=len(_dc_f), owner='Разработка',
+            why='Держатся только на robots.txt - если на страницу есть внешняя ссылка, '
+               'поисковик может показать её без сниппета.',
+            where='Лист «Индексация»'))
+
+    _adv = (indexing_summary or {}).get('advisory_open') or []
+    if _adv:
+        tasks.append(Task(
+            priority=3, task_group='robots_advisory_open',
+            title='Решить, нужны ли в индексе спорные разделы',
+            what=', '.join(sorted({a.get('label', '') for a in _adv})),
+            volume=len(_adv), owner='SEO',
+            why='Старые акции/новости/политики часто лучше закрыть noindex - '
+               'полезность субъективна, решает SEO.',
+            where='Лист «Индексация»'))
+
+    _pg = (indexing_summary or {}).get('pagination') or {}
+    if _pg.get('status') == 200 and _pg.get('canon_ok') is False:
+        tasks.append(Task(
+            priority=2, task_group='pagination_canonical',
+            title='Поправить canonical на пагинации категорий',
+            what=f'{_pg.get("base", "")}: canonical = {_pg.get("canonical") or "нет"}',
+            volume=1, owner='Разработка',
+            why='Для Яндекса на странице пагинации нужен canonical на категорию '
+               'без номера страницы.',
+            where='Лист «Индексация»'))
+    if _pg.get('loadmore') and _pg.get('pag_links') is False:
+        tasks.append(Task(
+            priority=2, task_group='pagination_loadmore_links',
+            title='Добавить ссылки пагинации в HTML при JS-подгрузке',
+            what=f'{_pg.get("base", "")}: бесконечная прокрутка без <a href> пагинации',
+            volume=1, owner='Разработка',
+            why='JS-подгрузку роботы не крутят - без ссылок в HTML товары дальше '
+               'первой страницы не увидят.',
+            where='Лист «Индексация»'))
+
+    _mc = (((indexing_summary or {}).get('sitemap_audit') or {})
+           .get('missing_catalog')) or {}
+    _n_miss = (len(_mc.get('categories') or []) + len(_mc.get('filters') or [])
+              + len(_mc.get('services') or []))
+    if _n_miss:
+        tasks.append(Task(
+            priority=1, task_group='sitemap_missing_catalog',
+            title='Добавить в sitemap отсутствующие страницы каталога',
+            what=(f'категорий: {len(_mc.get("categories") or [])}, '
+                 f'фильтров: {len(_mc.get("filters") or [])}, '
+                 f'услуг: {len(_mc.get("services") or [])}'),
+            volume=_n_miss, owner='Разработка',
+            why='Страниц из выгрузки нет в sitemap - робот может их не найти и не '
+               'проиндексировать.',
+            where='Лист «Индексация»'))
+
+    _bad_sm = ((indexing_summary or {}).get('sitemap_audit') or {}).get('bad_urls') or []
+    if _bad_sm:
+        tasks.append(Task(
+            priority=2, task_group='sitemap_bad_urls',
+            title='Убрать из sitemap битые/некорректные URL',
+            what=f'битых URL в sitemap: {len(_bad_sm)}',
+            volume=len(_bad_sm), owner='Разработка',
+            why='Sitemap с битыми ссылками тратит лимит обхода робота и снижает '
+               'доверие к файлу.',
+            where='Лист «Индексация»'))
+
+    _hm_junk = ((indexing_summary or {}).get('html_sitemap') or {}).get('junk_links') or []
+    if _hm_junk:
+        tasks.append(Task(
+            priority=3, task_group='html_sitemap_junk',
+            title='Убрать служебные ссылки из HTML-карты сайта',
+            what=f'служебных ссылок: {len(_hm_junk)}',
+            volume=len(_hm_junk), owner='Разработка',
+            why='HTML-карта для пользователей и роботов должна вести на контент, '
+               'а не в ЛК/корзину/поиск.',
+            where='Лист «Индексация»'))
+
     _sev_by_metric: dict = {}
     for h in (wm_metrics or {}).get('hosts') or []:
         for a in h.get('anomalies') or []:

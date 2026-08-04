@@ -324,3 +324,83 @@ def test_extra_site_tasks_fatal_service_issues():
 
 def test_extra_site_tasks_пусто_если_ничего_не_передано():
     assert extra_site_tasks() == []
+
+
+def test_extra_site_tasks_blanket_disallow():
+    tasks = extra_site_tasks(indexing_summary={'blanket_disallow': ['*', 'Yandex']})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'robots_blanket_disallow'
+    assert tasks[0].priority == 1
+
+
+def test_extra_site_tasks_assets_closed():
+    tasks = extra_site_tasks(indexing_summary={
+        'assets_closed': [{'url': 'https://a.ru/style.css', 'rule': '/style.css'}],
+        'assets_checked': 5})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'robots_assets_closed'
+    assert tasks[0].volume == 1
+
+
+def test_extra_site_tasks_directive_check_findings():
+    tasks = extra_site_tasks(indexing_summary={'directive_check': {'checked': 3, 'findings': [
+        {'rule': '/basket/', 'path': '/basket/', 'status': 200},
+    ]}})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'robots_directive_weak'
+    assert tasks[0].priority == 2
+
+
+def test_extra_site_tasks_advisory_open():
+    tasks = extra_site_tasks(indexing_summary={'advisory_open': [
+        {'label': 'старая акция', 'path': '/promo/2020/'},
+    ]})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'robots_advisory_open'
+    assert tasks[0].priority == 3
+
+
+def test_extra_site_tasks_pagination_canonical_плохой():
+    tasks = extra_site_tasks(indexing_summary={'pagination': {
+        'base': '/catalog/', 'status': 200, 'canonical': None, 'canon_ok': False,
+        'loadmore': None, 'pag_links': None}})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'pagination_canonical'
+
+
+def test_extra_site_tasks_pagination_loadmore_без_ссылок():
+    tasks = extra_site_tasks(indexing_summary={'pagination': {
+        'base': '/catalog/', 'status': 200, 'canonical': 'https://a.ru/catalog/',
+        'canon_ok': True, 'loadmore': True, 'pag_links': False}})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'pagination_loadmore_links'
+
+
+def test_extra_site_tasks_pagination_ok_ничего_не_даёт():
+    tasks = extra_site_tasks(indexing_summary={'pagination': {
+        'base': '/catalog/', 'status': 200, 'canonical': 'https://a.ru/catalog/',
+        'canon_ok': True, 'loadmore': True, 'pag_links': True}})
+    assert tasks == []
+
+
+def test_extra_site_tasks_sitemap_missing_catalog():
+    tasks = extra_site_tasks(indexing_summary={'sitemap_audit': {'missing_catalog': {
+        'categories': ['/catalog/a/'], 'filters': [], 'services': ['/uslugi/x/']}}})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'sitemap_missing_catalog'
+    assert tasks[0].volume == 2
+
+
+def test_extra_site_tasks_sitemap_bad_urls():
+    tasks = extra_site_tasks(indexing_summary={'sitemap_audit': {
+        'bad_urls': [{'url': 'https://a.ru/x', 'why': 'дубль'}]}})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'sitemap_bad_urls'
+
+
+def test_extra_site_tasks_html_sitemap_junk():
+    tasks = extra_site_tasks(indexing_summary={'html_sitemap': {
+        'junk_links': [{'url': 'https://a.ru/basket/', 'label': 'Корзина'}]}})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'html_sitemap_junk'
+    assert tasks[0].priority == 3
