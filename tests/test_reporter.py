@@ -376,7 +376,7 @@ def test_страницы_хосты_и_аномалии_трафик_созда
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        assert {'Страницы', 'Хосты и аномалии', 'Трафик'} <= set(wb.sheetnames)
+        assert {'Страницы', 'Хосты и аномалии', 'Трафик и траст'} <= set(wb.sheetnames)
         assert 'Аномалии' not in wb.sheetnames   # слит в «Хосты и аномалии»
 
         pages = wb['Страницы']
@@ -389,7 +389,7 @@ def test_страницы_хосты_и_аномалии_трафик_созда
         assert any('5xx' in str(t) for t in texts)
         assert any('порно казино' in str(t) for t in texts)   # часть B (ГСК)
 
-        tr = wb['Трафик']
+        tr = wb['Трафик и траст']
         vals = [c.value for row in tr.iter_rows() for c in row if c.value]
         assert 76 in vals and 64 in vals   # реальные visits/direct, не выдумка
 
@@ -406,7 +406,7 @@ def test_every_detail_sheet_is_grouped():
     covered = ({m for _, ms in _SHEET_GROUPS for m in ms}
                | {'Обзор', 'Все детали', 'Структура страниц', 'Я.Бизнес и GMB',
                  'План работ', 'Проблемы', 'Страницы', 'Хосты и аномалии',
-                 'Трафик'})
+                 'Трафик и траст'})
     orph = literal_sheets - covered
     assert not orph, f'листы вне групп (потеряются): {sorted(orph)}'
     print(f'✓ Все {len(literal_sheets)} листов распределены по группам')
