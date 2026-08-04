@@ -1815,7 +1815,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         row += 2
     else:
         row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'indexing', 'issues'), C.err)
+            ws, row, _issue_groups(bad, 'indexing', 'issues'), C.err,
+            extra_label='')
 
     # ── Секция 2: предупреждения (сгруппированы по замечанию) ──
     if warned:
@@ -1834,7 +1835,7 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                     if _ext else '')
         row = _render_issue_groups(
             ws, row, _issue_groups(warned, 'indexing', 'warnings'), C.warn,
-            extra=_idx_extra)
+            extra=_idx_extra, extra_label='Внешние nofollow-ссылки')
 
     # ── Секция 3: sitemap ↔ robots противоречия ──
     if indexing_summary:
@@ -2458,10 +2459,23 @@ def _issue_groups(pages, attr, key):
     return sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
 
 
-def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None):
+def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None,
+                         extra_label='Детали'):
     """Строка-проблема (текст + сколько страниц), под ней - город/тип/URL.
     extra(r) - необязательный текст в последнюю колонку (что нашлось на
-    странице), чтобы было видно контекст проблемы, а не только URL."""
+    странице), чтобы было видно контекст проблемы, а не только URL.
+    Перед первой группой - навигационная шапка колонок (навy, как на
+    остальных листах отчёта), иначе таблица без подписей."""
+    if groups:
+        for ci, title in enumerate(('Город', 'Тип', 'Ссылка', extra_label), 2):
+            cell = ws.cell(row=row, column=ci)
+            cell.value = title
+            cell.font = _font(size=9, bold=True, color=C.bg_elev)
+            cell.fill = _fill(C.header_navy)
+            cell.border = _border()
+            cell.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 18
+        row += 1
     for text, rs in groups:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
         c = ws.cell(row=row, column=2)
@@ -2533,8 +2547,8 @@ def _build_gsc_pages_sheet(wb, gsc_pages):
 
     for i, t in enumerate(('Показатель', 'Значение', 'Δ к прошлому'), 1):
         c = ws.cell(row=1, column=i, value=t)
-        c.font = _font(bold=True)
-        c.fill = _fill('ECEAE4')
+        c.font = _font(bold=True, color=C.bg_elev)
+        c.fill = _fill(C.header_navy)
         c.border = _border()
         c.alignment = _align('center' if i > 1 else 'left')
 
@@ -2553,15 +2567,15 @@ def _build_gsc_pages_sheet(wb, gsc_pages):
         c3.alignment = _align('center')
         if dv is not None:
             if dv > 0:
-                c3.value, _col = f'▲ +{dv:g}', '006300'
+                c3.value, _col = f'▲ +{dv:g}', C.ok
             elif dv < 0:
-                c3.value, _col = f'▼ {dv:g}', 'C0392B'
+                c3.value, _col = f'▼ {dv:g}', C.err
             else:
-                c3.value, _col = '= 0', '8A8781'
+                c3.value, _col = '= 0', C.text_muted
             c3.font = _font(bold=True, color=_col)
         else:
             c3.value = '–'
-            c3.font = _font(color='8A8781')
+            c3.font = _font(color=C.text_muted)
 
     _row(2, 'Проиндексировано', 'indexed')
     _row(3, 'Просканировано, но пока не проиндексировано', 'crawled_not_indexed')
@@ -2570,7 +2584,7 @@ def _build_gsc_pages_sheet(wb, gsc_pages):
     note = 'Числа из отчёта GSC «Индексирование → Страницы».'
     if gsc_pages.get('manual'):
         note += ' Введены вручную.'
-    ws.cell(row=6, column=1, value=note).font = _font(italic=True, color='5B5853')
+    ws.cell(row=6, column=1, value=note).font = _font(italic=True, color=C.text_muted)
 
     ws.column_dimensions['A'].width = 44
     ws.column_dimensions['B'].width = 14
@@ -2578,12 +2592,12 @@ def _build_gsc_pages_sheet(wb, gsc_pages):
 
 
 _HOME_DUPES_VERDICT = {
-    'main': ('✔ это главная', '006300'),
-    'redirect': ('✔ склеено (редирект)', '006300'),
-    'canonical': ('✔ склеено (canonical)', '006300'),
-    'duplicate': ('✖ ДУБЛЬ', 'C0392B'),
-    'absent': ('– адреса нет', '8A8781'),
-    'error': ('⚠ недоступно', 'B9770E'),
+    'main': ('✔ это главная', C.ok),
+    'redirect': ('✔ склеено (редирект)', C.ok),
+    'canonical': ('✔ склеено (canonical)', C.ok),
+    'duplicate': ('✖ ДУБЛЬ', C.err),
+    'absent': ('– адреса нет', C.text_muted),
+    'error': ('⚠ недоступно', C.warn),
 }
 
 
@@ -2604,13 +2618,13 @@ def _build_home_dupes_sheet(wb, home_dupes):
     c = ws.cell(row=2, column=1, value='Реальных дублей:')
     c.font = _font(bold=True)
     c2 = ws.cell(row=2, column=2, value=dupes)
-    c2.font = _font(bold=True, color=('C0392B' if dupes else '006300'))
+    c2.font = _font(bold=True, color=(C.err if dupes else C.ok))
 
     head_row = 4
     for i, t in enumerate(('Адрес', 'Ответ', 'Что происходит', 'Вердикт'), 1):
         cell = ws.cell(row=head_row, column=i, value=t)
-        cell.font = _font(bold=True)
-        cell.fill = _fill('ECEAE4')
+        cell.font = _font(bold=True, color=C.bg_elev)
+        cell.fill = _fill(C.header_navy)
         cell.border = _border()
         cell.alignment = _align('center' if i > 1 else 'left')
 
@@ -2637,13 +2651,13 @@ def _build_home_dupes_sheet(wb, home_dupes):
         cv.border = _border()
         if verdict == 'duplicate':
             for col in range(1, 5):
-                ws.cell(row=r, column=col).fill = _fill('FBE9E7')
+                ws.cell(row=r, column=col).fill = _fill(C.err_soft)
         r += 1
 
     note = ('Дубль = главная открывается по этому адресу с кодом 200, а поисковик '
             'не склеивает его с главной (нет редиректа и canonical не на главную). '
             'Лечится 301-редиректом на главную или тегом canonical.')
-    ws.cell(row=r + 1, column=1, value=note).font = _font(italic=True, color='5B5853')
+    ws.cell(row=r + 1, column=1, value=note).font = _font(italic=True, color=C.text_muted)
 
     ws.column_dimensions['A'].width = 48
     ws.column_dimensions['B'].width = 9
@@ -2666,19 +2680,19 @@ def _build_arsenkin_sheet(wb, arsenkin):
     ws.cell(row=1, column=2, value=arsenkin.get('checked', len(rows))).font = _font()
     ws.cell(row=2, column=1, value='Не в индексе:').font = _font(bold=True)
     c2 = ws.cell(row=2, column=2, value=ni)
-    c2.font = _font(bold=True, color=('C0392B' if ni else '006300'))
+    c2.font = _font(bold=True, color=(C.err if ni else C.ok))
     _det = []
     if eng.get('yandex'):
         _det.append(f'Яндекс: {arsenkin.get("not_indexed_yandex", 0)}')
     if eng.get('google'):
         _det.append(f'Google: {arsenkin.get("not_indexed_google", 0)}')
-    ws.cell(row=2, column=3, value='  '.join(_det)).font = _font(color='5B5853')
+    ws.cell(row=2, column=3, value='  '.join(_det)).font = _font(color=C.text_muted)
 
     head_row = 4
     for i, t in enumerate(('URL', 'В Яндексе', 'В Google'), 1):
         cell = ws.cell(row=head_row, column=i, value=t)
-        cell.font = _font(bold=True)
-        cell.fill = _fill('ECEAE4')
+        cell.font = _font(bold=True, color=C.bg_elev)
+        cell.fill = _fill(C.header_navy)
         cell.border = _border()
         cell.alignment = _align('center' if i > 1 else 'left')
 
@@ -2687,14 +2701,14 @@ def _build_arsenkin_sheet(wb, arsenkin):
         c.border = _border()
         c.alignment = _align('center')
         if not checked:
-            c.value, c.font = '–', _font(color='8A8781')
+            c.value, c.font = '–', _font(color=C.text_muted)
         elif flag is True:
-            c.value, c.font = 'Да', _font(bold=True, color='006300')
+            c.value, c.font = 'Да', _font(bold=True, color=C.ok)
         elif flag is False:
-            c.value, c.font = 'Нет', _font(bold=True, color='C0392B')
-            c.fill = _fill('FBE9E7')
+            c.value, c.font = 'Нет', _font(bold=True, color=C.err)
+            c.fill = _fill(C.err_soft)
         else:
-            c.value, c.font = '?', _font(color='B9770E')
+            c.value, c.font = '?', _font(color=C.warn)
 
     # не в индексе - вверх списка
     def _rank(r):
@@ -4482,7 +4496,8 @@ def _build_meta_sheet(wb, results, meta_summary):
             row += 2
         else:
             row = _render_issue_groups(
-                ws, row, _issue_groups(bad, 'meta', 'issues'), C.err)
+                ws, row, _issue_groups(bad, 'meta', 'issues'), C.err,
+                extra_label='')
 
         # ── Секция 2: предупреждения (длины; сгруппированы по замечанию) ──
         if warned:
@@ -4496,7 +4511,7 @@ def _build_meta_sheet(wb, results, meta_summary):
 
             row = _render_issue_groups(
                 ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn,
-                extra=_meta_len)
+                extra=_meta_len, extra_label='Длины title/description')
 
     # ── Секции 3-4: дубли метаданных (только если 1.8 выполнялась) ──
     for title_text, groups, note in ((
@@ -4609,7 +4624,7 @@ def _build_meta_sheet(wb, results, meta_summary):
         else:
             row = _render_issue_groups(
                 ws, row, _issue_groups(_st_warned, 'seo_text', 'warnings'),
-                C.warn)
+                C.warn, extra_label='')
 
     if meta_summary is not None:
         _meta_section_title(ws, row, f'Дубли УРЛОВ (нет редиректа)  ({len(url_dups)})',
