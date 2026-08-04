@@ -68,6 +68,10 @@ PROJECT_SETTING_FIELDS = [
     ("yandex_oauth", "OAuth-токен Яндекса", "password"),
     ("autoclick_session", "Сессия Яндекса (base64, автокликеры/Я.Бизнес)", "textarea"),
     ("gsc_service_account", "Сервис-аккаунт GSC (JSON)", "textarea"),
+    # Google Диск для отчётов о прогонах: у каждого проекта может быть СВОЙ
+    # диск/папка. Внутри инструмент сам заводит <Проект>/<Год>/<Месяц>/.
+    ("gdrive_shared_drive_id", "ID общего диска Google (отчёты проекта)", "text"),
+    ("gdrive_folder_id", "ID папки Google (если вместо диска - готовая папка)", "text"),
 ]
 
 
