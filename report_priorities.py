@@ -324,6 +324,58 @@ def _contacts_addr_findings(contacts_addr: Optional[dict], *, city, page_type,
     return out
 
 
+def _norm_host(s: str) -> str:
+    from urllib.parse import urlsplit
+    h = (s or '').strip().lower()
+    if '//' in h:
+        h = urlsplit(h).netloc or h
+    return h.split(':')[0].lstrip('.').removeprefix('www.')
+
+
+_CT_BROW_LABEL = {
+    'not_replaced': 'номер не подменяется в браузере',
+    'no_element': 'элемент с номером не найден на странице',
+    'error': 'ошибка загрузки страницы при проверке подмены',
+}
+
+
+def _calltracking_findings(results, calltracking_check: Optional[dict]) -> list:
+    """Замена рекл. номера (коллтрекинг): статика (kp_result.ad_check -
+    каждый прогон) + браузерная подмена (calltracking_check - по галочке,
+    only главные). Раньше был только на своём листе (полная таблица по
+    каждому городу, даже без проблем) - тут только реальные расхождения."""
+    out = []
+    brow_by_host = {}
+    for b in (calltracking_check or {}).get('results') or []:
+        brow_by_host[_norm_host(b.get('url'))] = b
+    for r in results or []:
+        if getattr(r, 'type_code', '') != 'main':
+            continue
+        kp = getattr(r, 'kp_result', None) or {}
+        ad = kp.get('ad_check') or {}
+        host = _norm_host(getattr(r, 'subdomain', '') or kp.get('domain', ''))
+        b = brow_by_host.get(host) or {}
+        if ad.get('status') == 'bug':
+            out.append(Finding(
+                'Ошибка', 'Замена рекл. номера',
+                'рекламный номер в конфиге коллтрекинга не совпадает с КП',
+                r.city, r.type_label, r.url, detail=ad.get('comment', '')))
+        b_status = b.get('status')
+        if b_status in _CT_BROW_LABEL:
+            level = 'Ошибка' if b_status == 'not_replaced' else 'Предупреждение'
+            out.append(Finding(level, 'Замена рекл. номера',
+                               f'{_CT_BROW_LABEL[b_status]} (реклама)',
+                               r.city, r.type_label, r.url))
+        seo = b.get('seo') or {}
+        seo_status = seo.get('status')
+        if seo_status in _CT_BROW_LABEL:
+            level = 'Ошибка' if seo_status == 'not_replaced' else 'Предупреждение'
+            out.append(Finding(level, 'Замена рекл. номера',
+                               f'{_CT_BROW_LABEL[seo_status]} (поиск)',
+                               r.city, r.type_label, r.url))
+    return out
+
+
 def _availability_findings(r) -> list:
     """Страница не открывается вовсе - самая базовая находка."""
     if r.is_ok:
@@ -368,10 +420,12 @@ def _index_404_findings(index_404_check: Optional[dict]) -> list:
 
 
 def collect_findings(results, *, console_check: dict = None,
-                     index_404_check: dict = None) -> list:
+                     index_404_check: dict = None,
+                     calltracking_check: dict = None) -> list:
     """Собрать находки со всех страниц прогона (results) + отдельных
-    проверок браузером (console_check, index_404_check - те не привязаны к
-    result-у: свой список страниц/хостов). Возвращает list[Finding]."""
+    проверок браузером (console_check, index_404_check, calltracking_check -
+    те не привязаны к result-у напрямую: свой список страниц/хостов).
+    Возвращает list[Finding]."""
     out: list = []
     for r in results or []:
         city, page_type, url = r.city, r.type_label, r.url
@@ -407,6 +461,7 @@ def collect_findings(results, *, console_check: dict = None,
                                            city=city, page_type=page_type, url=url))
     out.extend(_console_findings(console_check))
     out.extend(_index_404_findings(index_404_check))
+    out.extend(_calltracking_findings(results, calltracking_check))
     return out
 
 
@@ -597,6 +652,11 @@ _RULES = [
     ('Контакты по городам', '', 1, 'SEO + разработка', 'kp_contacts',
      'Свести контакты страницы с картой присутствия (КП)',
      'Неверный телефон/адрес города путает покупателя и портит доверие к сайту.'),
+
+    ('Замена рекл. номера', '', 1, 'Разработка', 'calltracking',
+     'Починить подмену рекламного номера (коллтрекинг)',
+     'Без рабочей подмены звонки с рекламы не отслеживаются - реклама '
+     'выглядит менее эффективной, чем есть на самом деле.'),
 ]
 
 

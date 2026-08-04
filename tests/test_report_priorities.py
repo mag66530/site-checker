@@ -306,6 +306,41 @@ def test_index_404_check_errors_тоже_дают_находки_не_тольк
     assert all('сервер не ответил' in f.problem for f in out)
 
 
+def test_calltracking_config_bug_даёт_находку():
+    r = _result(type_code='main', kp_result={'ad_check': {
+        'status': 'bug', 'comment': 'в конфиге сайта: 79991112233; в КП: 79994445566'}})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].section == 'Замена рекл. номера'
+    assert out[0].level == 'Ошибка'
+    assert 'не совпадает с КП' in out[0].problem
+
+
+def test_calltracking_config_ok_ничего_не_даёт():
+    r = _result(type_code='main', kp_result={'ad_check': {'status': 'ok'}})
+    assert collect_findings([r]) == []
+
+
+def test_calltracking_browser_not_replaced_ошибка_no_element_предупреждение():
+    r = _result(type_code='main', subdomain='example.ru')
+    ct = {'results': [{'url': 'https://example.ru/', 'status': 'not_replaced',
+                       'seo': {'status': 'no_element'}}]}
+    out = collect_findings([r], calltracking_check=ct)
+    assert len(out) == 2
+    by_level = {f.level for f in out}
+    assert by_level == {'Ошибка', 'Предупреждение'}
+    assert any('реклама' in f.problem for f in out)
+    assert any('поиск' in f.problem for f in out)
+
+
+def test_calltracking_только_на_главных_страницах():
+    """Браузерная проверка совпадает по хосту - не должна размножаться на
+    КАЖДУЮ страницу того же поддомена, только на главную."""
+    r = _result(type_code='category', subdomain='example.ru')
+    ct = {'results': [{'url': 'https://example.ru/', 'status': 'not_replaced'}]}
+    assert collect_findings([r], calltracking_check=ct) == []
+
+
 # ── classify / group_into_tasks ─────────────────────────────────────────
 
 def test_classify_известного_типа_находки():
