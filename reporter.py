@@ -610,8 +610,8 @@ def _build_structure_sheet(wb, results):
         for ci, (h, desc) in enumerate(headers, start=2):
             cell = ws.cell(row=hdr_row, column=ci)
             cell.value = h
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
-            cell.fill = _fill(C.surface)
+            cell.font = _font(size=9, bold=True, color=C.bg_elev)
+            cell.fill = _fill(C.header_navy)
             cell.alignment = _align(horizontal='center', wrap=True, indent=0)
             cell.border = _border()
             if desc:
@@ -847,6 +847,210 @@ def _build_structure_sheet(wb, results):
             wn.font = _font(size=9, color=C.err if _wn else C.text_muted)
             row += 1
         row += 2
+
+
+# ── Лист «Страницы» - короткая сводка всех проверенных страниц ──────
+
+
+def _build_pages_overview_sheet(wb, results, findings):
+    """Лист «Страницы»: код/статус/скорость + сколько находок на странице
+    (из «Проблемы») по каждой проверенной странице - для быстрого обзора,
+    без деталей (те - на «Все детали» и «Проблемы»)."""
+    if not results:
+        return
+    from collections import Counter
+    counts = Counter(f.url for f in findings if f.url)
+
+    ws = wb.create_sheet('Страницы')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = (
+        C.err if any(r.is_error for r in results) else
+        C.warn if any(r.is_warning for r in results) else C.ok)
+
+    headers = [('Город', 16), ('Поддомен', 24), ('Тип', 13),
+              ('Адрес страницы', 55), ('Код', 8), ('Статус', 18),
+              ('Скорость, с', 11), ('Оценка скорости', 16),
+              ('Кому чинить', 18), ('Найдено проблем', 14)]
+    ws.column_dimensions['A'].width = 3
+    for i, (_title, w) in enumerate(headers, 2):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    ws.merge_cells('B2:K2')
+    c = ws['B2']
+    c.value = f'Все проверенные страницы - {len(results)}'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:K3')
+    c = ws['B3']
+    c.value = ('Быстрый обзор: код ответа, статус, скорость и сколько находок '
+              'на странице (сами находки - на листе «Проблемы»).')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    ws.row_dimensions[3].height = 18
+
+    hdr_row = 5
+    for i, (title, _w) in enumerate(headers, 2):
+        cell = ws.cell(row=hdr_row, column=i)
+        cell.value = title
+        cell.font = _font(size=10, bold=True, color=C.bg_elev)
+        cell.fill = _fill(C.header_navy)
+        cell.border = _border()
+        cell.alignment = _align(indent=1)
+    ws.row_dimensions[hdr_row].height = 20
+
+    def sort_key(r):
+        score = 0 if r.is_error else 1 if r.is_warning else 2 if r.has_text_issues else 3
+        return (score, r.city or '')
+    sorted_results = sorted(results, key=sort_key)
+
+    row = hdr_row + 1
+    for r in sorted_results:
+        speed_sec = ''
+        if r.elapsed_ms is not None:
+            speed_sec = f'{r.elapsed_ms / 1000:.2f}'.replace('.', ',')
+        speed_label = SPEED_LABEL.get(r.speed_rating, '') if r.speed_rating else ''
+        n_prob = counts.get(r.url, 0)
+        vals = [r.city, r.subdomain, r.type_label, r.url,
+               r.http_code if r.http_code else '-',
+               STATUS_LABEL.get(r.status, r.status), speed_sec, speed_label,
+               _dept_result(r), n_prob or None]
+        for ci, v in enumerate(vals, 2):
+            cell = ws.cell(row=row, column=ci, value=v)
+            cell.font = _font(size=9, color=C.text_soft)
+            cell.alignment = _align(indent=1)
+            cell.border = _border(color=C.border_light)
+        ws.cell(row=row, column=3).font = _font(name='Consolas', size=9,
+                                                color=C.text_muted)
+        url_cell = ws.cell(row=row, column=5)
+        url_cell.hyperlink = r.url
+        url_cell.font = _font(name='Consolas', size=9, color=C.accent,
+                              underline='single')
+        status_cell = ws.cell(row=row, column=7)
+        status_color = C.ok if r.is_ok else C.warn if r.is_warning else C.err
+        status_fill = C.ok_soft if r.is_ok else C.warn_soft if r.is_warning else C.err_soft
+        status_cell.font = _font(size=9, bold=True, color=status_color)
+        status_cell.fill = _fill(status_fill)
+        if r.speed_rating:
+            speed_cell = ws.cell(row=row, column=9)
+            speed_cell.font = _font(size=9, bold=True, color=SPEED_COLOR[r.speed_rating])
+            speed_cell.fill = _fill(SPEED_FILL[r.speed_rating])
+        if n_prob:
+            prob_cell = ws.cell(row=row, column=11)
+            prob_cell.font = _font(size=9, bold=True, color=C.err)
+            prob_cell.fill = _fill(C.err_soft)
+        ws.row_dimensions[row].height = 16
+        row += 1
+
+    last = row - 1
+    ws.auto_filter.ref = f'B{hdr_row}:K{last}'
+    ws.freeze_panes = f'B{hdr_row + 1}'
+
+
+# ── Лист «Хосты и аномалии» - проблемы уровня сайта/хоста целиком ───
+
+
+def _build_hosts_anomalies_sheet(wb, service_issues, wm_metrics, link_profile):
+    """Лист «Хосты и аномалии»: фатальные проблемы из сервисов (Вебмастер/
+    GSC/Метрика) + аномалии обхода/ссылок «от себя-прошлого». Не привязаны
+    к одной странице - раньше были погребены внутри группового листа
+    «Аналитика», здесь вынесены наверх (обычно самые срочные)."""
+    fatal = [i for i in (service_issues or [])
+             if getattr(i, 'severity', None) == 'fatal']
+    anomaly_rows = (_collect_anomaly_rows(wm_metrics, link_profile)
+                    if wm_metrics and wm_metrics.get('available') else [])
+    if not fatal and not anomaly_rows:
+        return
+
+    n_red = sum(1 for a in anomaly_rows if a.get('severity') in ('fatal', 'critical'))
+    ws = wb.create_sheet('Хосты и аномалии')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.err if (fatal or n_red) else C.warn
+
+    ws.column_dimensions['A'].width = 3
+    for col, w in (('B', 26), ('C', 30), ('D', 16), ('E', 10), ('F', 90)):
+        ws.column_dimensions[col].width = w
+
+    ws.merge_cells('B2:F2')
+    c = ws['B2']
+    c.value = 'Проблемы уровня сайта: фатальные проблемы и аномалии обхода'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:F3')
+    c = ws['B3']
+    c.value = ('Находки не по страницам, а по хостам целиком - обычно самые '
+              'срочные (сайт может частично или полностью выпасть из индекса).')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    ws.row_dimensions[3].height = 18
+
+    row = 5
+
+    def _hdr(cols, r):
+        for col, title in cols:
+            cell = ws[f'{col}{r}']
+            cell.value = title
+            cell.font = _font(size=9, bold=True, color=C.bg_elev)
+            cell.fill = _fill(C.header_navy)
+            cell.border = _border()
+            cell.alignment = _align(indent=1, wrap=True)
+        ws.row_dimensions[r].height = 20
+
+    if fatal:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        c = ws.cell(row=row, column=2,
+                    value=f'Фатальные проблемы в сервисах  ({len(fatal)})')
+        c.font = _font(size=13, bold=True, color=C.err)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        _hdr((('B', 'Хост'), ('C', 'Что нашли'), ('D', 'Дата')), row)
+        row += 1
+        for i in fatal:
+            for col, v in ((2, i.host), (3, i.title), (4, i.date)):
+                cell = ws.cell(row=row, column=col, value=v)
+                cell.font = _font(size=10, color=C.text)
+                cell.fill = _fill(C.err_soft)
+                cell.border = _border(color=C.border_light)
+                cell.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 18
+            row += 1
+        row += 1
+
+    if anomaly_rows:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        c = ws.cell(row=row, column=2,
+                    value=f'Аномалии обхода/ссылок («от себя-прошлого»)  '
+                          f'({len(anomaly_rows)})')
+        c.font = _font(size=13, bold=True, color=C.err if n_red else C.warn)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        _hdr((('B', 'Хост'), ('C', 'Метрика'), ('D', 'Было → сейчас'),
+             ('E', 'Уровень'), ('F', 'Что это значит')), row)
+        row += 1
+        _F_WIDTH = 90
+        for a in anomaly_rows:
+            fatal_like = a.get('severity') in ('fatal', 'critical')
+            text = a.get('text', '')
+            vals = [(2, a.get('host', '')), (3, a.get('metric', '')),
+                   (4, _fmt_ba(a.get('before'), a.get('after'))),
+                   (5, _ANOM_SEV.get(a.get('severity'), (9, ''))[1]),
+                   (6, text)]
+            for col, v in vals:
+                cell = ws.cell(row=row, column=col, value=v)
+                cell.font = _font(size=10, color=C.text)
+                cell.border = _border(color=C.border_light)
+                cell.alignment = _align(indent=1, wrap=(col == 6), vertical='top')
+                if fatal_like:
+                    cell.fill = _fill(C.err_soft)
+            if a.get('panel_url'):
+                hc = ws.cell(row=row, column=2)
+                hc.hyperlink = a['panel_url']
+                hc.font = _font(size=10, color=C.accent, underline='single')
+            ws.row_dimensions[row].height = _row_height_for(text, _F_WIDTH, min_px=18)
+            row += 1
 
 
 # ── Лист уведомлений ──────────────────────────────────────────────
@@ -4214,6 +4418,160 @@ def _fmt_duration(sec):
     return f'{sec // 60}:{sec % 60:02d}'
 
 
+def _traffic_srez(period, r):
+    y, m, _d = r['d1'].split('-')
+    if period == 'Месяц':
+        return f'{_MONTHS_NOM[int(m)]} {y}'
+    if period == 'Год':
+        return y
+    return '.'.join(reversed(r['d1'].split('-')))
+
+
+def _traffic_nums(r):
+    return [r.get('visits', 0), r.get('direct', 0), r.get('yandex', 0),
+           r.get('google', 0), r.get('leads', 0), r.get('conv', 0),
+           r.get('bounce', 0)]
+
+
+# Индексы (0-based среди _traffic_nums) с инверсией: рост - плохо, красный.
+# Прямые заходы (1) - непропорциональный рост обычно значит потерю UTM/
+# referrer-разметки, а не реальный органический рост; Отказы (6) - как обычно.
+_TRAFFIC_INVERT_IDX = {1, 6}
+
+
+def _build_traffic_overview_sheet(wb, traffic):
+    """Лист «Трафик»: компактная сводка по странам/периодам (визиты, каналы,
+    лиды, конверсия, отказы) - без разбивки по типам страниц, для быстрого
+    просмотра (детали - «Динамика трафика»). Каждый блок (текущий/прошлый/Δ)
+    отделён жирной рамкой сверху и снизу, чтобы блоки не сливались."""
+    if not traffic:
+        return
+    groups = traffic.get('groups')
+    if not groups:
+        rows = traffic.get('rows') or []
+        if not rows:
+            return
+        groups = [{'country': 'Все домены', 'counters': traffic.get('counters', 0),
+                  'rows': rows}]
+    if not any(g.get('rows') for g in groups):
+        return
+
+    ws = wb.create_sheet('Трафик')
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = C.accent
+
+    cols = ['Страна', 'Период', 'Срез', 'Визиты', 'Прямые заходы', 'Яндекс',
+           'Google', 'Лиды', 'Конверсия, %', 'Отказы, %']
+    widths = [16, 9, 13, 10, 13, 10, 10, 8, 12, 10]
+    ws.column_dimensions['A'].width = 3
+    for i, w in enumerate(widths, 2):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    ws.merge_cells('B2:K2')
+    c = ws['B2']
+    c.value = 'Трафик по странам - краткая сводка (Яндекс.Метрика)'
+    c.font = _font(size=16, bold=True)
+    ws.row_dimensions[2].height = 26
+
+    ws.merge_cells('B3:K3')
+    c = ws['B3']
+    c.value = ('Текущий период и прошлый рядом, Δ - разница в %. Рост «Прямых '
+              'заходов» или «Отказов» - красный: обычно значит потерю UTM/'
+              'referrer-разметки или ухудшение, а не хороший знак. Детали по '
+              'типам страниц - на листе «Динамика трафика».')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True)
+    ws.row_dimensions[3].height = 28
+
+    hdr_row = 5
+    for i, title in enumerate(cols, 2):
+        cell = ws.cell(row=hdr_row, column=i)
+        cell.value = title
+        cell.font = _font(size=9, bold=True, color=C.bg_elev)
+        cell.fill = _fill(C.header_navy)
+        cell.border = _border()
+        cell.alignment = _align(horizontal='center', wrap=True)
+    ws.row_dimensions[hdr_row].height = 24
+
+    THICK = Side(style='medium', color='FF404040')
+    THIN = Side(style='thin', color=f'FF{C.border_light}')
+
+    def _row_border(top, bottom):
+        return Border(top=THICK if top else THIN, bottom=THICK if bottom else THIN,
+                      left=THIN, right=THIN)
+
+    def _delta_txt(cur, prev, invert):
+        if not prev:
+            return '–', C.text_muted, None
+        pct = round((cur - prev) / prev * 100, 1)
+        if pct == 0:
+            return '0%', C.text_muted, None
+        up_bad = invert
+        color = (C.err if up_bad else C.ok) if pct > 0 else (C.ok if up_bad else C.err)
+        bg = C.err_soft if color == C.err else C.ok_soft
+        sign = '+' if pct > 0 else ''
+        return f'{sign}{pct}%', color, bg
+
+    order = ['День', 'Месяц', 'Год']
+    row = hdr_row + 1
+    for g in groups:
+        grows = g.get('rows') or []
+        if not grows:
+            continue
+        seen_periods = sorted({r['period'] for r in grows},
+                              key=lambda p: order.index(p) if p in order else 9)
+        for period in seen_periods:
+            prs = [r for r in grows if r['period'] == period]
+            cur = next((r for r in prs if r['kind'] == 'текущий'), None)
+            prev = next((r for r in prs if r['kind'] == 'прошлый'), None)
+            block = [r for r in (cur, prev) if r]
+            for i_row, r in enumerate(block):
+                is_cur = r is cur
+                vals = [g.get('country', ''), period, _traffic_srez(period, r)] \
+                    + _traffic_nums(r)
+                for ci, v in enumerate(vals, 2):
+                    cell = ws.cell(row=row, column=ci, value=v)
+                    cell.font = _font(size=10, bold=(ci == 2 and is_cur))
+                    cell.alignment = _align(
+                        horizontal='center' if ci > 4 else 'left', indent=1)
+                    cell.border = _row_border(top=(i_row == 0), bottom=False)
+                ws.row_dimensions[row].height = 16
+                row += 1
+            if cur and prev:
+                cn, pn = _traffic_nums(cur), _traffic_nums(prev)
+                dvals = [g.get('country', ''), period, 'Δ, %']
+                for ci_v, (c_val, p_val) in enumerate(zip(cn, pn)):
+                    txt, color, bg = _delta_txt(
+                        c_val, p_val, invert=ci_v in _TRAFFIC_INVERT_IDX)
+                    dvals.append((txt, color, bg))
+                for ci, v in enumerate(dvals, 2):
+                    cell = ws.cell(row=row, column=ci)
+                    if isinstance(v, tuple):
+                        txt, color, bg = v
+                        cell.value = txt
+                        cell.font = _font(size=10, bold=True, color=color)
+                        if bg:
+                            cell.fill = _fill(bg)
+                    else:
+                        cell.value = v
+                        cell.font = _font(size=10, bold=True, color=C.text)
+                    cell.alignment = _align(
+                        horizontal='center' if ci > 4 else 'left', indent=1)
+                    cell.border = _row_border(top=False, bottom=True)
+                ws.row_dimensions[row].height = 16
+                row += 1
+            elif block:
+                # Единственная строка блока (нет пары текущий/прошлый) - и
+                # верхняя, и нижняя рамка жирные (блок из одной строки).
+                for ci in range(2, 12):
+                    ws.cell(row=row - 1, column=ci).border = _row_border(True, True)
+
+    last = row - 1
+    ws.freeze_panes = f'B{hdr_row + 1}'
+    if last >= hdr_row + 1:
+        ws.auto_filter.ref = f'B{hdr_row}:K{last}'
+
+
 def _build_traffic_sheet(wb, traffic):
     """Лист «Динамика трафика»: широкая таблица по Яндекс.Метрике - день/
     месяц/год, каждый в двух строках (текущий/прошлый). Каналы, лиды,
@@ -6316,9 +6674,10 @@ def _regroup_into_groups(wb):
         if grp.title != group_name:
             grp.title = group_name
 
-    # Порядок: Обзор → План работ → Проблемы → Структура страниц → 7 групп →
-    # Я.Бизнес/GMB → Все детали.
-    order = (['Обзор', 'План работ', 'Проблемы', 'Структура страниц']
+    # Порядок: Обзор → План работ → Проблемы → Структура страниц → Страницы →
+    # Хосты и аномалии → Трафик → 7 групп → Я.Бизнес/GMB → Все детали.
+    order = (['Обзор', 'План работ', 'Проблемы', 'Структура страниц',
+             'Страницы', 'Хосты и аномалии', 'Трафик']
              + [g for g, _ in _SHEET_GROUPS if g in wb.sheetnames]
              + ['Я.Бизнес и GMB', 'Все детали'])
     ordered = [wb[n] for n in order if n in wb.sheetnames]
@@ -7025,6 +7384,9 @@ def build_report(
         ('План работ', 'все задачи по приоритету: что чинить, почему это важно и кому передать.'),
         ('Проблемы', 'каждая находка отдельной строкой: уровень, раздел, адрес страницы. Фильтруется как угодно.'),
         ('Структура страниц', 'что чинить в контенте по типам страниц (главная/каталог/листинг/разделы/карточки товаров/технические) - где нет цены, кнопок заказа, заголовка. Красное = баг.'),
+        ('Страницы', 'краткая сводка всех проверенных страниц: код ответа, статус, скорость и сколько находок на каждой (детали - в «Проблемах»).'),
+        ('Хосты и аномалии', 'проблемы уровня сайта/хоста целиком (не одной страницы): фатальные проблемы из сервисов и аномалии обхода/ссылок «от себя-прошлого» - обычно самое срочное.'),
+        ('Трафик', 'краткая сводка трафика по странам/периодам (визиты, каналы, лиды, конверсия, отказы); разбивка по типам страниц - на «Динамике трафика» в «Аналитике».'),
         ('Техничка', 'SEO-техничка: индексация (robots/sitemap/canonical), метаданные и единственность заголовков, микроразметка (OG/Schema), безопасность и редиректы, ошибки JavaScript, валидность W3C и скорость, страница 404 и 404 в индексе, санкции ПС, нагрузка/парсинг, битые переменные.'),
         ('Верстка', 'вёрстка и адаптивность: viewport, CSS, сетка на пк/моб/планшет, переходы из меню, работа фильтров товаров, поиск по категориям.'),
         ('КП', 'сверка с картой присутствия: контакты по городам (телефон/почта/адрес), верные переменные города, чистота СНГ-доменов от РФ.'),
@@ -7134,6 +7496,15 @@ def build_report(
 
     # ─── Лист структурной проверки (идёт сразу после «Обзора») ──────
     _build_structure_sheet(wb, results)
+
+    # ─── Лист «Страницы» - краткая сводка всех проверенных страниц ──
+    _build_pages_overview_sheet(wb, results, _findings)
+
+    # ─── Лист «Хосты и аномалии» - проблемы уровня сайта/хоста ──────
+    _build_hosts_anomalies_sheet(wb, service_issues, wm_metrics, link_profile)
+
+    # ─── Лист «Трафик» - краткая сводка (детали - «Динамика трафика») ──
+    _build_traffic_overview_sheet(wb, traffic)
 
     # ─── Лист индексации (п.1.7) - если проверка выполнялась ────────
     _build_indexing_sheet(wb, results, indexing_summary)

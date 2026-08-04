@@ -320,6 +320,62 @@ def test_speed_with_comma():
     print('✓ Скорость с запятой')
 
 
+def test_страницы_хосты_и_аномалии_трафик_создаются_с_реальными_данными():
+    """Три перенесённых из превью листа - должны появиться в реальном
+    build_report() и нести реальные (не выдуманные) данные из уже
+    посчитанных results/service_issues/wm_metrics/traffic."""
+    from webmaster_api import ServiceIssue
+    results = [
+        make_result(url='https://a.ru/', type_label='Главная'),
+        make_result(url='https://a.ru/catalog/', type_label='Каталог',
+                   is_ok=False, is_error=True, http_code=404, status='not_found',
+                   speed_rating=None),
+    ]
+    selected = [Subdomain(url='https://a.ru/', city='Москва', host='a.ru')]
+    service_issues = [ServiceIssue(
+        project_id='t', service='webmaster', host='a.ru', severity='fatal',
+        code='SITE_ERROR', title='Сайт не загружается', date='2026-08-04')]
+    wm_metrics = {'available': True, 'hosts': [{
+        'host': 'a.ru', 'panel_url': 'https://webmaster.yandex.ru/site/a.ru/',
+        'anomalies': [{'metric': 'Обход: ошибки сервера (5xx)', 'before': 3,
+                      'after': 30, 'delta_pct': None, 'severity': 'fatal',
+                      'text': 'Робот получил ошибку сервера (5xx) на 30 URL'}],
+    }]}
+    traffic = {'groups': [{'country': 'Россия', 'counters': 1, 'rows': [
+        {'period': 'День', 'kind': 'текущий', 'year': 2026, 'd1': '2026-08-04',
+         'visits': 100, 'direct': 76, 'yandex': 10, 'google': 5, 'leads': 2,
+         'conv': 2.0, 'bounce': 40, 'depth': 2, 'duration': 60, 'pages': {}},
+        {'period': 'День', 'kind': 'прошлый', 'year': 2026, 'd1': '2026-08-03',
+         'visits': 90, 'direct': 64, 'yandex': 9, 'google': 5, 'leads': 1,
+         'conv': 1.1, 'bounce': 45, 'depth': 2, 'duration': 55, 'pages': {}},
+    ]}]}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000), selected_subdomains=selected,
+            results=results, output_path=out, service_issues=service_issues,
+            wm_metrics=wm_metrics, traffic=traffic,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert {'Страницы', 'Хосты и аномалии', 'Трафик'} <= set(wb.sheetnames)
+
+        pages = wb['Страницы']
+        urls = [pages.cell(row=r, column=5).value for r in range(6, 8)]
+        assert 'https://a.ru/catalog/' in urls   # реальный URL, не выдумка
+
+        ha = wb['Хосты и аномалии']
+        texts = [c.value for row in ha.iter_rows() for c in row if c.value]
+        assert any('Сайт не загружается' in str(t) for t in texts)
+        assert any('5xx' in str(t) for t in texts)
+
+        tr = wb['Трафик']
+        vals = [c.value for row in tr.iter_rows() for c in row if c.value]
+        assert 76 in vals and 64 in vals   # реальные visits/direct, не выдумка
+
+
 def test_every_detail_sheet_is_grouped():
     """Защита от потери функционала: КАЖДЫЙ лист, создаваемый в reporter
     через create_sheet('литерал'), должен попадать либо в группу
@@ -331,7 +387,8 @@ def test_every_detail_sheet_is_grouped():
     literal_sheets = set(_re.findall(r"create_sheet\('([^']+)'\)", src))
     covered = ({m for _, ms in _SHEET_GROUPS for m in ms}
                | {'Обзор', 'Все детали', 'Структура страниц', 'Я.Бизнес и GMB',
-                 'План работ', 'Проблемы'})
+                 'План работ', 'Проблемы', 'Страницы', 'Хосты и аномалии',
+                 'Трафик'})
     orph = literal_sheets - covered
     assert not orph, f'листы вне групп (потеряются): {sorted(orph)}'
     print(f'✓ Все {len(literal_sheets)} листов распределены по группам')
