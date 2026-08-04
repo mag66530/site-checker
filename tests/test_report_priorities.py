@@ -442,6 +442,29 @@ def test_extra_site_tasks_sitemap_bad_urls():
     assert tasks[0].task_group == 'sitemap_bad_urls'
 
 
+def test_extra_site_tasks_ps_filters_доступность_не_считается_санкцией():
+    """FATAL в диагностике Вебмастера - не всегда санкция ПС: 'сайт не
+    открывается' (SITE_ERROR) - доступность, не санкция, и уже отдельная
+    задача 'wm_fatal' - без фильтра по коду тут было бы вводящее в
+    заблуждение дублирование."""
+    tasks = extra_site_tasks(ps_filters={'yandex': [
+        {'host': 'a.ru', 'code': 'SITE_ERROR', 'severity': 'fatal'},
+        {'host': 'b.ru', 'code': 'DNS_ERROR', 'severity': 'fatal'},
+    ]})
+    assert tasks == []
+
+
+def test_extra_site_tasks_ps_filters_реальная_санкция_считается():
+    tasks = extra_site_tasks(ps_filters={'yandex': [
+        {'host': 'a.ru', 'code': 'SITE_ERROR', 'severity': 'fatal'},
+        {'host': 'b.ru', 'code': 'MANUAL_QUALITY_SANCTIONS', 'severity': 'fatal'},
+    ]})
+    assert len(tasks) == 1
+    assert tasks[0].task_group == 'ps_sanctions'
+    assert tasks[0].volume == 1   # только реальная санкция, SITE_ERROR не в счёте
+    assert 'Яндекс: 1 хост' in tasks[0].what
+
+
 def test_extra_site_tasks_html_sitemap_junk():
     tasks = extra_site_tasks(indexing_summary={'html_sitemap': {
         'junk_links': [{'url': 'https://a.ru/basket/', 'label': 'Корзина'}]}})

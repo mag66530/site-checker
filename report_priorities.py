@@ -632,6 +632,14 @@ def group_into_tasks(findings: list) -> list:
 # Эти находки НЕ идут в «Проблемы» (там колонки заточены под конкретную
 # страницу), а сразу становятся строками «Плана работ».
 
+# Дубль webmaster_api._SANCTION_CODE_RE (та же логика: реальная санкция/
+# угроза - по коду-маркеру, а не по одной FATAL-серьёзности). report_priorities
+# намеренно не импортирует webmaster_api (без сети/API - чистые функции).
+_SANCTION_CODE_RE = re.compile(
+    r'THREAT|MALWARE|SECUR|VIRUS|SPAM|QUALITY|SANC|FRAUD|PHISH|CHEAT|'
+    r'OVEROPT|ADS?_|ADVERT|MOBILE_REDIRECT|DECEPT|CLOAK|DOORWAY', re.I)
+
+
 def extra_site_tasks(*, indexing_summary: dict = None,
                      wm_metrics: dict = None,
                      service_issues: list = None,
@@ -786,17 +794,24 @@ def extra_site_tasks(*, indexing_summary: dict = None,
             why='Фатальная проблема блокирует индексацию сайта целиком.',
             where='Лист «Ошибки сервисов»'))
 
+    # filter_sanctions() (webmaster_api.py) кладёт в ps_filters['yandex'] ЛЮБУЮ
+    # фатальную проблему Вебмастера, не только настоящую санкцию (код-маркер
+    # угрозы/качества/спама) - "сайт не открывается" тоже FATAL, но это не
+    # санкция ПС, а доступность (та же проблема уже отдельной задачей
+    # 'wm_fatal' выше). Без фильтра тут - вводящее в заблуждение дублирование.
     sanc = (ps_filters or {}).get('yandex') or []
+    real_sanc = [s for s in sanc
+                if _SANCTION_CODE_RE.search(str(s.get('code') or ''))]
     gsc_hits = (ps_filters or {}).get('gsc_hits') or []
-    if sanc or gsc_hits:
+    if real_sanc or gsc_hits:
         tasks.append(Task(
             priority=1, task_group='ps_sanctions',
             title='Разобрать санкции поисковых систем',
-            what=(f'Яндекс: {len(sanc)} хост(ов) с санкцией/угрозой'
-                 if sanc else '') + (', ' if sanc and gsc_hits else '')
+            what=(f'Яндекс: {len(real_sanc)} хост(ов) с санкцией/угрозой'
+                 if real_sanc else '') + (', ' if real_sanc and gsc_hits else '')
                 + (f'Google: {len(gsc_hits)} писем с маркерами ручных мер'
                   if gsc_hits else ''),
-            volume=len(sanc) + len(gsc_hits), owner='SEO',
+            volume=len(real_sanc) + len(gsc_hits), owner='SEO',
             why='Санкция резко режет видимость сайта в поиске.',
             where='Лист «Фильтры ПС»'))
 
