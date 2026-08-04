@@ -950,6 +950,28 @@ def project_settings_page() -> None:
             except Exception as e:
                 st.error(f"❌ Не удалось сохранить: {e}")
 
+    # Google Диск для отчётов: сразу говорим, годится ли указанный ID. Личный
+    # gmail и Общий диск снаружи выглядят одинаково, а пишет туда сервисный
+    # аккаунт - разницу видно только пробной записью (см. drive_reports).
+    _drive_id = (cur.get("gdrive_folder_id") or cur.get("gdrive_shared_drive_id")
+                 or "").strip()
+    if st.button("🔍 Проверить доступ к Google Диску", key=f"gd_check_{pid}"):
+        if not _drive_id:
+            st.warning("Сначала укажите ID общего диска или папки и сохраните.")
+        else:
+            try:
+                import drive_reports
+                from kp_sheets import service_account_info
+                res = drive_reports.check_access(service_account_info(), _drive_id)
+            except Exception as e:  # noqa: BLE001
+                res = {"ok": False, "error": str(e), "kind": "", "name": ""}
+            if res.get("ok"):
+                st.success(f"✅ {res['kind']} «{res['name']}» доступен на запись - "
+                           f"отчёты будут складываться сюда, по папкам "
+                           f"проект/год/месяц.")
+            else:
+                st.error(f"❌ {res.get('error')}")
+
     # Проверка доступа к сайту - здесь, рядом с полем прокси. Раньше этот блок
     # висел на каждой странице чек-листов; убрали, чтобы настройки прокси были
     # ровно в одном месте.

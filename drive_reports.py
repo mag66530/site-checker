@@ -167,3 +167,83 @@ def upload_report(file_path: str, *, project_name: str, sa_info: dict,
 def _json_bytes(obj) -> bytes:
     import json
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
+
+
+def check_access(sa_info: dict, root_id: str, *,
+                 proxy_url: str | None = None) -> dict:
+    """Проверить, годится ли указанный диск/папка для отчётов ДО прогона.
+
+    Отвечает на три вопроса разом: виден ли объект сервисному аккаунту, это
+    Общий диск или обычная папка, и можно ли туда писать (пробуем создать
+    временную папку и сразу удалить). Обычная папка на личном Google-аккаунте
+    видна и «доступна», но запись упирается в нулевую квоту сервисного
+    аккаунта - эту разницу и ловим пробной записью.
+
+    → {'ok': bool, 'kind': 'Общий диск'|'папка'|'', 'name': str, 'error': str}
+    """
+    if not sa_info:
+        return {"ok": False, "kind": "", "name": "",
+                "error": "сервисный аккаунт Google не задан (gcp_service_account_b64)"}
+    if not root_id:
+        return {"ok": False, "kind": "", "name": "",
+                "error": "не указан ID диска или папки"}
+    try:
+        token = _token(sa_info, proxy_url)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "kind": "", "name": "",
+                "error": f"ключ сервисного аккаунта не принят: {e}"}
+
+    kind, name, drive_id = "", "", None
+    # Сначала пробуем как ОБЩИЙ ДИСК (у него отдельный эндпоинт), потом как файл-папку.
+    try:
+        r = requests.get(f"https://www.googleapis.com/drive/v3/drives/{root_id}",
+                         headers=_headers(token), proxies=_proxies(proxy_url),
+                         timeout=30)
+        if r.status_code == 200:
+            kind, name = "Общий диск", (r.json() or {}).get("name", "")
+            drive_id = root_id
+    except Exception:  # noqa: BLE001
+        pass
+    if not kind:
+        try:
+            r = requests.get(
+                f"{_FILES}/{root_id}",
+                params={"fields": "id,name,mimeType,driveId",
+                        "supportsAllDrives": "true"},
+                headers=_headers(token), proxies=_proxies(proxy_url), timeout=30)
+            if r.status_code != 200:
+                return {"ok": False, "kind": "", "name": "",
+                        "error": f"объект не найден или нет доступа "
+                                 f"(HTTP {r.status_code}). Проверьте ID и то, что "
+                                 f"сервисный аккаунт добавлен участником."}
+            info = r.json() or {}
+            if info.get("mimeType") != _FOLDER_MIME:
+                return {"ok": False, "kind": "", "name": info.get("name", ""),
+                        "error": "это не папка и не диск"}
+            kind = "папка"
+            name = info.get("name", "")
+            drive_id = info.get("driveId")
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "kind": "", "name": "", "error": str(e)}
+
+    # Пробная запись: создаём временную папку и убираем за собой.
+    try:
+        tmp_id = _create_folder(token, root_id, ".проверка-доступа",
+                               proxy_url=proxy_url)
+    except Exception as e:  # noqa: BLE001
+        подсказка = ""
+        if "storageQuotaExceeded" in str(e) or "quota" in str(e).lower():
+            подсказка = (" Это личный Google-аккаунт: у сервисного аккаунта нет "
+                         "своего места, писать он может только в Общий диск "
+                         "(Workspace).")
+        return {"ok": False, "kind": kind, "name": name,
+                "error": f"нет прав на запись: {e}.{подсказка}"}
+    try:
+        requests.delete(f"{_FILES}/{tmp_id}",
+                        params={"supportsAllDrives": "true"},
+                        headers=_headers(token), proxies=_proxies(proxy_url),
+                        timeout=30)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "kind": kind, "name": name, "error": "",
+            "drive_id": drive_id}
