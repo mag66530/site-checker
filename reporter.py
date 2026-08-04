@@ -2508,206 +2508,10 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None):
     return row
 
 
-# ── Лист «Вёрстка» (п.1.11, ТЗ 2.1/2.1.1: viewport, стили, @media) ──
-
-
-def _build_layout_sheet(wb, results, filters_test=None, search_check=None):
-    """Лист вёрстки и адаптивности: страницы без viewport, битые CSS,
-    отсутствие @media. Плюс секция «Фильтрация товаров» (браузерный тест
-    фильтра). Добавляется, если выполнялась вёрстка ИЛИ фильтр-тест."""
-    checked = [r for r in results if getattr(r, 'layout', None)]
-    if not checked and not filters_test:
-        return
-
-    bad = [r for r in checked if r.layout.get('issues')]
-    warned = [r for r in checked if (not r.layout.get('issues')
-                                     and r.layout.get('warnings'))]
-    has_bugs = bool(bad)
-
-    ws = wb.create_sheet('Вёрстка')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 18   # Город
-    ws.column_dimensions['C'].width = 14   # Тип
-    ws.column_dimensions['D'].width = 62   # URL
-    ws.column_dimensions['E'].width = 60
-    ws.column_dimensions['F'].width = 3
-
-    ws.merge_cells('B2:E2')
-    c = ws['B2']
-    c.value = 'Вёрстка, адаптивность и навигация (п.1.11)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:E3')
-    c = ws['B3']
-    c.value = ('ТЗ 2.1/2.1.1: страницы выводятся со стилями на ПК и мобильных - '
-               'задан тег viewport, каждый подключённый CSS-файл реально '
-               'грузится (4xx/5xx = страница без вёрстки), в стилях есть '
-               '@media-запросы по ширине (признак адаптивности; отсутствие - '
-               'предупреждение). ТЗ 2.2/2.3: переходы из меню шапки работают - '
-               'все ссылки меню (тех. страницы и каталог) прозваниваются с '
-               'главной каждого поддомена, 404/410 = баг. Favicon установлен '
-               'и реально грузится (проверка с главной поддомена). Плюс: свои '
-               'CSS/JS минифицированы и объединены (много отдельных файлов / '
-               'лишние пробелы = предупреждение); семантическая разметка '
-               '(<header>/<footer>/<main>) и инлайн-стили (много style="…" '
-               'в HTML = предупреждение); единый протокол - http-ресурсы на '
-               'https-странице (mixed content, браузер блокирует = баг) и '
-               'внутренние ссылки по http (предупреждение); вынос стилей/'
-               'скриптов во внешние файлы (большие inline-блоки = '
-               'предупреждение) и отложенный рендеринг (скрипты в <head> без '
-               'async/defer = предупреждение); псевдоссылки (button/div с '
-               'onclick вместо <a href>) и шрифты без font-display: swap '
-               '(сдвиг макета). Полный визуальный рендер это не заменяет - '
-               'выборочный ручной просмотр остаётся.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 60
-
-    row = 5
-
-    # Сводка
-    _no_vp = sum(1 for r in checked if not r.layout.get('viewport'))
-    _css_broken_pages = sum(1 for r in checked if r.layout.get('css_broken'))
-    _menu_checked = sum((r.layout.get('menu') or {}).get('checked', 0)
-                        for r in checked)
-    _menu_broken = sum(len((r.layout.get('menu') or {}).get('broken') or [])
-                       for r in checked)
-    # Favicon: проверяется с главной каждого поддомена; ок = без favicon-бага.
-    _fav_checked = [r for r in checked if r.layout.get('favicon')]
-    _fav_bad = sum(1 for r in _fav_checked
-                   if any('favicon' in t for t in r.layout.get('issues') or []))
-    _fav_txt = ''
-    if _fav_checked:
-        _fav_txt = (f' · favicon: ✅ ок на {len(_fav_checked)} поддоменах'
-                    if not _fav_bad else
-                    f' · favicon: ❌ битый на {_fav_bad} из {len(_fav_checked)}')
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = (f'Проверено страниц: {len(checked)} · без viewport: {_no_vp} · '
-               f'с битыми CSS: {_css_broken_pages} · '
-               f'ссылок меню прозвонено: {_menu_checked}, битых: {_menu_broken} · '
-               f'предупреждений: {len(warned)}{_fav_txt}')
-    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 26
-    row += 2
-
-    # Секция 1: проблемы (сгруппированы по тексту)
-    _meta_section_title(ws, row, f'Проблемы вёрстки  ({len(bad)})',
-                        C.err if bad else C.ok)
-    row += 1
-    if not bad:
-        _meta_ok_line(ws, row, '✅ На всех проверенных страницах viewport задан, '
-                               'все CSS-файлы грузятся.')
-        row += 2
-    else:
-        row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'layout', 'issues'), C.err)
-
-    # Секция 2: битые CSS-файлы (по файлу: какой файл на каких страницах)
-    _by_css = {}
-    for r in checked:
-        for b in (r.layout.get('css_broken') or []):
-            _key = f'{b.get("url", "")} (HTTP {b.get("status")})'
-            _by_css.setdefault(_key, []).append(r)
-    if _by_css:
-        _meta_section_title(ws, row, f'Битые CSS-файлы  ({len(_by_css)})', C.err)
-        row += 1
-        row = _render_issue_groups(
-            ws, row, sorted(_by_css.items(), key=lambda kv: -len(kv[1])), C.err)
-
-    # Секция 3: битые ссылки меню шапки (ТЗ 2.2/2.3) - по ссылке: где битая
-    _by_link = {}
-    for r in checked:
-        for b in ((r.layout.get('menu') or {}).get('broken') or []):
-            _key = f'{b.get("url", "")} (HTTP {b.get("code")})'
-            _by_link.setdefault(_key, []).append(r)
-    if _by_link:
-        _meta_section_title(ws, row,
-                            f'Битые ссылки в меню шапки  ({len(_by_link)})', C.err)
-        row += 1
-        row = _render_issue_groups(
-            ws, row, sorted(_by_link.items(), key=lambda kv: -len(kv[1])), C.err)
-
-    # Секция 4: предупреждения (нет @media)
-    if warned:
-        _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
-        row += 1
-        row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'layout', 'warnings'), C.warn)
-
-    # Секция 5: поиск по сайту находит категории (чек-лист)
-    if search_check:
-        row += 1
-        _sc_bad = (search_check.get('available')
-                   and search_check.get('found_category') is False)
-        _meta_section_title(ws, row, 'Поиск по сайту',
-                            C.warn if _sc_bad or not search_check.get(
-                                'available') else C.ok)
-        row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        if not search_check.get('available'):
-            c.value = ('⚠ Поиск не проверился: '
-                       + (search_check.get('error') or 'неизвестная причина')
-                       + ' - проверить вручную.')
-            c.font = _font(size=10, color=C.warn)
-        elif search_check.get('found_category'):
-            from urllib.parse import unquote as _unq
-            c.value = (f'✅ Поиск находит категории: по запросу '
-                       f'«{search_check.get("query", "")}» в выдаче есть '
-                       f'ссылка на саму категорию '
-                       f'({_unq(search_check.get("search_url", ""))}).')
-            c.font = _font(size=10, color=C.ok)
-        else:
-            from urllib.parse import unquote as _unq
-            c.value = (f'⚠ По запросу «{search_check.get("query", "")}» в '
-                       f'СТАТИКЕ выдачи нет ссылки на категорию. Либо поиск '
-                       f'ищет только товары, либо блок категорий дорисовывает '
-                       f'JS (как на СМУ) - открыть выдачу и проверить кликом: '
-                       f'{_unq(search_check.get("search_url", ""))}')
-            c.font = _font(size=10, color=C.warn)
-        c.alignment = _align(indent=1, wrap=True)
-        ws.row_dimensions[row].height = 30
-        row += 1
-        # Тег (страница-фильтр) - вторая проба.
-        if search_check.get('tag_note'):
-            ws.merge_cells(start_row=row, start_column=2, end_row=row,
-                           end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = '· Тег: ' + search_check['tag_note'] + '.'
-            c.font = _font(size=10, color=C.text_muted)
-            c.alignment = _align(indent=1, wrap=True)
-            ws.row_dimensions[row].height = 18
-            row += 1
-        if search_check.get('tag_query'):
-            ws.merge_cells(start_row=row, start_column=2, end_row=row,
-                           end_column=5)
-            c = ws.cell(row=row, column=2)
-            if search_check.get('found_tag'):
-                c.value = (f'✅ Теги тоже находятся: по запросу '
-                           f'«{search_check["tag_query"]}» в выдаче есть '
-                           f'ссылка на страницу-фильтр.')
-                c.font = _font(size=10, color=C.ok)
-            else:
-                c.value = (f'⚠ Тег «{search_check["tag_query"]}» в выдаче '
-                           f'не найден (ссылки на страницу-фильтр нет) - '
-                           f'типично для штатного поиска Bitrix, проверить '
-                           f'при желании вручную.')
-                c.font = _font(size=10, color=C.warn)
-            c.alignment = _align(indent=1, wrap=True)
-            ws.row_dimensions[row].height = 26
-            row += 1
-
-    # Секция 6: фильтрация товаров (браузерный тест) - если запускался
-    if filters_test:
-        row += 1
-        row = _render_filters_section(ws, row, filters_test)
+# Лист «Вёрстка» удалён: находки (viewport/CSS/меню/mixed content/favicon,
+# поиск по сайту не находит категории/теги, фильтрация товаров не
+# работает) полностью попадают в «Проблемы» через report_priorities.py
+# (_layout_findings/_search_check_findings/_filters_test_findings).
 
 
 # ── Лист «Разметка» (п.1.12, ТЗ 3.5: Schema.org + OpenGraph) ────────
@@ -5795,88 +5599,6 @@ _FILTER_VERDICT = {
 }
 
 
-def _render_filters_section(ws, row, filters_test):
-    """Секция «Фильтрация товаров» на листе «Вёрстка» (колонки B:E). Живой
-    драйв фильтра в браузере по пер-проектным селекторам. Возвращает
-    следующую свободную строку."""
-    if not filters_test:
-        return row
-    cases = filters_test.get('cases') or []
-    _bad = sum(1 for c in cases
-               if _FILTER_VERDICT.get(c.get('verdict'), (None, None, False))[2])
-
-    _ok = sum(1 for c in cases if c.get('verdict') == 'ok')
-    _meta_section_title(
-        ws, row, f'Фильтрация товаров (браузер)  ({len(cases)})',
-        C.err if _bad else C.ok)
-    row += 1
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = ('Проверено категорий прогона: '
-               + (f'{len(cases)} · работают: {_ok} · не работают: {_bad}. '
-                  if filters_test.get('available') and cases else '')
-               + 'На каждой применяем фильтр и сравниваем набор товаров '
-               '(ссылки карточек) на 1-й странице до/после - изменился = '
-               'фильтр применился. Ниже - результат по КАЖДОЙ категории.')
-    c.font = _font(size=9, italic=True, color=C.text_muted)
-    c.alignment = _align(wrap=True, indent=1)
-    ws.row_dimensions[row].height = 30
-    row += 1
-
-    # Тест не выполнялся / нет конфига
-    if not filters_test.get('available') or not cases:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = filters_test.get('note') or (
-            'Фильтр-тест не выполнялся: не заданы селекторы фильтра '
-            '(catalogs/filters-<проект>.json).')
-        c.font = _font(size=10, color=C.text_soft)
-        c.alignment = _align(wrap=True, indent=1)
-        ws.row_dimensions[row].height = 22
-        return row + 2
-
-    _CMAP = {'ok': C.ok, 'err': C.err, 'warn': C.warn}
-    for cs in cases:
-        label, ckey, _is_bad = _FILTER_VERDICT.get(
-            cs.get('verdict'), (cs.get('verdict') or '?', 'warn', False))
-        color = _CMAP.get(ckey, C.text_soft)
-        _ff, _fg = cs.get('filter_fields'), cs.get('filter_groups')
-        _ff_txt = ('' if _ff is None else
-                   (f'полей {_ff} (групп {_fg})' if _fg else f'полей {_ff}'))
-        # строка 1: имя + работает/не работает (+ сколько полей фильтра)
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = (f'{cs.get("name", "")}: {label}'
-                   + (f'   ({_ff_txt})' if _ff_txt else ''))
-        c.font = _font(size=10, bold=_is_bad, color=color)
-        c.fill = _fill(C.surface)
-        c.alignment = _align(wrap=True, indent=1)
-        c.border = _border()
-        ws.row_dimensions[row].height = 20
-        row += 1
-        # строка 2: категория (ссылка)
-        _cat = cs.get('category', '')
-        if _cat:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = _cat
-            c.hyperlink = _cat
-            c.font = _font(size=9, color=C.accent, underline='single')
-            c.alignment = _align(indent=2)
-            ws.row_dimensions[row].height = 16
-            row += 1
-        # строка 3: причина (если не «ok») - подробность из движка
-        if cs.get('verdict') != 'ok' and cs.get('detail'):
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = 'причина: ' + cs['detail']
-            c.font = _font(size=9, italic=True, color=C.text_muted)
-            c.alignment = _align(wrap=True, indent=2)
-            ws.row_dimensions[row].height = 16
-            row += 1
-    return row + 1
-
-
 def _build_autoclick_sheet(wb, autoclick):
     """Итоги автокликера (перекликивание ошибок в Вебмастере/ГСК) - сводка
     по сайтам. Добавляется только если автокликер запускался."""
@@ -5983,7 +5705,7 @@ _SHEET_GROUPS = [
         'Страницы в ГСК', 'Дубли главной', 'Индексация (Арсенкин)',
         'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
     ]),
-    ('Верстка', ['Вёрстка']),
+    ('Верстка', []),                # находки - в «Проблемы», лист удалён
     ('Безопасность', []),          # находки - в «Проблемы», лист удалён
     ('КП', []),                     # находки - в «Проблемы», листы удалены
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
@@ -5999,6 +5721,10 @@ _SHEET_GROUPS = [
 # Групповые листы, которым добавляем поясняющую секцию, даже если исходных
 # листов нет (чтобы структура из 7 листов существовала и была понятной).
 _GROUP_NOTES = {
+    'Верстка': ('Вёрстка и адаптивность (viewport, CSS, меню шапки, mixed '
+               'content, favicon), поиск по сайту (находит категории/теги) '
+               'и живой тест фильтрации товаров. Находки – на листе '
+               '«Проблемы» (раздел «Вёрстка»), приоритет – на «План работ».'),
     'КП': ('Сверка контактов с картой присутствия (телефон/почта/адрес), '
           'верные переменные города, чистота СНГ-доменов от РФ и '
           'технический регион поддоменов (гео-теги). Находки – на листе '
@@ -6597,7 +6323,9 @@ def build_report(
     # (там колонки заточены под конкретную страницу).
     _findings = collect_findings(results, console_check=console_check,
                                  index_404_check=index_404_check,
-                                 calltracking_check=calltracking_check)
+                                 calltracking_check=calltracking_check,
+                                 search_check=search_check,
+                                 filters_test=filters_test)
     _tasks = (group_into_tasks(_findings)
              + extra_site_tasks(indexing_summary=indexing_summary,
                                 wm_metrics=wm_metrics,
@@ -6777,7 +6505,7 @@ def build_report(
     if _filters_bad:
         summary_text += (f'\nФильтрация: {_filters_bad} '
                          f'{"фильтр" if _filters_bad == 1 else "фильтров"} '
-                         f'работают некорректно - см. лист «Верстка».')
+                         f'работают некорректно - см. «Проблемы».')
     _console_bad = sum(1 for p in ((console_check or {}).get('pages') or [])
                        if p.get('errors'))
     if _console_bad:
@@ -7008,8 +6736,8 @@ def build_report(
     # ─── Лист метаданных (п.1.8) - если проверка выполнялась ────────
     _build_meta_sheet(wb, results, meta_summary)
 
-    # ─── Лист вёрстки (п.1.11) + секция фильтрации (браузер) ────────
-    _build_layout_sheet(wb, results, filters_test, search_check)
+    # Лист «Вёрстка» удалён - находки (viewport/CSS/меню/mixed content/
+    # favicon, поиск по сайту, фильтрация товаров) полностью в «Проблемы».
 
     # ─── Лист разметки (п.1.12) - если проверка выполнялась ─────────
     _build_markup_sheet(wb, results)

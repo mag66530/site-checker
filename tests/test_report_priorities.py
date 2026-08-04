@@ -341,6 +341,38 @@ def test_calltracking_только_на_главных_страницах():
     assert collect_findings([r], calltracking_check=ct) == []
 
 
+def test_search_check_не_находит_категорию_даёт_предупреждение():
+    sc = {'available': True, 'query': 'арматура', 'found_category': False,
+         'search_url': 'https://a.ru/search/?q=арматура'}
+    out = collect_findings([], search_check=sc)
+    assert len(out) == 1
+    assert out[0].section == 'Вёрстка'
+    assert out[0].level == 'Предупреждение'
+    assert 'не находит категории' in out[0].problem
+
+
+def test_search_check_находит_ничего_не_даёт():
+    sc = {'available': True, 'query': 'арматура', 'found_category': True,
+         'search_url': 'https://a.ru/search/?q=арматура'}
+    assert collect_findings([], search_check=sc) == []
+
+
+def test_filters_test_плохой_вердикт_даёт_ошибку_а_нейтральный_предупреждение():
+    ft = {'available': True, 'cases': [
+        {'name': 'По диаметру', 'verdict': 'empty', 'category': 'https://a.ru/cat/',
+         'detail': 'после фильтра 0 товаров'},
+        {'name': 'По цвету', 'verdict': 'filter_absent', 'category': 'https://a.ru/cat2/'},
+        {'name': 'По марке', 'verdict': 'ok', 'category': 'https://a.ru/cat3/'},
+    ]}
+    out = collect_findings([], filters_test=ft)
+    assert len(out) == 2
+    by_level = {f.problem: f.level for f in out}
+    assert any('фильтр «По диаметру»' in p and lvl == 'Ошибка'
+              for p, lvl in by_level.items())
+    assert any('фильтр «По цвету»' in p and lvl == 'Предупреждение'
+              for p, lvl in by_level.items())
+
+
 # ── classify / group_into_tasks ─────────────────────────────────────────
 
 def test_classify_известного_типа_находки():
