@@ -35,8 +35,8 @@ _TIMEOUT = 20
 _offset: dict[str, int] = {}
 
 
-def _api(token: str, method: str, params: dict | None = None,
-         proxy_url: str | None = None) -> dict:
+def _api_once(token: str, method: str, params: dict | None = None,
+              proxy_url: str | None = None) -> dict:
     proxies = {"https": proxy_url, "http": proxy_url} if proxy_url else None
     r = requests.get(f"{API}{token}/{method}", params=params or {},
                      proxies=proxies, timeout=_TIMEOUT)
@@ -49,6 +49,27 @@ def _api(token: str, method: str, params: dict | None = None,
         raise RuntimeError(f"Telegram API {method}: "
                            f"{data.get('description') or r.status_code}")
     return data.get("result") or {}
+
+
+def _api(token: str, method: str, params: dict | None = None,
+         proxy_url: str | None = None) -> dict:
+    """Запрос к Telegram: сперва как есть, при сетевой неудаче - через прокси
+    проекта. api.telegram.org у части провайдеров и с облака недоступен
+    напрямую, а прокси для этого уже настроен (proxy_config) - без фоллбэка
+    привязка «молча» не работала бы там, где отправка отчётов работает."""
+    try:
+        return _api_once(token, method, params, proxy_url)
+    except Exception as прямая:  # noqa: BLE001
+        if proxy_url:
+            raise
+        try:
+            from proxy_config import resolve_proxy
+            _p = resolve_proxy(None)
+        except Exception:  # noqa: BLE001
+            _p = None
+        if not _p:
+            raise прямая
+        return _api_once(token, method, params, _p)
 
 
 def bot_username(token: str, proxy_url: str | None = None) -> str:

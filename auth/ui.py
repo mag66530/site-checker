@@ -636,12 +636,14 @@ def _tg_bot_token() -> str:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _tg_bot_name(token: str) -> str:
+def _tg_bot_name(token: str) -> tuple[str, str]:
+    """(@имя бота, текст ошибки). Ошибку возвращаем, а не глотаем: «бот не
+    отвечает» без причины не даёт понять, дело в токене, сети или вебхуке."""
     import telegram_link
     try:
-        return telegram_link.bot_username(token)
-    except Exception:
-        return ""
+        return telegram_link.bot_username(token), ""
+    except Exception as e:  # noqa: BLE001
+        return "", str(e)
 
 
 def render_telegram_block(user: dict) -> None:
@@ -674,9 +676,14 @@ def render_telegram_block(user: dict) -> None:
                 st.rerun()
             return
 
-        bot = _tg_bot_name(token)
+        bot, ошибка = _tg_bot_name(token)
         if not bot:
-            st.caption("Бот не отвечает - проверьте токен `telegram_bot_token`.")
+            st.caption(f"Бот не отвечает: {ошибка or 'причина неизвестна'}. "
+                       "Проверьте токен `telegram_bot_token` и доступ к "
+                       "api.telegram.org (при блокировке - через прокси).")
+            if st.button("Повторить", key="tg_retry", use_container_width=True):
+                _tg_bot_name.clear()
+                st.rerun()
             return
         code = (row or {}).get("code") or telegram_link.make_code(user["id"])
         try:
