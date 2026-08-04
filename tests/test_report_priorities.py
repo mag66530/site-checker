@@ -178,6 +178,46 @@ def test_images_cat_и_prod_warnings_не_теряются():
     assert all(f.level == 'Предупреждение' for f in out)
 
 
+def test_layout_css_broken_даёт_находку_с_url_и_кодом():
+    r = _result(layout={'css_broken': [{'url': 'https://a.ru/s.css', 'status': 404}]})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert 'не грузится часть CSS-стилей' in out[0].problem
+    assert out[0].detail == 'https://a.ru/s.css (код 404)'
+
+
+def test_layout_mixed_content_даёт_находку_на_каждый_ресурс():
+    r = _result(layout={'mixed_content': ['http://a.ru/x.js', 'http://a.ru/y.css']})
+    out = collect_findings([r])
+    assert len(out) == 2
+    assert {f.detail for f in out} == {'http://a.ru/x.js', 'http://a.ru/y.css'}
+    assert all('mixed content' in f.problem for f in out)
+
+
+def test_layout_menu_broken_даёт_находку_с_url_и_кодом():
+    r = _result(layout={'menu': {'checked': 5,
+                                 'broken': [{'url': 'https://a.ru/oplata/', 'code': 404}]}})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert 'битые ссылки в меню шапки' in out[0].problem
+    assert out[0].detail == 'https://a.ru/oplata/ (код 404)'
+
+
+def test_layout_favicon_404_даёт_находку_с_url():
+    r = _result(layout={'favicon': {'url': 'https://a.ru/favicon.ico', 'status': 404}})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert 'favicon не грузится' in out[0].problem
+    assert out[0].detail == 'https://a.ru/favicon.ico'
+
+
+def test_layout_viewport_остаётся_общей_находкой_без_детали():
+    r = _result(layout={'issues': ['нет тега viewport - мобильная версия не масштабируется']})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].detail == ''
+
+
 def test_console_check_ошибки_js_и_адаптивность():
     console = {'pages': [
         {'url': 'https://example.ru/', 'errors': ['TypeError: x is undefined'],

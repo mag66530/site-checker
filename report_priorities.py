@@ -141,6 +141,63 @@ def _images_findings(images: Optional[dict], *, city, page_type, url) -> list:
     return out
 
 
+_LAYOUT_ITEM_TEXT = {
+    'css_broken': ('не грузится часть CSS-стилей (битые ссылки на файлы '
+                   'стилей) - страница может выводиться без вёрстки'),
+    'mixed_content': ('ресурсы грузятся по http на https-странице (mixed '
+                      'content) - браузер их блокирует, картинки/стили/'
+                      'скрипты ломаются'),
+    'menu_broken': ('битые ссылки в меню шапки (404) - переходы по тех. '
+                    'страницам/каталогу не работают'),
+    'favicon': 'favicon не грузится (битая ссылка в link rel="icon")',
+}
+
+
+def _layout_findings(layout: Optional[dict], *, city, page_type, url) -> list:
+    """Вёрстка: конкретный битый CSS-файл / конкретный http-ресурс (mixed
+    content) / конкретная битая ссылка меню / favicon - отдельной находкой
+    с адресом в detail, а не общий текст на всю страницу (как было раньше
+    на листе «Вёрстка»). Остальные issues/warnings (viewport, семантика,
+    минификация и т.п.) - как есть, там нечего итемизировать по URL."""
+    out = []
+    lt = layout or {}
+    itemized_texts = set()
+
+    for c in lt.get('css_broken') or []:
+        text = _LAYOUT_ITEM_TEXT['css_broken']
+        itemized_texts.add(text)
+        out.append(Finding('Ошибка', 'Вёрстка', text, city, page_type, url,
+                           detail=f'{c.get("url", "")} (код {c.get("status", "")})'))
+
+    for m in lt.get('mixed_content') or []:
+        text = _LAYOUT_ITEM_TEXT['mixed_content']
+        itemized_texts.add(text)
+        out.append(Finding('Ошибка', 'Вёрстка', text, city, page_type, url,
+                           detail=m))
+
+    for b in (lt.get('menu') or {}).get('broken') or []:
+        text = _LAYOUT_ITEM_TEXT['menu_broken']
+        itemized_texts.add(text)
+        out.append(Finding('Ошибка', 'Вёрстка', text, city, page_type, url,
+                           detail=f'{b.get("url", "")} (код {b.get("code", "")})'))
+
+    fav = lt.get('favicon') or {}
+    if fav.get('status') in (404, 410):
+        text = _LAYOUT_ITEM_TEXT['favicon']
+        itemized_texts.add(text)
+        out.append(Finding('Ошибка', 'Вёрстка', text, city, page_type, url,
+                           detail=fav.get('url', '')))
+
+    for text in lt.get('issues') or []:
+        if text not in itemized_texts:
+            out.append(Finding('Ошибка', 'Вёрстка', str(text),
+                               city, page_type, url))
+    for text in lt.get('warnings') or []:
+        out.append(Finding('Предупреждение', 'Вёрстка', str(text),
+                           city, page_type, url))
+    return out
+
+
 def _console_findings(console_check: Optional[dict]) -> list:
     out = []
     for p in (console_check or {}).get('pages') or []:
@@ -240,8 +297,8 @@ def collect_findings(results, *, console_check: dict = None,
                                     city=city, page_type=page_type, url=url))
         out.extend(_from_issue_dict(r.meta, section='Метаданные',
                                     city=city, page_type=page_type, url=url))
-        out.extend(_from_issue_dict(r.layout, section='Вёрстка',
-                                    city=city, page_type=page_type, url=url))
+        out.extend(_layout_findings(r.layout, city=city, page_type=page_type,
+                                    url=url))
         out.extend(_from_issue_dict(r.markup, section='Разметка',
                                     city=city, page_type=page_type, url=url))
         out.extend(_from_issue_dict(r.security, section='Безопасность',
