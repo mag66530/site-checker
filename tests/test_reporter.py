@@ -123,7 +123,7 @@ def test_traffic_прямые_заходы_рост_красный_как_отк
     разметка, трафик из рекламы/ПС проваливается в «прямой», а не реальный
     органический рост) - красим красным, как и рост отказов, а не зелёным."""
     from openpyxl import Workbook
-    from reporter import _build_traffic_sheet, C
+    from reporter import _build_traffic_overview_sheet, C
     wb = Workbook()
     row_tpl = {'yandex': 0, 'google': 0, 'leads': 0, 'conv': 0, 'bounce': 0,
               'depth': 0, 'duration': 0, 'pages': {}}
@@ -133,11 +133,11 @@ def test_traffic_прямые_заходы_рост_красный_как_отк
         {'period': 'День', 'kind': 'прошлый', 'year': 2026,
          'd1': '2026-08-03', 'visits': 100, 'direct': 64, **row_tpl},
     ]}]}
-    _build_traffic_sheet(wb, traffic)
-    ws = wb['Динамика трафика']
+    _build_traffic_overview_sheet(wb, traffic)
+    ws = wb['Трафик и траст']
     delta_row = next(row[0].row for row in ws.iter_rows(min_row=1, max_row=ws.max_row)
-                     if row[2].value == 'Δ, %')
-    cell = ws.cell(row=delta_row, column=5)   # E = «Прямые заходы»
+                     if row[3].value == 'Δ, %')  # D = «Δ, %»
+    cell = ws.cell(row=delta_row, column=6)   # F = «Прямые заходы»
     assert cell.value == '+18.8%'
     assert cell.font.color.rgb == 'FF' + C.err
 
@@ -212,13 +212,14 @@ def test_basic_report_creation():
         from openpyxl import load_workbook
         wb = load_workbook(out)
         assert 'Обзор' in wb.sheetnames
-        assert 'Все детали' in wb.sheetnames
+        assert 'Страницы' in wb.sheetnames
         assert 'Битые тексты' not in wb.sheetnames  # нет находок
-        
-        # На листе «Все детали» - 3 строки данных + 1 шапка = 4
-        ws = wb['Все детали']
-        rows_with_data = sum(1 for r in ws.iter_rows(values_only=True) if r[0])
-        assert rows_with_data == 4
+
+        # На листе «Страницы» (колонка B - «Город») - 3 строки данных
+        # (заголовок таблицы на строке 5, данные с 6-й).
+        ws = wb['Страницы']
+        rows_with_data = sum(1 for r in ws.iter_rows(min_row=6, values_only=True) if r[1])
+        assert rows_with_data == 3
     print('✓ Базовый отчёт создаётся')
 
 
@@ -286,14 +287,13 @@ def test_redirect_chain_in_path_column():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        ws = wb['Все детали']
+        ws = wb['Страницы']
 
         # Находим колонку «Откуда перешли» по заголовку, а не по фикс. индексу -
-        # в лист «Все детали» со временем добавляли колонки (напр. «Отдел»),
-        # из-за чего хардкод column=10 ломался.
-        header_row = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+        # колонки со временем добавлялись, хардкод индекса ломался.
+        header_row = [ws.cell(row=5, column=c).value for c in range(1, ws.max_column + 1)]
         path_col = header_row.index('Откуда перешли') + 1
-        paths = [ws.cell(row=r, column=path_col).value for r in range(2, 4)]
+        paths = [ws.cell(row=r, column=path_col).value for r in range(6, 8)]
         # Должна быть и цепочка и «Прямая ссылка»
         assert any('301:' in p for p in paths if p)
         assert any('Прямая ссылка' in p for p in paths if p)
@@ -314,9 +314,10 @@ def test_speed_with_comma():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        ws = wb['Все детали']
-        # Колонка G - «Скорость, с»
-        speed = ws.cell(row=2, column=7).value
+        ws = wb['Страницы']
+        header_row = [ws.cell(row=5, column=c).value for c in range(1, ws.max_column + 1)]
+        speed_col = header_row.index('Скорость, с') + 1
+        speed = ws.cell(row=6, column=speed_col).value
         assert speed == '2,34', f'Ожидалось "2,34", получили {speed!r}'
     print('✓ Скорость с запятой')
 
@@ -566,10 +567,41 @@ def test_problem_text_human_phrases():
     print('✓ «Что чинить»: человеческие формулировки')
 
 
-def test_metrika_404_goal_есть():
-    """Цель на 404 найдена - строка появляется на листе «404 из Метрики»,
-    даже если 404-страниц за период не было (сам факт проверки цели не
-    должен теряться, когда сшивка сама по себе пустая)."""
+def test_metrika_404_findings_подтверждено_и_только_в_метрике():
+    """_metrika_404_findings (report_priorities.py) - реальный merge: URL,
+    совпавший с 404-страницей из самого прогона ("results"), помечается как
+    подтверждённый; URL вне выборки прогона - как «только по Метрике» с
+    отдельной формулировкой, не одинаковым текстом."""
+    from report_priorities import _metrika_404_findings
+    from metrika_404 import Report404, Page404
+    results = [make_result(url='https://stalmetural.ru/dead/', http_code=404,
+                           status='not_found', is_ok=False, is_error=True)]
+    reports = [Report404(
+        project_id='t', country_code='RU', country_name='Россия',
+        report_date='2026-08-03', received_at='2026-08-03T00:00:00',
+        pages=[
+            Page404(page_title='Страница не найдена', page_url='https://stalmetural.ru/dead/',
+                    views=5, visitors=3, referer=None),
+            Page404(page_title='Страница не найдена', page_url='https://stalmetural.kz/other/',
+                    views=2, visitors=1, referer=None),
+        ],
+        total_views=7, total_pages=2)]
+    out = _metrika_404_findings(reports, results)
+    assert len(out) == 2
+    confirmed = next(f for f in out if f.url == 'https://stalmetural.ru/dead/')
+    not_confirmed = next(f for f in out if f.url == 'https://stalmetural.kz/other/')
+    assert confirmed.section == '404 в индексе' == not_confirmed.section
+    assert 'обходом сайта' in confirmed.problem
+    assert 'вне выборки' in not_confirmed.problem
+    assert confirmed.problem != not_confirmed.problem
+    print('✓ 404 из Метрики: подтверждённые и «только в Метрике» различаются')
+
+
+def test_metrika_404_goal_параметр_не_ломает_сборку():
+    """metrika_404_goal - параметр build_report(), сейчас не отображается
+    отдельно (лист «404 из Метрики» удалён, находки - в «Проблемы» через
+    _metrika_404_findings); передача параметра просто не должна ронять
+    сборку и не должна создавать никакого «404 из Метрики»."""
     selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
     results = [make_result(url='https://stalmetural.ru/')]
 
@@ -585,39 +617,8 @@ def test_metrika_404_goal_есть():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        # «404 из Метрики» теперь - секция внутри группового «Аналитика».
-        assert 'Аналитика' in wb.sheetnames
         assert '404 из Метрики' not in wb.sheetnames
-        ws = wb['Аналитика']
-        text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
-        assert 'Цель на 404' in text
-        assert 'есть' in text.lower()
-    print('✓ Секция «404 из Метрики» в листе «Аналитика»: «цель есть»')
-
-
-def test_metrika_404_goal_не_найдена():
-    selected = [Subdomain(url='https://mepen.ru/', city='Москва', host='mepen.ru')]
-    results = [make_result(url='https://mepen.ru/')]
-
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / 'test.xlsx'
-        build_report(
-            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
-            finished_at_ms=int(time.time() * 1000),
-            selected_subdomains=selected, results=results, output_path=out,
-            metrika_reports=None,
-            metrika_404_goal={'есть': False, 'счётчики':
-                               {'99551890': {'есть': False, 'название': None}}},
-        )
-        from openpyxl import load_workbook
-        wb = load_workbook(out)
-        assert 'Аналитика' in wb.sheetnames
-        assert '404 из Метрики' not in wb.sheetnames
-        ws = wb['Аналитика']
-        text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
-        assert 'не найдена' in text.lower()
-        assert 'стоит создать' in text.lower()
-    print('✓ Секция «404 из Метрики» в «Аналитике»: «цель не найдена»')
+    print('✓ metrika_404_goal без metrika_reports не ломает сборку')
 
 
 def test_metrika_404_goal_none_без_данных_лист_не_создаётся():

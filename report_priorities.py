@@ -469,8 +469,55 @@ def _index_404_findings(index_404_check: Optional[dict]) -> list:
     return out
 
 
+def _metrika_404_findings(metrika_reports, results) -> list:
+    """404 по данным Яндекс.Метрики (реальные визиты на несуществующую
+    страницу) - раньше отдельный лист «404 из Метрики». Источник ДРУГОЙ,
+    чем у «404 в индексе» (Вебмастер/GSC: страница есть в поиске) - тут
+    источник посещений, поэтому пишем это прямо в detail, а не молчим:
+    если URL совпадает с 404/410, пойманным самим чек-листом - «подтверждено
+    обходом сайта»; если нет - «только по Метрике» (вне выборки прогона или
+    домен не проверялся)."""
+    if not metrika_reports:
+        return []
+    from urllib.parse import urlparse as _urlparse
+    sc_failed_urls, sc_failed_paths = set(), set()
+    for r in results or []:
+        if r.is_error and r.http_code in (404, 410):
+            sc_failed_urls.add(r.url)
+            try:
+                p = _urlparse(r.url).path
+                if p:
+                    sc_failed_paths.add(p)
+            except ValueError:
+                pass
+
+    out = []
+    for report in metrika_reports:
+        for page in report.pages:
+            url = page.page_url or ''
+            confirmed = url in sc_failed_urls
+            if not confirmed and url:
+                try:
+                    confirmed = _urlparse(url).path in sc_failed_paths
+                except ValueError:
+                    pass
+            problem = ('страница отвечает ошибкой - подтверждено и обходом '
+                      'сайта, и реальными визитами (Метрика)' if confirmed else
+                      'по данным Метрики были визиты на страницу с ошибкой - '
+                      'при обходе сайта её не поймали (вне выборки прогона '
+                      'или чужой домен), но переходы на неё реальны')
+            out.append(Finding(
+                'Ошибка', '404 в индексе', problem, url=url or '(URL не пришёл в письме)',
+                detail=f'{report.country_name}, {report.report_date}: '
+                       f'просмотров {page.views}, посетителей {page.visitors}'
+                       + (f' · реферер: {page.referer}' if page.referer else '')
+                       + f' · заголовок страницы: «{page.page_title}»'))
+    return out
+
+
 def collect_findings(results, *, console_check: dict = None,
                      index_404_check: dict = None,
+                     metrika_reports: list = None,
                      calltracking_check: dict = None,
                      search_check: dict = None,
                      filters_test: dict = None) -> list:
@@ -513,6 +560,7 @@ def collect_findings(results, *, console_check: dict = None,
                                            city=city, page_type=page_type, url=url))
     out.extend(_console_findings(console_check))
     out.extend(_index_404_findings(index_404_check))
+    out.extend(_metrika_404_findings(metrika_reports, results))
     out.extend(_calltracking_findings(results, calltracking_check))
     out.extend(_search_check_findings(search_check))
     out.extend(_filters_test_findings(filters_test))

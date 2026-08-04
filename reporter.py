@@ -1,14 +1,13 @@
 """
 reporter.py - формирование xlsx-отчёта.
 
-Структура (как в Node.js версии):
+Структура:
   • Лист «Обзор» - метрики, сводка, параметры прогона
-  • Лист «Все детали» - каждая проверка отдельной строкой
+  • Лист «План работ» / «Проблемы» - приоритезированные задачи и находки
+  • Лист «Страницы» - каждая проверенная страница отдельной строкой (код,
+    статус, скорость, отдел, битые переменные, откуда перешли, найдено
+    проблем) - без деталей находок, те на «Проблемы»
   • Лист «Битые тексты» - добавляется ТОЛЬКО если есть находки
-
-Колонки в «Все детали»:
-  Город | Поддомен | Тип | URL | Код | Статус |
-  Скорость, с | Оценка скорости | Битые переменные | Откуда перешли
 """
 import re
 from copy import copy
@@ -97,7 +96,7 @@ _NOTIF_CAT_DEPT = {
 
 
 def _dept_result(r) -> str:
-    """Отдел для колонки «Отдел» листа «Все детали».
+    """Отдел для колонки «Кому чинить» листа «Страницы».
 
     Тег ставим ТОЛЬКО при проблеме со статусом или скоростью.
     Если статус «Работает» и скорость «ОК» - поле пустое, всё в порядке.
@@ -853,9 +852,9 @@ def _build_structure_sheet(wb, results):
 
 
 def _build_pages_overview_sheet(wb, results, findings):
-    """Лист «Страницы»: код/статус/скорость + сколько находок на странице
-    (из «Проблемы») по каждой проверенной странице - для быстрого обзора,
-    без деталей (те - на «Все детали» и «Проблемы»)."""
+    """Лист «Страницы»: код/статус/скорость/битые переменные/откуда перешли
+    + сколько находок на странице (из «Проблемы») по каждой проверенной
+    странице - без деталей самих находок (те - на «Проблемы»)."""
     if not results:
         return
     from collections import Counter
@@ -870,7 +869,8 @@ def _build_pages_overview_sheet(wb, results, findings):
     headers = [('Город', 16), ('Поддомен', 24), ('Тип', 13),
               ('Адрес страницы', 55), ('Код', 8), ('Статус', 18),
               ('Скорость, с', 11), ('Оценка скорости', 16),
-              ('Кому чинить', 18), ('Найдено проблем', 14)]
+              ('Кому чинить', 18), ('Найдено проблем', 14),
+              ('Битые переменные', 16), ('Откуда перешли', 46)]
     ws.column_dimensions['A'].width = 3
     for i, (_title, w) in enumerate(headers, 2):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -910,10 +910,15 @@ def _build_pages_overview_sheet(wb, results, findings):
             speed_sec = f'{r.elapsed_ms / 1000:.2f}'.replace('.', ',')
         speed_label = SPEED_LABEL.get(r.speed_rating, '') if r.speed_rating else ''
         n_prob = counts.get(r.url, 0)
+        text_issue_text = ''
+        if r.has_text_issues:
+            n = len(r.text_issues)
+            text_issue_text = f'{n} {"находка" if n == 1 else "находок"}'
         vals = [r.city, r.subdomain, r.type_label, r.url,
                r.http_code if r.http_code else '-',
                STATUS_LABEL.get(r.status, r.status), speed_sec, speed_label,
-               _dept_result(r), n_prob or None]
+               _dept_result(r), n_prob or None, text_issue_text,
+               _build_path_description(r)]
         for ci, v in enumerate(vals, 2):
             cell = ws.cell(row=row, column=ci, value=v)
             cell.font = _font(size=9, color=C.text_soft)
@@ -938,11 +943,20 @@ def _build_pages_overview_sheet(wb, results, findings):
             prob_cell = ws.cell(row=row, column=11)
             prob_cell.font = _font(size=9, bold=True, color=C.err)
             prob_cell.fill = _fill(C.err_soft)
+        if r.has_text_issues:
+            issue_cell = ws.cell(row=row, column=12)
+            issue_cell.font = _font(size=9, bold=True, color=C.warn)
+            issue_cell.fill = _fill(C.warn_soft)
+        path_cell = ws.cell(row=row, column=13)
+        if r.redirect_chain:
+            path_cell.font = _font(name='Consolas', size=9, color=C.text_soft)
+        elif not r.is_ok:
+            path_cell.font = _font(size=9, italic=True, color=C.text_muted)
         ws.row_dimensions[row].height = 16
         row += 1
 
     last = row - 1
-    ws.auto_filter.ref = f'B{hdr_row}:K{last}'
+    ws.auto_filter.ref = f'B{hdr_row}:M{last}'
     ws.freeze_panes = f'B{hdr_row + 1}'
 
 
@@ -3107,220 +3121,9 @@ def _wm_alive_url(url, section='optimization/checklist/'):
             return url[:-len(dead)] + section
     return url
 
-
-# ── Лист «404 в индексе» (регулярный мониторинг страниц в поиске) ───
-
-
-def _index_404_code(status) -> int:
-    try:
-        return int(str(status).strip() or 0)
-    except (ValueError, TypeError):
-        return 0
-
-
-def _build_index_404_sheet(wb, index_404_check):
-    """Лист «404 в индексе» - понятная таблица битых страниц из поиска.
-    Каждая строка: сайт, адрес, что не так (простыми словами), код, источник.
-    Источники комбо (Sitemap / Яндекс / Google) сливаются, дубли по URL
-    схлопываются. Сортируется/фильтруется. Добавляется, если проверка была."""
-    if not index_404_check:
-        return
-    hosts = index_404_check.get('hosts') or []
-    _MAX_ROWS = 2000                 # предохранитель от гигантского файла
-    _RANK = {'dead': 0, 'server': 1, 'client': 2}
-
-    # Собираем проблемы, схлопывая по URL и объединяя источники.
-    by_url = {}
-
-    def _add(site, r, kind):
-        url = r.get('url', '')
-        if not url:
-            return
-        code = _index_404_code(r.get('status'))
-        # Код для показа: число, если известно; иначе сырой статус (GSC 5xx).
-        code_txt = str(code) if code else (str(r.get('status') or '').strip() or '–')
-        src = r.get('source', '')
-        p = by_url.get(url)
-        if p is None:
-            by_url[url] = {'site': site, 'url': url, 'code': code,
-                           'code_txt': code_txt, 'kind': kind,
-                           'sources': ({src} if src else set())}
-        else:
-            if src:
-                p['sources'].add(src)
-            if _RANK.get(kind, 9) < _RANK.get(p['kind'], 9):
-                p.update(site=site, code=code, code_txt=code_txt, kind=kind)
-
-    for h in hosts:
-        site = h.get('host', '')
-        for r in h.get('dead') or []:
-            _add(site, r, 'dead')
-        for r in h.get('errors') or []:
-            code = _index_404_code(r.get('status'))
-            _add(site, r, 'server' if (code >= 500 or code == 0) else 'client')
-
-    problems = list(by_url.values())
-    n_dead = sum(1 for p in problems if p['kind'] == 'dead')
-    n_err = len(problems) - n_dead
-    bad_sites = len({p['site'] for p in problems})
-    has_any = bool(problems)
-    src_list = [s for s in (index_404_check.get('sources') or []) if s]
-
-    ws = wb.create_sheet('404 в индексе')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = (C.err if n_dead
-                                    else C.warn if n_err else C.ok)
-    for col, w in (('A', 2), ('B', 18), ('C', 82), ('D', 20), ('E', 7),
-                   ('F', 16)):
-        ws.column_dimensions[col].width = w
-
-    # Заголовок.
-    ws.merge_cells('B2:F2')
-    c = ws['B2']
-    c.value = '404 в индексе – страницы в поиске, которые открываются с ошибкой'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    # Короткий подзаголовок (перепроверено – в списке нет рабочих ссылок).
-    ws.merge_cells('B3:F3')
-    c = ws['B3']
-    c.value = ('Страницы, которые Яндекс/Google держат в поиске, и которые ПРЯМО '
-               'СЕЙЧАС отдают ошибку – каждая перепроверена живым запросом, '
-               'рабочих ссылок в списке нет. Столбец «Источник» – откуда узнали.')
-    c.font = _font(size=10, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 28
-
-    row = 4
-
-    # Проверка не выполнилась / нет данных.
-    if index_404_check.get('error') and not hosts:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        c = ws.cell(row=row, column=2)
-        c.value = '⚠ Проверка не выполнилась: ' + str(index_404_check['error'])
-        c.font = _font(size=11, color=C.text_soft)
-        c.alignment = _align(wrap=True)
-        return
-    if not index_404_check.get('available') or not hosts:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        c = ws.cell(row=row, column=2)
-        c.value = 'Проверка не выполнялась.'
-        c.font = _font(size=11, color=C.text_soft)
-        c.alignment = _align(wrap=True)
-        return
-
-    # Крупная сводка.
-    total_checked = index_404_check.get('total_checked', 0)
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-    c = ws.cell(row=row, column=2)
-    _rev = ' · перепроверено живьём' if index_404_check.get('reverified') else ''
-    if has_any:
-        c.value = (f'Найдено {len(problems)} битых страниц на {bad_sites} '
-                   f'сайт(ах):   🔴 удалены (404): {n_dead}   '
-                   f'🟠 ошибка сервера: {n_err}{_rev}')
-        c.font = _font(size=13, bold=True, color=C.err)
-    else:
-        c.value = ('✅ Битых страниц в поиске не найдено – все, что поисковики '
-                   'считали битыми, при живой перепроверке открылись нормально.')
-        c.font = _font(size=13, bold=True, color=C.ok)
-    ws.row_dimensions[row].height = 22
-    row += 1
-
-    _src_txt = f'источники: {", ".join(src_list)}' if src_list else ''
-    if _src_txt:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        c = ws.cell(row=row, column=2)
-        c.value = _src_txt
-        c.font = _font(size=10, color=C.text_muted)
-        ws.row_dimensions[row].height = 14
-        row += 1
-
-    if not has_any:
-        return
-
-    # Что делать – простыми словами, один раз.
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-    c = ws.cell(row=row, column=2)
-    c.value = ('Что делать:  🔴 404 – 301-редирект на живой раздел или убрать из '
-               'индекса.   🟠 5xx – проверить, почему сервер отваливается (часто '
-               'тяжёлые страницы фильтров).')
-    c.font = _font(size=10, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[row].height = 28
-    row += 1
-
-    # Инсайт: почти все битые – страницы фильтров.
-    n_filter = sum(1 for p in problems if '/filter/' in (p['url'] or ''))
-    if len(problems) >= 10 and n_filter / len(problems) >= 0.6:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        c = ws.cell(row=row, column=2)
-        c.value = (f'⚠ {n_filter} из {len(problems)} – страницы фильтров каталога '
-                   f'(…/filter/…): фильтры плодят ссылки на несуществующие '
-                   f'комбинации, их стоит закрыть от индексации.')
-        c.font = _font(size=10, color=C.warn)
-        c.alignment = _align(wrap=True, vertical='top')
-        ws.row_dimensions[row].height = 26
-        row += 1
-
-    # Шапка таблицы.
-    hdr = row
-    for col, title in (('B', 'Сайт'), ('C', 'Адрес страницы'),
-                       ('D', 'Проблема'), ('E', 'Код'), ('F', 'Источник')):
-        cell = ws[f'{col}{hdr}']
-        cell.value = title
-        cell.font = _font(size=10, bold=True, color=C.text)
-        cell.fill = _fill(C.surface)
-        cell.border = _border()
-        cell.alignment = _align(indent=1)
-    ws.row_dimensions[hdr].height = 20
-    row += 1
-
-    # Сначала 404 (важнее), затем ошибки сервера; внутри - по сайту и адресу.
-    problems.sort(key=lambda p: (_RANK.get(p['kind'], 9), p['site'], p['url']))
-    _KIND = {'dead': ('Страница удалена', C.err),
-             'server': ('Сервер не ответил', C.warn),
-             'client': ('Страница недоступна', C.warn)}
-
-    for p in problems[:_MAX_ROWS]:
-        label, color = _KIND.get(p['kind'], ('Ошибка', C.warn))
-        b = ws.cell(row=row, column=2)
-        b.value = p['site']
-        b.font = _font(size=10)
-        b.alignment = _align(indent=1)
-        u = ws.cell(row=row, column=3)
-        u.value = p['url']
-        u.font = _font(size=10, color=C.accent, underline='single')
-        if p['url']:
-            u.hyperlink = p['url']
-        u.alignment = _align(indent=1)
-        pc = ws.cell(row=row, column=4)
-        pc.value = label
-        pc.font = _font(size=10, bold=True, color=color)
-        pc.alignment = _align(indent=1)
-        e = ws.cell(row=row, column=5)
-        e.value = p.get('code_txt') or '–'
-        e.font = _font(size=10, color=color)
-        e.alignment = _align(horizontal='center')
-        s = ws.cell(row=row, column=6)
-        s.value = ', '.join(sorted(p['sources'])) or '–'
-        s.font = _font(size=10, color=C.text_soft)
-        s.alignment = _align(indent=1)
-        for cc in (2, 3, 4, 5, 6):
-            ws.cell(row=row, column=cc).border = _border()
-        ws.row_dimensions[row].height = 15
-        row += 1
-
-    last = row - 1
-    ws.auto_filter.ref = f'B{hdr}:F{last}'
-    ws.freeze_panes = f'B{hdr + 1}'
-
-    if len(problems) > _MAX_ROWS:
-        row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        c = ws.cell(row=row, column=2)
-        c.value = (f'…показаны первые {_MAX_ROWS} из {len(problems)} – '
-                   f'остальные того же типа, чинятся так же.')
-        c.font = _font(size=10, italic=True, color=C.text_muted)
+# Лист «404 в индексе» удалён - те же находки (dead/errors) уже полностью
+# в «Проблемы» через report_priorities._index_404_findings(), отдельная
+# таблица дублировала одно и то же.
 
 
 # ── Лист «Фильтры ПС» (п.1.19: санкции поисковых систем) ───────────
@@ -3918,8 +3721,7 @@ _TRAFFIC_INVERT_IDX = {1, 6}
 
 def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None):
     """Лист «Трафик и траст»: компактная сводка трафика по странам/периодам
-    (визиты, каналы, лиды, конверсия, отказы) - без разбивки по типам
-    страниц, для быстрого просмотра (детали - «Динамика трафика»). Плюс
+    (визиты, каналы, лиды, конверсия, отказы). Плюс
     траст проекта (ИКС/DR) и ссылочный профиль (lite, Вебмастер) - обе
     метрики, не находки, поэтому не в «Проблемы», а здесь, рядом с
     трафиком (раньше жили отдельными листами внутри «Аналитики»). Каждый
@@ -3958,8 +3760,7 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None):
         c = ws.cell(row=row, column=2)
         c.value = ('Текущий период и прошлый рядом, Δ - разница в %. Рост «Прямых '
                   'заходов» или «Отказов» - красный: обычно значит потерю UTM/'
-                  'referrer-разметки или ухудшение, а не хороший знак. Детали по '
-                  'типам страниц - на листе «Динамика трафика».')
+                  'referrer-разметки или ухудшение, а не хороший знак.')
         c.font = _font(size=10, italic=True, color=C.text_soft)
         c.alignment = _align(wrap=True)
         ws.row_dimensions[row].height = 28
@@ -4138,186 +3939,9 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None):
             row += 1
 
 
-def _build_traffic_sheet(wb, traffic):
-    """Лист «Динамика трафика»: широкая таблица по Яндекс.Метрике - день/
-    месяц/год, каждый в двух строках (текущий/прошлый). Каналы, лиды,
-    конверсия, поведение, разбивка по типам страниц. Только если выполнялось."""
-    if not traffic:
-        return
-    # Формат: группы по странам (новый) или один плоский список rows (старый).
-    groups = traffic.get('groups')
-    if not groups:
-        rows = traffic.get('rows') or []
-        if not rows:
-            return
-        groups = [{'country': 'Все домены',
-                   'counters': traffic.get('counters', 0), 'rows': rows}]
-    if not any(g.get('rows') for g in groups):
-        return
-
-    # Спад визитов где-либо (по любой стране/периоду) - для цвета вкладки.
-    declined = False
-    for g in groups:
-        by_period = {}
-        for r in g.get('rows') or []:
-            by_period.setdefault(r['period'], {})[r['kind']] = r.get('visits', 0)
-        if any(v.get('текущий', 0) < v.get('прошлый', 0)
-               for v in by_period.values()):
-            declined = True
-
-    ws = wb.create_sheet('Динамика трафика')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.warn if declined else C.ok
-    ws.column_dimensions['A'].width = 3
-    for idx, (_name, w) in enumerate(_TRAFFIC_COLS):
-        ws.column_dimensions[get_column_letter(2 + idx)].width = w
-    last_col = 1 + len(_TRAFFIC_COLS)
-
-    ws.merge_cells(start_row=2, start_column=2, end_row=2, end_column=8)
-    c = ws.cell(row=2, column=2, value='Динамика трафика (Метрика)')
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells(start_row=3, start_column=2, end_row=3, end_column=last_col)
-    c = ws.cell(row=3, column=2, value=(
-        f'Источник: Яндекс.Метрика, {traffic.get("counters", 0)} счётчиков '
-        'проекта, РАЗБИВКА ПО СТРАНАМ/ДОМЕНАМ (каждый блок - свой набор '
-        'счётчиков по TLD домена, счётчик учтён ровно в одной стране). '
-        'День = сегодня / вчера, Месяц = с 1-го числа до сегодня / тот же '
-        'отрезок прошлого месяца, Год = с 1 января / прошлый год до той же даты. '
-        'Яндекс и Google - весь трафик источника (органика + реклама ПС). Лиды - '
-        'основная цель-лид страны; конверсия = лиды / визиты. Разбивка по типам '
-        'страниц - по URL приземления.'))
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 46
-
-    hrow = 5
-    for idx, (name, _w) in enumerate(_TRAFFIC_COLS):
-        h = ws.cell(row=hrow, column=2 + idx, value=name)
-        h.font = _font(size=9, bold=True, color=C.text)
-        h.fill = _fill(C.surface)
-        h.alignment = _align(wrap=True, vertical='center', horizontal='center')
-        h.border = _border()
-    ws.row_dimensions[hrow].height = 30
-
-    _PAGES = ('main', 'category', 'service', 'product', 'filter', 'tag',
-              'info', 'tech')
-
-    def _fmt(iso):
-        return '.'.join(reversed(iso.split('-')))
-
-    def _srez(period, r):
-        """Что писать в колонке «Срез»: день - дату, месяц - «Месяц ГГГГ»,
-        год - год (вместо слов текущий/прошлый). Заодно заменяет старый
-        заголовок блока с датами."""
-        y, m, _d = r['d1'].split('-')
-        if period == 'Месяц':
-            return f'{_MONTHS_NOM[int(m)]} {y}'
-        if period == 'Год':
-            return y
-        return _fmt(r['d1'])
-
-    def _nums(r):
-        p = r.get('pages') or {}
-        return ([r.get('visits', 0), r.get('direct', 0), r.get('yandex', 0),
-                 r.get('google', 0), r.get('leads', 0), r.get('conv', 0),
-                 r.get('bounce', 0), r.get('depth', 0), r.get('duration', 0)]
-                + [p.get(t, 0) for t in _PAGES])
-
-    def _disp(r):
-        n = _nums(r)
-        n[8] = _fmt_duration(n[8])   # время: секунды → м:сс
-        return n
-
-    _DELTA_FILL = {C.ok: C.ok_soft, C.err: C.err_soft, C.text_muted: None}
-
-    def _delta(cur, prev, invert=False):
-        # invert=True для «отказов»: рост - плохо (красный), падение - хорошо.
-        if not prev:
-            return '–', C.text_muted
-        pct = round((cur - prev) / prev * 100, 1)
-        if pct == 0:
-            return '0%', C.text_muted
-        up_color = C.err if invert else C.ok
-        down_color = C.ok if invert else C.err
-        if pct > 0:
-            return f'+{pct}%', up_color
-        return f'{pct}%', down_color
-
-    def _put(row, idx, value, fill=None, **fkw):
-        cell = ws.cell(row=row, column=2 + idx, value=value)
-        cell.font = _font(size=9, **fkw)
-        cell.alignment = _align(horizontal='center', vertical='center')
-        cell.border = _border()
-        if fill:
-            cell.fill = _fill(fill)
-        return cell
-
-    order = ['День', 'Месяц', 'Год']
-    row = hrow + 1
-    for g in groups:
-        grows = g.get('rows') or []
-        if not grows:
-            continue
-        # Полоса страны/домена (шире и заметнее блоков периода).
-        ws.merge_cells(start_row=row, start_column=2, end_row=row,
-                       end_column=last_col)
-        gb = ws.cell(row=row, column=2,
-                     value=f'{g.get("country", "")}   ·   '
-                           f'{g.get("counters", 0)} счётчик(ов)')
-        gb.font = _font(size=12, bold=True, color='FFFFFF')
-        gb.fill = _fill(C.accent)
-        gb.alignment = _align(indent=1, vertical='center')
-        ws.row_dimensions[row].height = 22
-        row += 1
-
-        seen_periods = sorted({r['period'] for r in grows},
-                              key=lambda p: order.index(p) if p in order else 9)
-        for period in seen_periods:
-            prs = [r for r in grows if r['period'] == period]
-            cur = next((r for r in prs if r['kind'] == 'текущий'), None)
-            prev = next((r for r in prs if r['kind'] == 'прошлый'), None)
-
-            # Полоса-заголовок блока периода (День/Месяц/Год).
-            ws.merge_cells(start_row=row, start_column=2, end_row=row,
-                           end_column=last_col)
-            band = ws.cell(row=row, column=2, value=period)
-            band.font = _font(size=11, bold=True, color='FFFFFF')
-            band.fill = _fill(C.text_soft)
-            band.alignment = _align(indent=1, vertical='center')
-            ws.row_dimensions[row].height = 20
-            row += 1
-
-            for r in (cur, prev):
-                if not r:
-                    continue
-                is_cur = r['kind'] == 'текущий'
-                base = C.text if is_cur else C.text_muted
-                _put(row, 0, r.get('year'), color=base)
-                _put(row, 1, _srez(period, r), color=base)   # дата/месяц/год
-                for j, val in enumerate(_disp(r)):
-                    _put(row, 2 + j, val, color=base, bold=(j == 0 and is_cur))
-                ws.row_dimensions[row].height = 16
-                row += 1
-
-            # Строка динамики (%). Отказы (индекс 6) - рост плохой, наоборот.
-            # Прямые заходы (индекс 1) - тоже наоборот: рост непропорционально
-            # остальным каналам обычно значит, что теряется UTM/referrer-
-            # разметка (трафик из рекламы/ПС валится в «прямой»), а не
-            # реальный органический рост - падение доли прямых заходов - ок.
-            if cur and prev:
-                _put(row, 0, '', color=C.text_muted)
-                _put(row, 1, 'Δ, %', color=C.text, bold=True)
-                cn, pn = _nums(cur), _nums(prev)
-                for j in range(len(cn)):
-                    txt, clr = _delta(cn[j], pn[j], invert=(j in (1, 6)))
-                    _put(row, 2 + j, txt, color=clr, bold=True,
-                        fill=_DELTA_FILL.get(clr))
-                ws.row_dimensions[row].height = 16
-                row += 1
-            row += 1   # разделитель между периодами
-        row += 1       # доп. разделитель между странами
+# Лист «Динамика трафика» удалён по прямому указанию - трафик по странам/
+# периодам уже есть на «Трафик и траст»; разбивку по типам страниц (была
+# только здесь) сознательно не переносим никуда.
 
 
 def _ratio_word(spike, spiked):
@@ -5136,26 +4760,6 @@ def _build_meta_sheet(wb, results, meta_summary):
 # городу (даже без проблем) не нужна.
 
 
-# Страна по доменной зоне URL (для листа «404 из Метрики»).
-_TLD_COUNTRY = {
-    'ru': 'Россия', 'kz': 'Казахстан', 'by': 'Беларусь', 'kg': 'Кыргызстан',
-    'uz': 'Узбекистан', 'am': 'Армения', 'az': 'Азербайджан', 'ua': 'Украина',
-}
-
-
-def _country_by_url(url: str) -> str:
-    """Страна по TLD домена URL. Неизвестно → прочерк."""
-    from urllib.parse import urlparse as _up
-    host = (url or '').strip()
-    try:
-        netloc = _up(host).netloc or host.split('/')[0]
-    except ValueError:
-        netloc = host.split('/')[0]
-    netloc = netloc.split(':')[0].strip('.')   # без порта
-    tld = netloc.rsplit('.', 1)[-1].lower() if '.' in netloc else ''
-    return _TLD_COUNTRY.get(tld, '-')
-
-
 # ── Лист «Автокликер» ──────────────────────────────────────────────
 
 
@@ -5276,7 +4880,7 @@ _SHEET_GROUPS = [
     ('Техничка', [
         'Индексация', 'Метаданные',
         'Разметка', 'Ошибки JavaScript',
-        'Валидация и скорость', 'Страница 404', '404 в индексе',
+        'Валидация и скорость', 'Страница 404',
         'Страницы в ГСК', 'Дубли главной', 'Индексация (Арсенкин)',
         'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
     ]),
@@ -5286,7 +4890,6 @@ _SHEET_GROUPS = [
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
-        '404 из Метрики', 'Динамика трафика',
         'Уведомления', 'Ошибки сервисов', 'Автокликер',
     ]),
     ('Контент', ['Уникальность']),
@@ -5414,8 +5017,7 @@ def _append_sheet_as_section(dst, src, start_row, title, gap=2):
 
 def _regroup_into_groups(wb):
     """Собрать детальные листы в 7 тематических групповых листов.
-    Обзор остаётся первым (следом - План работ и Проблемы), «Все детали» -
-    последним."""
+    Обзор остаётся первым (следом - План работ и Проблемы)."""
     for group_name, members in _SHEET_GROUPS:
         present = [m for m in members if m in wb.sheetnames]
         note = _GROUP_NOTES.get(group_name)
@@ -5460,11 +5062,11 @@ def _regroup_into_groups(wb):
             grp.title = group_name
 
     # Порядок: Обзор → План работ → Проблемы → Структура страниц → Страницы →
-    # Хосты и аномалии → Трафик и траст → 7 групп → Я.Бизнес/GMB → Все детали.
+    # Хосты и аномалии → Трафик и траст → 7 групп → Я.Бизнес/GMB.
     order = (['Обзор', 'План работ', 'Проблемы', 'Структура страниц',
              'Страницы', 'Хосты и аномалии', 'Трафик и траст']
              + [g for g, _ in _SHEET_GROUPS if g in wb.sheetnames]
-             + ['Я.Бизнес и GMB', 'Все детали'])
+             + ['Я.Бизнес и GMB'])
     ordered = [wb[n] for n in order if n in wb.sheetnames]
     ordered += [ws for ws in wb.worksheets if ws not in ordered]
     wb._sheets = ordered
@@ -5811,10 +5413,10 @@ def build_report(
     selected_subdomains: list,    # список Subdomain
     results: list,                 # список CheckResult
     output_path: Path | str,
-    metrika_reports: list = None,  # список Report404 - добавит лист «404 из Метрики»
-    metrika_data_date: str = None, # дата отчёта Метрики (YYYY-MM-DD)
-    metrika_is_stale: bool = False,# True если данные не за вчера, а за более ранний день
-    metrika_404_goal: dict = None, # has_404_goal() - строка на листе «404 из Метрики»
+    metrika_reports: list = None,  # список Report404 - находки в «Проблемы», раздел «404 в индексе»
+    metrika_data_date: str = None, # дата отчёта Метрики (YYYY-MM-DD) - сейчас не используется
+    metrika_is_stale: bool = False,# True если данные не за вчера - сейчас не используется
+    metrika_404_goal: dict = None, # has_404_goal() - сейчас не используется
     notifications: list = None,    # список WebmasterNotification - добавит лист «Уведомления»
     service_issues: list = None,   # список ServiceIssue - добавит лист «Ошибки сервисов»
     autoclick: dict = None,        # итоги автокликера - добавит лист «Автокликер»
@@ -5827,7 +5429,7 @@ def build_report(
     p404_check: dict = None,       # страница 404 (п.1.18) - лист «Страница 404»
     ps_filters: dict = None,       # фильтры ПС (п.1.19) - лист «Фильтры ПС»
     search_check: dict = None,     # поиск находит категории - секция «Вёрстки»
-    index_404_check: dict = None,  # 404 среди страниц в индексе - лист «404 в индексе»
+    index_404_check: dict = None,  # 404 среди страниц в индексе - находки в «Проблемы»
     stress_check: dict = None,     # ошибки сервера: парсинг/нагрузка/дубли - лист «Нагрузка и парсинг»
     link_profile: dict = None,     # lite-профиль ссылок (Вебмастер) - секция на «Трафик и траст»
     wm_metrics: dict = None,       # аномалии Вебмастера - лист «Хосты и аномалии»
@@ -5835,7 +5437,7 @@ def build_report(
     yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
     gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
     home_dupes: dict = None,       # дубли главной страницы - лист «Дубли главной»
-    traffic: dict = None,          # сравнение трафика день/месяц/год - лист «Динамика трафика»
+    traffic: dict = None,          # сравнение трафика день/месяц/год - лист «Трафик и траст»
     arsenkin: dict = None,         # индексация URL через Арсенкин - лист «Индексация (Арсенкин)»
     review_priority: dict = None,  # приоритет докупки отзывов - лист «Отзывы (докупка)»
     anomalies: dict = None,        # аномалии ГСК/Метрика - лист «Хосты и аномалии»
@@ -5897,6 +5499,7 @@ def build_report(
     # (там колонки заточены под конкретную страницу).
     _findings = collect_findings(results, console_check=console_check,
                                  index_404_check=index_404_check,
+                                 metrika_reports=metrika_reports,
                                  calltracking_check=calltracking_check,
                                  search_check=search_check,
                                  filters_test=filters_test)
@@ -6114,7 +5717,7 @@ def build_report(
             summary_text += ('\nНастройки в админке: не работают - '
                              + ', '.join(_adm_bad)
                              + f' (см. лист {_sheet_ref("Настройки в админке")}).')
-    summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
+    summary_text += '\nПодробности по страницам - на листе «Страницы» (фильтр по колонке «Статус»).'
     # Ссылки на старые листы → на группу-лист (блок внутри группы), т.к.
     # детальные листы теперь секции в 7 тематических листах.
     _sheet_to_group = {m: g for g, ms in _SHEET_GROUPS for m in ms}
@@ -6176,15 +5779,14 @@ def build_report(
         ('План работ', 'все задачи по приоритету: что чинить, почему это важно и кому передать.'),
         ('Проблемы', 'каждая находка отдельной строкой: уровень, раздел, адрес страницы. Фильтруется как угодно.'),
         ('Структура страниц', 'что чинить в контенте по типам страниц (главная/каталог/листинг/разделы/карточки товаров/технические) - где нет цены, кнопок заказа, заголовка. Красное = баг.'),
-        ('Страницы', 'краткая сводка всех проверенных страниц: код ответа, статус, скорость и сколько находок на каждой (детали - в «Проблемах»).'),
+        ('Страницы', 'каждая проверенная страница: адрес, код ответа, статус, скорость, битые переменные в тексте, откуда перешли и сколько находок (детали - в «Проблемах»).'),
         ('Хосты и аномалии', 'проблемы уровня сайта/хоста целиком (не одной страницы): фатальные проблемы из сервисов и аномалии обхода/ссылок «от себя-прошлого» - обычно самое срочное.'),
         ('Трафик и траст', 'краткая сводка трафика по странам/периодам (визиты, каналы, лиды, конверсия, отказы) + траст проекта (ИКС/DR) и lite-профиль беклинков; разбивка трафика по типам страниц - на «Динамике трафика» в «Аналитике».'),
-        ('Техничка', 'SEO-техничка: индексация (robots/sitemap/canonical), метаданные и единственность заголовков, микроразметка (OG/Schema), безопасность и редиректы, ошибки JavaScript, валидность W3C и скорость, страница 404 и 404 в индексе, санкции ПС, нагрузка/парсинг, битые переменные.'),
+        ('Техничка', 'SEO-техничка: индексация (robots/sitemap/canonical), метаданные и единственность заголовков, микроразметка (OG/Schema), ошибки JavaScript, валидность W3C и скорость, тест страницы 404, санкции ПС, нагрузка/парсинг, битые переменные; 404 в индексе (в т.ч. по данным Метрики) - на листе «Проблемы».'),
         ('Админка', 'работа функций настройки в админке: поддомены/категории/товары/тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
-        ('Аналитика', '404 из Метрики, разбивка трафика по типам страниц (день/месяц/год), письма Вебмастера/GSC, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений.'),
+        ('Аналитика', 'письма Вебмастера/GSC/Я.Бизнеса/2ГИС/Google, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений.'),
         ('Контент', 'если есть лист - уникальность контента (text.ru); изображения, вёрстка, КП и контакты - все на листе «Проблемы».'),
         ('Я.Бизнес и GMB', 'если есть лист - каждый поддомен (город) зарегистрирован в Яндекс.Бизнесе под своим регионом; поддомены без организации.'),
-        ('Все детали', 'каждая проверенная страница: адрес, код ответа, статус, скорость.'),
     ]
     nav_hdr = nav_row + 1
     for col, title in (('B', 'Лист'), ('C', 'Что там')):
@@ -6206,9 +5808,9 @@ def build_report(
         k.alignment = Alignment(horizontal='left', vertical='top', indent=1)
         k.border = _border(color=C.border_light)
         # Ссылка на лист ставится безусловно: на момент сборки «Обзора»
-        # остальные листы (План работ/Проблемы/группы/Все детали) ещё не
-        # созданы - появятся ниже по коду, но к моменту сохранения файла
-        # будут существовать все, внутренняя ссылка на них верна.
+        # остальные листы (План работ/Проблемы/группы) ещё не созданы -
+        # появятся ниже по коду, но к моменту сохранения файла будут
+        # существовать все, внутренняя ссылка на них верна.
         k.hyperlink = f"#'{sheet_name}'!A1"
         ws1.merge_cells(f'C{r}:H{r}')
         v = ws1[f'C{r}']
@@ -6332,8 +5934,7 @@ def build_report(
     # ─── Лист «Страница 404» (п.1.18) - если проверка выполнялась ──────
     _build_404_sheet(wb, p404_check)
 
-    # ─── Лист «404 в индексе» - если проверка выполнялась ──────────────
-    _build_index_404_sheet(wb, index_404_check)
+    # Лист «404 в индексе» удалён - находки уже в «Проблемы».
 
     # ─── Лист «Фильтры ПС» (п.1.19) - если проверка выполнялась ────────
     _build_ps_filters_sheet(wb, ps_filters)
@@ -6351,119 +5952,16 @@ def build_report(
     # ─── Лист «Я.Бизнес/GMB» + единая проверка отзывов (приоритет докупки) ──
     _build_yabusiness_sheet(wb, yabusiness, review_priority)
 
-    # ─── Лист «Динамика трафика» - если сравнение выполнялось ──────────
-    _build_traffic_sheet(wb, traffic)
+    # Лист «Динамика трафика» удалён - сводка трафика уже на «Трафик и траст».
 
     # Листы «Контакты по городам» и «Замена рекл. номера» удалены: находки
     # (конкретное поле/город/что не так) полностью попадают в «Проблемы»
     # через report_priorities.py (_kp_findings/_calltracking_findings) -
     # полная таблица по каждому городу (даже без проблем) не нужна.
 
-    # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 2: Все детали
-    # ═══════════════════════════════════════════════════════════════
-    ws2 = wb.create_sheet('Все детали')
-    ws2.sheet_view.showGridLines = False
-    ws2.freeze_panes = 'A2'
-
-    headers = [
-        ('Город', 18), ('Поддомен', 28), ('Тип', 12), ('URL', 55),
-        ('Код', 8), ('Статус', 22), ('Скорость, с', 12),
-        ('Оценка скорости', 18), ('Отдел', 22),
-        ('Битые переменные', 18), ('Откуда перешли', 50),
-    ]
-    for i, (header, width) in enumerate(headers, 1):
-        col_letter = get_column_letter(i)
-        ws2.column_dimensions[col_letter].width = width
-        c = ws2.cell(row=1, column=i)
-        c.value = header
-        c.font = _font(size=10, bold=True, color=C.text_muted)
-        c.alignment = _align()
-        c.fill = _fill(C.surface)
-        c.border = _border()
-    ws2.row_dimensions[1].height = 28
-
-    # Сортировка: сначала ошибки, потом предупреждения, потом с битыми текстами, потом ОК
-    def sort_key(r):
-        score = 0 if r.is_error else 1 if r.is_warning else 2 if r.has_text_issues else 3
-        return (score, r.city or '')
-
-    sorted_results = sorted(results, key=sort_key)
-
-    for row_idx, r in enumerate(sorted_results, 2):
-        ws2.row_dimensions[row_idx].height = 22
-
-        # Скорость с запятой (Excel в РФ ожидает запятую)
-        speed_sec = ''
-        if r.elapsed_ms is not None:
-            speed_sec = f'{r.elapsed_ms / 1000:.2f}'.replace('.', ',')
-
-        speed_label = SPEED_LABEL.get(r.speed_rating, '') if r.speed_rating else ''
-
-        text_issue_text = ''
-        if r.has_text_issues:
-            n = len(r.text_issues)
-            text_issue_text = f'{n} {"находка" if n == 1 else "находок"}'
-
-        values = [
-            r.city,                            # 1 Город
-            r.subdomain,                       # 2 Поддомен
-            r.type_label,                      # 3 Тип
-            r.url,                             # 4 URL
-            r.http_code if r.http_code else '-',  # 5 Код
-            STATUS_LABEL.get(r.status, r.status),  # 6 Статус
-            speed_sec,                         # 7 Скорость, с
-            speed_label,                       # 8 Оценка скорости
-            _dept_result(r),                   # 9 Отдел
-            text_issue_text,                   # 10 Битые переменные
-            _build_path_description(r),        # 11 Откуда перешли
-        ]
-
-        for col_idx, value in enumerate(values, 1):
-            cell = ws2.cell(row=row_idx, column=col_idx)
-            cell.value = value
-            cell.font = _font(size=10)
-            cell.alignment = _align(wrap=True)
-            cell.border = _border(color=C.border_light)
-
-        # Спец-шрифты для отдельных колонок
-        ws2.cell(row=row_idx, column=2).font = _font(name='Consolas', size=10, color=C.text_muted)
-
-        # URL - кликабельная гиперссылка
-        url_cell = ws2.cell(row=row_idx, column=4)
-        url_cell.hyperlink = r.url
-        url_cell.font = _font(name='Consolas', size=10, color=C.accent, underline='single')
-
-        # Откуда перешли - моноширинный для цепочек, курсивный для прямых
-        path_cell = ws2.cell(row=row_idx, column=11)
-        if r.redirect_chain:
-            path_cell.font = _font(name='Consolas', size=9, color=C.text_soft)
-        elif not r.is_ok:
-            path_cell.font = _font(size=10, italic=True, color=C.text_muted)
-
-        # Битые переменные - подсветка
-        if r.has_text_issues:
-            issue_cell = ws2.cell(row=row_idx, column=10)
-            issue_cell.font = _font(size=10, bold=True, color=C.warn)
-            issue_cell.fill = _fill(C.warn_soft)
-
-        # Оценка скорости - цвет и заливка по уровню (ОК - зелёным, медленно -
-        # жёлтым, долгий ответ сервера - красным)
-        if r.speed_rating:
-            speed_cell = ws2.cell(row=row_idx, column=8)
-            color = SPEED_COLOR[r.speed_rating]
-            bold = r.speed_rating in ('slow', 'very_slow')
-            speed_cell.font = _font(size=10, bold=bold, color=color)
-            speed_cell.fill = _fill(SPEED_FILL[r.speed_rating])
-
-        # Статус - цвет и заливка по результату
-        status_color = C.ok if r.is_ok else C.warn if r.is_warning else C.err
-        status_fill = C.ok_soft if r.is_ok else C.warn_soft if r.is_warning else C.err_soft
-        status_cell = ws2.cell(row=row_idx, column=6)
-        status_cell.font = _font(size=10, bold=True, color=status_color)
-        status_cell.fill = _fill(status_fill)
-
-    ws2.auto_filter.ref = f'A1:K{len(sorted_results) + 1}'
+    # Лист «Все детали» удалён - «Битые переменные» и «Откуда перешли»
+    # теперь колонки на «Страницы» (там же «Найдено проблем»), а не
+    # отдельный дублирующий лист со списком тех же страниц.
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 3: Битые тексты (только если есть)
@@ -6558,266 +6056,10 @@ def build_report(
 
         ws3.auto_filter.ref = f'A{hdr_row}:E{hdr_row}'
 
-    # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 4: «404 из Метрики» - если есть данные (страницы ИЛИ хотя бы
-    # проверка цели - иначе «404 не найдено, но и цель не проверялась»
-    # молча теряется, когда отчёт Метрики просто пуст за период)
-    # ═══════════════════════════════════════════════════════════════
-    if metrika_reports or metrika_404_goal is not None:
-        metrika_reports = metrika_reports or []
-        # Собираем все страницы из всех стран, считаем сшивку с Site Checker
-        # Множество URL'ов которые упали в Site Checker (404 или 5xx)
-        sc_failed_urls = set()
-        sc_failed_paths = set()  # для сравнения по pathname (без поддомена)
-        from urllib.parse import urlparse as _urlparse
-        for r in results:
-            if r.is_error and r.http_code in (404, 410):
-                sc_failed_urls.add(r.url)
-                try:
-                    p = _urlparse(r.url).path
-                    if p:
-                        sc_failed_paths.add(p)
-                except ValueError:
-                    pass
+    # Лист «404 из Метрики» удалён - находки (с пометкой, подтверждено ли
+    # обходом сайта или только по Метрике) теперь в «Проблемы», раздел
+    # «404 в индексе» (см. _metrika_404_findings в report_priorities.py).
 
-        ws4 = wb.create_sheet('404 из Метрики')
-        ws4.sheet_view.showGridLines = False
-        ws4.sheet_properties.tabColor = C.err if metrika_is_stale else C.accent
-        ws4.freeze_panes = 'A7'  # шапка фиксируется
-
-        # Колонки и их ширина
-        ws4.column_dimensions['A'].width = 14   # Дата отчёта
-        ws4.column_dimensions['B'].width = 16   # Страна
-        ws4.column_dimensions['C'].width = 18   # Статус сшивки
-        ws4.column_dimensions['D'].width = 55   # URL
-        ws4.column_dimensions['E'].width = 12   # Просмотры
-        ws4.column_dimensions['F'].width = 12   # Посетители
-        ws4.column_dimensions['G'].width = 40   # Реферер
-        ws4.column_dimensions['H'].width = 40   # Заголовок страницы
-
-        # ─── Заголовок и пояснение ─────────────────────────────────
-        ws4.merge_cells('A1:H1')
-        c = ws4['A1']
-        c.value = '404-страницы по данным Яндекс.Метрики'
-        c.font = _font(size=14, bold=True)
-        ws4.row_dimensions[1].height = 26
-
-        # Информация о дате данных
-        ws4.merge_cells('A2:H2')
-        c = ws4['A2']
-        # Форматируем дату красиво
-        try:
-            d_obj = datetime.strptime(metrika_data_date or '', '%Y-%m-%d')
-            date_display = d_obj.strftime('%d.%m.%Y')
-        except ValueError:
-            date_display = metrika_data_date or '-'
-
-        if metrika_is_stale:
-            c.value = (
-                f'⚠ Внимание: данные за {date_display}. '
-                f'Свежий отчёт Метрики (за вчерашний день) ещё не пришёл - '
-                f'используем последний доступный.'
-            )
-            c.font = _font(size=10, italic=True, bold=True, color=C.err)
-            c.fill = _fill(C.err_soft)
-        else:
-            c.value = f'Данные за {date_display}'
-            c.font = _font(size=10, color=C.text_soft)
-        c.alignment = _align(wrap=True)
-        ws4.row_dimensions[2].height = 30 if metrika_is_stale else 20
-
-        # 3-я строка - пустая. Раньше тут была длинная пояснительная
-        # строка про «🔴 Точно сломан / ⚠ Только в Метрике / Сортировка».
-        # Убрана по требованию: цвета в колонке «Статус» интуитивно понятны,
-        # а лишний текст загромождал шапку.
-        ws4.row_dimensions[3].height = 8
-
-        # ─── Цель на 404 в Метрике (регулярный мониторинг): есть/нет ───
-        # Не влияет на сам сбор этого листа (он и так работает через
-        # просмотры страниц с заголовком «не найдена») - это отдельная,
-        # клиентская настройка: без неё 404 не видно в «Конверсиях»/
-        # уведомлениях самой Метрики, только в этом отчёте.
-        if metrika_404_goal is not None:
-            ws4.merge_cells('A4:H4')
-            c = ws4['A4']
-            if metrika_404_goal.get('есть'):
-                _names = sorted({v['название'] for v in
-                                 metrika_404_goal.get('счётчики', {}).values()
-                                 if v.get('есть') and v.get('название')})
-                c.value = ('✅ Цель на 404 в Метрике: есть'
-                           + (f' («{", ".join(_names)}»)' if _names else ''))
-                c.font = _font(size=10, color=C.ok)
-            else:
-                c.value = ('❌ Цель на 404 в Метрике: не найдена - сбор на этом '
-                           'листе всё равно работает (через просмотры страниц), '
-                           'но в самой Метрике (вкладка «Конверсии», '
-                           'уведомления) 404 без цели не отслеживаются - '
-                           'стоит создать.')
-                c.font = _font(size=10, bold=True, color=C.err)
-            c.alignment = _align(wrap=True, indent=1)
-            ws4.row_dimensions[4].height = 20
-        else:
-            ws4.row_dimensions[4].height = 4
-
-        # ─── Шапка таблицы на 6-й строке ───────────────────────────
-        # 5-я строка - пустая разделительная
-        hdr_row = 6
-        ws4.row_dimensions[hdr_row].height = 28
-        hdrs = ['Дата', 'Страна', 'Статус', 'URL страницы', 'Просмотры', 'Посетители', 'Реферер', 'Заголовок страницы']
-        for col_idx, label in enumerate(hdrs, 1):
-            cell = ws4.cell(row=hdr_row, column=col_idx)
-            cell.value = label
-            cell.font = _font(size=10, bold=True, color=C.text_muted)
-            cell.alignment = _align()
-            cell.fill = _fill(C.surface)
-            cell.border = _border()
-
-        # ─── Собираем плоский список страниц со статусом сшивки ────
-        flat_rows = []
-        for report in metrika_reports:
-            for page in report.pages:
-                # Проверяем сшивку: URL из метрики совпадает с упавшим в Site Checker?
-                is_confirmed = False
-                if page.page_url:
-                    if page.page_url in sc_failed_urls:
-                        is_confirmed = True
-                    else:
-                        # Также сравним по path - если в Метрике URL без поддомена, в SC с поддоменом
-                        try:
-                            p = _urlparse(page.page_url).path
-                            if p and p in sc_failed_paths:
-                                is_confirmed = True
-                        except ValueError:
-                            pass
-
-                flat_rows.append({
-                    'date': report.report_date,
-                    'country_code': report.country_code,
-                    'country_name': report.country_name,
-                    'url': page.page_url or '',
-                    'title': page.page_title,
-                    'views': page.views,
-                    'visitors': page.visitors,
-                    'referer': page.referer or '',
-                    'confirmed': is_confirmed,
-                })
-
-        # Сортируем: сначала подтверждённые, потом по убыванию просмотров
-        flat_rows.sort(key=lambda r: (not r['confirmed'], -r['views']))
-
-        # ─── Предупреждение о пустых URL ──────────────────────────
-        # Если у всех или у большинства строк нет page_url - Метрика
-        # отдала только заголовки страниц. Так бывает, если в шаблоне
-        # рассылки не настроена группировка «Адрес страницы». Чинить
-        # это в Метрике, не в коде. Помечаем это прямо в xlsx, чтобы
-        # пользователь сразу понял что происходит.
-        rows_with_url = sum(1 for fr in flat_rows if fr['url'])
-        if flat_rows and rows_with_url == 0:
-            warn_row = hdr_row - 1  # 5-я строка (пустая разделительная)
-            ws4.merge_cells(f'A{warn_row}:H{warn_row}')
-            wc = ws4.cell(row=warn_row, column=1)
-            wc.value = (
-                '⚠ Колонка «URL страницы» пустая: в текущем шаблоне рассылки '
-                'Метрики нет «Адреса страницы» - приходят только заголовки. '
-                'Чтобы получать URL: Метрика → Содержание → Страницы → 404 → '
-                '«Группировки» → добавить «Адрес страницы» → сохранить шаблон '
-                'рассылки. Со следующего письма URL начнут приходить.'
-            )
-            wc.font = _font(size=10, bold=True, color=C.warn)
-            wc.fill = _fill(C.warn_soft)
-            wc.alignment = _align(wrap=True, vertical='top')
-            ws4.row_dimensions[warn_row].height = 48
-
-        # ─── Если в почте есть отчёты но 404 не нашлось - короткое сообщение ──
-        if not flat_rows:
-            ws4.merge_cells(f'A{hdr_row + 1}:H{hdr_row + 1}')
-            cell = ws4.cell(row=hdr_row + 1, column=1)
-            cell.value = '✓ За эту дату Метрика не зафиксировала ни одной 404-страницы по проекту'
-            cell.font = _font(size=11, bold=True, color=C.ok)
-            cell.alignment = _align()
-            cell.fill = _fill(C.ok_soft)
-            ws4.row_dimensions[hdr_row + 1].height = 32
-        else:
-            row_idx = hdr_row + 1
-            for fr in flat_rows:
-                ws4.row_dimensions[row_idx].height = 22
-
-                # Дата
-                try:
-                    d_obj = datetime.strptime(fr['date'], '%Y-%m-%d')
-                    date_str = d_obj.strftime('%d.%m.%Y')
-                except ValueError:
-                    date_str = fr['date']
-                cell = ws4.cell(row=row_idx, column=1)
-                cell.value = date_str
-                cell.font = _font(size=10, color=C.text_soft)
-                cell.alignment = _align()
-                cell.border = _border(color=C.border_light)
-
-                # Страна - определяем по доменной зоне URL
-                cell = ws4.cell(row=row_idx, column=2)
-                cell.value = _country_by_url(fr['url'])
-                cell.font = _font(size=10)
-                cell.alignment = _align()
-                cell.border = _border(color=C.border_light)
-
-                # Статус сшивки
-                cell = ws4.cell(row=row_idx, column=3)
-                if fr['confirmed']:
-                    cell.value = '🔴 Точно сломан'
-                    cell.font = _font(size=10, bold=True, color=C.err)
-                    cell.fill = _fill(C.err_soft)
-                else:
-                    cell.value = '⚠ В Метрике'
-                    cell.font = _font(size=10, color=C.warn)
-                cell.alignment = _align()
-                cell.border = _border(color=C.border_light)
-
-                # URL - кликабельный
-                cell = ws4.cell(row=row_idx, column=4)
-                cell.value = fr['url'] or '-'
-                if fr['url']:
-                    cell.hyperlink = fr['url']
-                    cell.font = _font(name='Consolas', size=10, color=C.accent, underline='single')
-                else:
-                    cell.font = _font(size=10, color=C.text_muted, italic=True)
-                cell.alignment = _align(wrap=True)
-                cell.border = _border(color=C.border_light)
-
-                # Просмотры
-                cell = ws4.cell(row=row_idx, column=5)
-                cell.value = fr['views']
-                cell.font = _font(size=10, bold=fr['confirmed'])
-                cell.alignment = _align(horizontal='right')
-                cell.border = _border(color=C.border_light)
-
-                # Посетители
-                cell = ws4.cell(row=row_idx, column=6)
-                cell.value = fr['visitors']
-                cell.font = _font(size=10)
-                cell.alignment = _align(horizontal='right')
-                cell.border = _border(color=C.border_light)
-
-                # Реферер
-                cell = ws4.cell(row=row_idx, column=7)
-                cell.value = fr['referer'] or '-'
-                if fr['referer']:
-                    cell.font = _font(name='Consolas', size=9, color=C.text_soft)
-                else:
-                    cell.font = _font(size=10, color=C.text_muted, italic=True)
-                cell.alignment = _align(wrap=True)
-                cell.border = _border(color=C.border_light)
-
-                # Заголовок страницы
-                cell = ws4.cell(row=row_idx, column=8)
-                cell.value = fr['title']
-                cell.font = _font(size=9, color=C.text_soft)
-                cell.alignment = _align(wrap=True)
-                cell.border = _border(color=C.border_light)
-
-                row_idx += 1
-
-            ws4.auto_filter.ref = f'A{hdr_row}:H{row_idx - 1}'
 
     # ═══════════════════════════════════════════════════════════════
     # ЛИСТ 5: Уведомления (письма Вебмастера/GSC/Я.Бизнеса/2ГИС/Google)
