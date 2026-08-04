@@ -3609,7 +3609,7 @@ def _build_ps_filters_sheet(wb, ps_filters):
         _line(f'✅ Санкций/угроз в диагностике Вебмастера нет '
               f'(хостов: {ps_filters.get("wm_hosts", 0)}, '
               f'проблем всего: {ps_filters.get("wm_issues_total", 0)} - '
-              f'несанкционные см. лист «Ошибки сервисов»).', C.ok)
+              f'несанкционные см. лист {_sheet_ref("Ошибки сервисов")}).', C.ok)
     row += 1
 
     # ── Google ──
@@ -6540,8 +6540,8 @@ _GROUP_NOTES = {
                      '(раздел «Безопасность»), приоритет – на «План работ».'),
     'Формы': ('Детальная проверка форм – в отдельном отчёте форм-тестера '
               '(свой файл). Здесь, в основном отчёте, форма заявки/телефон '
-              'проверяется как часть страниц (см. лист «Техничка» → блоки '
-              'страниц и «Страница 404»).'),
+              'проверяется как часть страниц (см. лист «Структура страниц» '
+              'и лист «Техничка», раздел «Страница 404»).'),
     'Контент': ('Изображения (alt, современные форматы webp/avif, вес, '
                 'lazy, уникальность картинок категорий, фото товаров не '
                 'дублируются между категориями) – находки на листе '
@@ -6555,9 +6555,28 @@ _GROUP_TAB_RANK = {C.err: 0, C.warn: 1}   # для агрегированног�
 
 # «Хосты и аномалии» - не отдельный старый лист (тот называется «Аномалии»,
 # уходит в группу «Аналитика») - здесь просто исправляем название на
-# реальное, чтобы _fix_where_refs его тоже перевела на группу.
+# реальное, чтобы _sheet_ref/_fix_where_refs его тоже перевели на группу.
 _WHERE_SECTION_OVERRIDE = {'Хосты и аномалии': 'Аномалии'}
 _RE_WHERE_SHEET = re.compile(r'^Лист «([^»]+)»$')
+
+
+def _old_to_group_map() -> dict:
+    """{старое имя листа: имя группового листа}, куда его сливает
+    _regroup_into_groups (Индексация -> Техничка, Вёрстка -> Верстка и т.п.)."""
+    return {old: grp for grp, olds in _SHEET_GROUPS for old in olds}
+
+
+def _sheet_ref(name: str) -> str:
+    """«X» -> «Группа», раздел «X»» для листа, который _regroup_into_groups
+    сливает в групповой (Индексация/Метаданные/Вёрстка/… -> Техничка/Верстка/
+    Аналитика и т.п.) - для текста внутри предложений («см. лист {ref}»).
+    Листы вне группировки (Обзор/Проблемы/Структура страниц/Страницы/…)
+    возвращаются как есть - «X»."""
+    section = _WHERE_SECTION_OVERRIDE.get(name, name)
+    grp = _old_to_group_map().get(section)
+    if grp and grp != name:
+        return f'«{grp}», раздел «{section}»'
+    return f'«{name}»'
 
 
 def _fix_where_refs(tasks):
@@ -6567,16 +6586,11 @@ def _fix_where_refs(tasks):
     исправления ссылка в «Плане работ» ведёт на несуществующую вкладку.
     Переписываем на «Лист «Группа», раздел «X»» ДО того, как этот текст
     попадёт на лист (регруппировка выполняется позже, tasks строятся раньше)."""
-    old_to_group = {old: grp for grp, olds in _SHEET_GROUPS for old in olds}
     for t in tasks:
         m = _RE_WHERE_SHEET.match(t.where or '')
         if not m:
             continue
-        name = m.group(1)
-        section = _WHERE_SECTION_OVERRIDE.get(name, name)
-        grp = old_to_group.get(section)
-        if grp and grp != name:
-            t.where = f'Лист «{grp}», раздел «{section}»'
+        t.where = f'Лист {_sheet_ref(m.group(1))}'
     return tasks
 
 
@@ -7215,7 +7229,8 @@ def build_report(
     if total_text_issues > 0:
         summary_text += (
             f'\nДополнительно: на {len(pages_with_issues)} страницах найдено '
-            f'{total_text_issues} битых переменных в текстах - см. лист «Битые тексты».'
+            f'{total_text_issues} битых переменных в текстах - см. лист '
+            f'{_sheet_ref("Битые тексты")}.'
         )
     if total_content_bugs > 0:
         summary_text += (
@@ -7250,36 +7265,39 @@ def build_report(
         if _idx_hm_junk:
             _idx_bits.append(f'{len(_idx_hm_junk)} служебных ссылок в HTML-карте')
         summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
-                         + ' - см. лист «Индексация».')
+                         + ' - см. «Проблемы» и «План работ».')
     if meta_bad_pages or meta_dup_groups:
         _mb = []
+        _mb_ref = '«Проблемы»'
         if meta_bad_pages:
             _mb.append(f'проблемы на {len(meta_bad_pages)} '
                        f'{_plural_pages(len(meta_bad_pages))}')
         if meta_dup_groups:
             _mb.append(f'{meta_dup_groups} групп дублей (title/описания/URL)')
-        summary_text += ('\nМетаданные: ' + ', '.join(_mb)
-                         + ' - см. лист «Метаданные».')
+            # Дубли (в отличие от находок по странице) не попадают в
+            # «Проблемы» - только на сам лист метаданных.
+            _mb_ref = f'«Проблемы» (страницы) и лист {_sheet_ref("Метаданные")} (дубли)'
+        summary_text += ('\nМетаданные: ' + ', '.join(_mb) + ' - см. ' + _mb_ref + '.')
     if layout_bad_pages:
         summary_text += (f'\nВёрстка: проблемы (viewport/CSS) на '
                          f'{len(layout_bad_pages)} '
                          f'{_plural_pages(len(layout_bad_pages))} - '
-                         f'см. лист «Вёрстка».')
+                         f'см. «Проблемы».')
     if markup_bad_pages:
         summary_text += (f'\nРазметка: проблемы (OG/Schema.org) на '
                          f'{len(markup_bad_pages)} '
                          f'{_plural_pages(len(markup_bad_pages))} - '
-                         f'см. лист «Разметка».')
+                         f'см. «Проблемы».')
     if security_bad_pages:
         summary_text += (f'\nБезопасность: ошибки заголовков на '
                          f'{len(security_bad_pages)} '
                          f'{_plural_pages(len(security_bad_pages))} - '
-                         f'см. лист «Безопасность».')
+                         f'см. «Проблемы».')
     if images_bad_pages:
         summary_text += (f'\nИзображения: картинки без alt на '
                          f'{len(images_bad_pages)} '
                          f'{_plural_pages(len(images_bad_pages))} - '
-                         f'см. лист «Изображения».')
+                         f'см. «Проблемы».')
     _filters_cases = (filters_test or {}).get('cases') or []
     _filters_bad = sum(1 for c in _filters_cases
                        if _FILTER_VERDICT.get(c.get('verdict'),
@@ -7287,13 +7305,13 @@ def build_report(
     if _filters_bad:
         summary_text += (f'\nФильтрация: {_filters_bad} '
                          f'{"фильтр" if _filters_bad == 1 else "фильтров"} '
-                         f'работают некорректно - см. лист «Вёрстка».')
+                         f'работают некорректно - см. лист «Верстка».')
     _console_bad = sum(1 for p in ((console_check or {}).get('pages') or [])
                        if p.get('errors'))
     if _console_bad:
         summary_text += (f'\nОшибки JavaScript: на {_console_bad} '
                          f'{_plural_pages(_console_bad)} есть ошибки в консоли '
-                         f'- см. лист «Ошибки JavaScript».')
+                         f'- см. «Проблемы».')
     if stress_check and stress_check.get('available'):
         _sp = stress_check.get('parsing') or {}
         _sl = stress_check.get('load') or {}
@@ -7301,27 +7319,27 @@ def build_report(
         _s5 = (len(_sp.get('server_errors') or [])
                + sum(p.get('server_5xx', 0) for p in (_sl.get('pages') or []))
                + len(_sd.get('server_errors') or []))
+        _stress_ref = _sheet_ref('Нагрузка и парсинг')
         if _sp.get('banned'):
             summary_text += ('\nНагрузка и парсинг: сайт закрыл доступ '
-                             '(принял бота за парсера) - см. лист «Нагрузка '
-                             'и парсинг».')
+                             f'(принял бота за парсера) - см. лист {_stress_ref}.')
         elif _s5:
             summary_text += (f'\nНагрузка и парсинг: ошибок сервера (5xx) '
-                             f'{_s5} - см. лист «Нагрузка и парсинг».')
+                             f'{_s5} - см. лист {_stress_ref}.')
     if link_profile and link_profile.get('available'):
         _lp_w = sum(len(h.get('warnings') or [])
                     for h in (link_profile.get('hosts') or []))
         if _lp_w:
             summary_text += (f'\nСсылочный профиль: замечаний {_lp_w} '
-                             f'(обвал/всплеск/спам) - см. лист «Ссылочный '
-                             f'профиль».')
+                             f'(обвал/всплеск/спам) - см. лист '
+                             f'{_sheet_ref("Ссылочный профиль")}.')
     if admin_settings and admin_settings.get('available'):
         _adm_bad = [c.get('title') for c in (admin_settings.get('checks') or [])
                     if not c.get('ok')]
         if _adm_bad:
             summary_text += ('\nНастройки в админке: не работают - '
                              + ', '.join(_adm_bad)
-                             + ' (см. лист «Настройки в админке»).')
+                             + f' (см. лист {_sheet_ref("Настройки в админке")}).')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     # Ссылки на старые листы → на группу-лист (блок внутри группы), т.к.
     # детальные листы теперь секции в 7 тематических листах.
