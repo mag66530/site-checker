@@ -683,6 +683,99 @@ def session_delete_expired() -> None:
         cur.execute("DELETE FROM sessions WHERE expires_at < now()")
 
 
+# ---------- привязка Telegram (уведомления о прогонах) ----------
+
+_TG_READY = False
+
+
+def _ensure_telegram_table() -> None:
+    """Таблица привязок Telegram: одна строка на пользователя.
+
+    code   - одноразовый код, который человек передаёт боту командой
+             /start <code> (ссылка из личного кабинета);
+    chat_id- заполняется, когда бот увидел этот /start (до тех пор пусто -
+             привязка «ожидает подтверждения»).
+    """
+    global _TG_READY
+    if _TG_READY:
+        return
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_telegram (
+                user_id    text PRIMARY KEY,
+                code       text NOT NULL,
+                chat_id    text,
+                username   text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                linked_at  timestamptz
+            );
+            """
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS user_telegram_code_idx "
+            "ON user_telegram (code);"
+        )
+    _TG_READY = True
+
+
+@_retry
+def telegram_get(user_id: str) -> Optional[dict]:
+    """Привязка пользователя: {user_id, code, chat_id, username, linked_at} или None."""
+    if not user_id:
+        return None
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT * FROM user_telegram WHERE user_id = %s", (str(user_id),))
+        return cur.fetchone()
+
+
+@_retry
+def telegram_ensure_code(user_id: str, code: str) -> dict:
+    """Вернуть существующую привязку или завести новую с этим кодом.
+    Код меняем только если привязки ещё нет - иначе ссылка «прыгала» бы при
+    каждом заходе на страницу."""
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """INSERT INTO user_telegram (user_id, code)
+               VALUES (%s, %s)
+               ON CONFLICT (user_id) DO NOTHING""",
+            (str(user_id), code),
+        )
+        cur.execute("SELECT * FROM user_telegram WHERE user_id = %s", (str(user_id),))
+        return cur.fetchone()
+
+
+@_retry
+def telegram_link_by_code(code: str, chat_id: str, username: str = "") -> Optional[str]:
+    """Подтвердить привязку по коду из /start. → user_id или None (код не найден)."""
+    if not code or not chat_id:
+        return None
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """UPDATE user_telegram
+                  SET chat_id = %s, username = %s, linked_at = now()
+                WHERE code = %s
+            RETURNING user_id""",
+            (str(chat_id), (username or "")[:100], code),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+@_retry
+def telegram_unlink(user_id: str) -> None:
+    """Отключить уведомления: строку удаляем целиком, следующий заход выдаст
+    новый код (старая ссылка перестаёт работать)."""
+    if not user_id:
+        return
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM user_telegram WHERE user_id = %s", (str(user_id),))
+
+
 # ---------- seed admin ----------
 
 def ensure_seed_admin() -> None:

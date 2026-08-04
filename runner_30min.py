@@ -691,6 +691,38 @@ def _run_review_priority(pid, proxy_url, log):
                 'note': f'результат отзывов не прочитан: {e}'}
 
 
+def _выложить_на_диск(report_path, cfg, creds, proxy_url, log) -> dict:
+    """Отчёт → Google Диск: <Общий диск>/<Проект>/<Год>/<Месяц>/<файл>.
+    Год/месяц заводятся сами. Возвращает {'link', 'path'} или {} - выкладка
+    вспомогательная, при любой проблеме прогон продолжается (файл всё равно
+    уходит в Telegram вложением), причина пишется в лог."""
+    if not report_path:
+        return {}
+    root_id = (creds.get('gdrive_folder_id') or creds.get('gdrive_root_id')
+               or creds.get('gdrive_shared_drive_id') or '')
+    if not root_id:
+        log('Google Диск: не задан общий диск (gdrive_shared_drive_id) - '
+            'выкладка пропущена.')
+        return {}
+    try:
+        import drive_reports
+        from kp_sheets import service_account_info
+        sa = service_account_info()
+        res = drive_reports.upload_report(
+            str(report_path), project_name=cfg.get('name') or cfg.get('id') or 'Проект',
+            sa_info=sa, root_id=root_id,
+            drive_id=creds.get('gdrive_shared_drive_id') or None,
+            proxy_url=proxy_url)
+    except Exception as e:  # noqa: BLE001
+        log(f'⚠ Google Диск: выкладка не выполнена ({e})')
+        return {}
+    if not res.get('ok'):
+        log(f'⚠ Google Диск: {res.get("error")}')
+        return {}
+    log(f'✓ Google Диск: отчёт в «{res["path"]}» - {res["link"]}')
+    return res
+
+
 def run_check(pid, params, creds, log, progress):
     """Выполнить прогон. log(msg), progress(frac, text) - колбэки.
     Возвращает dict с results / report_path / started_at / finished_at / error."""
@@ -1980,7 +2012,8 @@ def run_check(pid, params, creds, log, progress):
             log(f'Критических находок: {crit.total} '
                 f'(падений доступности: {len(crit.availability)})')
 
-        # Telegram (полный отчёт - почта/метрика уже собраны выше)
+        # Telegram (полный отчёт - почта/метрика уже собраны выше).
+        # Перед отправкой отчёт уезжает на Google Диск (см. _выложить_на_диск).
         tg_token = creds.get('tg_token')
         tg_recipients = creds.get('tg_recipients') or []
         if tg_token and tg_recipients:
@@ -2043,6 +2076,13 @@ def run_check(pid, params, creds, log, progress):
                         if getattr(r, 'has_markup_issues', False)),
                     index_404_dead=((_index_404 or {}).get('total_dead', 0)
                                     + (_index_404 or {}).get('total_soft', 0)))
+                # Отчёт на Google Диск: <Общий диск>/<Проект>/<Год>/<Месяц>/.
+                # Ссылку кладём в сообщение - файл всё равно уходит вложением,
+                # поэтому неудача выкладки прогон не ломает (пишем в лог).
+                _drive = _выложить_на_диск(report_path, cfg, creds, proxy_url, log)
+                if _drive.get("link"):
+                    summary_text += (f'\n\n📁 <a href="{_drive["link"]}">Отчёт на '
+                                     f'Google Диске</a> · {_drive.get("path", "")}')
                 tg_result = send_run_notification(
                     bot_token=tg_token, recipients=tg_recipients,
                     project_name=cfg['name'], summary_text=summary_text,

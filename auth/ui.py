@@ -620,9 +620,90 @@ def render_account_ui() -> None:
         global _proxy_slot
         _proxy_slot = st.empty()
 
+        render_telegram_block(user)
+
         if st.button("Выйти", key="logout_btn", use_container_width=True):
             logout()
             st.rerun()
+
+
+def _tg_bot_token() -> str:
+    """Токен бота уведомлений (тот же, что шлёт отчёты)."""
+    try:
+        return str(st.secrets.get("telegram_bot_token") or "").strip()
+    except Exception:
+        return ""
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _tg_bot_name(token: str) -> str:
+    import telegram_link
+    try:
+        return telegram_link.bot_username(token)
+    except Exception:
+        return ""
+
+
+def render_telegram_block(user: dict) -> None:
+    """«Уведомления в Telegram» в личном кабинете: ссылка-подключение и статус.
+
+    Человек жмёт ссылку, Telegram открывает бота и шлёт ему «/start <код>»;
+    кнопка «Проверить подключение» вычитывает апдейты и записывает chat_id.
+    Дальше отчёты о ЕГО прогонах приходят ему в личку - без ручного вписывания
+    chat_id в секреты."""
+    import telegram_link
+    from . import db
+
+    token = _tg_bot_token()
+    with st.expander("🔔 Уведомления в Telegram", expanded=False):
+        if not token:
+            st.caption("Бот не настроен: нет секрета `telegram_bot_token`.")
+            return
+        try:
+            row = db.telegram_get(user["id"])
+        except Exception as e:  # noqa: BLE001
+            st.caption(f"Не удалось прочитать привязку: {e}")
+            return
+
+        if row and row.get("chat_id"):
+            кто = row.get("username") or row["chat_id"]
+            st.success(f"Подключено: {кто}")
+            st.caption("Отчёты о ваших прогонах приходят в этот чат.")
+            if st.button("Отключить", key="tg_unlink", use_container_width=True):
+                db.telegram_unlink(user["id"])
+                st.rerun()
+            return
+
+        bot = _tg_bot_name(token)
+        if not bot:
+            st.caption("Бот не отвечает - проверьте токен `telegram_bot_token`.")
+            return
+        code = (row or {}).get("code") or telegram_link.make_code(user["id"])
+        try:
+            row = db.telegram_ensure_code(user["id"], code)
+            code = row["code"]
+        except Exception as e:  # noqa: BLE001
+            st.caption(f"Не удалось создать код привязки: {e}")
+            return
+
+        st.caption("1. Откройте бота и нажмите «Start» 2. Вернитесь и нажмите "
+                   "«Проверить подключение».")
+        st.link_button("Открыть бота", telegram_link.link_url(bot, code),
+                       use_container_width=True)
+        if st.button("Проверить подключение", key="tg_check",
+                     use_container_width=True):
+            try:
+                telegram_link.try_link_all(token)
+            except Exception as e:  # noqa: BLE001
+                _hook = telegram_link.webhook_set(token)
+                if _hook:
+                    st.error("У бота задан вебхук - привязка кодом не работает. "
+                             "Снимите вебхук (deleteWebhook) или подключайте "
+                             "chat_id вручную.")
+                else:
+                    st.error(f"Telegram не ответил: {e}")
+            else:
+                st.rerun()
 
 
 _proxy_slot = None

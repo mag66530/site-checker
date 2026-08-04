@@ -170,6 +170,19 @@ def get_google_folder_credentials(project_id):
 
 
 def get_telegram_recipients(project_id):
+    """Кому уходит отчёт о прогоне: ТОМУ, КТО ЕГО ЗАПУСТИЛ (привязка Telegram
+    в личном кабинете). Если человек Telegram не подключил - откатываемся на
+    старый список из секрета telegram_recipients_<проект>, чтобы уже
+    настроенные проекты не остались без уведомлений."""
+    try:
+        import auth
+        import telegram_link
+        _u = auth.current_user()
+        _chat = telegram_link.chat_id_for_user(_u["id"]) if _u else None
+        if _chat:
+            return [str(_chat)]
+    except Exception:  # noqa: BLE001
+        pass
     val = _secret(f'telegram_recipients_{project_id}')
     if isinstance(val, str):
         return [val.strip()] if val.strip() else []
@@ -2453,6 +2466,10 @@ if pid:
                 'proxy_url': _c30_effective_proxy,
                 'tg_token': _secret('telegram_bot_token'),
                 'tg_recipients': get_telegram_recipients(pid),
+                # Google Диск для отчётов: общий диск (Shared Drive) и, если
+                # задана, готовая папка проекта. Пусто = выкладка пропускается.
+                'gdrive_shared_drive_id': _secret_pid('gdrive_shared_drive_id', pid),
+                'gdrive_folder_id': _secret_pid('gdrive_folder_id', pid),
                 'metrika': get_metrika_credentials(pid),
                 'gsc': get_gsc_credentials(pid),
                 # Сервисный аккаунт GSC для источника «Google» в «404 в индексе»
