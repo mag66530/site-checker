@@ -60,6 +60,28 @@ def test_region_issue_читается_из_структуры_тип_зона_�
     assert 'Норильск' in out[0].detail
 
 
+def test_geo_findings_технический_регион_даёт_предупреждение():
+    """region['geo']['warnings'] (гео-теги в коде главной поддомена) -
+    раньше показывались только на листе, в «Проблемы» не попадали."""
+    r = _result(region={'город': 'Пенза', 'issues': [], 'geo': {
+        'signals': [], 'localities': [], 'locality_match': None,
+        'warnings': ['технический регион не задан в коде (нет meta geo.* '
+                    'и addressLocality в Schema.org) - регион в '
+                    'Яндекс.Вебмастере проверить вручную']}})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].level == 'Предупреждение'
+    assert out[0].section == 'Регион и город'
+    assert 'технический регион не задан' in out[0].problem
+
+
+def test_geo_findings_совпадение_ничего_не_даёт():
+    r = _result(region={'город': 'Пенза', 'issues': [], 'geo': {
+        'signals': ['geo.region=RU-PNZ'], 'localities': ['Пенза'],
+        'locality_match': True, 'warnings': []}})
+    assert collect_findings([r]) == []
+
+
 def test_content_bugs_дают_находку_на_блок():
     content = ContentResult(type_code='product', blocks=[
         BlockResult(key='rec_links', label='Блок «похожие товары»',

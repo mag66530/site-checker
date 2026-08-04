@@ -93,6 +93,15 @@ def _region_findings(region: Optional[dict], *, city, page_type, url) -> list:
     return out
 
 
+def _geo_findings(region: Optional[dict], *, city, page_type, url) -> list:
+    """Технический регион поддомена (гео-сигналы meta geo.*/Schema
+    addressLocality) - считается только на главной. Сам чекер кладёт эти
+    тексты в warnings (не issues) - Предупреждение, не Ошибка."""
+    geo = (region or {}).get('geo') or {}
+    return [Finding('Предупреждение', 'Регион и город', str(w), city, page_type, url)
+           for w in geo.get('warnings') or []]
+
+
 _META_UNIQUE_LABEL = {
     'title': 'Title', 'description': 'Meta description',
     'h1': 'H1', 'h2': 'H2', 'h3': 'H3', 'h4': 'H4', 'h5': 'H5', 'h6': 'H6',
@@ -386,6 +395,8 @@ def collect_findings(results, *, console_check: dict = None,
                                  page_type=page_type, url=url))
         out.extend(_region_findings(r.region, city=city, page_type=page_type,
                                     url=url))
+        out.extend(_geo_findings(r.region, city=city, page_type=page_type,
+                                 url=url))
         out.extend(_content_findings(r.content, city=city, page_type=page_type,
                                      url=url))
         out.extend(_kp_findings(getattr(r, 'kp_result', None), city=city,
@@ -565,6 +576,16 @@ _RULES = [
      'Проверить вёрстку и адаптивность',
      'Вёрстка и адаптивность влияют на удобство покупки на любом устройстве.'),
 
+    ('Регион и город', 'технический регион не совпадает', 2, 'Разработка',
+     'region_geo_mismatch',
+     'Поправить технический регион (geo-теги/addressLocality)',
+     'Гео-сигналы в коде не совпадают с реальным городом поддомена - '
+     'путает роботов и локальные сервисы.'),
+    ('Регион и город', 'технический регион не задан', 3, 'Разработка',
+     'region_geo_missing',
+     'Добавить технические гео-сигналы (meta geo.*/addressLocality)',
+     'Без гео-сигналов в коде труднее подтвердить регион поддомена для '
+     'локального ранжирования.'),
     ('Регион и город', '', 1, 'SEO + разработка', 'region_wrong_city',
      'Убрать чужой город со страницы',
      'Смешение городов путает и покупателя, и региональное ранжирование.'),
