@@ -1495,8 +1495,34 @@ f => {
       || ['text','tel','email','search','url','number','password',''].includes(t)); });
   const reqLike = ctrls.filter(looksReq);
   window.__valSaved = ctrls.map(e => ({v: e.value, c: e.checked}));
+  // ВАЖНО для React/Vue (SHOPMET и любой SPA): прямое `e.value=''` меняет DOM,
+  // но НЕ состояние компонента - форма продолжает считать поля заполненными,
+  // пустую отправку пропускает, подсказок не показывает, и проба писала ложное
+  // «форма не показывает ошибок». Пишем через нативный сеттер и шлём input/change,
+  // как это делает человек.
+  window.__valSet = (e, v) => {
+    try {
+      const proto = e.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype
+                  : (e.tagName === 'SELECT' ? window.HTMLSelectElement.prototype
+                                            : window.HTMLInputElement.prototype);
+      const d = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (d && d.set) d.set.call(e, v); else e.value = v;
+    } catch (_) { e.value = v; }
+    e.dispatchEvent(new Event('input', {bubbles: true}));
+    e.dispatchEvent(new Event('change', {bubbles: true}));
+  };
+  window.__valSetChecked = (e, v) => {
+    if (e.checked === v) return;
+    try {
+      const d = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked');
+      if (d && d.set) d.set.call(e, v); else e.checked = v;
+    } catch (_) { e.checked = v; }
+    e.dispatchEvent(new Event('click', {bubbles: true}));
+    e.dispatchEvent(new Event('change', {bubbles: true}));
+  };
   ctrls.forEach(e => { const t=(e.type||'').toLowerCase();
-    if (t==='checkbox'||t==='radio') e.checked=false; else e.value=''; });
+    if (t==='checkbox'||t==='radio') window.__valSetChecked(e, false);
+    else window.__valSet(e, ''); });
   let formValid = true, msgs = [];
   try { formValid = form.checkValidity(); } catch(_){}
   for (const e of ctrls) { try {
@@ -1519,7 +1545,12 @@ f => {
   // остальных (раньше исключение на одном контроле оставляло все следующие за
   // ним поля пустыми - и боевая отправка уходила с полупустой формой).
   ctrls.forEach((e,i) => { if (s[i]) { try { const t=(e.type||'').toLowerCase();
-    if (t==='checkbox'||t==='radio') e.checked=s[i].c; else e.value=s[i].v;
+    // Возвращаем ТЕМ ЖЕ путём, что и чистили (нативный сеттер + события):
+    // иначе на React форма осталась бы «пустой» для своего состояния, и боевая
+    // отправка после пробы ушла бы с незаполненными полями.
+    if (t==='checkbox'||t==='radio') {
+      if (window.__valSetChecked) window.__valSetChecked(e, s[i].c); else e.checked=s[i].c;
+    } else if (window.__valSet) { window.__valSet(e, s[i].v); } else { e.value=s[i].v; }
   } catch (_) {} } });
   return true;
 }
@@ -1576,6 +1607,11 @@ f => {
   // error/invalid, ни role=alert - подсказка это обычный <p class="text-red-500">
   // с текстом «Укажите ФИО». Ловим и по классу цвета, и по формулировке.
   const HINT = /(введите|укажите|заполн|обязат|не\s*менее|минимум|слишком|неверн|некоррект|ошибк|не заполнено|обязательное поле)/i;
+  // Сообщение о СБОЕ ОТПРАВКИ («Не удалось отправить заявку, попробуйте ещё
+  // раз») - реакция на оборванный запрос, а НЕ подсказка валидации: его
+  // проверяет отдельный пункт «Обработка ошибок». Раньше оно уходило в улику
+  // пробы валидации и путало («подсказка: не удалось отправить заявку»).
+  const SEND_FAIL = /(не удалось отправ|попроб\w* (ещё|еще) раз|повторите попытку|произошла ошибка|сервер (не отвеча|недоступ))/i;
   const sels = "[class*=error i],[class*=invalid i],[class*=advice i],[aria-invalid=true],"
     + ".errortext,.form-error,.field-error,.help-block,.invalid-feedback,"
     + ".validation-advice,[generated=true],[role=alert],"
@@ -1583,7 +1619,7 @@ f => {
   for (const el of root.querySelectorAll(sels)) {
     if (!vis(el) || el.children.length) continue;
     const t=(el.innerText||'').trim();
-    if (!t || t.length>160) continue;
+    if (!t || t.length>160 || SEND_FAIL.test(t)) continue;
     const c=getComputedStyle(el).color;
     // Класс с «red/danger/warn» бывает и у обычного текста (кнопка «Удалить»):
     // от таких защищаемся - берём либо красный цвет, либо текст-подсказку.
@@ -1595,7 +1631,7 @@ f => {
   for (const el of root.querySelectorAll('p,div,span,small,label')) {
     if (!vis(el) || el.children.length) continue;
     const t=(el.innerText||'').trim();
-    if (!t || t.length>90 || !HINT.test(t)) continue;
+    if (!t || t.length>90 || !HINT.test(t) || SEND_FAIL.test(t)) continue;
     const c=getComputedStyle(el).color;
     return {found:true, text:t.slice(0,120), color:c, red:red(c), kind:'msg'};
   }
