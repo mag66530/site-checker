@@ -124,6 +124,24 @@ def test_meta_unique_findings_заголовки_и_мета():
     assert out[0].detail == 'H1: теги внутри'
 
 
+def test_markup_findings_сохраняет_field_details():
+    """Разметка (OG/Schema.org): field_details («Offer/цена: 21 из 60») -
+    раньше отдельная колонка на удалённом листе «Разметка», при переносе в
+    generic-обработчик терялась бы; _markup_findings кладёт её в detail."""
+    r = _result(markup={
+        'issues': ['в разметке Product: нет поля «предложение/цена»'],
+        'warnings': ['в разметке Organization: нет поля «логотип»'],
+        'field_details': ['Offer/цена: 21 из 60', 'Organization/логотип: 11 из 11'],
+    })
+    out = collect_findings([r])
+    assert len(out) == 2
+    for f in out:
+        assert f.section == 'Разметка'
+        assert 'Offer/цена: 21 из 60' in f.detail
+        assert 'Organization/логотип: 11 из 11' in f.detail
+    assert {f.level for f in out} == {'Ошибка', 'Предупреждение'}
+
+
 def test_cis_findings_снг_домены():
     """issues - список словарей {тип, зона, найдено, контекст, пояснение}
     (та же форма, что у region/meta_unique), а не строк - раньше шли через

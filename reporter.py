@@ -2507,95 +2507,10 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None):
 # (_layout_findings/_search_check_findings/_filters_test_findings).
 
 
-# ── Лист «Разметка» (п.1.12, ТЗ 3.5: Schema.org + OpenGraph) ────────
-
-
-def _build_markup_sheet(wb, results):
-    """Лист микроразметки: OG-теги и Schema.org-типы на основных типах
-    страниц. Добавляется только если проверка выполнялась."""
-    checked = [r for r in results if getattr(r, 'markup', None)]
-    if not checked:
-        return
-
-    bad = [r for r in checked if r.markup.get('issues')]
-    warned = [r for r in checked if (not r.markup.get('issues')
-                                     and r.markup.get('warnings'))]
-    has_bugs = bool(bad)
-
-    ws = wb.create_sheet('Разметка')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 18
-    ws.column_dimensions['C'].width = 14
-    ws.column_dimensions['D'].width = 62
-    ws.column_dimensions['E'].width = 60
-    ws.column_dimensions['F'].width = 3
-
-    ws.merge_cells('B2:E2')
-    c = ws['B2']
-    c.value = 'Микроразметка и OpenGraph (п.1.12)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:E3')
-    c = ws['B3']
-    c.value = ('ТЗ 3.5: OpenGraph (og:url/title/description/image/type - все '
-               'обязательны) и Schema.org на основных типах страниц: данные '
-               'компании (Organization/LocalBusiness) везде, хлебные крошки '
-               '(BreadcrumbList) на вложенных, листинги (OfferCatalog/ItemList/'
-               'CollectionPage), на товаре - Product, характеристики '
-               '(PropertyValue), фото (itemprop=image). Основной формат - '
-               'microdata: тип только в JSON-LD = предупреждение. Цена не '
-               'размечена = предупреждение (товары «по запросу»). Плюс '
-               'проверка обязательных полей в объекте: Product без '
-               'offers/name/image, Offer без цены/валюты, крошки без '
-               'элементов = баг; желательные (логотип, описание) = '
-               'предупреждение. Условные типы: видео на странице → '
-               'VideoObject, FAQ-блок → FAQPage, адрес/контакты → '
-               'PostalAddress (нет = предупреждение).')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 68
-
-    row = 5
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = (f'Проверено страниц: {len(checked)} · с багами разметки: '
-               f'{len(bad)} · с предупреждениями: {len(warned)}')
-    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 26
-    row += 2
-
-    # Детали полей («Offer/цена: 21 из 60») - в колонке-контексте: тексты
-    # проблем без чисел, иначе группировка дробится на страницы.
-    def _markup_extra(r):
-        d = (getattr(r, 'markup', None) or {}).get('field_details') or []
-        return '; '.join(d[:3]) + (f' … +{len(d) - 3}' if len(d) > 3 else '')
-
-    # Что реально нашлось на странице - чтобы было видно: «нет разметки»
-    # значит нет НИ ОДНОГО типа из требуемых, а не «часть есть».
-    _meta_section_title(ws, row, f'Проблемы разметки  ({len(bad)})',
-                        C.err if bad else C.ok)
-    row += 1
-    if not bad:
-        _meta_ok_line(ws, row, '✅ OG-теги и обязательная Schema.org-разметка '
-                               'на месте у всех проверенных страниц.')
-        row += 2
-    else:
-        row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'markup', 'issues'), C.err,
-            extra=_markup_extra)
-
-    if warned:
-        _meta_section_title(ws, row, f'Предупреждения  ({len(warned)})', C.warn)
-        row += 1
-        row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'markup', 'warnings'), C.warn,
-            extra=_markup_extra)
+# Лист «Разметка» (п.1.12, ТЗ 3.5: Schema.org + OpenGraph) удалён -
+# находки полностью и итемизированно в «Проблемы» через
+# report_priorities._markup_findings (вместе с field_details, который
+# раньше показывался отдельной колонкой листа).
 
 
 # Листы «Безопасность» и «Изображения» удалены (04.08.2026): их находки
@@ -4879,7 +4794,7 @@ _SHEET_GROUPS = [
     # после «Обзора» (как было до пересборки).
     ('Техничка', [
         'Индексация', 'Метаданные',
-        'Разметка', 'Ошибки JavaScript',
+        'Ошибки JavaScript',
         'Валидация и скорость', 'Страница 404',
         'Страницы в ГСК', 'Дубли главной', 'Индексация (Арсенкин)',
         'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
@@ -5913,8 +5828,7 @@ def build_report(
     # Лист «Вёрстка» удалён - находки (viewport/CSS/меню/mixed content/
     # favicon, поиск по сайту, фильтрация товаров) полностью в «Проблемы».
 
-    # ─── Лист разметки (п.1.12) - если проверка выполнялась ─────────
-    _build_markup_sheet(wb, results)
+    # Лист «Разметка» удалён - находки полностью в «Проблемы».
 
     # Листы «Безопасность» и «Изображения» удалены - находки (заголовки
     # безопасности; конкретная картинка без alt/битая, дубли картинок

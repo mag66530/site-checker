@@ -515,6 +515,24 @@ def _metrika_404_findings(metrika_reports, results) -> list:
     return out
 
 
+def _markup_findings(markup: Optional[dict], *, city, page_type, url) -> list:
+    """Разметка (OG/Schema.org) - как _from_issue_dict, но с field_details
+    ("Offer/цена: 21 из 60") в detail - раньше это была отдельная колонка
+    на листе «Разметка», при объединении в общий адаптер терялась."""
+    if not markup:
+        return []
+    out = []
+    details = markup.get('field_details') or []
+    detail_text = '; '.join(details[:3]) + (f' … +{len(details) - 3}' if len(details) > 3 else '')
+    for text in markup.get('issues') or []:
+        out.append(Finding('Ошибка', 'Разметка', str(text), city, page_type, url,
+                           detail=detail_text))
+    for text in markup.get('warnings') or []:
+        out.append(Finding('Предупреждение', 'Разметка', str(text), city, page_type, url,
+                           detail=detail_text))
+    return out
+
+
 def collect_findings(results, *, console_check: dict = None,
                      index_404_check: dict = None,
                      metrika_reports: list = None,
@@ -535,8 +553,8 @@ def collect_findings(results, *, console_check: dict = None,
                                     city=city, page_type=page_type, url=url))
         out.extend(_layout_findings(r.layout, city=city, page_type=page_type,
                                     url=url))
-        out.extend(_from_issue_dict(r.markup, section='Разметка',
-                                    city=city, page_type=page_type, url=url))
+        out.extend(_markup_findings(r.markup, city=city, page_type=page_type,
+                                    url=url))
         out.extend(_from_issue_dict(r.security, section='Безопасность',
                                     city=city, page_type=page_type, url=url))
         out.extend(_images_findings(r.images, city=city, page_type=page_type,
