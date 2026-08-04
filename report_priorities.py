@@ -108,6 +108,39 @@ def _content_findings(content, *, city, page_type, url) -> list:
     return out
 
 
+def _images_findings(images: Optional[dict], *, city, page_type, url) -> list:
+    """Изображения: конкретная картинка (без alt / битая 404) - отдельной
+    находкой с адресом картинки в detail, а не общий текст на всю страницу
+    (как было раньше на листе «Изображения»). Остальные warnings (форматы/
+    вес/lazy/имена) - как есть, общим текстом: там просто счётчики, для них
+    нет одного конкретного URL. cat_warnings/prod_warnings (дубли картинок
+    категорий/товаров) не входят в issues/warnings вообще - без этого блока
+    терялись целиком."""
+    out = []
+    im = images or {}
+    for src in im.get('no_alt') or []:
+        out.append(Finding('Ошибка', 'Изображения',
+                           'есть картинки без alt или с пустым alt=""',
+                           city, page_type, url, detail=src))
+    for b in im.get('broken_imgs') or []:
+        out.append(Finding('Ошибка', 'Изображения',
+                           'битые картинки (404) - изображение не '
+                           'отображается на странице',
+                           city, page_type, url, detail=b.get('url', '')))
+    for text in im.get('warnings') or []:
+        out.append(Finding('Предупреждение', 'Изображения', str(text),
+                           city, page_type, url))
+    for w in im.get('cat_warnings') or []:
+        d = im.get('cat_dup') or im.get('cat_img') or {}
+        out.append(Finding('Предупреждение', 'Изображения', str(w),
+                           city, page_type, url, detail=d.get('name', '')))
+    for w in im.get('prod_warnings') or []:
+        d = im.get('prod_dup') or im.get('prod_img') or {}
+        out.append(Finding('Предупреждение', 'Изображения', str(w),
+                           city, page_type, url, detail=d.get('name', '')))
+    return out
+
+
 def _console_findings(console_check: Optional[dict]) -> list:
     out = []
     for p in (console_check or {}).get('pages') or []:
@@ -213,8 +246,8 @@ def collect_findings(results, *, console_check: dict = None,
                                     city=city, page_type=page_type, url=url))
         out.extend(_from_issue_dict(r.security, section='Безопасность',
                                     city=city, page_type=page_type, url=url))
-        out.extend(_from_issue_dict(r.images, section='Изображения',
-                                    city=city, page_type=page_type, url=url))
+        out.extend(_images_findings(r.images, city=city, page_type=page_type,
+                                    url=url))
         out.extend(_from_issue_dict(getattr(r, 'meta_unique', None),
                                     section='Заголовки и мета',
                                     city=city, page_type=page_type, url=url))

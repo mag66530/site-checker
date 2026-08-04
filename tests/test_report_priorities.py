@@ -135,6 +135,49 @@ def test_contacts_addr_mismatched_даёт_находку_на_город():
     assert 'Ленина, 1' in out[0].detail and 'Ленина, 2' in out[0].detail
 
 
+def test_images_no_alt_даёт_находку_на_каждую_картинку():
+    r = _result(images={'no_alt': ['/img/a.jpg', '/img/b.jpg (alt пустой)']})
+    out = collect_findings([r])
+    assert len(out) == 2
+    assert {f.detail for f in out} == {'/img/a.jpg', '/img/b.jpg (alt пустой)'}
+    assert all(f.level == 'Ошибка' and f.section == 'Изображения' for f in out)
+    assert all('без alt' in f.problem for f in out)
+
+
+def test_images_broken_даёт_находку_с_url_картинки_в_detail():
+    r = _result(images={'broken_imgs': [{'url': 'https://a.ru/img/x.jpg'}]})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].detail == 'https://a.ru/img/x.jpg'
+    assert 'битые картинки' in out[0].problem
+
+
+def test_images_warnings_попадают_без_детализации():
+    r = _result(images={'warnings': ['современные форматы (webp/avif) не используются']})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].level == 'Предупреждение'
+    assert out[0].detail == ''
+
+
+def test_images_cat_и_prod_warnings_не_теряются():
+    r = _result(images={
+        'cat_warnings': ['картинка категории не уникальна - та же картинка '
+                        'на других категориях (каждому разделу нужна своя)'],
+        'cat_dup': {'name': 'category.jpg', 'n': 2},
+        'prod_warnings': ['фото товара дублируется в разных категориях - '
+                          'та же картинка у товаров из других разделов '
+                          '(в каждой категории свои фото товаров)'],
+        'prod_dup': {'name': 'product.jpg', 'n': 2, 'cats': 2},
+    })
+    out = collect_findings([r])
+    assert len(out) == 2
+    by_detail = {f.detail: f for f in out}
+    assert by_detail['category.jpg'].problem.startswith('картинка категории не уникальна')
+    assert by_detail['product.jpg'].problem.startswith('фото товара дублируется')
+    assert all(f.level == 'Предупреждение' for f in out)
+
+
 def test_console_check_ошибки_js_и_адаптивность():
     console = {'pages': [
         {'url': 'https://example.ru/', 'errors': ['TypeError: x is undefined'],
