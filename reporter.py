@@ -3609,7 +3609,7 @@ def _build_ps_filters_sheet(wb, ps_filters):
         _line(f'✅ Санкций/угроз в диагностике Вебмастера нет '
               f'(хостов: {ps_filters.get("wm_hosts", 0)}, '
               f'проблем всего: {ps_filters.get("wm_issues_total", 0)} - '
-              f'несанкционные см. лист «Ошибки сервисов»).', C.ok)
+              f'несанкционные см. лист {_sheet_ref("Ошибки сервисов")}).', C.ok)
     row += 1
 
     # ── Google ──
@@ -5745,149 +5745,10 @@ def _build_meta_sheet(wb, results, meta_summary):
                 row += 1
 
 
-# ── Лист «Контакты по городам» (сверка с КП) ───────────────────────
-
-
-def _build_kp_sheet(wb, results):
-    """
-    Сверка контактов (телефон / почта / адрес) на главных страницах
-    поддоменов с «Картой присутствия». По одному городу в строке -
-    наглядно видно, где номер/почта/адрес не совпали с КП.
-    """
-    rows = [r for r in results if getattr(r, 'kp_result', None)]
-    if not rows:
-        return
-
-    # Сортировка: сначала города с проблемами, потом по алфавиту
-    rows.sort(key=lambda r: (not r.kp_result.get('has_issues'),
-                             r.kp_result.get('city') or ''))
-
-    total = len(rows)
-    with_problems = sum(1 for r in rows if r.kp_result.get('has_issues'))
-
-    ws = wb.create_sheet('Контакты по городам')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if with_problems else C.accent
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 22   # Город
-    ws.column_dimensions['C'].width = 10   # Открыть
-    ws.column_dimensions['D'].width = 12   # Телефон
-    ws.column_dimensions['E'].width = 12   # Почта
-    ws.column_dimensions['F'].width = 12   # Адрес
-    ws.column_dimensions['G'].width = 78   # Что не так
-
-    # Заголовок + пояснение
-    ws.merge_cells('B2:G2')
-    c = ws['B2']
-    c.value = 'Контакты по городам - сверка с КП'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 24
-
-    ws.merge_cells('B3:G3')
-    c = ws['B3']
-    c.value = ('Сверяем телефон, почту и адрес на главной каждого города (шапка + '
-               'подвал) с «Картой присутствия». Телефон: ожидается SEO-номер (если '
-               'нет - рекламный, затем общий). Зелёное «✓» - совпало с КП, красное - '
-               'нет. «есть» (серое) - на сайте есть, но в КП этого поля нет (сверять '
-               'не с чем, дополнить КП). «-» - нет ни в КП, ни на сайте. '
-               'Что именно не так - в последнем столбце.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 30
-
-    # Плитки сводки
-    tiles = [
-        ('Проверено городов', total, C.accent, C.accent_soft),
-        ('С расхождениями', with_problems,
-         C.err if with_problems else C.ok, C.err_soft if with_problems else C.ok_soft),
-    ]
-    col = 2
-    for label, value, color, bg in tiles:
-        ws.merge_cells(start_row=5, start_column=col, end_row=5, end_column=col + 1)
-        ws.merge_cells(start_row=6, start_column=col, end_row=6, end_column=col + 1)
-        vc = ws.cell(row=5, column=col, value=value)
-        vc.font = _font(size=22, bold=True, color=color)
-        vc.fill = _fill(bg); vc.alignment = _align(horizontal='center')
-        vc.border = _border(color=C.border_light)
-        ws.cell(row=5, column=col + 1).fill = _fill(bg)
-        ws.cell(row=5, column=col + 1).border = _border(color=C.border_light)
-        lc = ws.cell(row=6, column=col, value=label)
-        lc.font = _font(size=9, color=C.text_muted)
-        lc.fill = _fill(bg); lc.alignment = _align(horizontal='center')
-        lc.border = _border(color=C.border_light)
-        ws.cell(row=6, column=col + 1).fill = _fill(bg)
-        ws.cell(row=6, column=col + 1).border = _border(color=C.border_light)
-        col += 3
-    ws.row_dimensions[5].height = 30
-
-    # Шапка таблицы
-    hdr_row = 8
-    headers = ['Город', 'Открыть', 'Телефон', 'Почта', 'Адрес', 'Что не так']
-    for ci, h in enumerate(headers, start=2):
-        cell = ws.cell(row=hdr_row, column=ci, value=h)
-        cell.font = _font(size=10, bold=True, color=C.text_muted)
-        cell.fill = _fill(C.surface)
-        cell.alignment = _align(horizontal='center' if ci > 3 else 'left')
-        cell.border = _border()
-    ws.row_dimensions[hdr_row].height = 24
-    ws.freeze_panes = f'B{hdr_row + 1}'
-
-    field_to_col = {'Телефон': 4, 'Почта': 5, 'Адрес': 6}
-    row = hdr_row + 1
-    for r in rows:
-        kp = r.kp_result
-        issues = {i['field']: i for i in kp.get('issues', [])}
-
-        cc = ws.cell(row=row, column=2, value=r.city or kp.get('city'))
-        cc.font = _font(size=10); cc.alignment = _align(indent=1)
-        cc.border = _border(color=C.border_light)
-
-        uc = ws.cell(row=row, column=3, value='открыть')
-        uc.hyperlink = r.url
-        uc.font = _font(size=10, color=C.accent, underline='single')
-        uc.alignment = _align(horizontal='center', indent=0)
-        uc.border = _border(color=C.border_light)
-
-        # Ячейки статусов
-        for field, col_idx in field_to_col.items():
-            cell = ws.cell(row=row, column=col_idx)
-            cell.alignment = _align(horizontal='center', indent=0)
-            cell.border = _border(color=C.border_light)
-            iss = issues.get(field)
-            if iss is None:
-                cell.value = '-'           # и в КП нет, и на сайте нет - нечего показать
-                cell.font = _font(size=10, color=C.text_muted)
-            elif iss['status'] == 'ok':
-                cell.value = '✓'
-                cell.font = _font(size=10, bold=True, color=C.ok)
-                cell.fill = _fill(C.ok_soft)
-            elif iss['status'] == 'info':
-                # на сайте есть, но в КП нет - не сверка, но и не «нет». «есть».
-                cell.value = 'есть'
-                cell.font = _font(size=9, color=C.text_soft)
-                if iss.get('comment'):
-                    cell.comment = Comment(iss['comment'], 'Site Checker',
-                                           height=80, width=240)
-            elif iss['status'] == 'critical':
-                cell.value = 'КРИТ'
-                cell.font = _font(size=9, bold=True, color=C.err)
-                cell.fill = _fill(C.err_soft)
-            else:
-                cell.value = 'БАГ'
-                cell.font = _font(size=10, bold=True, color=C.err)
-                cell.fill = _fill(C.err_soft)
-
-        # Что не так - комментарии по проблемным полям
-        problems = [f'{i["field"]}: {i["comment"]}'
-                    for i in kp.get('issues', [])
-                    if i['status'] in ('bug', 'critical') and i.get('comment')]
-        wc = ws.cell(row=row, column=7, value='\n'.join(problems))
-        wc.font = _font(size=9, color=C.err if problems else C.text_muted)
-        wc.alignment = _align(wrap=True, vertical='top')
-        wc.border = _border(color=C.border_light)
-        ws.row_dimensions[row].height = max(22, 15 * (len(problems) or 1))
-        row += 1
+# Лист «Контакты по городам» удалён (04.08.2026): находки (конкретное поле/
+# город/что не так) полностью попадают в «Проблемы» через
+# report_priorities._kp_findings - полная ✓/✗-матрица по городам не нужна,
+# только реальные расхождения.
 
 
 # ── Секция «Замена рекл. номера» (в группе «Аналитика», в конце) ────
@@ -6318,187 +6179,11 @@ def _build_autoclick_sheet(wb, autoclick):
         row += 1
 
 
-# ── Лист «Регион и СНГ» (п.1.8 верные переменные / п.1.9 СНГ-чистота) ──
-
-
-def _region_issue_rows(pages, attr):
-    """(result, issue) по каждой находке региональной проверки."""
-    out = []
-    for r in pages:
-        data = getattr(r, attr, None) or {}
-        for i in (data.get('issues') or []):
-            out.append((r, i))
-    return out
-
-
-def _build_region_sheet(wb, results):
-    """Лист региональных проверок: чужой город/телефон/почта на странице города
-    (п.1.9) и упоминания РФ/СНГ/чужих стран на СНГ-доменах (п.1.10).
-    Добавляется только если проверки выполнялись."""
-    reg_checked = [r for r in results if getattr(r, 'region', None) is not None]
-    cis_checked = [r for r in results if getattr(r, 'cis', None) is not None]
-    if not reg_checked and not cis_checked:
-        return
-
-    reg_rows = _region_issue_rows(reg_checked, 'region')
-    cis_rows = _region_issue_rows(cis_checked, 'cis')
-    has_bugs = bool(reg_rows or cis_rows)
-
-    ws = wb.create_sheet('Регион и СНГ')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 16   # Город
-    ws.column_dimensions['C'].width = 13   # Тип страницы
-    ws.column_dimensions['D'].width = 52   # URL
-    ws.column_dimensions['E'].width = 30   # Что нашли
-    ws.column_dimensions['F'].width = 44   # Пояснение
-    ws.column_dimensions['G'].width = 52   # Контекст
-    ws.column_dimensions['H'].width = 3
-
-    ws.merge_cells('B2:G2')
-    c = ws['B2']
-    c.value = 'Региональные проверки (переменные города · чистота СНГ)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:G3')
-    c = ws['B3']
-    c.value = ('П.1.9: на странице города не должно быть подстановок другого города - '
-               'чужой город в title/description/H1, телефон или почта другого города '
-               '(сверка со справочником КП). '
-               'П.1.10: на сайте страны СНГ в текстах, заголовках, метаданных и '
-               'контактах не должно быть «РФ», «Россия», «СНГ» и названий других '
-               'стран - только своя страна.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 42
-
-    row = 5
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
-    c = ws.cell(row=row, column=2)
-    c.value = (f'Переменные города: страниц проверено {len(reg_checked)}, находок '
-               f'{len(reg_rows)}  ·  СНГ-чистота: страниц проверено '
-               f'{len(cis_checked)}, находок {len(cis_rows)}')
-    c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 26
-    row += 2
-
-    def _section(title, rows, empty_text, color_ok=C.ok):
-        nonlocal row
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
-        c = ws.cell(row=row, column=2)
-        c.value = f'{title}  ({len(rows)})'
-        c.font = _font(size=13, bold=True, color=C.err if rows else color_ok)
-        c.fill = _fill(C.accent_soft)
-        c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
-        if not rows:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
-            c = ws.cell(row=row, column=2)
-            c.value = empty_text
-            c.font = _font(size=10, color=color_ok)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 22
-            row += 2
-            return
-        for ci, h in enumerate(['Город', 'Тип', 'URL', 'Что нашли',
-                                'Пояснение', 'Контекст'], 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = h
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
-            cell.fill = _fill(C.surface)
-            cell.alignment = _align()
-            cell.border = _border()
-        ws.row_dimensions[row].height = 20
-        row += 1
-        for r, i in rows:
-            ws.row_dimensions[row].height = 34
-            найдено = i.get('найдено', '')
-            зона = i.get('зона', '')
-            vals = [
-                (r.city or '-', {'size': 10, 'color': C.text}),
-                (r.type_label, {'size': 9, 'color': C.text_muted}),
-                (r.url, {'size': 10, 'color': C.accent, 'underline': 'single'}),
-                (f'«{найдено}» ({зона})', {'size': 10, 'color': C.err}),
-                (i.get('пояснение', ''), {'size': 10, 'color': C.text}),
-                (i.get('контекст', ''), {'size': 9, 'color': C.text_soft}),
-            ]
-            for ci, (val, kw) in enumerate(vals, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 4:
-                    cell.hyperlink = r.url
-            row += 1
-        row += 1
-
-    if reg_checked:
-        _section('Чужой город / телефон / почта на странице (п.1.8)', reg_rows,
-                 '✅ Подстановок другого города не найдено.')
-    if cis_checked:
-        _section('Упоминания РФ / СНГ / чужих стран на СНГ-доменах (п.1.9)', cis_rows,
-                 '✅ На проверенных СНГ-страницах упоминаний РФ/СНГ/чужих стран нет.')
-    elif reg_checked:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
-        c = ws.cell(row=row, column=2)
-        c.value = ('П.1.9 (СНГ-чистота): в этой выборке СНГ-доменов не было - '
-                   'проверка выполняется только на доменах не-РФ.')
-        c.font = _font(size=10, italic=True, color=C.text_soft)
-        c.alignment = _align(indent=1)
-        row += 2
-
-    # ── Технический регион (гео-сигналы в коде) - по главным поддоменов ──
-    _geo_rows = [r for r in results
-                 if r.type_code == 'main'
-                 and (getattr(r, 'region', None) or {}).get('geo')]
-    if _geo_rows:
-        _geo_warn = [r for r in _geo_rows if r.region['geo'].get('warnings')]
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
-        c = ws.cell(row=row, column=2)
-        c.value = (f'Технический регион поддоменов (гео-сигналы в коде)  '
-                   f'({len(_geo_warn)} из {len(_geo_rows)} без сигналов)')
-        c.font = _font(size=13, bold=True,
-                       color=C.warn if _geo_warn else C.ok)
-        c.fill = _fill(C.accent_soft)
-        c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
-        c = ws.cell(row=row, column=2)
-        c.value = ('Снаружи видны только сигналы в коде: meta geo.* и '
-                   'addressLocality из Schema.org. Настройку региона в '
-                   'Яндекс.Вебмастере API не отдаёт - проверяется вручную.')
-        c.font = _font(size=9, italic=True, color=C.text_soft)
-        c.alignment = _align(indent=1, wrap=True)
-        ws.row_dimensions[row].height = 24
-        row += 1
-        for r in _geo_rows:
-            g = r.region['geo']
-            ws.merge_cells(start_row=row, start_column=2,
-                           end_row=row, end_column=7)
-            c = ws.cell(row=row, column=2)
-            if g.get('warnings'):
-                c.value = f'⚠ {r.city} ({r.subdomain}): ' + '; '.join(g['warnings'])
-                c.font = _font(size=10, color=C.warn)
-            else:
-                c.value = (f'✅ {r.city} ({r.subdomain}): '
-                           + '; '.join(g.get('signals') or [])[:160])
-                c.font = _font(size=10, color=C.ok)
-            c.alignment = _align(indent=2, wrap=True)
-            ws.row_dimensions[row].height = 18
-            row += 1
-
-
-# Лист «Заголовки и мета» удалён (04.08.2026): его находки полностью и
-# читаемо (не str(dict)) попадают в «Проблемы» через
-# report_priorities._meta_unique_findings.
+# Листы «Регион и СНГ» и «Заголовки и мета» удалены (04.08.2026): находки
+# (чужой город/телефон/почта, СНГ-чистота, технический регион по гео-тегам,
+# единственность title/description/H1) полностью и читаемо попадают в
+# «Проблемы» через report_priorities.py (_region_findings/_cis_findings/
+# _geo_findings/_meta_unique_findings).
 
 
 # ── Пересборка листов в тематические группы ─────────────────────────
@@ -6519,7 +6204,7 @@ _SHEET_GROUPS = [
     ]),
     ('Верстка', ['Вёрстка']),
     ('Безопасность', []),          # находки - в «Проблемы», лист удалён
-    ('КП', ['Контакты по городам', 'Регион и СНГ']),
+    ('КП', []),                     # находки - в «Проблемы», листы удалены
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
     ('Аналитика', [
@@ -6533,6 +6218,11 @@ _SHEET_GROUPS = [
 # Групповые листы, которым добавляем поясняющую секцию, даже если исходных
 # листов нет (чтобы структура из 7 листов существовала и была понятной).
 _GROUP_NOTES = {
+    'КП': ('Сверка контактов с картой присутствия (телефон/почта/адрес), '
+          'верные переменные города, чистота СНГ-доменов от РФ и '
+          'технический регион поддоменов (гео-теги). Находки – на листе '
+          '«Проблемы» (раздел «Регион и город» / «СНГ-домены» / «Контакты '
+          'по городам»), приоритет – на «План работ».'),
     'Безопасность': ('Заголовки безопасности ответа сервера (HSTS, CSP, '
                      'X-Content-Type-Options, защита от кликджекинга) по '
                      'выборке страниц. Нет заголовка – предупреждение, '
@@ -6540,8 +6230,8 @@ _GROUP_NOTES = {
                      '(раздел «Безопасность»), приоритет – на «План работ».'),
     'Формы': ('Детальная проверка форм – в отдельном отчёте форм-тестера '
               '(свой файл). Здесь, в основном отчёте, форма заявки/телефон '
-              'проверяется как часть страниц (см. лист «Техничка» → блоки '
-              'страниц и «Страница 404»).'),
+              'проверяется как часть страниц (см. лист «Структура страниц» '
+              'и лист «Техничка», раздел «Страница 404»).'),
     'Контент': ('Изображения (alt, современные форматы webp/avif, вес, '
                 'lazy, уникальность картинок категорий, фото товаров не '
                 'дублируются между категориями) – находки на листе '
@@ -6555,9 +6245,28 @@ _GROUP_TAB_RANK = {C.err: 0, C.warn: 1}   # для агрегированног�
 
 # «Хосты и аномалии» - не отдельный старый лист (тот называется «Аномалии»,
 # уходит в группу «Аналитика») - здесь просто исправляем название на
-# реальное, чтобы _fix_where_refs его тоже перевела на группу.
+# реальное, чтобы _sheet_ref/_fix_where_refs его тоже перевели на группу.
 _WHERE_SECTION_OVERRIDE = {'Хосты и аномалии': 'Аномалии'}
 _RE_WHERE_SHEET = re.compile(r'^Лист «([^»]+)»$')
+
+
+def _old_to_group_map() -> dict:
+    """{старое имя листа: имя группового листа}, куда его сливает
+    _regroup_into_groups (Индексация -> Техничка, Вёрстка -> Верстка и т.п.)."""
+    return {old: grp for grp, olds in _SHEET_GROUPS for old in olds}
+
+
+def _sheet_ref(name: str) -> str:
+    """«X» -> «Группа», раздел «X»» для листа, который _regroup_into_groups
+    сливает в групповой (Индексация/Метаданные/Вёрстка/… -> Техничка/Верстка/
+    Аналитика и т.п.) - для текста внутри предложений («см. лист {ref}»).
+    Листы вне группировки (Обзор/Проблемы/Структура страниц/Страницы/…)
+    возвращаются как есть - «X»."""
+    section = _WHERE_SECTION_OVERRIDE.get(name, name)
+    grp = _old_to_group_map().get(section)
+    if grp and grp != name:
+        return f'«{grp}», раздел «{section}»'
+    return f'«{name}»'
 
 
 def _fix_where_refs(tasks):
@@ -6567,16 +6276,11 @@ def _fix_where_refs(tasks):
     исправления ссылка в «Плане работ» ведёт на несуществующую вкладку.
     Переписываем на «Лист «Группа», раздел «X»» ДО того, как этот текст
     попадёт на лист (регруппировка выполняется позже, tasks строятся раньше)."""
-    old_to_group = {old: grp for grp, olds in _SHEET_GROUPS for old in olds}
     for t in tasks:
         m = _RE_WHERE_SHEET.match(t.where or '')
         if not m:
             continue
-        name = m.group(1)
-        section = _WHERE_SECTION_OVERRIDE.get(name, name)
-        grp = old_to_group.get(section)
-        if grp and grp != name:
-            t.where = f'Лист «{grp}», раздел «{section}»'
+        t.where = f'Лист {_sheet_ref(m.group(1))}'
     return tasks
 
 
@@ -7215,7 +6919,8 @@ def build_report(
     if total_text_issues > 0:
         summary_text += (
             f'\nДополнительно: на {len(pages_with_issues)} страницах найдено '
-            f'{total_text_issues} битых переменных в текстах - см. лист «Битые тексты».'
+            f'{total_text_issues} битых переменных в текстах - см. лист '
+            f'{_sheet_ref("Битые тексты")}.'
         )
     if total_content_bugs > 0:
         summary_text += (
@@ -7250,36 +6955,39 @@ def build_report(
         if _idx_hm_junk:
             _idx_bits.append(f'{len(_idx_hm_junk)} служебных ссылок в HTML-карте')
         summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
-                         + ' - см. лист «Индексация».')
+                         + ' - см. «Проблемы» и «План работ».')
     if meta_bad_pages or meta_dup_groups:
         _mb = []
+        _mb_ref = '«Проблемы»'
         if meta_bad_pages:
             _mb.append(f'проблемы на {len(meta_bad_pages)} '
                        f'{_plural_pages(len(meta_bad_pages))}')
         if meta_dup_groups:
             _mb.append(f'{meta_dup_groups} групп дублей (title/описания/URL)')
-        summary_text += ('\nМетаданные: ' + ', '.join(_mb)
-                         + ' - см. лист «Метаданные».')
+            # Дубли (в отличие от находок по странице) не попадают в
+            # «Проблемы» - только на сам лист метаданных.
+            _mb_ref = f'«Проблемы» (страницы) и лист {_sheet_ref("Метаданные")} (дубли)'
+        summary_text += ('\nМетаданные: ' + ', '.join(_mb) + ' - см. ' + _mb_ref + '.')
     if layout_bad_pages:
         summary_text += (f'\nВёрстка: проблемы (viewport/CSS) на '
                          f'{len(layout_bad_pages)} '
                          f'{_plural_pages(len(layout_bad_pages))} - '
-                         f'см. лист «Вёрстка».')
+                         f'см. «Проблемы».')
     if markup_bad_pages:
         summary_text += (f'\nРазметка: проблемы (OG/Schema.org) на '
                          f'{len(markup_bad_pages)} '
                          f'{_plural_pages(len(markup_bad_pages))} - '
-                         f'см. лист «Разметка».')
+                         f'см. «Проблемы».')
     if security_bad_pages:
         summary_text += (f'\nБезопасность: ошибки заголовков на '
                          f'{len(security_bad_pages)} '
                          f'{_plural_pages(len(security_bad_pages))} - '
-                         f'см. лист «Безопасность».')
+                         f'см. «Проблемы».')
     if images_bad_pages:
         summary_text += (f'\nИзображения: картинки без alt на '
                          f'{len(images_bad_pages)} '
                          f'{_plural_pages(len(images_bad_pages))} - '
-                         f'см. лист «Изображения».')
+                         f'см. «Проблемы».')
     _filters_cases = (filters_test or {}).get('cases') or []
     _filters_bad = sum(1 for c in _filters_cases
                        if _FILTER_VERDICT.get(c.get('verdict'),
@@ -7287,13 +6995,13 @@ def build_report(
     if _filters_bad:
         summary_text += (f'\nФильтрация: {_filters_bad} '
                          f'{"фильтр" if _filters_bad == 1 else "фильтров"} '
-                         f'работают некорректно - см. лист «Вёрстка».')
+                         f'работают некорректно - см. лист «Верстка».')
     _console_bad = sum(1 for p in ((console_check or {}).get('pages') or [])
                        if p.get('errors'))
     if _console_bad:
         summary_text += (f'\nОшибки JavaScript: на {_console_bad} '
                          f'{_plural_pages(_console_bad)} есть ошибки в консоли '
-                         f'- см. лист «Ошибки JavaScript».')
+                         f'- см. «Проблемы».')
     if stress_check and stress_check.get('available'):
         _sp = stress_check.get('parsing') or {}
         _sl = stress_check.get('load') or {}
@@ -7301,27 +7009,27 @@ def build_report(
         _s5 = (len(_sp.get('server_errors') or [])
                + sum(p.get('server_5xx', 0) for p in (_sl.get('pages') or []))
                + len(_sd.get('server_errors') or []))
+        _stress_ref = _sheet_ref('Нагрузка и парсинг')
         if _sp.get('banned'):
             summary_text += ('\nНагрузка и парсинг: сайт закрыл доступ '
-                             '(принял бота за парсера) - см. лист «Нагрузка '
-                             'и парсинг».')
+                             f'(принял бота за парсера) - см. лист {_stress_ref}.')
         elif _s5:
             summary_text += (f'\nНагрузка и парсинг: ошибок сервера (5xx) '
-                             f'{_s5} - см. лист «Нагрузка и парсинг».')
+                             f'{_s5} - см. лист {_stress_ref}.')
     if link_profile and link_profile.get('available'):
         _lp_w = sum(len(h.get('warnings') or [])
                     for h in (link_profile.get('hosts') or []))
         if _lp_w:
             summary_text += (f'\nСсылочный профиль: замечаний {_lp_w} '
-                             f'(обвал/всплеск/спам) - см. лист «Ссылочный '
-                             f'профиль».')
+                             f'(обвал/всплеск/спам) - см. лист '
+                             f'{_sheet_ref("Ссылочный профиль")}.')
     if admin_settings and admin_settings.get('available'):
         _adm_bad = [c.get('title') for c in (admin_settings.get('checks') or [])
                     if not c.get('ok')]
         if _adm_bad:
             summary_text += ('\nНастройки в админке: не работают - '
                              + ', '.join(_adm_bad)
-                             + ' (см. лист «Настройки в админке»).')
+                             + f' (см. лист {_sheet_ref("Настройки в админке")}).')
     summary_text += '\nПодробности - на листе «Все детали» (фильтр по колонке «Статус»).'
     # Ссылки на старые листы → на группу-лист (блок внутри группы), т.к.
     # детальные листы теперь секции в 7 тематических листах.
@@ -7389,7 +7097,7 @@ def build_report(
         ('Трафик', 'краткая сводка трафика по странам/периодам (визиты, каналы, лиды, конверсия, отказы); разбивка по типам страниц - на «Динамике трафика» в «Аналитике».'),
         ('Техничка', 'SEO-техничка: индексация (robots/sitemap/canonical), метаданные и единственность заголовков, микроразметка (OG/Schema), безопасность и редиректы, ошибки JavaScript, валидность W3C и скорость, страница 404 и 404 в индексе, санкции ПС, нагрузка/парсинг, битые переменные.'),
         ('Верстка', 'вёрстка и адаптивность: viewport, CSS, сетка на пк/моб/планшет, переходы из меню, работа фильтров товаров, поиск по категориям.'),
-        ('КП', 'сверка с картой присутствия: контакты по городам (телефон/почта/адрес), верные переменные города, чистота СНГ-доменов от РФ.'),
+        ('КП', 'верные переменные города, чистота СНГ-доменов от РФ; сверка контактов (телефон/почта/адрес) с картой присутствия - на листе «Проблемы».'),
         ('Формы', 'формы: детальная проверка - в отдельном отчёте форм-тестера; здесь - точки формы на страницах.'),
         ('Админка', 'работа функций настройки в админке: поддомены/категории/товары/тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
         ('Аналитика', '404 из Метрики, письма Вебмастера/GSC, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений, lite-профиль беклинков.'),
@@ -7509,11 +7217,11 @@ def build_report(
     # ─── Лист индексации (п.1.7) - если проверка выполнялась ────────
     _build_indexing_sheet(wb, results, indexing_summary)
 
-    # Лист «Заголовки и мета» удалён - его находки (единственность title/
-    # description/H1, дубли H2, h2-h6 вне текста, иерархия заголовков)
-    # полностью и читаемо (не str(dict)) попадают в «Проблемы» через
-    # report_priorities._meta_unique_findings.
-    _build_region_sheet(wb, results)
+    # Листы «Заголовки и мета» и «Регион и СНГ» удалены - их находки
+    # (единственность title/description/H1, чужой город/телефон/почта,
+    # СНГ-чистота, технический регион по гео-тегам) полностью попадают в
+    # «Проблемы» через report_priorities.py (_meta_unique_findings/
+    # _region_findings/_cis_findings/_geo_findings).
 
     # ─── Лист метаданных (п.1.8) - если проверка выполнялась ────────
     _build_meta_sheet(wb, results, meta_summary)
@@ -7566,8 +7274,10 @@ def build_report(
     # ─── Лист «Динамика трафика» - если сравнение выполнялось ──────────
     _build_traffic_sheet(wb, traffic)
 
-    # ─── Лист сверки контактов с КП (если были главные с kp_result) ──
-    _build_kp_sheet(wb, results)
+    # Лист «Контакты по городам» удалён (04.08.2026): находки (конкретное
+    # поле/город/что не так) полностью попадают в «Проблемы» через
+    # report_priorities._kp_findings - полная ✓/✗-матрица по городам не
+    # нужна, только реальные расхождения.
     _build_calltracking_sheet(wb, results, calltracking_check)
 
     # ═══════════════════════════════════════════════════════════════

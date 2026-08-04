@@ -93,6 +93,15 @@ def _region_findings(region: Optional[dict], *, city, page_type, url) -> list:
     return out
 
 
+def _geo_findings(region: Optional[dict], *, city, page_type, url) -> list:
+    """Технический регион поддомена (гео-сигналы meta geo.*/Schema
+    addressLocality) - считается только на главной. Сам чекер кладёт эти
+    тексты в warnings (не issues) - Предупреждение, не Ошибка."""
+    geo = (region or {}).get('geo') or {}
+    return [Finding('Предупреждение', 'Регион и город', str(w), city, page_type, url)
+           for w in geo.get('warnings') or []]
+
+
 _META_UNIQUE_LABEL = {
     'title': 'Title', 'description': 'Meta description',
     'h1': 'H1', 'h2': 'H2', 'h3': 'H3', 'h4': 'H4', 'h5': 'H5', 'h6': 'H6',
@@ -386,6 +395,8 @@ def collect_findings(results, *, console_check: dict = None,
                                  page_type=page_type, url=url))
         out.extend(_region_findings(r.region, city=city, page_type=page_type,
                                     url=url))
+        out.extend(_geo_findings(r.region, city=city, page_type=page_type,
+                                 url=url))
         out.extend(_content_findings(r.content, city=city, page_type=page_type,
                                      url=url))
         out.extend(_kp_findings(getattr(r, 'kp_result', None), city=city,
@@ -565,6 +576,16 @@ _RULES = [
      'Проверить вёрстку и адаптивность',
      'Вёрстка и адаптивность влияют на удобство покупки на любом устройстве.'),
 
+    ('Регион и город', 'технический регион не совпадает', 2, 'Разработка',
+     'region_geo_mismatch',
+     'Поправить технический регион (geo-теги/addressLocality)',
+     'Гео-сигналы в коде не совпадают с реальным городом поддомена - '
+     'путает роботов и локальные сервисы.'),
+    ('Регион и город', 'технический регион не задан', 3, 'Разработка',
+     'region_geo_missing',
+     'Добавить технические гео-сигналы (meta geo.*/addressLocality)',
+     'Без гео-сигналов в коде труднее подтвердить регион поддомена для '
+     'локального ранжирования.'),
     ('Регион и город', '', 1, 'SEO + разработка', 'region_wrong_city',
      'Убрать чужой город со страницы',
      'Смешение городов путает и покупателя, и региональное ранжирование.'),
@@ -631,6 +652,14 @@ def group_into_tasks(findings: list) -> list:
 # ── 4. Задачи уровня сайта/хоста (не привязаны к одной странице) ────────
 # Эти находки НЕ идут в «Проблемы» (там колонки заточены под конкретную
 # страницу), а сразу становятся строками «Плана работ».
+
+# Дубль webmaster_api._SANCTION_CODE_RE (та же логика: реальная санкция/
+# угроза - по коду-маркеру, а не по одной FATAL-серьёзности). report_priorities
+# намеренно не импортирует webmaster_api (без сети/API - чистые функции).
+_SANCTION_CODE_RE = re.compile(
+    r'THREAT|MALWARE|SECUR|VIRUS|SPAM|QUALITY|SANC|FRAUD|PHISH|CHEAT|'
+    r'OVEROPT|ADS?_|ADVERT|MOBILE_REDIRECT|DECEPT|CLOAK|DOORWAY', re.I)
+
 
 def extra_site_tasks(*, indexing_summary: dict = None,
                      wm_metrics: dict = None,
@@ -786,17 +815,24 @@ def extra_site_tasks(*, indexing_summary: dict = None,
             why='Фатальная проблема блокирует индексацию сайта целиком.',
             where='Лист «Ошибки сервисов»'))
 
+    # filter_sanctions() (webmaster_api.py) кладёт в ps_filters['yandex'] ЛЮБУЮ
+    # фатальную проблему Вебмастера, не только настоящую санкцию (код-маркер
+    # угрозы/качества/спама) - "сайт не открывается" тоже FATAL, но это не
+    # санкция ПС, а доступность (та же проблема уже отдельной задачей
+    # 'wm_fatal' выше). Без фильтра тут - вводящее в заблуждение дублирование.
     sanc = (ps_filters or {}).get('yandex') or []
+    real_sanc = [s for s in sanc
+                if _SANCTION_CODE_RE.search(str(s.get('code') or ''))]
     gsc_hits = (ps_filters or {}).get('gsc_hits') or []
-    if sanc or gsc_hits:
+    if real_sanc or gsc_hits:
         tasks.append(Task(
             priority=1, task_group='ps_sanctions',
             title='Разобрать санкции поисковых систем',
-            what=(f'Яндекс: {len(sanc)} хост(ов) с санкцией/угрозой'
-                 if sanc else '') + (', ' if sanc and gsc_hits else '')
+            what=(f'Яндекс: {len(real_sanc)} хост(ов) с санкцией/угрозой'
+                 if real_sanc else '') + (', ' if real_sanc and gsc_hits else '')
                 + (f'Google: {len(gsc_hits)} писем с маркерами ручных мер'
                   if gsc_hits else ''),
-            volume=len(sanc) + len(gsc_hits), owner='SEO',
+            volume=len(real_sanc) + len(gsc_hits), owner='SEO',
             why='Санкция резко режет видимость сайта в поиске.',
             where='Лист «Фильтры ПС»'))
 
