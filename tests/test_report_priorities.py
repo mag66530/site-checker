@@ -124,6 +124,24 @@ def test_meta_unique_findings_заголовки_и_мета():
     assert out[0].detail == 'H1: теги внутри'
 
 
+def test_markup_findings_сохраняет_field_details():
+    """Разметка (OG/Schema.org): field_details («Offer/цена: 21 из 60») -
+    раньше отдельная колонка на удалённом листе «Разметка», при переносе в
+    generic-обработчик терялась бы; _markup_findings кладёт её в detail."""
+    r = _result(markup={
+        'issues': ['в разметке Product: нет поля «предложение/цена»'],
+        'warnings': ['в разметке Organization: нет поля «логотип»'],
+        'field_details': ['Offer/цена: 21 из 60', 'Organization/логотип: 11 из 11'],
+    })
+    out = collect_findings([r])
+    assert len(out) == 2
+    for f in out:
+        assert f.section == 'Разметка'
+        assert 'Offer/цена: 21 из 60' in f.detail
+        assert 'Organization/логотип: 11 из 11' in f.detail
+    assert {f.level for f in out} == {'Ошибка', 'Предупреждение'}
+
+
 def test_cis_findings_снг_домены():
     """issues - список словарей {тип, зона, найдено, контекст, пояснение}
     (та же форма, что у region/meta_unique), а не строк - раньше шли через
@@ -441,18 +459,36 @@ def test_extra_site_tasks_wm_anomaly_группируется_по_метрик�
     assert tasks[0].priority == 1
 
 
+class _Issue:
+    def __init__(self, host, severity):
+        self.host = host
+        self.severity = severity
+
+
 def test_extra_site_tasks_fatal_service_issues():
-    class _Issue:
-        def __init__(self, host, severity):
-            self.host = host
-            self.severity = severity
+    """fatal и critical - РАЗНЫЕ задачи (не всё в одну кучу)."""
     tasks = extra_site_tasks(service_issues=[
         _Issue('aktau.example.kz', 'fatal'),
         _Issue('example.ru', 'critical'),
     ])
-    assert len(tasks) == 1
-    assert tasks[0].task_group == 'wm_fatal'
-    assert tasks[0].volume == 1
+    assert len(tasks) == 2
+    fatal = next(t for t in tasks if t.task_group == 'wm_fatal')
+    critical = next(t for t in tasks if t.task_group == 'wm_service_critical')
+    assert fatal.volume == 1
+    assert critical.volume == 1
+    assert critical.priority == 1
+
+
+def test_extra_site_tasks_service_issues_possible_recommendation():
+    tasks = extra_site_tasks(service_issues=[
+        _Issue('a.ru', 'possible'), _Issue('a.ru', 'recommendation'),
+        _Issue('b.ru', 'info'),   # info - не проблема, задачи не будет
+    ])
+    assert len(tasks) == 2
+    groups = {t.task_group: t for t in tasks}
+    assert groups['wm_service_possible'].priority == 2
+    assert groups['wm_service_recommendation'].priority == 3
+    assert 'wm_service_info' not in groups
 
 
 def test_extra_site_tasks_пусто_если_ничего_не_передано():

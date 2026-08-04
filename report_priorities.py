@@ -469,8 +469,73 @@ def _index_404_findings(index_404_check: Optional[dict]) -> list:
     return out
 
 
+def _metrika_404_findings(metrika_reports, results) -> list:
+    """404 по данным Яндекс.Метрики (реальные визиты на несуществующую
+    страницу) - раньше отдельный лист «404 из Метрики». Источник ДРУГОЙ,
+    чем у «404 в индексе» (Вебмастер/GSC: страница есть в поиске) - тут
+    источник посещений, поэтому пишем это прямо в detail, а не молчим:
+    если URL совпадает с 404/410, пойманным самим чек-листом - «подтверждено
+    обходом сайта»; если нет - «только по Метрике» (вне выборки прогона или
+    домен не проверялся)."""
+    if not metrika_reports:
+        return []
+    from urllib.parse import urlparse as _urlparse
+    sc_failed_urls, sc_failed_paths = set(), set()
+    for r in results or []:
+        if r.is_error and r.http_code in (404, 410):
+            sc_failed_urls.add(r.url)
+            try:
+                p = _urlparse(r.url).path
+                if p:
+                    sc_failed_paths.add(p)
+            except ValueError:
+                pass
+
+    out = []
+    for report in metrika_reports:
+        for page in report.pages:
+            url = page.page_url or ''
+            confirmed = url in sc_failed_urls
+            if not confirmed and url:
+                try:
+                    confirmed = _urlparse(url).path in sc_failed_paths
+                except ValueError:
+                    pass
+            problem = ('страница отвечает ошибкой - подтверждено и обходом '
+                      'сайта, и реальными визитами (Метрика)' if confirmed else
+                      'по данным Метрики были визиты на страницу с ошибкой - '
+                      'при обходе сайта её не поймали (вне выборки прогона '
+                      'или чужой домен), но переходы на неё реальны')
+            out.append(Finding(
+                'Ошибка', '404 в индексе', problem, url=url or '(URL не пришёл в письме)',
+                detail=f'{report.country_name}, {report.report_date}: '
+                       f'просмотров {page.views}, посетителей {page.visitors}'
+                       + (f' · реферер: {page.referer}' if page.referer else '')
+                       + f' · заголовок страницы: «{page.page_title}»'))
+    return out
+
+
+def _markup_findings(markup: Optional[dict], *, city, page_type, url) -> list:
+    """Разметка (OG/Schema.org) - как _from_issue_dict, но с field_details
+    ("Offer/цена: 21 из 60") в detail - раньше это была отдельная колонка
+    на листе «Разметка», при объединении в общий адаптер терялась."""
+    if not markup:
+        return []
+    out = []
+    details = markup.get('field_details') or []
+    detail_text = '; '.join(details[:3]) + (f' … +{len(details) - 3}' if len(details) > 3 else '')
+    for text in markup.get('issues') or []:
+        out.append(Finding('Ошибка', 'Разметка', str(text), city, page_type, url,
+                           detail=detail_text))
+    for text in markup.get('warnings') or []:
+        out.append(Finding('Предупреждение', 'Разметка', str(text), city, page_type, url,
+                           detail=detail_text))
+    return out
+
+
 def collect_findings(results, *, console_check: dict = None,
                      index_404_check: dict = None,
+                     metrika_reports: list = None,
                      calltracking_check: dict = None,
                      search_check: dict = None,
                      filters_test: dict = None) -> list:
@@ -488,8 +553,8 @@ def collect_findings(results, *, console_check: dict = None,
                                     city=city, page_type=page_type, url=url))
         out.extend(_layout_findings(r.layout, city=city, page_type=page_type,
                                     url=url))
-        out.extend(_from_issue_dict(r.markup, section='Разметка',
-                                    city=city, page_type=page_type, url=url))
+        out.extend(_markup_findings(r.markup, city=city, page_type=page_type,
+                                    url=url))
         out.extend(_from_issue_dict(r.security, section='Безопасность',
                                     city=city, page_type=page_type, url=url))
         out.extend(_images_findings(r.images, city=city, page_type=page_type,
@@ -513,6 +578,7 @@ def collect_findings(results, *, console_check: dict = None,
                                            city=city, page_type=page_type, url=url))
     out.extend(_console_findings(console_check))
     out.extend(_index_404_findings(index_404_check))
+    out.extend(_metrika_404_findings(metrika_reports, results))
     out.extend(_calltracking_findings(results, calltracking_check))
     out.extend(_search_check_findings(search_check))
     out.extend(_filters_test_findings(filters_test))
@@ -927,6 +993,31 @@ def extra_site_tasks(*, indexing_summary: dict = None,
             what=', '.join(sorted(fatal_hosts)),
             volume=len(fatal_hosts), owner='SEO + разработка',
             why='Фатальная проблема блокирует индексацию сайта целиком.',
+            where='Лист «Ошибки сервисов»'))
+
+    # Остальные уровни серьёзности (fatal - уже отдельной задачей выше;
+    # info - справочная информация, не проблема, не заводим задачу).
+    _SVC_SEV_META = {
+        'critical': (1, 'критические', 'Критическая проблема (безопасность/'
+                    'битые ссылки и т.п.) - серьёзно мешает сайту и роботу.'),
+        'possible': (2, 'возможные', 'Возможная проблема - стоит проверить, '
+                    'даже если сервис не уверен на 100%.'),
+        'recommendation': (3, 'рекомендации', 'Рекомендация сервиса - не '
+                           'срочно, но полезно сделать.'),
+    }
+    _svc_by_sev: dict = {}
+    for i in (service_issues or []):
+        sev = getattr(i, 'severity', None)
+        if sev not in _SVC_SEV_META:
+            continue
+        _svc_by_sev.setdefault(sev, set()).add(getattr(i, 'host', ''))
+    for sev, hosts in _svc_by_sev.items():
+        priority, label, why = _SVC_SEV_META[sev]
+        tasks.append(Task(
+            priority=priority, task_group=f'wm_service_{sev}',
+            title=f'Разобрать проблемы в сервисах ({label})',
+            what=', '.join(sorted(hosts)),
+            volume=len(hosts), owner='SEO + разработка', why=why,
             where='Лист «Ошибки сервисов»'))
 
     # filter_sanctions() (webmaster_api.py) кладёт в ps_filters['yandex'] ЛЮБУЮ
