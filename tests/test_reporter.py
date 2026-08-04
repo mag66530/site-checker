@@ -393,6 +393,14 @@ def test_страницы_хосты_и_аномалии_трафик_созда
         vals = [c.value for row in tr.iter_rows() for c in row if c.value]
         assert 76 in vals and 64 in vals   # реальные visits/direct, не выдумка
 
+        # «Ошибки сервисов» - детальный лист, на который ссылается «План
+        # работ» (Task.where); должен реально собираться и сливаться в
+        # группу «Аналитика», а не оставаться неиспользуемой функцией.
+        an = wb['Аналитика']
+        an_texts = [c.value for row in an.iter_rows() for c in row if c.value]
+        assert any('Ошибки сервисов' in str(t) for t in an_texts)
+        assert any('Сайт не загружается' in str(t) for t in an_texts)
+
 
 def test_every_detail_sheet_is_grouped():
     """Защита от потери функционала: КАЖДЫЙ лист, создаваемый в reporter

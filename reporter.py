@@ -1311,18 +1311,17 @@ _NOTIF_SECTIONS = [
 ]
 
 
-def _build_notifications_sheet(wb, notifications, service_issues=None):
-    """Лист «Уведомления» - письма по источникам + ошибки прямо из сервисов
-    (Вебмастер по API). Структурирован секциями. Добавляется всегда: при
+def _build_notifications_sheet(wb, notifications):
+    """Лист «Уведомления» - письма по источникам (Вебмастер/GSC/Я.Бизнес/
+    2ГИС/Google) за период проверки. Структурирован секциями. Ошибки прямо
+    из сервисов (не из почты) - отдельным листом «Ошибки сервисов», чтобы
+    не дублировать одни и те же данные дважды. Добавляется всегда: при
     пустых данных показывает заглушку."""
     notifications = notifications or []
-    service_issues = service_issues or []
     ws = wb.create_sheet('Уведомления')
     ws.sheet_view.showGridLines = False
 
-    has_critical = (any(n.priority == 'critical' for n in notifications)
-                    or any(getattr(i, 'severity', '') in ('fatal', 'critical')
-                           for i in service_issues))
+    has_critical = any(n.priority == 'critical' for n in notifications)
     ws.sheet_properties.tabColor = C.err if has_critical else C.accent
 
     ws.column_dimensions['A'].width = 3
@@ -1352,8 +1351,8 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 24
 
-    # Нет ни писем, ни ошибок сервисов - показываем заглушку и выходим
-    if not notifications and not service_issues:
+    # Нет писем - показываем заглушку и выходим
+    if not notifications:
         ws.merge_cells('B5:H5')
         c = ws['B5']
         c.value = ('За период проверки писем не найдено. '
@@ -1545,82 +1544,10 @@ def _build_notifications_sheet(wb, notifications, service_issues=None):
 
         row += 2  # пробел между секциями
 
-    # ── Секция «Вебмастер» - ошибки прямо из сервиса (API), не из почты ──
-    if service_issues:
-        from collections import defaultdict as _dd
-        _n_problems = len(_group_service_issues(service_issues))
-        _n_hosts = len({getattr(i, 'host', '') for i in service_issues})
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
-        sc = ws.cell(row=row, column=2)
-        sc.value = (f'Вебмастер  ({_n_problems} проблем на {_n_hosts} сайтах, '
-                    f'{len(service_issues)} всего)')
-        sc.font = _font(size=13, bold=True, color=C.accent)
-        sc.fill = _fill(C.accent_soft)
-        sc.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
-
-        prio_groups = _dd(list)
-        for i in service_issues:
-            prio_groups[_SEV2PRIO.get(getattr(i, 'severity', 'info'), 'info')].append(i)
-
-        for priority in _NOTIF_PRIORITY_ORDER:
-            p_items = prio_groups.get(priority, [])
-            if not p_items:
-                continue
-            p_color = _NOTIF_PRIORITY_COLOR[priority]
-            p_bg = _NOTIF_PRIORITY_BG[priority]
-            p_label = _NOTIF_PRIORITY_LABEL[priority]
-
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
-            pc = ws.cell(row=row, column=2)
-            pc.value = f'  {p_label}  ({len(p_items)})'
-            pc.font = _font(size=10, bold=True, color=p_color)
-            pc.fill = _fill(p_bg)
-            pc.alignment = _align(indent=2)
-            ws.row_dimensions[row].height = 20
-            row += 1
-
-            # Шапка: одна строка на проблему, сайты - списком + их состояния
-            for ci, h in enumerate(['Дата', 'Серьёзность', 'Категория', 'Проблема',
-                                    'Сайты', 'Состояние', 'Кол-во', 'Отдел'], 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = h
-                cell.font = _font(size=9, bold=True, color=C.text_muted)
-                cell.fill = _fill(C.surface)
-                cell.alignment = _align()
-                cell.border = _border()
-            ws.row_dimensions[row].height = 20
-            row += 1
-
-            groups = _group_service_issues(p_items)
-            for g in sorted(groups, key=lambda x: x['count'], reverse=True):
-                hosts_str = ', '.join(g['hosts'])
-                ws.row_dimensions[row].height = _notif_row_height(hosts_str, '')
-                for ci, (val, kw) in enumerate([
-                    (g['date'], {'color': C.text_soft}),
-                    (p_label, {'bold': priority == 'critical', 'color': p_color}),
-                    ('Диагностика', {'color': C.text_soft}),
-                    (g['title'], {'bold': priority == 'critical', 'color': p_color}),
-                    (hosts_str, {'size': 9, 'color': C.text_soft}),
-                    (_format_states(g['states']), {'size': 9, 'color': C.text_soft}),
-                    (len(g['hosts']), {'size': 10, 'bold': True, 'color': C.text_soft}),
-                    (_dept_service_issue(g['first']), {'size': 9, 'color': C.text_soft}),
-                ], 2):
-                    cell = ws.cell(row=row, column=ci)
-                    cell.value = val
-                    cell.font = _font(**kw)
-                    cell.alignment = _align(
-                        wrap=True, vertical='top',
-                        horizontal='center' if ci == 8 else 'general')
-                    cell.border = _border(color=C.border_light)
-                row += 1
-
-            row += 1
-        row += 2
-
 
 # ── Лист «Ошибки сервисов» (Вебмастер/GSC/Метрика - из API) ─────────
+# Ошибки прямо из сервисов (не из почты) - находки, детали для «Плана
+# работ» (Task.where = «Лист «Ошибки сервисов»»).
 
 _SVC_SECTION = [
     ('webmaster', 'Яндекс.Вебмастер'),
@@ -6893,14 +6820,18 @@ def build_report(
             ws4.auto_filter.ref = f'A{hdr_row}:H{row_idx - 1}'
 
     # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 5: Уведомления (Вебмастер + GSC) - если сбор включён
+    # ЛИСТ 5: Уведомления (письма Вебмастера/GSC/Я.Бизнеса/2ГИС/Google)
     # ═══════════════════════════════════════════════════════════════
     # notifications=None - сбор уведомлений был ВЫКЛЮЧЕН, листа нет.
     # notifications=[] - сбор включён, писем нет: лист с заглушкой
     # («проверено, писем нет» - это результат, а не отсутствие проверки).
-    # Сюда же идут ошибки из Вебмастера по API (секция «Вебмастер»).
-    if notifications is not None or service_issues:
-        _build_notifications_sheet(wb, notifications, service_issues)
+    if notifications is not None:
+        _build_notifications_sheet(wb, notifications)
+
+    # ЛИСТ: «Ошибки сервисов» - находки прямо из сервисов (не из почты),
+    # детали к агрегированным задачам «Разобрать проблемы в сервисах» в
+    # «Плане работ».
+    _build_service_issues_sheet(wb, service_issues)
 
     # ЛИСТ: «Автокликер» - итоги перекликивания ошибок (если запускался).
     _build_autoclick_sheet(wb, autoclick)
