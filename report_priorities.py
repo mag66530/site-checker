@@ -93,6 +93,40 @@ def _region_findings(region: Optional[dict], *, city, page_type, url) -> list:
     return out
 
 
+_META_UNIQUE_LABEL = {
+    'title': 'Title', 'description': 'Meta description',
+    'h1': 'H1', 'h2': 'H2', 'h3': 'H3', 'h4': 'H4', 'h5': 'H5', 'h6': 'H6',
+}
+
+
+def _meta_unique_findings(meta_unique: Optional[dict], *, city, page_type,
+                          url) -> list:
+    """Заголовки и мета: issues - список словарей {тип, найдено, пояснение}
+    (та же форма, что у region), а не строк - через generic _from_issue_dict
+    получался бы str(dict) вида "{'тип': 'title', ...}" вместо текста."""
+    out = []
+    for i in (meta_unique or {}).get('issues') or []:
+        label = _META_UNIQUE_LABEL.get(i.get('тип'), i.get('тип', ''))
+        out.append(Finding(
+            'Ошибка', 'Заголовки и мета', i.get('пояснение', ''),
+            city, page_type, url, detail=f'{label}: {i.get("найдено", "")}'))
+    return out
+
+
+def _cis_findings(cis: Optional[dict], *, city, page_type, url) -> list:
+    """СНГ-домены: issues - список словарей {тип, зона, найдено, контекст,
+    пояснение} (та же форма, что у region/meta_unique), а не строк -
+    через generic _from_issue_dict получался бы str(dict) вместо текста."""
+    out = []
+    for i in (cis or {}).get('issues') or []:
+        out.append(Finding(
+            'Ошибка', 'СНГ-домены', i.get('пояснение', ''),
+            city, page_type, url,
+            detail=f'{i.get("зона", "")}: «{i.get("найдено", "")}» - '
+                   f'{i.get("контекст", "")}'))
+    return out
+
+
 def _content_findings(content, *, city, page_type, url) -> list:
     out = []
     if content is None:
@@ -325,11 +359,11 @@ def collect_findings(results, *, console_check: dict = None,
                                     city=city, page_type=page_type, url=url))
         out.extend(_images_findings(r.images, city=city, page_type=page_type,
                                     url=url))
-        out.extend(_from_issue_dict(getattr(r, 'meta_unique', None),
-                                    section='Заголовки и мета',
-                                    city=city, page_type=page_type, url=url))
-        out.extend(_from_issue_dict(getattr(r, 'cis', None), section='СНГ-домены',
-                                    city=city, page_type=page_type, url=url))
+        out.extend(_meta_unique_findings(getattr(r, 'meta_unique', None),
+                                         city=city, page_type=page_type,
+                                         url=url))
+        out.extend(_cis_findings(getattr(r, 'cis', None), city=city,
+                                 page_type=page_type, url=url))
         out.extend(_region_findings(r.region, city=city, page_type=page_type,
                                     url=url))
         out.extend(_content_findings(r.content, city=city, page_type=page_type,
