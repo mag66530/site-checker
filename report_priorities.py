@@ -929,6 +929,31 @@ def extra_site_tasks(*, indexing_summary: dict = None,
             why='Фатальная проблема блокирует индексацию сайта целиком.',
             where='Лист «Ошибки сервисов»'))
 
+    # Остальные уровни серьёзности (fatal - уже отдельной задачей выше;
+    # info - справочная информация, не проблема, не заводим задачу).
+    _SVC_SEV_META = {
+        'critical': (1, 'критические', 'Критическая проблема (безопасность/'
+                    'битые ссылки и т.п.) - серьёзно мешает сайту и роботу.'),
+        'possible': (2, 'возможные', 'Возможная проблема - стоит проверить, '
+                    'даже если сервис не уверен на 100%.'),
+        'recommendation': (3, 'рекомендации', 'Рекомендация сервиса - не '
+                           'срочно, но полезно сделать.'),
+    }
+    _svc_by_sev: dict = {}
+    for i in (service_issues or []):
+        sev = getattr(i, 'severity', None)
+        if sev not in _SVC_SEV_META:
+            continue
+        _svc_by_sev.setdefault(sev, set()).add(getattr(i, 'host', ''))
+    for sev, hosts in _svc_by_sev.items():
+        priority, label, why = _SVC_SEV_META[sev]
+        tasks.append(Task(
+            priority=priority, task_group=f'wm_service_{sev}',
+            title=f'Разобрать проблемы в сервисах ({label})',
+            what=', '.join(sorted(hosts)),
+            volume=len(hosts), owner='SEO + разработка', why=why,
+            where='Лист «Ошибки сервисов»'))
+
     # filter_sanctions() (webmaster_api.py) кладёт в ps_filters['yandex'] ЛЮБУЮ
     # фатальную проблему Вебмастера, не только настоящую санкцию (код-маркер
     # угрозы/качества/спама) - "сайт не открывается" тоже FATAL, но это не

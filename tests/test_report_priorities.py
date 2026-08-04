@@ -441,18 +441,36 @@ def test_extra_site_tasks_wm_anomaly_группируется_по_метрик�
     assert tasks[0].priority == 1
 
 
+class _Issue:
+    def __init__(self, host, severity):
+        self.host = host
+        self.severity = severity
+
+
 def test_extra_site_tasks_fatal_service_issues():
-    class _Issue:
-        def __init__(self, host, severity):
-            self.host = host
-            self.severity = severity
+    """fatal и critical - РАЗНЫЕ задачи (не всё в одну кучу)."""
     tasks = extra_site_tasks(service_issues=[
         _Issue('aktau.example.kz', 'fatal'),
         _Issue('example.ru', 'critical'),
     ])
-    assert len(tasks) == 1
-    assert tasks[0].task_group == 'wm_fatal'
-    assert tasks[0].volume == 1
+    assert len(tasks) == 2
+    fatal = next(t for t in tasks if t.task_group == 'wm_fatal')
+    critical = next(t for t in tasks if t.task_group == 'wm_service_critical')
+    assert fatal.volume == 1
+    assert critical.volume == 1
+    assert critical.priority == 1
+
+
+def test_extra_site_tasks_service_issues_possible_recommendation():
+    tasks = extra_site_tasks(service_issues=[
+        _Issue('a.ru', 'possible'), _Issue('a.ru', 'recommendation'),
+        _Issue('b.ru', 'info'),   # info - не проблема, задачи не будет
+    ])
+    assert len(tasks) == 2
+    groups = {t.task_group: t for t in tasks}
+    assert groups['wm_service_possible'].priority == 2
+    assert groups['wm_service_recommendation'].priority == 3
+    assert 'wm_service_info' not in groups
 
 
 def test_extra_site_tasks_пусто_если_ничего_не_передано():

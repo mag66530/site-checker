@@ -101,7 +101,8 @@ def test_проблемы_колонка_как_исправить_заполн�
 def test_fix_where_refs_переписывает_ссылку_на_слитый_лист():
     """Индексация/Фильтры ПС/Ошибки сервисов больше не отдельные вкладки -
     _regroup_into_groups сливает их в «Техничка»/«Аналитика». where=«Лист
-    «Индексация»» без исправления вёл бы в никуда."""
+    «Индексация»» без исправления вёл бы в никуда. «Хосты и аномалии» -
+    реальный самостоятельный лист (не сливается), остаётся как есть."""
     from reporter import _fix_where_refs
     from report_priorities import Task
     tasks = [
@@ -113,7 +114,7 @@ def test_fix_where_refs_переписывает_ссылку_на_слитый_
     _fix_where_refs(tasks)
     assert tasks[0].where == 'Лист «Техничка», раздел «Индексация»'
     assert tasks[1].where == 'Лист «Аналитика», раздел «Ошибки сервисов»'
-    assert tasks[2].where == 'Лист «Аналитика», раздел «Аномалии»'
+    assert tasks[2].where == 'Лист «Хосты и аномалии»'
     assert tasks[3].where == 'Лист «Техничка», раздел «Фильтры ПС»'
 
 
@@ -323,11 +324,12 @@ def test_speed_with_comma():
 def test_sheet_ref_переписывает_слитый_лист_иначе_отдаёт_как_есть():
     """_sheet_ref - как _fix_where_refs, но для текста внутри предложений
     («см. лист {ref}»), а не только Task.where. Индексация уходит в
-    Техничку, Обзор нигде не сливается - остаётся как есть."""
+    Техничку, Обзор и Хосты и аномалии нигде не сливаются - остаются
+    как есть."""
     from reporter import _sheet_ref
     assert _sheet_ref('Индексация') == '«Техничка», раздел «Индексация»'
     assert _sheet_ref('Обзор') == '«Обзор»'
-    assert _sheet_ref('Хосты и аномалии') == '«Аналитика», раздел «Аномалии»'
+    assert _sheet_ref('Хосты и аномалии') == '«Хосты и аномалии»'
 
 
 def test_страницы_хосты_и_аномалии_трафик_создаются_с_реальными_данными():
@@ -359,6 +361,10 @@ def test_страницы_хосты_и_аномалии_трафик_созда
          'visits': 90, 'direct': 64, 'yandex': 9, 'google': 5, 'leads': 1,
          'conv': 1.1, 'bounce': 45, 'depth': 2, 'duration': 55, 'pages': {}},
     ]}]}
+    anomalies = {'gsc': {'available': True, 'spiked': True,
+                        'total_impr_cur': 500, 'total_impr_prev': 200,
+                        'spam_queries_count': 1,
+                        'spam_queries': [{'query': 'порно казино', 'impressions': 40}]}}
 
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / 'test.xlsx'
@@ -366,11 +372,12 @@ def test_страницы_хосты_и_аномалии_трафик_созда
             project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
             finished_at_ms=int(time.time() * 1000), selected_subdomains=selected,
             results=results, output_path=out, service_issues=service_issues,
-            wm_metrics=wm_metrics, traffic=traffic,
+            wm_metrics=wm_metrics, traffic=traffic, anomalies=anomalies,
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
         assert {'Страницы', 'Хосты и аномалии', 'Трафик'} <= set(wb.sheetnames)
+        assert 'Аномалии' not in wb.sheetnames   # слит в «Хосты и аномалии»
 
         pages = wb['Страницы']
         urls = [pages.cell(row=r, column=5).value for r in range(6, 8)]
@@ -380,6 +387,7 @@ def test_страницы_хосты_и_аномалии_трафик_созда
         texts = [c.value for row in ha.iter_rows() for c in row if c.value]
         assert any('Сайт не загружается' in str(t) for t in texts)
         assert any('5xx' in str(t) for t in texts)
+        assert any('порно казино' in str(t) for t in texts)   # часть B (ГСК)
 
         tr = wb['Трафик']
         vals = [c.value for row in tr.iter_rows() for c in row if c.value]

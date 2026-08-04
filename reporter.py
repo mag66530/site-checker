@@ -949,16 +949,24 @@ def _build_pages_overview_sheet(wb, results, findings):
 # ── Лист «Хосты и аномалии» - проблемы уровня сайта/хоста целиком ───
 
 
-def _build_hosts_anomalies_sheet(wb, service_issues, wm_metrics, link_profile):
+def _build_hosts_anomalies_sheet(wb, service_issues, wm_metrics, link_profile,
+                                 anomalies=None):
     """Лист «Хосты и аномалии»: фатальные проблемы из сервисов (Вебмастер/
-    GSC/Метрика) + аномалии обхода/ссылок «от себя-прошлого». Не привязаны
-    к одной странице - раньше были погребены внутри группового листа
-    «Аналитика», здесь вынесены наверх (обычно самые срочные)."""
+    GSC/Метрика) + аномалии обхода/ссылок «от себя-прошлого» + всплески
+    мусорных/иноязычных запросов (ГСК) и переходов со спам-сайтов
+    (Метрика). Не привязаны к одной странице - раньше были погребены
+    внутри группового листа «Аналитика», здесь вынесены наверх (обычно
+    самые срочные)."""
     fatal = [i for i in (service_issues or [])
              if getattr(i, 'severity', None) == 'fatal']
     anomaly_rows = (_collect_anomaly_rows(wm_metrics, link_profile)
                     if wm_metrics and wm_metrics.get('available') else [])
-    if not fatal and not anomaly_rows:
+    _a = anomalies or {}
+    gsc = _a.get('gsc') or {}
+    mtr = _a.get('metrika') or {}
+    _gsc_bad = gsc.get('available') and (gsc.get('spiked') or gsc.get('spam_queries_count'))
+    _mtr_bad = mtr.get('available') and (mtr.get('spiked') or mtr.get('spam_domains_count'))
+    if not fatal and not anomaly_rows and not _gsc_bad and not _mtr_bad:
         return
 
     n_red = sum(1 for a in anomaly_rows if a.get('severity') in ('fatal', 'critical'))
@@ -1051,6 +1059,50 @@ def _build_hosts_anomalies_sheet(wb, service_issues, wm_metrics, link_profile):
                 hc.font = _font(size=10, color=C.accent, underline='single')
             ws.row_dimensions[row].height = _row_height_for(text, _F_WIDTH, min_px=18)
             row += 1
+
+    # ── Всплески мусорных/иноязычных запросов (ГСК) и переходов со
+    # спам-сайтов (Метрика) - проектная сводка, не по одному хосту. ──
+    if _gsc_bad or _mtr_bad:
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        c = ws.cell(row=row, column=2, value='Всплески мусорных запросов и переходов')
+        c.font = _font(size=13, bold=True, color=C.err)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+
+        def _q_line(text, color=C.text, bold=False):
+            nonlocal row
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+            cc = ws.cell(row=row, column=2, value=text)
+            cc.font = _font(size=10, color=color, bold=bold)
+            cc.alignment = _align(indent=1, wrap=True)
+            ws.row_dimensions[row].height = 18
+            row += 1
+
+        if _gsc_bad:
+            _q_line(
+                f'Google Search Console: показы сейчас/было '
+                f'{gsc.get("total_impr_cur")}/{gsc.get("total_impr_prev")}'
+                + _ratio_word(gsc.get('impr_spike'), gsc.get('spiked'))
+                + f' · мусорных/иноязычных запросов: '
+                f'{gsc.get("spam_queries_count", 0)} (показов '
+                f'{gsc.get("spam_impr_cur", 0)}, было {gsc.get("spam_impr_prev", 0)})',
+                color=C.err, bold=True)
+            for q in (gsc.get('spam_queries') or [])[:12]:
+                _q_line(f'  «{q.get("query", "")}» - {q.get("impressions")} показов',
+                       color=C.text_soft)
+        if _mtr_bad:
+            _q_line(
+                f'Метрика: переходы-рефералы сейчас/было '
+                f'{mtr.get("total_cur")}/{mtr.get("total_prev")}'
+                + _ratio_word(mtr.get('referral_spike'), mtr.get('spiked'))
+                + f' · спам-доменов-рефереров: {mtr.get("spam_domains_count", 0)} '
+                f'(переходов {mtr.get("spam_cur", 0)}, было {mtr.get("spam_prev", 0)})',
+                color=C.err, bold=True)
+            for d in (mtr.get('spam_domains') or [])[:15]:
+                _q_line(f'  {d.get("domain", "")} - {d.get("visits")} переходов',
+                       color=C.text_soft)
 
 
 # ── Лист уведомлений ──────────────────────────────────────────────
@@ -3827,148 +3879,9 @@ def _collect_anomaly_rows(wm_metrics, link_profile):
     return rows
 
 
-def _render_wm_anomalies(ws, start_row, wm_metrics, link_profile):
-    """Часть A секции «Аномалии»: Вебмастер (обход/проблемы/страницы/ИКС) +
-    внезапные мусорные доноры. Пишет с start_row, возвращает следующую строку."""
-    row = start_row
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-    h = ws.cell(row=row, column=2, value='A. Вебмастер и ссылочный профиль')
-    h.font = _font(size=12, bold=True, color='FFFFFF')
-    h.fill = _fill(C.text_soft)
-    h.alignment = _align(indent=1)
-    ws.row_dimensions[row].height = 20
-    row += 1
-
-    if not wm_metrics.get('available'):
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        c = ws.cell(row=row, column=2,
-                    value=f'⚪ {wm_metrics.get("note", "Проверка не выполнялась.")}')
-        c.font = _font(size=10, color=C.text_muted)
-        c.alignment = _align(indent=1, wrap=True)
-        return row + 2
-
-    rows = _collect_anomaly_rows(wm_metrics, link_profile)
-    n_red = sum(1 for r in rows if r.get('severity') in ('fatal', 'critical'))
-    n_warn = sum(1 for r in rows if r.get('severity') == 'possible')
-
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-    c = ws.cell(row=row, column=2)
-    if rows:
-        c.value = (f'⚠ Аномалий: {len(rows)} · фатально/критично: {n_red} · '
-                   f'возможных: {n_warn}. Проверьте по каждому.')
-        c.font = _font(size=11, bold=True, color=C.err if n_red else C.warn)
-    else:
-        _hosts = len(wm_metrics.get('hosts') or [])
-        c.value = (f'✅ Аномалий Вебмастера/ссылок нет (проверено хостов: '
-                   f'{_hosts}). Обход, проблемы, страницы/ИКС и доноры - в норме.')
-        c.font = _font(size=11, bold=True, color=C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(indent=1)
-    ws.row_dimensions[row].height = 22
-    row += 1
-    if not rows:
-        return row + 1
-
-    hdr_row = row
-    for col, title in (('B', 'Хост'), ('C', 'Метрика'),
-                       ('D', 'Было → сейчас'), ('E', 'Отклонение'),
-                       ('F', 'Что случилось')):
-        cell = ws[f'{col}{hdr_row}']
-        cell.value = title
-        cell.font = _font(size=10, bold=True, color=C.text_muted)
-        cell.fill = _fill(C.surface)
-        cell.alignment = _align(horizontal='center' if col in 'DE' else 'left',
-                                indent=0 if col in 'DE' else 1)
-        cell.border = _border()
-    ws.row_dimensions[hdr_row].height = 22
-    row += 1
-
-    for r in rows:
-        red = r.get('severity') in ('fatal', 'critical')
-        color = C.err if red else C.warn
-        sev_label = _ANOM_SEV.get(r.get('severity'), (9, ''))[1]
-        dpct = (f'−{abs(r["delta_pct"])}%' if r.get('delta_pct') else
-                (sev_label.split(' ', 1)[-1] if sev_label else '-'))
-        vals = [
-            ('B', r.get('host', ''), _font(size=10), _align(indent=1)),
-            ('C', r.get('metric', ''), _font(size=10, bold=True, color=color),
-             _align(indent=1)),
-            ('D', _fmt_ba(r.get('before'), r.get('after')),
-             _font(size=10, color=C.text_soft), _align(horizontal='center')),
-            ('E', dpct, _font(size=10, bold=red, color=color),
-             _align(horizontal='center')),
-            ('F', r.get('text', ''), _font(size=10, color=C.text), _align(wrap=True, indent=1)),
-        ]
-        for col, val, fnt, algn in vals:
-            cell = ws[f'{col}{row}']
-            cell.value = val
-            cell.font = fnt
-            cell.alignment = algn
-            cell.border = _border(color=C.border_light)
-            if red and col in 'CE':
-                cell.fill = _fill(C.err_soft)
-        # Хост - кликабельный: ведёт в панель Вебмастера этого сайта.
-        if r.get('panel_url'):
-            hc = ws[f'B{row}']
-            hc.hyperlink = r['panel_url']
-            hc.font = _font(size=10, color=C.accent, underline='single')
-        ws.row_dimensions[row].height = 20
-        row += 1
-    return row + 1
-
-
-def _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies):
-    """Единый лист «Аномалии» (в конце группы «Аналитика»): (A) Вебмастер
-    (обход/проблемы/страницы/ИКС) + внезапные мусорные доноры; (B) ГСК-запросы
-    и Метрика-рефералы. Строится, если выполнялась хотя бы одна часть."""
-    has_wm = bool(wm_metrics)
-    _a = anomalies or {}
-    has_q = bool(_a.get('gsc') or _a.get('metrika'))
-    if not has_wm and not has_q:
-        return
-    ws = wb.create_sheet('Аномалии')
-    ws.sheet_view.showGridLines = False
-    for col, w in (('A', 3), ('B', 26), ('C', 24), ('D', 22), ('E', 12),
-                   ('F', 60), ('G', 3)):
-        ws.column_dimensions[col].width = w
-
-    ws.merge_cells('B2:F2')
-    c = ws['B2']
-    c.value = 'Аномалии'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:F3')
-    c = ws['B3']
-    c.value = ('Резкие отклонения «от себя-прошлого» - часто видны раньше, чем '
-               'просядут позиции и трафик. A - Вебмастер (всплеск ошибок обхода '
-               '4xx/5xx, просадка страниц, фатальные/критические проблемы, '
-               'падение страниц в поиске/ИКС) и ссылочный профиль (внезапные '
-               'мусорные доноры, скачки массы). B - всплеск мусорных/иноязычных '
-               'запросов в ГСК и переходов со спам-сайтов в Метрике. Пусто - '
-               'аномалий нет (норма).')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
-
-    def _not_run(r, text):
-        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
-        cc = ws.cell(row=r, column=2, value=text)
-        cc.font = _font(size=10, color=C.text_muted)
-        cc.alignment = _align(indent=1, wrap=True)
-        return r + 2
-
-    row = 5
-    if has_wm:
-        row = _render_wm_anomalies(ws, row, wm_metrics, link_profile)
-    else:
-        row = _not_run(row, 'A. Вебмастер и ссылочный профиль - в этом прогоне '
-                            'не проверялось (включите галочку «1.21 Нет аномалий»).')
-    if has_q:
-        _render_query_anomalies(ws, row, anomalies)
-    else:
-        _not_run(row, 'B. Запросы (ГСК) и переходы (Метрика) - в этом прогоне '
-                      'не проверялось (включите проверку аномалий ГСК/Метрики).')
+# Лист «Аномалии» удалён: часть A (Вебмастер/ссылочный профиль) и часть B
+# (ГСК-запросы/Метрика-рефералы) обе перенесены на «Хосты и аномалии»
+# (_build_hosts_anomalies_sheet) - «только с проблемами», без «всё чисто».
 
 
 # ── Лист «Настройки в админке» (доп. чек-лист: функции настройки) ──
@@ -4558,19 +4471,6 @@ def _build_traffic_sheet(wb, traffic):
         row += 1       # доп. разделитель между странами
 
 
-def _fmt_dt(d):
-    """'2026-07-06' -> '06.07.2026'."""
-    p = str(d or '').split('-')
-    return f'{p[2]}.{p[1]}.{p[0]}' if len(p) == 3 else str(d or '')
-
-
-def _fmt_period(s):
-    """'2026-07-06...2026-07-20' -> '06.07.2026 – 20.07.2026'."""
-    parts = str(s or '').split('...')
-    return (f'{_fmt_dt(parts[0])} – {_fmt_dt(parts[1])}'
-            if len(parts) == 2 else str(s or '–'))
-
-
 def _ratio_word(spike, spiked):
     """Пояснение к коэффициенту ×: во сколько раз изменилось."""
     if not spike:
@@ -4586,116 +4486,6 @@ def _ratio_word(spike, spiked):
     if z >= 1.1:
         return f'  ·  ×{spike} – чуть выше'
     return f'  ·  ×{spike} – без изменений'
-
-
-def _render_query_anomalies(ws, start_row, anomalies):
-    """Часть B секции «Аномалии»: ГСК - всплеск показов по мусорным/иноязычным
-    запросам; Метрика - переходы со спам-сайтов (спам-домены-рефереры +
-    всплеск). Пишет с start_row в переданный лист."""
-    _a = anomalies or {}
-    gsc = _a.get('gsc') or {}
-    mtr = _a.get('metrika') or {}
-    if not gsc and not mtr:
-        return start_row
-
-    row = [start_row]
-    ws.merge_cells(start_row=row[0], start_column=2, end_row=row[0], end_column=6)
-    _bh = ws.cell(row=row[0], column=2,
-                  value='B. Запросы (ГСК) и переходы (Метрика)')
-    _bh.font = _font(size=12, bold=True, color='FFFFFF')
-    _bh.fill = _fill(C.text_soft)
-    _bh.alignment = _align(indent=1)
-    ws.row_dimensions[row[0]].height = 20
-    row[0] += 1
-
-    def _hdr(text, color=C.text):
-        ws.merge_cells(start_row=row[0], start_column=2, end_row=row[0],
-                       end_column=4)
-        h = ws.cell(row=row[0], column=2, value=text)
-        h.font = _font(size=12, bold=True, color='FFFFFF')
-        h.fill = _fill(color)
-        h.alignment = _align(indent=1)
-        ws.row_dimensions[row[0]].height = 20
-        row[0] += 1
-
-    def _line(label, value, color=C.text_soft):
-        ws.cell(row=row[0], column=2, value=label).font = _font(
-            size=10, color=C.text_soft)
-        cc = ws.cell(row=row[0], column=3, value=value)
-        cc.font = _font(size=10, color=color)
-        row[0] += 1
-
-    # Короткая расшифровка обозначений (чтобы «сейчас / было» и «×» были понятны).
-    ws.merge_cells(start_row=row[0], start_column=2, end_row=row[0], end_column=6)
-    _hint = ws.cell(row=row[0], column=2,
-                    value='Обозначения: «сейчас / было» - показатель за текущий '
-                          'период и за такой же предыдущий; × - во сколько раз '
-                          'изменилось (≈×1 - норма, ×2 и больше - всплеск).')
-    _hint.font = _font(size=9, italic=True, color=C.text_muted)
-    _hint.alignment = _align(indent=1, wrap=True)
-    row[0] += 1
-
-    # ── ГСК ──
-    _hdr('Google Search Console - аномалии запросов', C.text_soft)
-    if not gsc.get('available'):
-        _line('Статус', gsc.get('note', 'не выполнялось'), C.text_muted)
-    else:
-        bad = gsc.get('spiked') or gsc.get('spam_queries_count')
-        _line('Вердикт', 'ЕСТЬ аномалии' if bad else 'аномалий нет',
-              C.err if bad else C.ok)
-        _line('Сейчас (период)', _fmt_period(gsc.get('cur_period')))
-        _line('Сравниваем с', _fmt_period(gsc.get('prev_period')))
-        _line('Показы: сейчас / было',
-              f'{gsc.get("total_impr_cur")} / {gsc.get("total_impr_prev")}'
-              + _ratio_word(gsc.get('impr_spike'), gsc.get('spiked')),
-              C.err if gsc.get('spiked') else C.text)
-        _line('Мусорные/иноязыч. запросы',
-              f'{gsc.get("spam_queries_count", 0)} (показов '
-              f'{gsc.get("spam_impr_cur", 0)}, было {gsc.get("spam_impr_prev", 0)})',
-              C.err if gsc.get('spam_queries_count') else C.text)
-        for q in (gsc.get('spam_queries') or [])[:12]:
-            ws.cell(row=row[0], column=2, value='  ' + (q.get('query') or '')
-                    ).font = _font(size=9, color=C.err)
-            ws.cell(row=row[0], column=3, value=f'{q.get("impressions")} показов'
-                    ).font = _font(size=9, color=C.text_soft)
-            row[0] += 1
-        # Доноры GSC - API не отдаёт, ручная сверка.
-        lc = ws.cell(row=row[0], column=2,
-                     value='Мусорные доноры (раздел Links) - API не отдаёт, '
-                           'проверить вручную →')
-        lc.font = _font(size=9, italic=True, color=C.text_muted)
-        link = ws.cell(row=row[0], column=3, value='GSC → Ссылки')
-        link.font = _font(size=9, color=C.accent, underline='single')
-        link.hyperlink = gsc.get('gsc_links_url',
-                                 'https://search.google.com/search-console/links')
-        row[0] += 1
-    row[0] += 1
-
-    # ── Метрика ──
-    _hdr('Метрика - переходы с мусорных сайтов', C.text_soft)
-    if not mtr.get('available'):
-        _line('Статус', mtr.get('note', 'не выполнялось'), C.text_muted)
-    else:
-        bad = mtr.get('spiked') or mtr.get('spam_domains_count')
-        _line('Вердикт', 'ЕСТЬ аномалии' if bad else 'аномалий нет',
-              C.err if bad else C.ok)
-        _line('Сейчас (период)', _fmt_period(mtr.get('cur_period')))
-        _line('Сравниваем с', _fmt_period(mtr.get('prev_period')))
-        _line('Переходы-рефералы: сейчас / было',
-              f'{mtr.get("total_cur")} / {mtr.get("total_prev")}'
-              + _ratio_word(mtr.get('referral_spike'), mtr.get('spiked')),
-              C.err if mtr.get('spiked') else C.text)
-        _line('Спам-домены-рефереры',
-              f'{mtr.get("spam_domains_count", 0)} (переходов '
-              f'{mtr.get("spam_cur", 0)}, было {mtr.get("spam_prev", 0)})',
-              C.err if mtr.get('spam_domains_count') else C.text)
-        for d in (mtr.get('spam_domains') or [])[:15]:
-            ws.cell(row=row[0], column=2, value='  ' + (d.get('domain') or '')
-                    ).font = _font(size=9, color=C.err)
-            ws.cell(row=row[0], column=3, value=f'{d.get("visits")} переходов'
-                    ).font = _font(size=9, color=C.text_soft)
-            row[0] += 1
-    return row[0]
 
 
 def _build_trust_sheet(wb, trust):
@@ -5713,7 +5503,7 @@ _SHEET_GROUPS = [
     ('Аналитика', [
         '404 из Метрики', 'Динамика трафика',
         'Траст проекта', 'Уведомления', 'Ошибки сервисов', 'Автокликер',
-        'Ссылочный профиль', 'Аномалии',
+        'Ссылочный профиль',
     ]),
     ('Контент', ['Уникальность']),
 ]
@@ -5750,10 +5540,6 @@ _GROUP_NOTES = {
 
 _GROUP_TAB_RANK = {C.err: 0, C.warn: 1}   # для агрегированного цвета вкладки
 
-# «Хосты и аномалии» - не отдельный старый лист (тот называется «Аномалии»,
-# уходит в группу «Аналитика») - здесь просто исправляем название на
-# реальное, чтобы _sheet_ref/_fix_where_refs его тоже перевели на группу.
-_WHERE_SECTION_OVERRIDE = {'Хосты и аномалии': 'Аномалии'}
 _RE_WHERE_SHEET = re.compile(r'^Лист «([^»]+)»$')
 
 
@@ -5765,24 +5551,23 @@ def _old_to_group_map() -> dict:
 
 def _sheet_ref(name: str) -> str:
     """«X» -> «Группа», раздел «X»» для листа, который _regroup_into_groups
-    сливает в групповой (Индексация/Метаданные/Вёрстка/… -> Техничка/Верстка/
-    Аналитика и т.п.) - для текста внутри предложений («см. лист {ref}»).
-    Листы вне группировки (Обзор/Проблемы/Структура страниц/Страницы/…)
-    возвращаются как есть - «X»."""
-    section = _WHERE_SECTION_OVERRIDE.get(name, name)
-    grp = _old_to_group_map().get(section)
+    сливает в групповой (Индексация/Метаданные/… -> Техничка/Аналитика и
+    т.п.) - для текста внутри предложений («см. лист {ref}»). Листы вне
+    группировки (Обзор/Проблемы/Структура страниц/Страницы/Хосты и
+    аномалии/…) возвращаются как есть - «X»."""
+    grp = _old_to_group_map().get(name)
     if grp and grp != name:
-        return f'«{grp}», раздел «{section}»'
+        return f'«{grp}», раздел «{name}»'
     return f'«{name}»'
 
 
 def _fix_where_refs(tasks):
     """Task.where вида «Лист «X»» может называть лист, который
     _regroup_into_groups сливает в групповой (Индексация/Фильтры ПС/…
-    -> «Техничка», Ошибки сервисов/Аномалии -> «Аналитика» и т.п.) - без
-    исправления ссылка в «Плане работ» ведёт на несуществующую вкладку.
-    Переписываем на «Лист «Группа», раздел «X»» ДО того, как этот текст
-    попадёт на лист (регруппировка выполняется позже, tasks строятся раньше)."""
+    -> «Техничка», Ошибки сервисов -> «Аналитика» и т.п.) - без исправления
+    ссылка в «Плане работ» ведёт на несуществующую вкладку. Переписываем на
+    «Лист «Группа», раздел «X»» ДО того, как этот текст попадёт на лист
+    (регруппировка выполняется позже, tasks строятся раньше)."""
     for t in tasks:
         m = _RE_WHERE_SHEET.match(t.where or '')
         if not m:
@@ -6256,7 +6041,7 @@ def build_report(
     index_404_check: dict = None,  # 404 среди страниц в индексе - лист «404 в индексе»
     stress_check: dict = None,     # ошибки сервера: парсинг/нагрузка/дубли - лист «Нагрузка и парсинг»
     link_profile: dict = None,     # lite-профиль ссылок (Вебмастер) - лист «Ссылочный профиль»
-    wm_metrics: dict = None,       # аномалии Вебмастера (Блок B) - секция «Аномалии» внизу «Аналитики»
+    wm_metrics: dict = None,       # аномалии Вебмастера - лист «Хосты и аномалии»
     admin_settings: dict = None,   # функции настройки в админке (п.1.21) - лист «Настройки в админке»
     yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
     gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
@@ -6264,7 +6049,7 @@ def build_report(
     traffic: dict = None,          # сравнение трафика день/месяц/год - лист «Динамика трафика»
     arsenkin: dict = None,         # индексация URL через Арсенкин - лист «Индексация (Арсенкин)»
     review_priority: dict = None,  # приоритет докупки отзывов - лист «Отзывы (докупка)»
-    anomalies: dict = None,        # аномалии ГСК/Метрика - лист «Аномалии»
+    anomalies: dict = None,        # аномалии ГСК/Метрика - лист «Хосты и аномалии»
     trust: dict = None,            # ИКС + DR - лист «Траст проекта»
     uniqueness: dict = None,       # уникальность контента (text.ru) - лист «Уникальность»
 ) -> Path:
@@ -6719,7 +6504,8 @@ def build_report(
     _build_pages_overview_sheet(wb, results, _findings)
 
     # ─── Лист «Хосты и аномалии» - проблемы уровня сайта/хоста ──────
-    _build_hosts_anomalies_sheet(wb, service_issues, wm_metrics, link_profile)
+    _build_hosts_anomalies_sheet(wb, service_issues, wm_metrics, link_profile,
+                                 anomalies)
 
     # ─── Лист «Трафик» - краткая сводка (детали - «Динамика трафика») ──
     _build_traffic_overview_sheet(wb, traffic)
@@ -6771,7 +6557,6 @@ def build_report(
 
     # ─── Лист «Ссылочный профиль» - если lite-проверка выполнялась ─────
     _build_link_profile_sheet(wb, link_profile)
-    _build_anomalies_sheet(wb, wm_metrics, link_profile, anomalies)
     _build_trust_sheet(wb, trust)
     _build_uniqueness_sheet(wb, uniqueness)
 
