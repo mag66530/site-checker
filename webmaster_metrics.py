@@ -149,7 +149,7 @@ def analyze_summary(summary, base_searchable=None, base_sqi=None):
         out.append({'metric': 'Фатальные проблемы', 'before': None, 'after': fatal,
                     'delta_pct': None, 'severity': 'fatal',
                     'text': f'фатальных проблем сайта: {fatal} (детали - лист '
-                            f'«Ошибки сервисов»)'})
+                            f'«Аналитика», раздел «Ошибки сервисов»)'})
     # Страницы в поиске - падение от эталона.
     if (base_searchable and isinstance(searchable, int)
             and base_searchable - searchable >= MIN_ABS):

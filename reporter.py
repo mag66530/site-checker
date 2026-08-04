@@ -23,6 +23,7 @@ from openpyxl.utils import get_column_letter, range_boundaries
 
 from report_priorities import (
     PRIORITY_LABEL, collect_findings, group_into_tasks, extra_site_tasks,
+    classify,
 )
 
 
@@ -6599,6 +6600,32 @@ _GROUP_NOTES = {
 
 _GROUP_TAB_RANK = {C.err: 0, C.warn: 1}   # для агрегированного цвета вкладки
 
+# «Хосты и аномалии» - не отдельный старый лист (тот называется «Аномалии»,
+# уходит в группу «Аналитика») - здесь просто исправляем название на
+# реальное, чтобы _fix_where_refs его тоже перевела на группу.
+_WHERE_SECTION_OVERRIDE = {'Хосты и аномалии': 'Аномалии'}
+_RE_WHERE_SHEET = re.compile(r'^Лист «([^»]+)»$')
+
+
+def _fix_where_refs(tasks):
+    """Task.where вида «Лист «X»» может называть лист, который
+    _regroup_into_groups сливает в групповой (Индексация/Фильтры ПС/…
+    -> «Техничка», Ошибки сервисов/Аномалии -> «Аналитика» и т.п.) - без
+    исправления ссылка в «Плане работ» ведёт на несуществующую вкладку.
+    Переписываем на «Лист «Группа», раздел «X»» ДО того, как этот текст
+    попадёт на лист (регруппировка выполняется позже, tasks строятся раньше)."""
+    old_to_group = {old: grp for grp, olds in _SHEET_GROUPS for old in olds}
+    for t in tasks:
+        m = _RE_WHERE_SHEET.match(t.where or '')
+        if not m:
+            continue
+        name = m.group(1)
+        section = _WHERE_SECTION_OVERRIDE.get(name, name)
+        grp = old_to_group.get(section)
+        if grp and grp != name:
+            t.where = f'Лист «{grp}», раздел «{section}»'
+    return tasks
+
 
 def _append_sheet_as_section(dst, src, start_row, title, gap=2):
     """Скопировать содержимое листа src в dst начиная со start_row (значения,
@@ -6887,20 +6914,21 @@ def _build_problems_sheet(wb, findings):
         f.level == 'Ошибка' for f in findings) else (C.warn if findings else C.ok)
 
     for col, w in (('A', 3), ('B', 4), ('C', 14), ('D', 20), ('E', 46),
-                  ('F', 12), ('G', 14), ('H', 55), ('I', 40)):
+                  ('F', 12), ('G', 14), ('H', 55), ('I', 40), ('J', 46)):
         ws.column_dimensions[col].width = w
 
-    ws.merge_cells('B2:I2')
+    ws.merge_cells('B2:J2')
     c = ws['B2']
     c.value = 'Все находки по страницам - одна строка = одна проблема на одной странице'
     c.font = _font(size=14, bold=True)
     ws.row_dimensions[2].height = 24
 
-    ws.merge_cells('B3:I3')
+    ws.merge_cells('B3:J3')
     c = ws['B3']
     c.value = ('Фильтруйте столбцы: «Уровень» - что критично, «Раздел» - чья '
               'зона ответственности, «Проблема» - конкретная задача. '
-              'Ошибка = чинить, Предупреждение = улучшение.')
+              'Ошибка = чинить, Предупреждение = улучшение. «Как исправить» - '
+              'готовая рекомендация с пояснением, почему это важно.')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
     ws.row_dimensions[3].height = 30
@@ -6908,7 +6936,8 @@ def _build_problems_sheet(wb, findings):
     hdr = 5
     headers = (('B', '№'), ('C', 'Уровень'), ('D', 'Раздел'),
               ('E', 'Проблема'), ('F', 'Город'), ('G', 'Тип страницы'),
-              ('H', 'Адрес страницы'), ('I', 'Подробности'))
+              ('H', 'Адрес страницы'), ('I', 'Подробности'),
+              ('J', 'Как исправить'))
     for col, title in headers:
         cell = ws[f'{col}{hdr}']
         cell.value = title
@@ -6924,14 +6953,18 @@ def _build_problems_sheet(wb, findings):
     for i, f in enumerate(ordered[:_MAX_ROWS], 1):
         color = getattr(C, _LEVEL_COLOR.get(f.level, 'text_soft'))
         fill_name = _LEVEL_FILL.get(f.level)
+        meta = classify(f)
+        fix = meta['title']
+        if meta.get('why'):
+            fix = f'{fix} - {meta["why"]}'
         vals = (i, f.level, f.section, f.problem, f.city, f.page_type,
-               f.url, f.detail)
+               f.url, f.detail, fix)
         for col_i, (col, _) in enumerate(headers):
             cell = ws[f'{col}{row}']
             cell.value = vals[col_i]
             cell.font = _font(size=9, color=color if col == 'C' else C.text_soft,
                               bold=(col == 'C'))
-            cell.alignment = _align(wrap=(col in ('E', 'H', 'I')),
+            cell.alignment = _align(wrap=(col in ('E', 'H', 'I', 'J')),
                                     vertical='top', indent=1)
             cell.border = _border(color=C.border_light)
             if col == 'C' and fill_name:
@@ -6945,11 +6978,11 @@ def _build_problems_sheet(wb, findings):
 
     last = row - 1
     if last >= hdr + 1:
-        ws.auto_filter.ref = f'B{hdr}:I{last}'
+        ws.auto_filter.ref = f'B{hdr}:J{last}'
         ws.freeze_panes = f'B{hdr + 1}'
     if len(ordered) > _MAX_ROWS:
         row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=10)
         c = ws.cell(row=row, column=2)
         c.value = f'…показаны первые {_MAX_ROWS} из {len(ordered)} находок.'
         c.font = _font(size=10, italic=True, color=C.text_muted)
@@ -7130,6 +7163,7 @@ def build_report(
                                 wm_metrics=wm_metrics,
                                 service_issues=service_issues,
                                 ps_filters=ps_filters))
+    _fix_where_refs(_tasks)
     _tasks.sort(key=lambda t: (t.priority, -t.volume))
     _critical_tasks = sum(1 for t in _tasks if t.priority == 1)
 

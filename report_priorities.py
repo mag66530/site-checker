@@ -23,6 +23,7 @@ reporter.build_report).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -108,6 +109,24 @@ def _content_findings(content, *, city, page_type, url) -> list:
     return out
 
 
+_RE_TEMPLATE_PLACEHOLDER = re.compile(r'\$\{|\{\{|<%')
+
+
+def _describe_img_src(src: str) -> str:
+    """detail для конкретной картинки: сам адрес + пояснение, если это не
+    реальный файл, а неотрендеренный шаблон (${...}/{{...}}/<%...%>) - JS
+    не подставил значение в src. Это баг скрипта на ВСЕЙ странице (картинка
+    не появится ни у одного товара с таким блоком), а не 404 одного файла -
+    без пояснения такой src выглядит как бессмысленный мусор."""
+    src = (src or '').strip()
+    if _RE_TEMPLATE_PLACEHOLDER.search(src):
+        return (f'src="{src}" - это не адрес файла, а неотрендеренный '
+                f'JS-шаблон (переменная не подставилась) - картинка не '
+                f'появится ни у одного товара с таким блоком, чинить надо '
+                f'скрипт вывода, а не искать конкретный файл')
+    return src
+
+
 def _images_findings(images: Optional[dict], *, city, page_type, url) -> list:
     """Изображения: конкретная картинка (без alt / битая 404) - отдельной
     находкой с адресом картинки в detail, а не общий текст на всю страницу
@@ -121,12 +140,13 @@ def _images_findings(images: Optional[dict], *, city, page_type, url) -> list:
     for src in im.get('no_alt') or []:
         out.append(Finding('Ошибка', 'Изображения',
                            'есть картинки без alt или с пустым alt=""',
-                           city, page_type, url, detail=src))
+                           city, page_type, url, detail=_describe_img_src(src)))
     for b in im.get('broken_imgs') or []:
         out.append(Finding('Ошибка', 'Изображения',
                            'битые картинки (404) - изображение не '
                            'отображается на странице',
-                           city, page_type, url, detail=b.get('url', '')))
+                           city, page_type, url,
+                           detail=_describe_img_src(b.get('url', ''))))
     for text in im.get('warnings') or []:
         out.append(Finding('Предупреждение', 'Изображения', str(text),
                            city, page_type, url))

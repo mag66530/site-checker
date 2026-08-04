@@ -72,6 +72,51 @@ def test_проблемы_и_план_работ_шапка_синяя():
         assert cell.font.color.rgb == 'FFFFFFFF'
 
 
+def test_проблемы_колонка_как_исправить_заполнена_для_любой_находки():
+    """По каждой находке (даже без готового правила приоритезации) должна
+    быть рекомендация - classify() всегда возвращает title (безопасный
+    дефолт для незнакомых разделов), находка не должна оставаться без
+    подсказки «что делать»."""
+    from openpyxl import Workbook
+    from reporter import _build_problems_sheet
+    from report_priorities import Finding
+    wb = Workbook()
+    findings = [
+        Finding('Ошибка', 'Изображения', 'битые картинки (404) - изображение '
+               'не отображается на странице', url='https://a.ru/x/',
+               detail='https://a.ru/img.jpg'),
+        Finding('Предупреждение', 'Совсем новый раздел', 'что-то невиданное',
+               url='https://a.ru/y/'),
+    ]
+    _build_problems_sheet(wb, findings)
+    ws = wb['Проблемы']
+    assert ws['J5'].value == 'Как исправить'
+    fix_texts = [ws[f'J{r}'].value for r in (6, 7)]
+    assert all(fix_texts)
+    assert 'битые картинки' in ' '.join(f.problem for f in findings)
+    assert 'Починить битые картинки' in fix_texts[0]
+    assert fix_texts[1]  # безопасный дефолт для неизвестного раздела - не пусто
+
+
+def test_fix_where_refs_переписывает_ссылку_на_слитый_лист():
+    """Индексация/Фильтры ПС/Ошибки сервисов больше не отдельные вкладки -
+    _regroup_into_groups сливает их в «Техничка»/«Аналитика». where=«Лист
+    «Индексация»» без исправления вёл бы в никуда."""
+    from reporter import _fix_where_refs
+    from report_priorities import Task
+    tasks = [
+        Task(1, 'a', 'т', 'ч', 1, 'п', 'о', 'Лист «Индексация»'),
+        Task(1, 'b', 'т', 'ч', 1, 'п', 'о', 'Лист «Ошибки сервисов»'),
+        Task(1, 'c', 'т', 'ч', 1, 'п', 'о', 'Лист «Хосты и аномалии»'),
+        Task(1, 'd', 'т', 'ч', 1, 'п', 'о', 'Лист «Фильтры ПС»'),
+    ]
+    _fix_where_refs(tasks)
+    assert tasks[0].where == 'Лист «Техничка», раздел «Индексация»'
+    assert tasks[1].where == 'Лист «Аналитика», раздел «Ошибки сервисов»'
+    assert tasks[2].where == 'Лист «Аналитика», раздел «Аномалии»'
+    assert tasks[3].where == 'Лист «Техничка», раздел «Фильтры ПС»'
+
+
 def test_wrap_line_count_растёт_с_длиной_текста():
     from reporter import _wrap_line_count, _row_height_for
     short = _wrap_line_count('коротко', 50)

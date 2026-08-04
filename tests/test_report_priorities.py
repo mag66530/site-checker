@@ -152,6 +152,18 @@ def test_images_broken_даёт_находку_с_url_картинки_в_detail
     assert 'битые картинки' in out[0].problem
 
 
+def test_images_broken_шаблонный_src_объясняется_а_не_дублируется_голым():
+    """src вида ${ product.thumb } - не 404 конкретного файла, а
+    неотрендеренный JS-шаблон (переменная не подставилась). detail должен
+    объяснять это, а не просто повторять бессмысленный текст."""
+    r = _result(images={'broken_imgs': [{'url': '${ product.thumb }'}]})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert '${ product.thumb }' in out[0].detail
+    assert 'неотрендеренный' in out[0].detail
+    assert 'шаблон' in out[0].detail
+
+
 def test_images_warnings_попадают_без_детализации():
     r = _result(images={'warnings': ['современные форматы (webp/avif) не используются']})
     out = collect_findings([r])
