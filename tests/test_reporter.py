@@ -142,6 +142,35 @@ def test_traffic_прямые_заходы_рост_красный_как_отк
     assert cell.font.color.rgb == 'FF' + C.err
 
 
+def test_траст_и_ссылочный_профиль_в_разных_колонках():
+    """Раньше Траст и Ссылочный профиль стояли один под другим в ОДНИХ И
+    ТЕХ ЖЕ колонках - узкие числовые колонки траста (ИКС/DR) навязывали
+    свою ширину колонкам ссылочного профиля. Проверяем, что их таблицы
+    физически не пересекаются по колонкам."""
+    from openpyxl import Workbook
+    from reporter import _build_traffic_overview_sheet
+    wb = Workbook()
+    trust = {'available': True, 'hosts': [{'host': 'a.ru', 'sqi': 15, 'dr': 20}]}
+    link_profile = {'available': True, 'hosts': [{
+        'host': 'a.ru', 'total': 100, 'distinct_hosts': 10,
+        'history': {'points': 2, 'first': 100, 'latest': 90, 'dropped': False},
+        'warnings': ['подозрительный спам-донор'], 'spam_hosts': [],
+    }]}
+    _build_traffic_overview_sheet(wb, None, trust, link_profile)
+    ws = wb['Трафик и траст']
+
+    def _find_cols(text):
+        return {c.column for row in ws.iter_rows() for c in row if c.value == text}
+
+    trust_cols = _find_cols('Хост') | _find_cols('ИКС (Яндекс)')
+    lp_cols = _find_cols('Ссылок') | _find_cols('Доноров') | _find_cols('Что не так')
+    assert not (trust_cols & lp_cols), (
+        f'колонки Траста {trust_cols} пересекаются с Ссылочным профилем {lp_cols}')
+    what_wrong_cell = ws.cell(row=1, column=next(iter(_find_cols('Что не так'))))
+    assert ws.column_dimensions[what_wrong_cell.column_letter].width >= 40
+    print('✓ Траст и Ссылочный профиль в независимых колонках')
+
+
 def test_wrap_line_count_растёт_с_длиной_текста():
     from reporter import _wrap_line_count, _row_height_for
     short = _wrap_line_count('коротко', 50)
