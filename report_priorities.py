@@ -436,6 +436,20 @@ def _availability_findings(r) -> list:
                     detail=r.error_message or '')]
 
 
+def _text_issue_findings(r) -> list:
+    """Битые переменные в тексте страницы (шаблон не подставил значение:
+    {{city}}, %price%, undefined и т.п.) - раньше только на отдельном
+    листе «Битые тексты», в «Проблемы» не попадали вообще."""
+    if not getattr(r, 'has_text_issues', False):
+        return []
+    return [
+        Finding('Ошибка', 'Битые тексты',
+               f'битая переменная в тексте: {issue.match}',
+               r.city, r.type_label, r.url,
+               detail=f'тип шаблона: {issue.pattern} · где: {issue.context}')
+        for issue in r.text_issues]
+
+
 def _index_404_code(status) -> int:
     try:
         return int(str(status).strip() or 0)
@@ -547,6 +561,7 @@ def collect_findings(results, *, console_check: dict = None,
     for r in results or []:
         city, page_type, url = r.city, r.type_label, r.url
         out.extend(_availability_findings(r))
+        out.extend(_text_issue_findings(r))
         out.extend(_from_issue_dict(r.indexing, section='Индексация',
                                     city=city, page_type=page_type, url=url))
         out.extend(_from_issue_dict(r.meta, section='Метаданные',
@@ -602,6 +617,10 @@ _RULES = [
     ('Доступность страниц', '', 1, 'Разработка', 'availability',
      'Починить недоступные страницы',
      'Страница не открывается - покупатель и робот получают ошибку вместо контента.'),
+
+    ('Битые тексты', '', 2, 'Разработка', 'broken_text_vars',
+     'Убрать битые переменные из текста',
+     'Шаблонизатор не подставил значение - фрагмент кода виден покупателю прямо на странице.'),
 
     ('404 в индексе', '', 1, 'SEO + разработка', 'index_404',
      'Убрать из поиска удалённые страницы',

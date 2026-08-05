@@ -7,7 +7,6 @@ reporter.py - формирование xlsx-отчёта.
   • Лист «Страницы» - каждая проверенная страница отдельной строкой (код,
     статус, скорость, отдел, битые переменные, откуда перешли, найдено
     проблем) - без деталей находок, те на «Проблемы»
-  • Лист «Битые тексты» - добавляется ТОЛЬКО если есть находки
 """
 import re
 from copy import copy
@@ -4812,7 +4811,7 @@ _SHEET_GROUPS = [
         'Ошибки JavaScript',
         'Валидация и скорость', 'Страница 404',
         'Страницы в ГСК', 'Дубли главной', 'Индексация (Арсенкин)',
-        'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
+        'Фильтры ПС', 'Нагрузка и парсинг',
     ]),
     ('Верстка', []),                # находки - в «Проблемы», лист удалён
     ('Безопасность', []),          # находки - в «Проблемы», лист удалён
@@ -5536,8 +5535,7 @@ def build_report(
     if total_text_issues > 0:
         summary_text += (
             f'\nДополнительно: на {len(pages_with_issues)} страницах найдено '
-            f'{total_text_issues} битых переменных в текстах - см. лист '
-            f'{_sheet_ref("Битые тексты")}.'
+            f'{total_text_issues} битых переменных в текстах - см. «Проблемы».'
         )
     if total_content_bugs > 0:
         summary_text += (
@@ -5893,97 +5891,8 @@ def build_report(
     # отдельный дублирующий лист со списком тех же страниц.
 
     # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 3: Битые тексты (только если есть)
-    # ═══════════════════════════════════════════════════════════════
-    if total_text_issues > 0:
-        ws3 = wb.create_sheet('Битые тексты')
-        ws3.sheet_view.showGridLines = False
-        ws3.sheet_properties.tabColor = C.warn
-        ws3.freeze_panes = 'A5'
-
-        ws3.column_dimensions['A'].width = 18
-        ws3.column_dimensions['B'].width = 50
-        ws3.column_dimensions['C'].width = 18
-        ws3.column_dimensions['D'].width = 24
-        ws3.column_dimensions['E'].width = 80
-
-        # Заголовок и пояснение
-        ws3.merge_cells('A1:E1')
-        c = ws3['A1']
-        c.value = 'Битые переменные в текстах страниц'
-        c.font = _font(size=14, bold=True)
-        ws3.row_dimensions[1].height = 26
-
-        ws3.merge_cells('A2:E2')
-        c = ws3['A2']
-        c.value = (
-            'Шаблонизатор сайта не подставил значение, и фрагмент шаблона '
-            '({{city}}, %price%, #MIN_PRICE#, undefined и т.п.) остался виден пользователю в тексте страницы. '
-            'Чтобы увидеть проблему - откройте URL и поищите по странице (Ctrl+F) то, '
-            'что в колонке «Что нашлось».'
-        )
-        c.font = _font(size=10, italic=True, color=C.text_soft)
-        c.alignment = _align(wrap=True, vertical='top')
-        ws3.row_dimensions[2].height = 36
-
-        # Шапка таблицы на строке 4
-        ws3.merge_cells('A3:E3')  # пустая разделительная
-
-        hdr_row = 4
-        ws3.row_dimensions[hdr_row].height = 28
-        hdrs = ['Город', 'Открыть страницу', 'Тип шаблона', 'Что нашлось', 'Где это в тексте']
-        for col_idx, label in enumerate(hdrs, 1):
-            c = ws3.cell(row=hdr_row, column=col_idx)
-            c.value = label
-            c.font = _font(size=10, bold=True, color=C.text_muted)
-            c.alignment = _align()
-            c.fill = _fill(C.surface)
-            c.border = _border()
-
-        row_idx = hdr_row + 1
-        for page in pages_with_issues:
-            for issue in page.text_issues:
-                ws3.row_dimensions[row_idx].height = 30
-
-                # Город
-                c = ws3.cell(row=row_idx, column=1)
-                c.value = page.city
-                c.font = _font(size=10)
-                c.alignment = _align(wrap=True)
-                c.border = _border(color=C.border_light)
-
-                # URL - кликабельный
-                c = ws3.cell(row=row_idx, column=2)
-                c.value = page.url
-                c.hyperlink = page.url
-                c.font = _font(name='Consolas', size=10, color=C.accent, underline='single')
-                c.alignment = _align(wrap=True)
-                c.border = _border(color=C.border_light)
-
-                # Тип шаблона
-                c = ws3.cell(row=row_idx, column=3)
-                c.value = issue.pattern
-                c.font = _font(size=10, color=C.text_soft)
-                c.alignment = _align()
-                c.border = _border(color=C.border_light)
-
-                # Что нашлось
-                c = ws3.cell(row=row_idx, column=4)
-                c.value = issue.match
-                c.font = _font(name='Consolas', size=10, bold=True, color=C.warn)
-                c.alignment = _align()
-                c.border = _border(color=C.border_light)
-
-                # Контекст
-                c = ws3.cell(row=row_idx, column=5)
-                c.value = issue.context
-                c.font = _font(name='Consolas', size=9, color=C.text_muted)
-                c.alignment = _align(wrap=True)
-                c.border = _border(color=C.border_light)
-
-                row_idx += 1
-
-        ws3.auto_filter.ref = f'A{hdr_row}:E{hdr_row}'
+    # Лист «Битые тексты» удалён - находки полностью в «Проблемы» через
+    # report_priorities._text_issue_findings().
 
     # Лист «404 из Метрики» удалён - находки (с пометкой, подтверждено ли
     # обходом сайта или только по Метрике) теперь в «Проблемы», раздел

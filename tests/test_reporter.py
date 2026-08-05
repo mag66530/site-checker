@@ -224,12 +224,12 @@ def test_basic_report_creation():
 
 
 def test_report_with_text_issues():
-    """Если есть битые тексты - добавляется третий лист."""
+    """Битые тексты - находки прямо в «Проблемы», отдельного листа нет."""
     issue1 = TextIssue(pattern='{{...}}', match='{{city}}',
                        context='Купить трубу в {{city}} с доставкой')
     issue2 = TextIssue(pattern='%переменная%', match='%price%',
                        context='Цена от %price% рублей')
-    
+
     results = [
         make_result(url='https://stalmetural.ru/cat-a',
                     text_issues=[issue1], has_text_issues=True),
@@ -237,7 +237,7 @@ def test_report_with_text_issues():
                     text_issues=[issue2], has_text_issues=True),
     ]
     selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
-    
+
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / 'test.xlsx'
         build_report(
@@ -247,16 +247,13 @@ def test_report_with_text_issues():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        # «Битые тексты» теперь - секция внутри группового листа «Техничка».
-        assert 'Техничка' in wb.sheetnames
         assert 'Битые тексты' not in wb.sheetnames
-        ws = wb['Техничка']
+        ws = wb['Проблемы']
         all_cells = []
         for row in ws.iter_rows(values_only=True):
             all_cells.extend(c for c in row if c)
-        assert '{{city}}' in all_cells
-        assert '%price%' in all_cells
-        assert '▸ Битые тексты' in all_cells   # полоса-разделитель секции
+        assert '{{city}}' in ' '.join(str(c) for c in all_cells)
+        assert '%price%' in ' '.join(str(c) for c in all_cells)
     print('✓ Секция «Битые тексты» в листе «Техничка»')
 
 

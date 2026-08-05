@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from http_checker import CheckResult
 from content_checker import BlockResult, ContentResult
+from text_checker import TextIssue
 from report_priorities import (
     Finding, collect_findings, classify, group_into_tasks, extra_site_tasks,
 )
@@ -36,6 +37,25 @@ def test_недоступная_страница_даёт_находку_дос�
 def test_рабочая_страница_без_доп_проверок_ничего_не_даёт():
     r = _result()
     assert collect_findings([r]) == []
+
+
+def test_битые_тексты_дают_находку_на_каждую_переменную():
+    """Раньше text_issues были только на отдельном листе «Битые тексты»,
+    в collect_findings не итемизировались вообще."""
+    issues = [
+        TextIssue(pattern='{{...}}', match='{{city}}',
+                 context='Купить трубу в {{city}} с доставкой'),
+        TextIssue(pattern='%переменная%', match='%price%',
+                 context='Цена от %price% рублей'),
+    ]
+    r = _result(text_issues=issues, has_text_issues=True)
+    out = collect_findings([r])
+    assert len(out) == 2
+    assert all(f.section == 'Битые тексты' and f.level == 'Ошибка' for f in out)
+    assert '{{city}}' in out[0].problem
+    assert '{{...}}' in out[0].detail
+    assert 'Купить трубу' in out[0].detail
+    assert '%price%' in out[1].problem
 
 
 def test_indexing_issues_and_warnings_разносятся_по_уровню():
