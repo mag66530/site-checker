@@ -852,14 +852,17 @@ def _build_structure_sheet(wb, results):
 # ── Лист «Страницы» - короткая сводка всех проверенных страниц ──────
 
 
-def _build_pages_overview_sheet(wb, results, findings):
+def _build_pages_overview_sheet(wb, results, findings, w3c_check=None):
     """Лист «Страницы»: код/статус/скорость/битые переменные/откуда перешли
     + сколько находок на странице (из «Проблемы») по каждой проверенной
-    странице - без деталей самих находок (те - на «Проблемы»)."""
+    странице - без деталей самих находок (те - на «Проблемы»). Плюс, если
+    была валидация W3C (выборка страниц) - ошибок валидатора и время
+    загрузки ресурсов (детали по типам ресурсов - на «Валидация и скорость»)."""
     if not results:
         return
     from collections import Counter
     counts = Counter(f.url for f in findings if f.url)
+    w3c_by_url = {p.get('url'): p for p in (w3c_check or {}).get('pages') or []}
 
     ws = wb.create_sheet('Страницы')
     ws.sheet_view.showGridLines = False
@@ -872,20 +875,25 @@ def _build_pages_overview_sheet(wb, results, findings):
               ('Скорость, с', 11), ('Оценка скорости', 16),
               ('Кому чинить', 18), ('Найдено проблем', 14),
               ('Битые переменные', 16), ('Откуда перешли', 46)]
+    if w3c_by_url:
+        headers += [('W3C ошибок', 12), ('Загрузка, мс', 12)]
+    last_col = get_column_letter(1 + len(headers))
     ws.column_dimensions['A'].width = 3
     for i, (_title, w) in enumerate(headers, 2):
         ws.column_dimensions[get_column_letter(i)].width = w
 
-    ws.merge_cells('B2:K2')
+    ws.merge_cells(f'B2:{last_col}2')
     c = ws['B2']
     c.value = f'Все проверенные страницы - {len(results)}'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
-    ws.merge_cells('B3:K3')
+    ws.merge_cells(f'B3:{last_col}3')
     c = ws['B3']
     c.value = ('Быстрый обзор: код ответа, статус, скорость и сколько находок '
-              'на странице (сами находки - на листе «Проблемы»).')
+              'на странице (сами находки - на листе «Проблемы»).'
+              + (' W3C/загрузка - только для страниц из выборки валидации '
+                 '(детали - «Валидация и скорость»).' if w3c_by_url else ''))
     c.font = _font(size=10, italic=True, color=C.text_soft)
     ws.row_dimensions[3].height = 18
 
@@ -920,6 +928,15 @@ def _build_pages_overview_sheet(wb, results, findings):
                STATUS_LABEL.get(r.status, r.status), speed_sec, speed_label,
                _dept_result(r), n_prob or None, text_issue_text,
                _build_path_description(r)]
+        if w3c_by_url:
+            wp = w3c_by_url.get(r.url)
+            w3c_errors = w3c_total_ms = None
+            if wp and not wp.get('error'):
+                _h, _cs = wp.get('html') or {}, wp.get('css') or {}
+                if not _h.get('error') and not _cs.get('error'):
+                    w3c_errors = (_h.get('errors', 0) or 0) + (_cs.get('errors', 0) or 0)
+                w3c_total_ms = (wp.get('timings') or {}).get('total_ms')
+            vals += [w3c_errors, w3c_total_ms]
         for ci, v in enumerate(vals, 2):
             cell = ws.cell(row=row, column=ci, value=v)
             cell.font = _font(size=9, color=C.text_soft)
@@ -953,11 +970,15 @@ def _build_pages_overview_sheet(wb, results, findings):
             path_cell.font = _font(name='Consolas', size=9, color=C.text_soft)
         elif not r.is_ok:
             path_cell.font = _font(size=9, italic=True, color=C.text_muted)
+        if w3c_by_url and w3c_errors:
+            err_cell = ws.cell(row=row, column=14)
+            err_cell.font = _font(size=9, bold=True, color=C.warn)
+            err_cell.fill = _fill(C.warn_soft)
         ws.row_dimensions[row].height = 16
         row += 1
 
     last = row - 1
-    ws.auto_filter.ref = f'B{hdr_row}:M{last}'
+    ws.auto_filter.ref = f'B{hdr_row}:{last_col}{last}'
     ws.freeze_panes = f'B{hdr_row + 1}'
 
 
@@ -5832,7 +5853,7 @@ def build_report(
     _build_structure_sheet(wb, results)
 
     # ─── Лист «Страницы» - краткая сводка всех проверенных страниц ──
-    _build_pages_overview_sheet(wb, results, _findings)
+    _build_pages_overview_sheet(wb, results, _findings, w3c_check)
 
     # ─── Лист «Хосты и аномалии» - проблемы уровня сайта/хоста ──────
     _build_hosts_anomalies_sheet(wb, service_issues, wm_metrics, link_profile,

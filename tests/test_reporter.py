@@ -354,6 +354,44 @@ def test_speed_with_comma():
     print('✓ Скорость с запятой')
 
 
+def test_w3c_колонки_на_странице_только_для_выборки():
+    """W3C-колонки появляются на «Страницы» только если была валидация;
+    заполнены только у страниц из выборки, у остальных - пусто."""
+    results = [
+        make_result(url='https://stalmetural.ru/', type_label='Главная'),
+        make_result(url='https://stalmetural.ru/catalog/', type_label='Каталог'),
+    ]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    w3c_check = {'available': True, 'pages': [{
+        'url': 'https://stalmetural.ru/',
+        'html': {'errors': 3, 'warnings': 5}, 'css': {'errors': 2, 'warnings': 0},
+        'timings': {'total_ms': 4818},
+    }]}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            w3c_check=w3c_check,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        ws = wb['Страницы']
+        header_row = [ws.cell(row=5, column=c).value for c in range(1, ws.max_column + 1)]
+        err_col = header_row.index('W3C ошибок') + 1
+        ms_col = header_row.index('Загрузка, мс') + 1
+        by_url = {}
+        for r in range(6, 8):
+            url_col = header_row.index('Адрес страницы') + 1
+            by_url[ws.cell(row=r, column=url_col).value] = (
+                ws.cell(row=r, column=err_col).value, ws.cell(row=r, column=ms_col).value)
+        assert by_url['https://stalmetural.ru/'] == (5, 4818)   # 3 HTML + 2 CSS
+        assert by_url['https://stalmetural.ru/catalog/'] == (None, None)
+    print('✓ W3C-колонки на «Страницы» только для выборки')
+
+
 def test_sheet_ref_переписывает_слитый_лист_иначе_отдаёт_как_есть():
     """_sheet_ref - как _fix_where_refs, но для текста внутри предложений
     («см. лист {ref}»), а не только Task.where. Индексация уходит в
