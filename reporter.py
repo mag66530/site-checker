@@ -23,6 +23,7 @@ from report_priorities import (
     PRIORITY_LABEL, collect_findings, group_into_tasks, extra_site_tasks,
     classify, indexing_site_findings, metadata_site_findings,
     home_dupes_findings, arsenkin_findings, page404_findings,
+    stress_check_findings, ps_filters_findings,
 )
 
 
@@ -5436,13 +5437,16 @@ def build_report(
                       + metadata_site_findings(meta_summary)
                       + home_dupes_findings(home_dupes)
                       + arsenkin_findings(arsenkin)
-                      + page404_findings(p404_check))
-    # Сайт-уровневые находки индексации (пути/файлы, не одна страница) -
-    # только в «Проблемы» (список), «План работ» их всё ещё агрегирует
-    # extra_site_tasks() ниже - через group_into_tasks они бы задвоились.
-    # Дубли метаданных (meta_summary) свою агрегацию не имеют нигде больше -
-    # идут через group_into_tasks() как обычные находки, не отдельно.
-    _findings = _page_findings + indexing_site_findings(indexing_summary)
+                      + page404_findings(p404_check)
+                      + stress_check_findings(stress_check))
+    # Сайт-уровневые находки индексации (пути/файлы) и санкции ПС - только
+    # в «Проблемы» (список), «План работ» их агрегирует extra_site_tasks()
+    # ниже - через group_into_tasks они бы задвоились. Остальные (дубли
+    # метаданных, дубли главной, Арсенкин, 404-тест, нагрузка/парсинг)
+    # своей агрегации нигде больше не имеют - идут через group_into_tasks()
+    # как обычные находки.
+    _findings = (_page_findings + indexing_site_findings(indexing_summary)
+                + ps_filters_findings(ps_filters))
     _tasks = (group_into_tasks(_page_findings)
              + extra_site_tasks(indexing_summary=indexing_summary,
                                 wm_metrics=wm_metrics,

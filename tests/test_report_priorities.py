@@ -13,6 +13,7 @@ from report_priorities import (
     Finding, collect_findings, classify, group_into_tasks, extra_site_tasks,
     indexing_site_findings, metadata_site_findings,
     home_dupes_findings, arsenkin_findings, page404_findings,
+    stress_check_findings, ps_filters_findings,
 )
 
 
@@ -809,3 +810,53 @@ def test_page404_findings_issues_и_warnings():
 def test_page404_findings_пусто_если_ничего_не_передано():
     assert page404_findings(None) == []
     assert page404_findings({'hosts': []}) == []
+
+
+# ── stress_check_findings / ps_filters_findings ──────────────────────────
+
+def test_stress_check_findings_banned_и_5xx():
+    out = stress_check_findings({'available': True,
+        'parsing': {'banned': {'code': 403, 'after': 50, 'url': 'https://a.ru/x/'},
+                    'server_errors': [{'code': 500, 'url': 'https://a.ru/y/'}],
+                    'network_errors': ['e1', 'e2']},
+        'load': {'pages': [
+            {'url': 'https://a.ru/z/', 'server_5xx': 2, 'network_errors': 0, 'sent': 10},
+            {'url': 'https://a.ru/w/', 'degraded': True},
+            {'url': 'https://a.ru/ok/'},
+        ]},
+        'duplicates': {'server_errors': [{'code': 500, 'kind': 'двойной слэш', 'url': 'https://a.ru/d/'}]},
+    })
+    problems = {f.problem for f in out}
+    assert any('бота за парсера' in p for p in problems)
+    assert any('быстром обходе' in p for p in problems)
+    assert sum(1 for f in out if 'обрывы связи' in f.problem) == 1
+    assert any('параллельной нагрузкой' in p for p in problems)
+    assert any('замедляется' in p for p in problems)
+    assert any('кривом дубле' in p for p in problems)
+    assert len(out) == 6   # banned + 5xx + net + load-5xx + degraded + dup-5xx
+
+
+def test_stress_check_findings_недоступен_даёт_пусто():
+    assert stress_check_findings({'available': False}) == []
+    assert stress_check_findings(None) == []
+
+
+def test_ps_filters_findings_фильтрует_не_санкции():
+    """SITE_ERROR (доступность) - не настоящая санкция, real_sanc её не
+    считает; THREAT/MALWARE-подобные коды - считает."""
+    out = ps_filters_findings({
+        'yandex': [
+            {'host': 'a.ru', 'code': 'SITE_ERROR', 'title': 'Сайт недоступен', 'date': '2026-08-01'},
+            {'host': 'b.ru', 'code': 'MALWARE_DETECTED', 'title': 'Вредоносный код', 'date': '2026-08-02'},
+        ],
+        'gsc_hits': [{'date': '2026-08-03', 'subject': 'Обнаружены проблемы безопасности'}],
+    })
+    assert len(out) == 2   # SITE_ERROR отфильтрован, MALWARE + gsc_hit остались
+    assert all(f.section == 'Фильтры ПС' and f.level == 'Ошибка' for f in out)
+    assert any('Вредоносный код' in f.problem for f in out)
+    assert any('ручных мер' in f.problem for f in out)
+
+
+def test_ps_filters_findings_пусто_если_ничего_не_передано():
+    assert ps_filters_findings(None) == []
+    assert ps_filters_findings({}) == []

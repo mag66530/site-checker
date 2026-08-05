@@ -643,6 +643,17 @@ _RULES = [
      'Починить страницу 404',
      'Правильная страница 404 (уникальный title, ссылки, форма) удерживает посетителя, а не отпугивает его.'),
 
+    ('Нагрузка и парсинг', 'бота за парсера', 1, 'Разработка', 'stress_banned',
+     'Разобраться с защитой от ботов',
+     'Защита банит и обычных роботов поисковых систем, не только парсеры - риск потери индексации.'),
+    ('Нагрузка и парсинг', '', 2, 'Разработка', 'stress_5xx',
+     'Стабилизировать сервер под нагрузкой',
+     'Ошибки сервера под обходом/нагрузкой роботы воспринимают как нестабильный сайт - хуже краулинг.'),
+
+    ('Фильтры ПС', '', 1, 'SEO', 'ps_sanctions_item',
+     'Разобрать санкции поисковых систем',
+     'Санкция резко режет видимость сайта в поиске.'),
+
     ('Блоки на странице', 'похожие товар', 2, 'Разработка', 'blocks_related',
      'Вернуть блок «Похожие товары»',
      'Меньше просмотров товаров и меньше добавлений в корзину.'),
@@ -981,6 +992,81 @@ def page404_findings(p404_check: Optional[dict]) -> list:
             out.append(Finding('Ошибка', 'Страница 404', t, city, url=url))
         for t in h.get('warnings') or []:
             out.append(Finding('Предупреждение', 'Страница 404', t, city, url=url))
+    return out
+
+
+def stress_check_findings(stress_check: Optional[dict]) -> list:
+    """Ошибки сервера (5xx/обрывы) при быстром обходе, высокой нагрузке и
+    кривых дублях URL - раньше только на листе «Нагрузка и парсинг»."""
+    if not stress_check or not stress_check.get('available'):
+        return []
+    out = []
+    parsing = stress_check.get('parsing') or {}
+    load = stress_check.get('load') or {}
+    dups = stress_check.get('duplicates') or {}
+
+    banned = parsing.get('banned')
+    if banned:
+        out.append(Finding(
+            'Ошибка', 'Нагрузка и парсинг',
+            f'сайт принял бота за парсера и закрыл доступ (код {banned.get("code")}) '
+            f'после {banned.get("after", 0)} успешных страниц',
+            url=banned.get('url', '')))
+
+    for e in parsing.get('server_errors') or []:
+        out.append(Finding('Ошибка', 'Нагрузка и парсинг',
+                           f'ошибка сервера ({e.get("code")}) при быстром обходе',
+                           url=e.get('url', '')))
+
+    _net = len(parsing.get('network_errors') or [])
+    if _net:
+        out.append(Finding('Ошибка', 'Нагрузка и парсинг',
+                           f'обрывы связи при быстром обходе: {_net}'))
+
+    for p in load.get('pages') or []:
+        if p.get('server_5xx') or p.get('network_errors'):
+            out.append(Finding(
+                'Ошибка', 'Нагрузка и парсинг',
+                'сервер отдаёт ошибки под параллельной нагрузкой',
+                url=p.get('url', ''),
+                detail=f'5xx {p.get("server_5xx", 0)}, обрывов '
+                       f'{p.get("network_errors", 0)} из {p.get("sent", 0)} запросов'))
+        elif p.get('degraded'):
+            out.append(Finding(
+                'Предупреждение', 'Нагрузка и парсинг',
+                'ответ замедляется более чем в 3 раза под нагрузкой',
+                url=p.get('url', '')))
+
+    for e in dups.get('server_errors') or []:
+        out.append(Finding(
+            'Ошибка', 'Нагрузка и парсинг',
+            f'ошибка сервера ({e.get("code")}) на кривом дубле URL ({e.get("kind", "")})',
+            url=e.get('url', '')))
+
+    return out
+
+
+def ps_filters_findings(ps_filters: Optional[dict]) -> list:
+    """Санкции/угрозы поисковых систем - реальные (не любая FATAL-проблема
+    Вебмастера, см. _SANCTION_CODE_RE) плюс маркеры ручных мер в почте
+    GSC. Раньше только на листе «Фильтры ПС»; extra_site_tasks() агрегирует
+    те же данные в «План работ» отдельно (эта функция сюда не дублируется -
+    не проходит через group_into_tasks)."""
+    out = []
+    sanc = (ps_filters or {}).get('yandex') or []
+    for s in sanc:
+        if not _SANCTION_CODE_RE.search(str(s.get('code') or '')):
+            continue
+        out.append(Finding(
+            'Ошибка', 'Фильтры ПС',
+            f'санкция/угроза в диагностике Вебмастера: {s.get("title", s.get("code", ""))}',
+            url=f'https://{s.get("host", "")}/' if s.get('host') else '',
+            detail=f'дата: {s.get("date", "")}'))
+    for h in (ps_filters or {}).get('gsc_hits') or []:
+        out.append(Finding(
+            'Ошибка', 'Фильтры ПС',
+            f'маркер ручных мер/безопасности в письме GSC: {h.get("subject", "")}',
+            detail=f'дата: {h.get("date", "")}'))
     return out
 
 
