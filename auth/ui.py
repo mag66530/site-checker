@@ -1003,6 +1003,18 @@ def project_settings_page() -> None:
             return v
     _drive_id = _folder_id(_поле("gdrive_folder_id")
                            or _поле("gdrive_shared_drive_id"))
+    # Что РЕАЛЬНО сохранено: значения из формы попадают в настройки только по
+    # кнопке «Сохранить ключи», и прогон берёт именно их. Без этой подписи
+    # выходило непонимание: в поле ссылка вставлена, а отчёты летят в корень.
+    _сохранённая_папка = _folder_id(cur.get("gdrive_folder_id")
+                                    or cur.get("gdrive_shared_drive_id") or "")
+    if _сохранённая_папка:
+        st.caption(f"Сейчас сохранено: папка `{_сохранённая_папка}` - отчёты "
+                   f"пойдут в неё.")
+    else:
+        st.caption("Папка не сохранена - отчёты лягут в корень Диска. Вставьте "
+                   "ссылку в поле выше и нажмите «💾 Сохранить ключи».")
+
     if st.button("🔍 Проверить доступ к Google Диску", key=f"gd_check_{pid}"):
         _refresh = (cur.get("gdrive_refresh_token") or "").strip()
         if not _drive_id and not _refresh:
