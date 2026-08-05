@@ -988,13 +988,20 @@ def project_settings_page() -> None:
     # Google Диск для отчётов: сразу говорим, годится ли указанный ID. Личный
     # gmail и Общий диск снаружи выглядят одинаково, а пишет туда сервисный
     # аккаунт - разницу видно только пробной записью (см. drive_reports).
-    _drive_id = (cur.get("gdrive_folder_id") or cur.get("gdrive_shared_drive_id")
-                 or "").strip()
+    def _поле(name: str) -> str:
+        """Значение поля: сперва то, что человек ввёл ПРЯМО СЕЙЧАС (виджет), потом
+        сохранённое. Иначе проверка ругалась «укажите ID и сохраните» на уже
+        вставленный, но ещё не сохранённый ID - и выглядело как поломка."""
+        v = st.session_state.get(f"ps_{pid}_{name}")
+        return str(v if v is not None else cur.get(name, "") or "").strip()
+
+    _drive_id = _поле("gdrive_folder_id") or _поле("gdrive_shared_drive_id")
     if st.button("🔍 Проверить доступ к Google Диску", key=f"gd_check_{pid}"):
         _refresh = (cur.get("gdrive_refresh_token") or "").strip()
         if not _drive_id and not _refresh:
-            st.warning("Сначала подключите аккаунт проекта либо укажите ID "
-                       "общего диска и сохраните.")
+            st.warning("Укажите ID папки или общего диска в полях выше (либо "
+                       "подключите аккаунт проекта) - и повторите проверку. "
+                       "Проверять можно сразу после ввода, до сохранения.")
         else:
             try:
                 import drive_reports
@@ -1015,7 +1022,12 @@ def project_settings_page() -> None:
             if res.get("ok"):
                 _где = f"{res.get('kind') or 'Диск'} «{res.get('name') or ''}»".strip()
                 st.success(f"✅ {_где} доступен на запись - отчёты будут "
-                           f"складываться сюда, по папкам проект/год/месяц.")
+                           f"складываться сюда: год / месяц / вид проверки.")
+                if _drive_id and _drive_id != (cur.get("gdrive_folder_id") or
+                                               cur.get("gdrive_shared_drive_id")):
+                    st.info("Не забудьте нажать «💾 Сохранить ключи» - "
+                            "проверка прошла по введённому значению, но в "
+                            "настройках оно ещё не сохранено.")
             else:
                 st.error(f"❌ {res.get('error')}")
 
