@@ -11,7 +11,7 @@ from content_checker import BlockResult, ContentResult
 from text_checker import TextIssue
 from report_priorities import (
     Finding, collect_findings, classify, group_into_tasks, extra_site_tasks,
-    indexing_site_findings,
+    indexing_site_findings, metadata_site_findings,
 )
 
 
@@ -680,3 +680,73 @@ def test_indexing_site_findings_не_дублируется_в_план_рабо
     assert len(findings) == 1
     assert len(tasks) == 1
     assert tasks[0].where == 'Лист «Индексация»'
+
+
+# ── metadata_site_findings (дубли метаданных/URL/тестовые домены) ────────
+
+def test_metadata_site_findings_same_city_по_каждой_странице():
+    out = metadata_site_findings({'duplicates': {'same_city': [{
+        'field': 'title', 'value': 'Металлопрокат', 'scope': 'a.ru',
+        'pages': [
+            {'city': 'Москва', 'url': 'https://a.ru/x/', 'type_label': 'Категория'},
+            {'city': 'Москва', 'url': 'https://a.ru/y/', 'type_label': 'Категория'},
+        ]}]}})
+    assert len(out) == 2
+    assert all(f.level == 'Ошибка' and f.section == 'Метаданные' for f in out)
+    assert all('дубль title внутри города' in f.problem for f in out)
+    assert {f.url for f in out} == {'https://a.ru/x/', 'https://a.ru/y/'}
+
+
+def test_metadata_site_findings_cross_city_предупреждение():
+    out = metadata_site_findings({'duplicates': {'cross_city': [{
+        'field': 'h1', 'value': 'Тройник ПНД', 'scope': None,
+        'pages': [{'city': 'Казань', 'url': 'https://kzn.a.ru/z/', 'type_label': 'Товар'}]}]}})
+    assert len(out) == 1
+    assert out[0].level == 'Предупреждение'
+    assert 'совпадает с другим городом' in out[0].problem
+
+
+def test_metadata_site_findings_url_duplicates_уровень_по_problem():
+    out = metadata_site_findings({'url_duplicates': [
+        {'canonical': 'https://a.ru/', 'variant': 'http://a.ru/', 'kind': 'http',
+         'code': 200, 'problem': 'duplicate'},
+        {'canonical': 'https://a.ru/', 'variant': 'https://a.ru//', 'kind': 'slash',
+         'code': 302, 'problem': 'not_301'},
+    ]})
+    assert len(out) == 2
+    dup, temp = out
+    assert dup.level == 'Ошибка' and dup.url == 'http://a.ru/'
+    assert temp.level == 'Предупреждение' and temp.url == 'https://a.ru//'
+
+
+def test_metadata_site_findings_test_domain_только_indexable():
+    out = metadata_site_findings({'test_domains': [
+        {'host': 'test.a.ru', 'code': 200, 'state': 'indexable'},
+        {'host': 'dev.a.ru', 'code': 200, 'state': 'closed'},
+    ]})
+    assert len(out) == 1
+    assert out[0].url == 'https://test.a.ru/'
+    assert out[0].level == 'Ошибка'
+
+
+def test_metadata_site_findings_пусто_если_ничего_не_передано():
+    assert metadata_site_findings(None) == []
+    assert metadata_site_findings({}) == []
+
+
+def test_metadata_site_findings_группируется_в_план_работ():
+    """В отличие от indexing_site_findings, дубли метаданных не имеют
+    отдельной агрегации в extra_site_tasks - должны идти через
+    group_into_tasks() как обычные находки (одна задача на task_group,
+    не по одной на каждую страницу)."""
+    findings = metadata_site_findings({'duplicates': {'same_city': [{
+        'field': 'title', 'value': 'X', 'scope': 'a.ru',
+        'pages': [
+            {'city': 'Москва', 'url': 'https://a.ru/1/', 'type_label': 'Категория'},
+            {'city': 'Москва', 'url': 'https://a.ru/2/', 'type_label': 'Категория'},
+            {'city': 'Москва', 'url': 'https://a.ru/3/', 'type_label': 'Категория'},
+        ]}]}})
+    tasks = group_into_tasks(findings)
+    assert len(tasks) == 1
+    assert tasks[0].volume == 3
+    assert tasks[0].priority == 1

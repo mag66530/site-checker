@@ -683,6 +683,18 @@ _RULES = [
     ('Метаданные', 'длинный', 3, 'SEO', 'meta_len',
      'Привести в норму длины title и description',
      'Поиск обрезает сниппет, теряется призыв к действию.'),
+    ('Метаданные', 'дубль', 1, 'Контент', 'meta_dup_same_city',
+     'Развести дублирующиеся title/description/H1 внутри города',
+     'Поиск считает одинаковые страницы дублями и хуже ранжирует обе.'),
+    ('Метаданные', 'совпадает с другим городом', 3, 'SEO', 'meta_dup_cross_city',
+     'Проверить межгородские совпадения title/description/H1',
+     'Само по себе не санкция, но стоит проверить наличие ключа и города в тексте.'),
+    ('Метаданные', 'зеркало адреса', 2, 'Разработка', 'meta_url_mirror',
+     'Склеить зеркала адреса редиректом/canonical',
+     'Одна страница доступна по нескольким адресам - поиск делит вес между ними.'),
+    ('Метаданные', 'тестовый поддомен', 1, 'Разработка', 'meta_test_domain',
+     'Закрыть тестовый поддомен от индексации',
+     'Открытый тестовый поддомен - полный дубль сайта в индексе.'),
     ('Метаданные', '', 2, 'SEO', 'meta_generic',
      'Проверить метаданные страницы',
      'Title/description/H1 напрямую влияют на клики из поиска.'),
@@ -858,6 +870,58 @@ def group_into_tasks(findings: list) -> list:
 _SANCTION_CODE_RE = re.compile(
     r'THREAT|MALWARE|SECUR|VIRUS|SPAM|QUALITY|SANC|FRAUD|PHISH|CHEAT|'
     r'OVEROPT|ADS?_|ADVERT|MOBILE_REDIRECT|DECEPT|CLOAK|DOORWAY', re.I)
+
+
+_META_FIELD_LABEL = {'title': 'title', 'description': 'description', 'h1': 'H1'}
+
+
+def metadata_site_findings(meta_summary: Optional[dict]) -> list:
+    """Дубли метаданных (same_city/cross_city), дубли УРЛОВ и тестовые
+    домены - раньше только на листе «Метаданные», страничная проверка
+    title/description/H1 уже итемизирована через r.meta, а вот эти
+    межстраничные группы - нет. Один Finding на каждую затронутую
+    страницу группы (не одна строка на группу), чтобы список был виден
+    без открытия детального листа."""
+    s = meta_summary or {}
+    out = []
+
+    for g in s.get('duplicates', {}).get('same_city') or []:
+        field = _META_FIELD_LABEL.get(g.get('field', ''), g.get('field', ''))
+        for p in g.get('pages') or []:
+            out.append(Finding(
+                'Ошибка', 'Метаданные',
+                f'дубль {field} внутри города: одинаковое значение у нескольких страниц',
+                p.get('city', ''), p.get('type_label', ''), p.get('url', ''),
+                detail=g.get('value', '')))
+
+    for g in s.get('duplicates', {}).get('cross_city') or []:
+        field = _META_FIELD_LABEL.get(g.get('field', ''), g.get('field', ''))
+        for p in g.get('pages') or []:
+            out.append(Finding(
+                'Предупреждение', 'Метаданные',
+                f'{field} совпадает с другим городом - нет ключа/города в тексте?',
+                p.get('city', ''), p.get('type_label', ''), p.get('url', ''),
+                detail=g.get('value', '')))
+
+    for d in s.get('url_duplicates') or []:
+        if d.get('problem') == 'duplicate':
+            level, problem = 'Ошибка', 'зеркало адреса отвечает 200 без редиректа - дубль страницы'
+        elif d.get('problem') == 'not_301':
+            level, problem = 'Предупреждение', 'зеркало адреса редиректит временно (302/303/307), а не 301'
+        else:
+            continue
+        out.append(Finding(level, 'Метаданные', problem, url=d.get('variant', ''),
+                           detail=f'канонический адрес: {d.get("canonical", "")}'))
+
+    for t in s.get('test_domains') or []:
+        if t.get('state') != 'indexable':
+            continue
+        out.append(Finding(
+            'Ошибка', 'Метаданные',
+            'тестовый поддомен открыт для индексации - дубль всего сайта',
+            url=f'https://{t.get("host", "")}/'))
+
+    return out
 
 
 def _idx_url(indexing_summary, path):
