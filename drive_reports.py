@@ -178,6 +178,34 @@ def _json_bytes(obj) -> bytes:
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
+def check_write_as_user(access_token: str, root_id: str = "root", *,
+                        proxy_url: str | None = None) -> dict:
+    """Проверка записи ОТ ИМЕНИ подключённого аккаунта проекта (обычный gmail).
+
+    Отличается от check_access тем, что не трогает сервисный аккаунт: здесь
+    файлы создаёт сам пользователь, поэтому и проверять надо его токеном.
+    Пишем временную папку в «Мой диск» и сразу убираем.
+    """
+    if not access_token:
+        return {"ok": False, "kind": "", "name": "",
+                "error": "аккаунт проекта не подключён (нет токена доступа)"}
+    try:
+        tmp_id = _create_folder(access_token, root_id, ".проверка-доступа",
+                               proxy_url=proxy_url)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "kind": "", "name": "",
+                "error": f"нет прав на запись: {e}"}
+    try:
+        requests.delete(f"{_FILES}/{tmp_id}",
+                        params={"supportsAllDrives": "true"},
+                        headers=_headers(access_token),
+                        proxies=_proxies(proxy_url), timeout=30)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "kind": "Диск аккаунта проекта", "name": "Мой диск",
+            "error": ""}
+
+
 def check_access(sa_info: dict, root_id: str, *,
                  proxy_url: str | None = None) -> dict:
     """Проверить, годится ли указанный диск/папка для отчётов ДО прогона.

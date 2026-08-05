@@ -984,19 +984,31 @@ def project_settings_page() -> None:
     _drive_id = (cur.get("gdrive_folder_id") or cur.get("gdrive_shared_drive_id")
                  or "").strip()
     if st.button("🔍 Проверить доступ к Google Диску", key=f"gd_check_{pid}"):
-        if not _drive_id:
-            st.warning("Сначала укажите ID общего диска или папки и сохраните.")
+        _refresh = (cur.get("gdrive_refresh_token") or "").strip()
+        if not _drive_id and not _refresh:
+            st.warning("Сначала подключите аккаунт проекта либо укажите ID "
+                       "общего диска и сохраните.")
         else:
             try:
                 import drive_reports
                 from kp_sheets import service_account_info
-                res = drive_reports.check_access(service_account_info(), _drive_id)
+                if _refresh:
+                    # Подключённый аккаунт проекта: проверяем запись ЕГО
+                    # токеном - сервисный аккаунт тут вообще ни при чём.
+                    import google_oauth
+                    cid, csec = _google_oauth_creds()
+                    tok = google_oauth.access_token(cid, csec, _refresh)
+                    res = drive_reports.check_write_as_user(
+                        tok, _drive_id or "root")
+                else:
+                    res = drive_reports.check_access(service_account_info(),
+                                                     _drive_id)
             except Exception as e:  # noqa: BLE001
                 res = {"ok": False, "error": str(e), "kind": "", "name": ""}
             if res.get("ok"):
-                st.success(f"✅ {res['kind']} «{res['name']}» доступен на запись - "
-                           f"отчёты будут складываться сюда, по папкам "
-                           f"проект/год/месяц.")
+                _где = f"{res.get('kind') or 'Диск'} «{res.get('name') or ''}»".strip()
+                st.success(f"✅ {_где} доступен на запись - отчёты будут "
+                           f"складываться сюда, по папкам проект/год/месяц.")
             else:
                 st.error(f"❌ {res.get('error')}")
 
