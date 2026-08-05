@@ -1159,12 +1159,22 @@ def render_gdrive_account(pid: str, cur: dict) -> None:
         st.caption("Не задан `app.base_url` - без него Google некуда вернуть "
                    "ответ авторизации.")
         return
-    st.caption("Подключается ОДИН служебный Google-аккаунт на все проекты. "
-               "Дальше владельцу каждого проекта достаточно расшарить свою "
-               "папку на его адрес с правом «Редактор» - вход через Google "
-               "второй раз не потребуется.")
-    st.link_button("Подключить служебный Google-аккаунт",
-                   google_oauth.auth_url(cid, base, APP_GDRIVE_PID))
+    st.caption("Два способа - выберите удобный.")
+    _c1, _c2 = st.columns(2)
+    with _c1:
+        st.link_button(f"Подключить аккаунт «{project_label(pid)}»",
+                       google_oauth.auth_url(cid, base, pid),
+                       use_container_width=True)
+        st.caption("Входите почтой САМОГО проекта. Отчёты лягут на его Диск и "
+                   "займут его место. Почта должна быть в списке Test users "
+                   "экрана согласия (Google Cloud → OAuth consent screen).")
+    with _c2:
+        st.link_button("Подключить один служебный аккаунт",
+                       google_oauth.auth_url(cid, base, APP_GDRIVE_PID),
+                       use_container_width=True)
+        st.caption("Один вход на ВСЕ проекты. Владельцы просто расшаривают "
+                   "свои папки на его адрес («Редактор»); файлы лежат в папке "
+                   "проекта, место - служебного аккаунта.")
 
 
 def handle_gdrive_oauth_redirect() -> None:
