@@ -3171,8 +3171,8 @@ def _build_stress_sheet(wb, stress_check):
               f'{banned.get("after", 0)} успешных страниц - сайт принял бота '
               f'за парсера: {banned.get("url", "")}', C.err)
     if parse_5xx:
-        for e in parse_5xx[:20]:
-            _line(f'❌ {e.get("code")} на {e.get("url", "")}', C.err)
+        _line(f'❌ Ошибок сервера при обходе: {len(parse_5xx)}. Список - '
+              f'в «Проблемах» (раздел «Нагрузка и парсинг»).', C.err)
     if parse_net:
         _line(f'❌ Обрывы связи при обходе: {len(parse_net)} '
               f'(сервер не отвечал под последовательной нагрузкой)', C.err)
@@ -3226,9 +3226,8 @@ def _build_stress_sheet(wb, stress_check):
               f'(проверено {dups.get("checked", 0)} по '
               f'{dups.get("samples", 0)} страницам)', C.text, bold=True)
         if dup_5xx:
-            for e in dup_5xx[:20]:
-                _line(f'❌ {e.get("code")} на «{e.get("kind", "")}»: '
-                      f'{e.get("url", "")}', C.err)
+            _line(f'❌ Ошибок сервера на кривых дублях URL: {len(dup_5xx)}. '
+                  f'Список - в «Проблемах» (раздел «Нагрузка и парсинг»).', C.err)
         else:
             _line('✅ На кривых дублях адресов сервер отвечает штатно '
                   '(200/301/404), 5xx нет.', C.ok)
@@ -4194,7 +4193,7 @@ def _build_console_sheet(wb, console_check):
         row += 1
         for p in bad:
             errs = p.get('errors') or []
-            ws.row_dimensions[row].height = max(20, 14 * min(len(errs), 6))
+            ws.row_dimensions[row].height = max(20, 14 * min(len(errs), 3))
             # URL
             c = ws.cell(row=row, column=2)
             c.value = p.get('url', '')
@@ -4202,10 +4201,12 @@ def _build_console_sheet(wb, console_check):
             c.font = _font(size=9, color=C.accent, underline='single')
             c.alignment = _align(wrap=True, vertical='top')
             c.border = _border(color=C.border_light)
-            # Ошибки
+            # Ошибки: первые 3 для контекста, полный список - в «Проблемах»
+            # (report_priorities._console_findings хранит там же первые 3).
             c = ws.cell(row=row, column=3)
-            c.value = '\n'.join(f'• {e}' for e in errs[:6]) + (
-                f'\n… и ещё {len(errs) - 6}' if len(errs) > 6 else '')
+            c.value = '\n'.join(f'• {e}' for e in errs[:3]) + (
+                f'\n… и ещё {len(errs) - 3} - полный список в «Проблемах» '
+                f'(раздел «Ошибки JavaScript»)' if len(errs) > 3 else '')
             c.font = _font(size=9, color=C.err)
             c.alignment = _align(wrap=True, vertical='top')
             c.border = _border(color=C.border_light)
@@ -4407,18 +4408,6 @@ def _build_console_sheet(wb, console_check):
 _META_FIELD_LABEL = {'title': 'title', 'description': 'description', 'h1': 'H1'}
 
 
-def _meta_table_header(ws, row, headers):
-    """Строка заголовков таблицы в стиле остальных листов."""
-    for ci, h in enumerate(headers, 2):
-        cell = ws.cell(row=row, column=ci)
-        cell.value = h
-        cell.font = _font(size=9, bold=True, color=C.text_muted)
-        cell.fill = _fill(C.surface)
-        cell.alignment = _align()
-        cell.border = _border()
-    ws.row_dimensions[row].height = 20
-
-
 def _meta_section_title(ws, row, text, color):
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
@@ -4436,6 +4425,17 @@ def _meta_ok_line(ws, row, text):
     c.font = _font(size=10, color=C.ok)
     c.alignment = _align(indent=1)
     ws.row_dimensions[row].height = 22
+
+
+def _meta_pointer_line(ws, row, text):
+    """Нейтральная (не зелёная) строка-указатель на детали в «Проблемах» -
+    в отличие от _meta_ok_line не означает «всё в порядке»."""
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = text
+    c.font = _font(size=10, italic=True, color=C.text_muted)
+    c.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 20
 
 
 def _build_meta_sheet(wb, results, meta_summary):
@@ -4527,23 +4527,15 @@ def _build_meta_sheet(wb, results, meta_summary):
             _meta_ok_line(ws, row, '✅ У всех проверенных страниц метаданные в порядке.')
             row += 2
         else:
-            row = _render_issue_groups(
-                ws, row, _issue_groups(bad, 'meta', 'issues'), C.err,
-                extra_label='')
+            _meta_pointer_line(ws, row, '· постранично - в «Проблемах» (раздел «Метаданные»).')
+            row += 2
 
         # ── Секция 2: предупреждения (длины; сгруппированы по замечанию) ──
         if warned:
             _meta_section_title(ws, row, f'Предупреждения (длины)  ({len(warned)})', C.warn)
             row += 1
-
-            def _meta_len(r):
-                m = getattr(r, 'meta', None) or {}
-                return (f'title: {m.get("title_len", 0)} симв. · '
-                        f'description: {m.get("desc_len", 0)} симв.')
-
-            row = _render_issue_groups(
-                ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn,
-                extra=_meta_len, extra_label='Длины title/description')
+            _meta_pointer_line(ws, row, '· постранично - в «Проблемах» (раздел «Метаданные»).')
+            row += 2
 
     # ── Секции 3-4: дубли метаданных (только если 1.8 выполнялась) ──
     for title_text, groups, note in ((
@@ -4574,58 +4566,19 @@ def _build_meta_sheet(wb, results, meta_summary):
                 fld = _META_FIELD_LABEL.get(g.get('field'), g.get('field'))
                 ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
                 c = ws.cell(row=row, column=2)
-                c.value = f'{fld}: «{g.get("value", "")}»'
+                c.value = (f'{fld}: «{g.get("value", "")}»  -  '
+                          f'{len(g.get("pages", []))} '
+                          f'{_plural_pages(len(g.get("pages", [])))}')
                 c.font = _font(size=10, bold=True, color=C.text)
                 c.fill = _fill(C.surface)
                 c.alignment = _align(wrap=True, indent=1)
                 ws.row_dimensions[row].height = 22
                 row += 1
-                for p in g.get('pages', []):
-                    ws.row_dimensions[row].height = 18
-                    vals = [
-                        (p.get('city') or '-', {'size': 9, 'color': C.text_muted}),
-                        (p.get('type_label', ''), {'size': 9, 'color': C.text_muted}),
-                        (p.get('url', ''), {'size': 9, 'color': C.accent,
-                                            'underline': 'single'}),
-                        ('', {}),
-                    ]
-                    for ci, (val, kw) in enumerate(vals, 2):
-                        cell = ws.cell(row=row, column=ci)
-                        cell.value = val
-                        if kw:
-                            cell.font = _font(**kw)
-                        cell.alignment = _align(vertical='top')
-                        cell.border = _border(color=C.border_light)
-                        if ci == 4 and val:
-                            cell.hyperlink = val
-                    row += 1
-        row += 1
-
-    # ── Секция 5: дубли УРЛОВ ──
-    def _url_dup_table(items, color):
-        nonlocal row
-        _meta_table_header(ws, row, ['Вариант', 'Код',
-                                     'Адрес варианта',
-                                     'Канонический адрес'])
-        row += 1
-        for d in items:
-            ws.row_dimensions[row].height = 20
-            vals = [
-                (d.get('kind', ''), {'size': 9, 'color': C.text_muted}),
-                (d.get('code', ''), {'size': 10, 'color': color}),
-                (d.get('variant', ''), {'size': 10, 'color': color}),
-                (d.get('canonical', ''), {'size': 10, 'color': C.accent,
-                                          'underline': 'single'}),
-            ]
-            for ci, (val, kw) in enumerate(vals, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 5 and val:
-                    cell.hyperlink = val
+            _meta_pointer_line(
+                ws, row,
+                '· страницы по каждой группе - в «Проблемах» (раздел «Метаданные»).')
             row += 1
+        row += 1
 
     # ── Секция: SEO-тексты категорий (нейроответы / AI overviews) ──
     _st_pages = [r for r in results
@@ -4654,9 +4607,8 @@ def _build_meta_sheet(wb, results, meta_summary):
                                    'с ключом, фото, таблицей и структурой.')
             row += 2
         else:
-            row = _render_issue_groups(
-                ws, row, _issue_groups(_st_warned, 'seo_text', 'warnings'),
-                C.warn, extra_label='')
+            _meta_pointer_line(ws, row, '· постранично - в «Проблемах» (раздел «Метаданные»).')
+            row += 2
 
     if meta_summary is not None:
         _meta_section_title(ws, row, f'Дубли УРЛОВ (нет редиректа)  ({len(url_dups)})',
@@ -4669,7 +4621,8 @@ def _build_meta_sheet(wb, results, meta_summary):
                                    '301-редирект на канонический вид.')
             row += 1
         else:
-            _url_dup_table(url_dups, C.err)
+            _meta_pointer_line(ws, row, '· список - в «Проблемах» (раздел «Метаданные»).')
+            row += 1
         row += 1
         # Временные редиректы: склейка не передаётся, 301 обязателен
         if url_not301:
@@ -4677,8 +4630,8 @@ def _build_meta_sheet(wb, results, meta_summary):
                 ws, row,
                 f'Временный редирект вместо 301  ({len(url_not301)})', C.warn)
             row += 1
-            _url_dup_table(url_not301, C.warn)
-            row += 1
+            _meta_pointer_line(ws, row, '· список - в «Проблемах» (раздел «Метаданные»).')
+            row += 2
 
         # ── Тестовые домены (test./dev./stage.…) ──
         _meta_section_title(
