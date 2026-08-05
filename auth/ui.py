@@ -1070,6 +1070,19 @@ def _google_oauth_creds(pid: str | None = None,
         csec = str(src.get("google_oauth_client_secret") or "").strip()
     if cid and csec:
         return cid, csec
+    # Ключи OAuth-приложения ОДНИ на все проекты, поэтому вписывать их в каждый
+    # проект не нужно: если у этого пусто - берём у любого, где заполнено.
+    try:
+        for _p in project_keys():
+            if _p == pid:
+                continue
+            s = _c_proj_settings(_p)
+            _cid = str(s.get("google_oauth_client_id") or "").strip()
+            _csec = str(s.get("google_oauth_client_secret") or "").strip()
+            if _cid and _csec:
+                return _cid, _csec
+    except Exception:  # noqa: BLE001
+        pass
     try:
         return (cid or str(st.secrets.get("google_oauth_client_id") or "").strip(),
                 csec or str(st.secrets.get("google_oauth_client_secret") or "").strip())
