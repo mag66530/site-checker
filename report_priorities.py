@@ -629,9 +629,19 @@ _RULES = [
     ('Индексация', 'noindex', 1, 'SEO', 'idx_noindex',
      'Проверить расхождение robots/noindex',
      'Сигналы индексации страницы противоречат друг другу - решить, что верно.'),
+    ('Индексация', 'дубль главной', 1, 'Разработка', 'home_dup',
+     'Склеить дубли главной страницы',
+     'Поисковик делит вес и доверие между несколькими адресами одной и той же главной.'),
+    ('Индексация', 'не в индексе', 2, 'SEO', 'arsenkin_not_indexed',
+     'Разобраться, почему страницы не в индексе',
+     'Раз страницы нет в индексе - она не приносит трафик, даже если технически всё верно.'),
     ('Индексация', 'canonical', 2, 'Разработка', 'idx_canonical',
      'Добавить/поправить rel="canonical"',
      'Без canonical поиск сам решает, какой адрес считать основным.'),
+
+    ('Страница 404', '', 2, 'Разработка', 'p404_test',
+     'Починить страницу 404',
+     'Правильная страница 404 (уникальный title, ссылки, форма) удерживает посетителя, а не отпугивает его.'),
 
     ('Блоки на странице', 'похожие товар', 2, 'Разработка', 'blocks_related',
      'Вернуть блок «Похожие товары»',
@@ -921,6 +931,56 @@ def metadata_site_findings(meta_summary: Optional[dict]) -> list:
             'тестовый поддомен открыт для индексации - дубль всего сайта',
             url=f'https://{t.get("host", "")}/'))
 
+    return out
+
+
+def home_dupes_findings(home_dupes: Optional[dict]) -> list:
+    """Реальные дубли главной (адрес отвечает 200, поисковик его НЕ
+    склеивает с канонической главной) - раньше только на листе «Дубли
+    главной». ✔-варианты (склеено/это и есть главная) - не находки."""
+    out = []
+    for v in (home_dupes or {}).get('variants') or []:
+        if v.get('verdict') != 'duplicate':
+            continue
+        out.append(Finding(
+            'Ошибка', 'Индексация',
+            'дубль главной страницы - адрес отвечает 200, но не склеен '
+            'с канонической главной (нет редиректа/canonical)',
+            url=v.get('url', ''), detail=v.get('note', '')))
+    return out
+
+
+def arsenkin_findings(arsenkin: Optional[dict]) -> list:
+    """URL не в индексе Яндекса/Google (по данным Арсенкина) - раньше
+    только на листе «Индексация (Арсенкин)»."""
+    if not arsenkin or not arsenkin.get('available'):
+        return []
+    eng = arsenkin.get('engines') or {'yandex': True, 'google': True}
+    out = []
+    for r in arsenkin.get('rows') or []:
+        missing = [name for name, checked in (('Яндекс', eng.get('yandex')),
+                                              ('Google', eng.get('google')))
+                  if checked and r.get('yandex' if name == 'Яндекс' else 'google') is False]
+        if missing:
+            out.append(Finding(
+                'Ошибка', 'Индексация',
+                f'страница не в индексе: {", ".join(missing)}',
+                url=r.get('url', '')))
+    return out
+
+
+def page404_findings(p404_check: Optional[dict]) -> list:
+    """Тест страницы 404 (код/дизайн/title/ссылки/форма) - раньше только
+    на листе «Страница 404». Хост-уровневая находка (не привязана к
+    конкретной проверенной странице прогона)."""
+    out = []
+    for h in (p404_check or {}).get('hosts') or []:
+        city, host = h.get('city', ''), h.get('host', '')
+        url = f'https://{host}/' if host else ''
+        for t in h.get('issues') or []:
+            out.append(Finding('Ошибка', 'Страница 404', t, city, url=url))
+        for t in h.get('warnings') or []:
+            out.append(Finding('Предупреждение', 'Страница 404', t, city, url=url))
     return out
 
 

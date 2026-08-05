@@ -12,6 +12,7 @@ from text_checker import TextIssue
 from report_priorities import (
     Finding, collect_findings, classify, group_into_tasks, extra_site_tasks,
     indexing_site_findings, metadata_site_findings,
+    home_dupes_findings, arsenkin_findings, page404_findings,
 )
 
 
@@ -750,3 +751,61 @@ def test_metadata_site_findings_группируется_в_план_работ(
     assert len(tasks) == 1
     assert tasks[0].volume == 3
     assert tasks[0].priority == 1
+
+
+# ── home_dupes_findings / arsenkin_findings / page404_findings ──────────
+
+def test_home_dupes_findings_только_verdict_duplicate():
+    out = home_dupes_findings({'home': 'https://a.ru/', 'dupes': 1, 'variants': [
+        {'url': 'https://a.ru/?dubli=1', 'status': 200,
+         'note': '200 - дубль', 'verdict': 'duplicate'},
+        {'url': 'https://a.ru/', 'status': 200,
+         'note': '200 - это главная', 'verdict': 'main'},
+        {'url': 'https://www.a.ru/', 'status': 301,
+         'note': '301 → главная', 'verdict': 'redirect'},
+    ]})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert out[0].url == 'https://a.ru/?dubli=1'
+
+
+def test_home_dupes_findings_пусто_без_дублей():
+    assert home_dupes_findings(None) == []
+    assert home_dupes_findings({'variants': [
+        {'url': 'https://a.ru/', 'status': 200, 'verdict': 'main'}]}) == []
+
+
+def test_arsenkin_findings_только_не_проверенных_движков():
+    out = arsenkin_findings({'available': True, 'engines': {'yandex': True, 'google': False},
+                             'rows': [
+        {'url': 'https://a.ru/x/', 'yandex': False, 'google': False},
+        {'url': 'https://a.ru/y/', 'yandex': True, 'google': False},
+    ]})
+    # google выключен в engines - не считается, даже если False
+    assert len(out) == 1
+    assert out[0].url == 'https://a.ru/x/'
+    assert 'Яндекс' in out[0].problem
+    assert 'Google' not in out[0].problem
+
+
+def test_arsenkin_findings_недоступен_даёт_пусто():
+    assert arsenkin_findings({'available': False, 'rows': [{'url': 'x', 'yandex': False}]}) == []
+    assert arsenkin_findings(None) == []
+
+
+def test_page404_findings_issues_и_warnings():
+    out = page404_findings({'hosts': [
+        {'city': 'Москва', 'host': 'a.ru', 'status': 200,
+         'issues': ['soft-404: код 200 вместо 404'],
+         'warnings': ['редирект вместо 404']},
+        {'city': 'Казань', 'host': 'kzn.a.ru', 'status': 404},  # чисто, без issues/warnings
+    ]})
+    assert len(out) == 2
+    assert out[0].level == 'Ошибка' and out[0].section == 'Страница 404'
+    assert out[0].url == 'https://a.ru/'
+    assert out[1].level == 'Предупреждение'
+
+
+def test_page404_findings_пусто_если_ничего_не_передано():
+    assert page404_findings(None) == []
+    assert page404_findings({'hosts': []}) == []
