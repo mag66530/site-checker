@@ -3644,12 +3644,22 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
     ws.sheet_view.showGridLines = False
     ws.sheet_properties.tabColor = C.accent
 
+    # Трафик - в колонках B:K. Траст/Ссылочный профиль/ГСК - РЯДОМ, в
+    # колонках M:R (через узкую колонку-разделитель L), а не под трафиком
+    # в тех же колонках: иначе узкие числовые колонки трафика (Яндекс/
+    # Google - ширина ~10) навязывают свою ширину текстовой колонке
+    # «Что не так» ссылочного профиля - там тексту physически некуда
+    # влезать без переноса на десяток строк.
     widths = [16, 9, 13, 10, 13, 10, 10, 8, 12, 10]
     ws.column_dimensions['A'].width = 3
     for i, w in enumerate(widths, 2):
         ws.column_dimensions[get_column_letter(i)].width = w
+    ws.column_dimensions['L'].width = 3
+    for col, w in zip('MNOPQR', (18, 11, 11, 15, 14, 60)):
+        ws.column_dimensions[col].width = w
+    SIDE_COL = 11  # смещение колонок метрик-блоков: было B(2) -> стало M(13)
 
-    ws.merge_cells('B2:K2')
+    ws.merge_cells('B2:R2')
     c = ws['B2']
     c.value = 'Трафик и траст проекта'
     c.font = _font(size=16, bold=True)
@@ -3758,24 +3768,29 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
             ws.auto_filter.ref = f'B{hdr_row}:K{last}'
         row += 1
 
+    # Метрик-блоки (Траст/Ссылочный профиль/ГСК) - своя колонка-сетка (M:R,
+    # SIDE_COL смещение) и свой курсор строк, независимый от таблицы
+    # трафика слева (см. коммент у widths выше).
+    side_row = 3
+
     # ── Траст проекта (ИКС + DR) - метрика, не находка ───────────────────
     if trust and trust.get('available') and trust.get('hosts'):
-        row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        c = ws.cell(row=row, column=2, value='Траст проекта (ИКС + DR)')
+        ws.merge_cells(start_row=side_row, start_column=2 + SIDE_COL,
+                       end_row=side_row, end_column=5 + SIDE_COL)
+        c = ws.cell(row=side_row, column=2 + SIDE_COL, value='Траст проекта (ИКС + DR)')
         c.font = _font(size=13, bold=True, color=C.text)
         c.fill = _fill(C.accent_soft)
         c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
+        ws.row_dimensions[side_row].height = 24
+        side_row += 1
         for col, title in ((2, 'Хост'), (3, 'ИКС (Яндекс)'), (4, 'DR (Open PageRank)')):
-            h = ws.cell(row=row, column=col, value=title)
+            h = ws.cell(row=side_row, column=col + SIDE_COL, value=title)
             h.font = _font(size=9, bold=True, color=C.bg_elev)
             h.fill = _fill(C.header_navy)
             h.border = _border()
             h.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 20
-        row += 1
+        ws.row_dimensions[side_row].height = 20
+        side_row += 1
         for hh in trust['hosts']:
             sqi, dr = hh.get('sqi'), hh.get('dr')
             vals = [(2, hh.get('host', ''), C.text, False),
@@ -3786,36 +3801,36 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
                     (int(dr) if isinstance(dr, (int, float)) and float(dr).is_integer()
                      else dr), C.text, False)]
             for col, v, color, bold in vals:
-                cell = ws.cell(row=row, column=col, value=v)
+                cell = ws.cell(row=side_row, column=col + SIDE_COL, value=v)
                 cell.font = _font(size=10, color=color, bold=bold)
                 cell.border = _border(color=C.border_light)
                 cell.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 16
-            row += 1
+            ws.row_dimensions[side_row].height = 16
+            side_row += 1
+        side_row += 1
 
     # ── Ссылочный профиль (lite, Вебмастер) - метрика, не находка ────────
     lp_hosts = sorted((link_profile or {}).get('hosts') or [], key=_lp_rank) \
         if link_profile and link_profile.get('available') else []
     if lp_hosts:
-        row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=7)
-        c = ws.cell(row=row, column=2, value='Ссылочный профиль (lite, Вебмастер)')
+        ws.merge_cells(start_row=side_row, start_column=2 + SIDE_COL,
+                       end_row=side_row, end_column=7 + SIDE_COL)
+        c = ws.cell(row=side_row, column=2 + SIDE_COL,
+                    value='Ссылочный профиль (lite, Вебмастер)')
         c.font = _font(size=13, bold=True, color=C.text)
         c.fill = _fill(C.accent_soft)
         c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
-        _lp_headers = (('B', 'Хост'), ('C', 'Ссылок'), ('D', 'Доноров'),
-                      ('E', 'Динамика'), ('F', 'Статус'), ('G', 'Что не так'))
-        for col, title in _lp_headers:
-            h = ws[f'{col}{row}']
-            h.value = title
+        ws.row_dimensions[side_row].height = 24
+        side_row += 1
+        _lp_headers = ('Хост', 'Ссылок', 'Доноров', 'Динамика', 'Статус', 'Что не так')
+        for i, title in enumerate(_lp_headers, 2):
+            h = ws.cell(row=side_row, column=i + SIDE_COL, value=title)
             h.font = _font(size=9, bold=True, color=C.bg_elev)
             h.fill = _fill(C.header_navy)
             h.border = _border()
             h.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 20
-        row += 1
+        ws.row_dimensions[side_row].height = 20
+        side_row += 1
         _LP_STATUS = {0: ('❌ обвал', C.err), 1: ('⚠ спам/всплеск', C.err),
                       2: ('⚠ внимание', C.warn), 3: ('· нет профиля', C.text_muted),
                       4: ('✅ норма', C.ok)}
@@ -3834,31 +3849,33 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
                    (6, label, color), (7, problems_text,
                                       color if problems else C.text_muted)]
             for col, v, color_ in vals:
-                cell = ws.cell(row=row, column=col, value=v)
+                cell = ws.cell(row=side_row, column=col + SIDE_COL, value=v)
                 cell.font = _font(size=9, color=color_, bold=(col == 6 and grp <= 1))
                 cell.border = _border(color=C.border_light)
                 cell.alignment = _align(indent=1, wrap=(col == 7))
-            ws.row_dimensions[row].height = 16
-            row += 1
+            ws.row_dimensions[side_row].height = 16
+            side_row += 1
+        side_row += 1
 
     # ── Страницы в ГСК (индексировано/просканировано) - метрика, не находка ──
     if gsc_pages and gsc_pages.get('available'):
-        row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-        c = ws.cell(row=row, column=2, value='Страницы в ГСК (Google Search Console)')
+        ws.merge_cells(start_row=side_row, start_column=2 + SIDE_COL,
+                       end_row=side_row, end_column=4 + SIDE_COL)
+        c = ws.cell(row=side_row, column=2 + SIDE_COL,
+                    value='Страницы в ГСК (Google Search Console)')
         c.font = _font(size=13, bold=True, color=C.text)
         c.fill = _fill(C.accent_soft)
         c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
+        ws.row_dimensions[side_row].height = 24
+        side_row += 1
         for col, title in ((2, 'Показатель'), (3, 'Значение'), (4, 'Δ к прошлому')):
-            h = ws.cell(row=row, column=col, value=title)
+            h = ws.cell(row=side_row, column=col + SIDE_COL, value=title)
             h.font = _font(size=9, bold=True, color=C.bg_elev)
             h.fill = _fill(C.header_navy)
             h.border = _border()
             h.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 20
-        row += 1
+        ws.row_dimensions[side_row].height = 20
+        side_row += 1
         deltas = gsc_pages.get('deltas') or {}
         for label, key in (('Проиндексировано', 'indexed'),
                            ('Просканировано, но пока не проиндексировано', 'crawled_not_indexed'),
@@ -3876,21 +3893,22 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
             for col, v, color, bold in ((2, label, C.text, False),
                                         (3, val if val is not None else '–', C.text, True),
                                         (4, dv_text, dv_color, True)):
-                cell = ws.cell(row=row, column=col, value=v)
+                cell = ws.cell(row=side_row, column=col + SIDE_COL, value=v)
                 cell.font = _font(size=10, color=color, bold=bold)
                 cell.border = _border(color=C.border_light)
                 cell.alignment = _align(indent=1, horizontal='center' if col > 2 else 'left')
-            ws.row_dimensions[row].height = 18
-            row += 1
+            ws.row_dimensions[side_row].height = 18
+            side_row += 1
         note = 'Числа из отчёта GSC «Индексирование → Страницы».'
         if gsc_pages.get('manual'):
             note += ' Введены вручную.'
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-        c = ws.cell(row=row, column=2, value=note)
+        ws.merge_cells(start_row=side_row, start_column=2 + SIDE_COL,
+                       end_row=side_row, end_column=4 + SIDE_COL)
+        c = ws.cell(row=side_row, column=2 + SIDE_COL, value=note)
         c.font = _font(size=9, italic=True, color=C.text_muted)
         c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 16
-        row += 1
+        ws.row_dimensions[side_row].height = 16
+        side_row += 1
 
 
 # Лист «Динамика трафика» удалён по прямому указанию - трафик по странам/
