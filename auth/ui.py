@@ -723,7 +723,7 @@ def render_telegram_block(user: dict) -> None:
         if st.button("Проверить подключение", key="tg_check",
                      use_container_width=True):
             try:
-                telegram_link.try_link_all(token)
+                _linked = telegram_link.try_link_all(token)
             except Exception as e:  # noqa: BLE001
                 _hook = telegram_link.webhook_set(token)
                 if _hook:
@@ -733,7 +733,14 @@ def render_telegram_block(user: dict) -> None:
                 else:
                     st.error(f"Telegram не ответил: {e}")
             else:
-                st.rerun()
+                # Подтвердиться могла привязка ДРУГОГО человека (его /start
+                # лежал в общей очереди апдейтов) - тогда для нажавшего ничего
+                # не изменилось, и делать вид, что всё готово, нельзя.
+                if str(user["id"]) in _linked:
+                    st.rerun()
+                else:
+                    st.info("Пока не вижу вашего «Start». Откройте бота по "
+                            "кнопке выше, нажмите «Start» и повторите проверку.")
 
 
 _proxy_slot = None

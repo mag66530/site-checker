@@ -153,20 +153,48 @@ def send_hello(token: str, chat_id: str, text: str,
         return False
 
 
-def try_link_all(token: str, proxy_url: str | None = None) -> int:
+def try_link_all(token: str, proxy_url: str | None = None) -> set[str]:
     """Вычитать апдейты и записать все найденные привязки в БД.
-    → сколько привязок подтверждено. Ошибки БД не глушим - их видно в UI."""
+    → множество user_id, чьи привязки подтвердились ЭТИМ вызовом.
+
+    Почему обрабатываем ВСЕ найденные коды, а не только «свой»: Telegram отдаёт
+    апдейт один раз, и если в пачке лежит чужой /start (человек нажал Start, но
+    «Проверить подключение» не жал), выбросить его нельзя - тогда его привязка
+    не сработает никогда.
+
+    Отсюда же следствие: кнопку нажал один человек, а подтвердиться может
+    привязка другого. Поэтому возвращаем ИМЕННО СПИСОК - интерфейс по нему
+    говорит нажавшему правду («ваш Start ещё не пришёл»), а не молча
+    показывает чужой успех.
+    """
     from auth import db
     starts = collect_starts(token, proxy_url=proxy_url)
-    n = 0
+    linked: set[str] = set()
     for code, info in starts.items():
         uid = db.telegram_link_by_code(code, info["chat_id"], info.get("username", ""))
         if uid:
-            n += 1
+            linked.add(str(uid))
+            _кто = _подпись_аккаунта(uid)
             send_hello(token, info["chat_id"],
-                       "✅ Уведомления подключены. Сюда будут приходить отчёты "
-                       "о ваших прогонах.", proxy_url=proxy_url)
-    return n
+                       "✅ Уведомления подключены"
+                       + (f" для аккаунта {_кто}" if _кто else "")
+                       + ". Сюда будут приходить отчёты о прогонах.",
+                       proxy_url=proxy_url)
+    return linked
+
+
+def _подпись_аккаунта(user_id: str) -> str:
+    """«Имя Фамилия (почта)» - чтобы в приветствии бота было видно, К КАКОМУ
+    аккаунту привязан чат: сообщение может прийти позже нажатия Start, и без
+    подписи человек не понимает, за что оно."""
+    try:
+        from auth import db
+        u = db.get_user_by_id(str(user_id)) or {}
+        имя = " ".join(x for x in (u.get("first_name"), u.get("last_name")) if x)
+        почта = u.get("email") or ""
+        return f"{имя} ({почта})".strip() if имя or почта else ""
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def chat_id_for_user(user_id: str) -> Optional[str]:
