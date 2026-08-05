@@ -344,8 +344,21 @@ def check_write_as_user(access_token: str, root_id: str = "root", *,
                          "отметив в окне Google все флажки.")
         return {"ok": False, "kind": "", "name": "",
                 "error": f"нет прав на запись: {ошибка}{подсказка}"}
-    return {"ok": True, "kind": "Диск аккаунта проекта", "name": "Мой диск",
-            "error": ""}
+    # Куда именно попадут отчёты: имя указанной папки, иначе корень «Мой диск».
+    имя = "Мой диск (корень)"
+    вид = "Диск аккаунта проекта"
+    if root_id and root_id != "root":
+        try:
+            r = requests.get(f"{_FILES}/{root_id}",
+                             params={"fields": "name", "supportsAllDrives": "true"},
+                             headers=_headers(access_token),
+                             proxies=_proxies(proxy_url), timeout=30)
+            if r.status_code == 200:
+                имя = (r.json() or {}).get("name") or имя
+                вид = "Папка"
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "kind": вид, "name": имя, "error": ""}
 
 
 def check_access(sa_info: dict, root_id: str, *,
