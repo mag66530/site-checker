@@ -2584,22 +2584,25 @@ def _build_home_dupes_sheet(wb, home_dupes):
     ws = wb.create_sheet('Дубли главной')
     ws.sheet_view.showGridLines = False
 
+    # Все таблицы отчёта начинаются с колонки B (в A - узкий отступ): на
+    # групповом листе «Техничка» секции идут одна под другой, и блок, начатый
+    # с A, съезжал влево относительно остальных.
     dupes = int(home_dupes.get('dupes', 0) or 0)
-    c = ws.cell(row=1, column=1, value='Каноническая главная:')
+    c = ws.cell(row=1, column=2, value='Каноническая главная:')
     c.font = _font(bold=True)
-    ws.cell(row=1, column=2, value=home_dupes.get('home', '–')).font = _font()
-    c = ws.cell(row=2, column=1, value='Реальных дублей:')
+    ws.cell(row=1, column=3, value=home_dupes.get('home', '–')).font = _font()
+    c = ws.cell(row=2, column=2, value='Реальных дублей:')
     c.font = _font(bold=True)
-    c2 = ws.cell(row=2, column=2, value=dupes)
+    c2 = ws.cell(row=2, column=3, value=dupes)
     c2.font = _font(bold=True, color=(C.err if dupes else C.ok))
 
     head_row = 4
-    for i, t in enumerate(('Адрес', 'Ответ', 'Что происходит', 'Вердикт'), 1):
+    for i, t in enumerate(('Адрес', 'Ответ', 'Что происходит', 'Вердикт'), 2):
         cell = ws.cell(row=head_row, column=i, value=t)
         cell.font = _font(bold=True, color=C.bg_elev)
         cell.fill = _fill(C.header_navy)
         cell.border = _border()
-        cell.alignment = _align('center' if i > 1 else 'left')
+        cell.alignment = _align('center' if i > 2 else 'left')
 
     # дубли - вверх списка, дальше по осмысленному порядку
     order = {'duplicate': 0, 'error': 1, 'canonical': 2, 'main': 3,
@@ -2609,33 +2612,34 @@ def _build_home_dupes_sheet(wb, home_dupes):
     for v in rows:
         verdict = v.get('verdict', 'error')
         label, color = _HOME_DUPES_VERDICT.get(verdict, ('?', C.text))
-        ca = ws.cell(row=r, column=1, value=v.get('url', ''))
+        ca = ws.cell(row=r, column=2, value=v.get('url', ''))
         ca.font = _font()
         ca.border = _border()
-        cs = ws.cell(row=r, column=2, value=str(v.get('status', '')))
+        cs = ws.cell(row=r, column=3, value=str(v.get('status', '')))
         cs.font = _font()
         cs.border = _border()
         cs.alignment = _align('center')
-        cn = ws.cell(row=r, column=3, value=v.get('note', ''))
+        cn = ws.cell(row=r, column=4, value=v.get('note', ''))
         cn.font = _font()
         cn.border = _border()
-        cv = ws.cell(row=r, column=4, value=label)
+        cv = ws.cell(row=r, column=5, value=label)
         cv.font = _font(bold=True, color=color)
         cv.border = _border()
         if verdict == 'duplicate':
-            for col in range(1, 5):
+            for col in range(2, 6):
                 ws.cell(row=r, column=col).fill = _fill(C.err_soft)
         r += 1
 
     note = ('Дубль = главная открывается по этому адресу с кодом 200, а поисковик '
             'не склеивает его с главной (нет редиректа и canonical не на главную). '
             'Лечится 301-редиректом на главную или тегом canonical.')
-    ws.cell(row=r + 1, column=1, value=note).font = _font(italic=True, color=C.text_muted)
+    ws.cell(row=r + 1, column=2, value=note).font = _font(italic=True, color=C.text_muted)
 
-    ws.column_dimensions['A'].width = 48
-    ws.column_dimensions['B'].width = 9
-    ws.column_dimensions['C'].width = 40
-    ws.column_dimensions['D'].width = 24
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 48
+    ws.column_dimensions['C'].width = 9
+    ws.column_dimensions['D'].width = 40
+    ws.column_dimensions['E'].width = 24
 
 
 def _build_arsenkin_sheet(wb, arsenkin):
@@ -2648,26 +2652,28 @@ def _build_arsenkin_sheet(wb, arsenkin):
     ws = wb.create_sheet('Индексация (Арсенкин)')
     ws.sheet_view.showGridLines = False
 
+    # Начинаем с колонки B - как остальные листы отчёта (в A узкий отступ),
+    # иначе на групповом листе «Техничка» секция съезжает влево.
     ni = int(arsenkin.get('not_indexed', 0) or 0)
-    ws.cell(row=1, column=1, value='Проверено URL:').font = _font(bold=True)
-    ws.cell(row=1, column=2, value=arsenkin.get('checked', len(rows))).font = _font()
-    ws.cell(row=2, column=1, value='Не в индексе:').font = _font(bold=True)
-    c2 = ws.cell(row=2, column=2, value=ni)
+    ws.cell(row=1, column=2, value='Проверено URL:').font = _font(bold=True)
+    ws.cell(row=1, column=3, value=arsenkin.get('checked', len(rows))).font = _font()
+    ws.cell(row=2, column=2, value='Не в индексе:').font = _font(bold=True)
+    c2 = ws.cell(row=2, column=3, value=ni)
     c2.font = _font(bold=True, color=(C.err if ni else C.ok))
     _det = []
     if eng.get('yandex'):
         _det.append(f'Яндекс: {arsenkin.get("not_indexed_yandex", 0)}')
     if eng.get('google'):
         _det.append(f'Google: {arsenkin.get("not_indexed_google", 0)}')
-    ws.cell(row=2, column=3, value='  '.join(_det)).font = _font(color=C.text_muted)
+    ws.cell(row=2, column=4, value='  '.join(_det)).font = _font(color=C.text_muted)
 
     head_row = 4
-    for i, t in enumerate(('URL', 'В Яндексе', 'В Google'), 1):
+    for i, t in enumerate(('URL', 'В Яндексе', 'В Google'), 2):
         cell = ws.cell(row=head_row, column=i, value=t)
         cell.font = _font(bold=True, color=C.bg_elev)
         cell.fill = _fill(C.header_navy)
         cell.border = _border()
-        cell.alignment = _align('center' if i > 1 else 'left')
+        cell.alignment = _align('center' if i > 2 else 'left')
 
     def _cell(row, col, flag, checked):
         c = ws.cell(row=row, column=col)
@@ -2690,16 +2696,17 @@ def _build_arsenkin_sheet(wb, arsenkin):
         return 0 if bad else 1
     r = head_row + 1
     for row in sorted(rows, key=_rank):
-        cu = ws.cell(row=r, column=1, value=row.get('url', ''))
+        cu = ws.cell(row=r, column=2, value=row.get('url', ''))
         cu.font = _font()
         cu.border = _border()
-        _cell(r, 2, row.get('yandex'), eng.get('yandex'))
-        _cell(r, 3, row.get('google'), eng.get('google'))
+        _cell(r, 3, row.get('yandex'), eng.get('yandex'))
+        _cell(r, 4, row.get('google'), eng.get('google'))
         r += 1
 
-    ws.column_dimensions['A'].width = 70
-    ws.column_dimensions['B'].width = 12
+    ws.column_dimensions['A'].width = 3
+    ws.column_dimensions['B'].width = 70
     ws.column_dimensions['C'].width = 12
+    ws.column_dimensions['D'].width = 12
 
 
 def _build_w3c_sheet(wb, w3c_check):
@@ -3928,6 +3935,43 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
         c.alignment = _align(indent=1)
         ws.row_dimensions[gsc_row].height = 16
         gsc_row += 1
+
+    # ── Ни один блок не наполнился: лист остаётся с одним заголовком, и по
+    # нему не понять, сломалось что-то или просто не настроено. Пишем прямо,
+    # чего не хватает - как на листе «Я.Бизнес и GMB».
+    _пусто = []
+    if not has_traffic:
+        _пусто.append(('Трафик',
+                       (traffic or {}).get('note')
+                       or 'нет данных Яндекс.Метрики. Нужны OAuth-токен Метрики '
+                          'и номер счётчика в настройках проекта '
+                          '(metrika_oauth, metrika_counter).'))
+    if not (trust and trust.get('available') and trust.get('hosts')):
+        _пусто.append(('Траст проекта',
+                       (trust or {}).get('note')
+                       or 'ИКС не получен. Нужен OAuth-токен Вебмастера '
+                          '(webmaster_oauth) в настройках проекта; DR требует '
+                          'ключ Open PageRank.'))
+    if not lp_hosts:
+        _пусто.append(('Ссылочный профиль',
+                       (link_profile or {}).get('note')
+                       or 'данные Вебмастера не получены. Нужен OAuth-токен '
+                          'Вебмастера со scope webmaster:hostinfo.'))
+    if not (gsc_pages and gsc_pages.get('available')):
+        _пусто.append(('Страницы в ГСК',
+                       (gsc_pages or {}).get('note')
+                       or 'нет доступа к Google Search Console. Нужен '
+                          'сервис-аккаунт GSC (gsc_service_account) с правами '
+                          'на ресурс сайта.'))
+    if len(_пусто) == 4:            # не наполнилось НИЧЕГО
+        _r = 4
+        for _имя, _почему in _пусто:
+            ws.merge_cells(start_row=_r, start_column=2, end_row=_r, end_column=12)
+            c = ws.cell(row=_r, column=2, value=f'⚪ {_имя}: {_почему}')
+            c.font = _font(size=10, color=C.text_muted)
+            c.alignment = _align(wrap=True, indent=1)
+            ws.row_dimensions[_r].height = 30
+            _r += 1
 
 
 # Лист «Динамика трафика» удалён по прямому указанию - трафик по странам/
