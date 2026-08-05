@@ -654,6 +654,14 @@ _RULES = [
      'Разобрать санкции поисковых систем',
      'Санкция резко режет видимость сайта в поиске.'),
 
+    ('Ошибки сервисов', '', 2, 'SEO + разработка', 'service_issue_item',
+     'Разобрать проблему в сервисах',
+     'Сервис (Вебмастер/GSC/Метрика) диагностировал проблему по официальным данным.'),
+
+    ('Валидация и скорость', '', 3, 'Разработка', 'w3c_errors',
+     'Поправить ошибки валидатора W3C',
+     'Невалидный HTML/CSS может рендериться браузерами по-разному и мешать роботу.'),
+
     ('Блоки на странице', 'похожие товар', 2, 'Разработка', 'blocks_related',
      'Вернуть блок «Похожие товары»',
      'Меньше просмотров товаров и меньше добавлений в корзину.'),
@@ -1067,6 +1075,54 @@ def ps_filters_findings(ps_filters: Optional[dict]) -> list:
             'Ошибка', 'Фильтры ПС',
             f'маркер ручных мер/безопасности в письме GSC: {h.get("subject", "")}',
             detail=f'дата: {h.get("date", "")}'))
+    return out
+
+
+_SVC_SEV_TO_LEVEL = {'fatal': 'Ошибка', 'critical': 'Ошибка',
+                     'possible': 'Предупреждение', 'recommendation': 'Предупреждение'}
+
+
+def service_issues_findings(service_issues: Optional[list]) -> list:
+    """Ошибки сервисов (Вебмастер/GSC/Метрика по API, не из почты) - раньше
+    только на листе «Ошибки сервисов». extra_site_tasks() агрегирует те же
+    данные в «План работ» отдельно (по хосту, не по issue) - эта функция
+    сюда не дублируется, не проходит через group_into_tasks. 'info' -
+    справочная информация, не находка, пропускаем."""
+    out = []
+    for i in service_issues or []:
+        level = _SVC_SEV_TO_LEVEL.get(getattr(i, 'severity', None))
+        if not level:
+            continue
+        host = getattr(i, 'host', '')
+        out.append(Finding(
+            level, 'Ошибки сервисов',
+            getattr(i, 'title', '') or getattr(i, 'code', ''),
+            url=f'https://{host}/' if host else '',
+            detail=f'дата: {getattr(i, "date", "")}'))
+    return out
+
+
+def w3c_findings(w3c_check: Optional[dict]) -> list:
+    """Ошибки валидатора W3C (HTML/CSS) по выборке страниц - числа уже
+    видны колонками на «Страницы», но без отдельной находки не попадали
+    бы в «Проблемы» вовсе. Одна находка на страницу (не на ошибку -
+    ошибок валидатора у боевых сайтов обычно десятки, разбивка по каждой
+    не нужна), детали - на «Валидация и скорость»."""
+    out = []
+    for p in (w3c_check or {}).get('pages') or []:
+        if p.get('error'):
+            continue
+        h, cs = p.get('html') or {}, p.get('css') or {}
+        if h.get('error') or cs.get('error'):
+            continue
+        n = (h.get('errors', 0) or 0) + (cs.get('errors', 0) or 0)
+        if not n:
+            continue
+        out.append(Finding(
+            'Предупреждение', 'Валидация и скорость',
+            f'ошибок валидатора W3C (HTML+CSS): {n}',
+            url=p.get('url', ''),
+            detail=f'HTML: {h.get("errors", 0)} · CSS: {cs.get("errors", 0)}'))
     return out
 
 

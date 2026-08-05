@@ -14,6 +14,7 @@ from report_priorities import (
     indexing_site_findings, metadata_site_findings,
     home_dupes_findings, arsenkin_findings, page404_findings,
     stress_check_findings, ps_filters_findings,
+    service_issues_findings, w3c_findings,
 )
 
 
@@ -860,3 +861,51 @@ def test_ps_filters_findings_фильтрует_не_санкции():
 def test_ps_filters_findings_пусто_если_ничего_не_передано():
     assert ps_filters_findings(None) == []
     assert ps_filters_findings({}) == []
+
+
+# ── service_issues_findings / w3c_findings ────────────────────────────────
+
+def test_service_issues_findings_info_пропускается():
+    from webmaster_api import ServiceIssue
+    issues = [
+        ServiceIssue(project_id='t', service='webmaster', host='a.ru',
+                    severity='fatal', code='SITE_ERROR', title='Сайт не открывается',
+                    date='2026-08-01'),
+        ServiceIssue(project_id='t', service='webmaster', host='b.ru',
+                    severity='info', code='TIP', title='Совет', date='2026-08-01'),
+    ]
+    out = service_issues_findings(issues)
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка' and out[0].section == 'Ошибки сервисов'
+    assert out[0].url == 'https://a.ru/'
+
+
+def test_service_issues_findings_severity_уровни():
+    from webmaster_api import ServiceIssue
+    make = lambda sev: ServiceIssue(project_id='t', service='webmaster', host='a.ru',
+                                    severity=sev, code='X', title='X', date='')
+    out = service_issues_findings([make('critical'), make('possible'),
+                                   make('recommendation')])
+    assert [f.level for f in out] == ['Ошибка', 'Предупреждение', 'Предупреждение']
+
+
+def test_service_issues_findings_пусто_если_ничего_не_передано():
+    assert service_issues_findings(None) == []
+    assert service_issues_findings([]) == []
+
+
+def test_w3c_findings_одна_находка_на_страницу():
+    out = w3c_findings({'pages': [
+        {'url': 'https://a.ru/1/', 'html': {'errors': 3}, 'css': {'errors': 2}},
+        {'url': 'https://a.ru/2/', 'html': {'errors': 0}, 'css': {'errors': 0}},
+        {'url': 'https://a.ru/3/', 'html': {'error': 'timeout'}, 'css': {}},
+    ]})
+    assert len(out) == 1
+    assert out[0].url == 'https://a.ru/1/'
+    assert '5' in out[0].problem
+    assert out[0].level == 'Предупреждение'
+
+
+def test_w3c_findings_пусто_если_ничего_не_передано():
+    assert w3c_findings(None) == []
+    assert w3c_findings({}) == []

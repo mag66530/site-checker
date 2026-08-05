@@ -24,6 +24,7 @@ from report_priorities import (
     classify, indexing_site_findings, metadata_site_findings,
     home_dupes_findings, arsenkin_findings, page404_findings,
     stress_check_findings, ps_filters_findings,
+    service_issues_findings, w3c_findings,
 )
 
 
@@ -5448,9 +5449,9 @@ def build_report(
                              if d.get('problem') != 'not_301'))
 
     # Находки со всех проверок (лист «Проблемы») + приоритезированный план
-    # работ (лист «План работ») - report_priorities.py. wm_metrics/ps_filters/
-    # service_issues - задачи уровня сайта/хоста, в «Проблемы» не попадают
-    # (там колонки заточены под конкретную страницу).
+    # работ (лист «План работ») - report_priorities.py. wm_metrics - задачи
+    # уровня хоста, в «Проблемы» не попадают (те же данные видны на листе
+    # «Хосты и аномалии», отдельный дубль не нужен).
     _page_findings = (collect_findings(results, console_check=console_check,
                                        index_404_check=index_404_check,
                                        metrika_reports=metrika_reports,
@@ -5467,9 +5468,13 @@ def build_report(
     # ниже - через group_into_tasks они бы задвоились. Остальные (дубли
     # метаданных, дубли главной, Арсенкин, 404-тест, нагрузка/парсинг)
     # своей агрегации нигде больше не имеют - идут через group_into_tasks()
-    # как обычные находки.
+    # как обычные находки. Ошибки сервисов и W3C - тоже только в «Проблемы»
+    # (агрегация service_issues в «План работ» - по хосту, не по issue;
+    # W3C вообще без своей задачи, только числа-колонки на «Страницы»).
     _findings = (_page_findings + indexing_site_findings(indexing_summary)
-                + ps_filters_findings(ps_filters))
+                + ps_filters_findings(ps_filters)
+                + service_issues_findings(service_issues)
+                + w3c_findings(w3c_check))
     _tasks = (group_into_tasks(_page_findings)
              + extra_site_tasks(indexing_summary=indexing_summary,
                                 wm_metrics=wm_metrics,
