@@ -11,6 +11,7 @@ from content_checker import BlockResult, ContentResult
 from text_checker import TextIssue
 from report_priorities import (
     Finding, collect_findings, classify, group_into_tasks, extra_site_tasks,
+    indexing_site_findings,
 )
 
 
@@ -616,3 +617,66 @@ def test_extra_site_tasks_html_sitemap_junk():
     assert len(tasks) == 1
     assert tasks[0].task_group == 'html_sitemap_junk'
     assert tasks[0].priority == 3
+
+
+# ── indexing_site_findings (сайт-уровневые находки индексации в «Проблемы») ──
+
+def test_indexing_site_findings_disallowed_даёт_полный_url():
+    out = indexing_site_findings({
+        'host': 'a.ru',
+        'disallowed': [{'path': '/catalog/x/', 'rule': 'Disallow: /catalog/'}]})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert out[0].section == 'Индексация'
+    assert out[0].url == 'https://a.ru/catalog/x/'
+    assert 'Disallow: /catalog/' in out[0].detail
+
+
+def test_indexing_site_findings_missing_catalog_по_каждому_пути():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_audit': {
+        'missing_catalog': {'categories': ['/catalog/a/', '/catalog/b/'],
+                            'filters': ['/catalog/a/filter/x/'], 'services': []}}})
+    assert len(out) == 3
+    assert all(f.level == 'Ошибка' and f.section == 'Индексация' for f in out)
+    assert {f.url for f in out} == {
+        'https://a.ru/catalog/a/', 'https://a.ru/catalog/b/',
+        'https://a.ru/catalog/a/filter/x/'}
+
+
+def test_indexing_site_findings_file_stats_лимиты():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_audit': {'file_stats': [
+        {'url': 'https://a.ru/sitemap-1.xml', 'urls': 60000, 'bytes': 1000},
+        {'url': 'https://a.ru/sitemap-2.xml', 'urls': 11000, 'bytes': 1000},
+        {'url': 'https://a.ru/sitemap-3.xml', 'urls': 100, 'bytes': 1000},
+    ]}})
+    assert len(out) == 2   # 3-й файл в норме, находки нет
+    protocol, recommended = out[0], out[1]
+    assert protocol.level == 'Ошибка' and 'протокола' in protocol.problem
+    assert recommended.level == 'Предупреждение' and 'рекомендуемого' in recommended.problem
+
+
+def test_indexing_site_findings_lastmod_отсутствует_везде():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_audit': {
+        'total': 100, 'with_lastmod': 0, 'with_changefreq': 0, 'with_priority': 100}})
+    assert len(out) == 1
+    assert 'lastmod' in out[0].problem and 'changefreq' in out[0].problem
+    assert 'priority' not in out[0].problem
+
+
+def test_indexing_site_findings_пусто_если_ничего_не_передано():
+    assert indexing_site_findings(None) == []
+    assert indexing_site_findings({}) == []
+
+
+def test_indexing_site_findings_не_дублируется_в_план_работ():
+    """extra_site_tasks (агрегат в «Плане работ») и indexing_site_findings
+    (постатейно в «Проблемы») читают одни и те же данные независимо -
+    сборка build_report должна их не путать (проверяем на уровне модуля:
+    оба возвращают непустой список для одного и того же indexing_summary,
+    но это осознанно два разных места вывода, не одно и то же)."""
+    summary = {'host': 'a.ru', 'disallowed': [{'path': '/x/', 'rule': 'r'}]}
+    findings = indexing_site_findings(summary)
+    tasks = extra_site_tasks(indexing_summary=summary)
+    assert len(findings) == 1
+    assert len(tasks) == 1
+    assert tasks[0].where == 'Лист «Индексация»'

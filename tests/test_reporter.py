@@ -254,7 +254,42 @@ def test_report_with_text_issues():
             all_cells.extend(c for c in row if c)
         assert '{{city}}' in ' '.join(str(c) for c in all_cells)
         assert '%price%' in ' '.join(str(c) for c in all_cells)
-    print('✓ Секция «Битые тексты» в листе «Техничка»')
+    print('✓ Битые тексты - находки прямо в «Проблемы»')
+
+
+def test_indexing_site_findings_попадают_в_проблемы_и_план_работ_без_дублей():
+    """indexing_site_findings (постатейно в «Проблемы») и extra_site_tasks
+    (агрегатом в «Плане работ») читают один indexing_summary независимо -
+    в «Проблемах» видна конкретная страница, в «Плане работ» - сводка
+    без задвоения (одна задача на категорию, не по одной на каждый путь)."""
+    results = [make_result(url='https://stalmetural.ru/', type_label='Главная')]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    indexing_summary = {
+        'host': 'stalmetural.ru',
+        'disallowed': [{'path': '/catalog/a/', 'rule': 'Disallow: /catalog/'},
+                       {'path': '/catalog/b/', 'rule': 'Disallow: /catalog/'}],
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            indexing_summary=indexing_summary,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        prob_cells = [c for row in wb['Проблемы'].iter_rows(values_only=True)
+                     for c in row if c]
+        prob_text = ' '.join(str(c) for c in prob_cells)
+        assert 'https://stalmetural.ru/catalog/a/' in prob_text
+        assert 'https://stalmetural.ru/catalog/b/' in prob_text
+
+        plan_rows = [row for row in wb['План работ'].iter_rows(values_only=True)
+                    if row and row[2] == 'Открыть в robots.txt страницы из sitemap']
+        assert len(plan_rows) == 1   # одна сводная задача, не по одной на путь
+    print('✓ Индексация: сайт-уровневые находки в «Проблемах» без дублей в «Плане работ»')
 
 
 def test_redirect_chain_in_path_column():

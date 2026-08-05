@@ -21,7 +21,7 @@ from openpyxl.utils import get_column_letter, range_boundaries
 
 from report_priorities import (
     PRIORITY_LABEL, collect_findings, group_into_tasks, extra_site_tasks,
-    classify,
+    classify, indexing_site_findings,
 )
 
 
@@ -5426,13 +5426,17 @@ def build_report(
     # работ (лист «План работ») - report_priorities.py. wm_metrics/ps_filters/
     # service_issues - задачи уровня сайта/хоста, в «Проблемы» не попадают
     # (там колонки заточены под конкретную страницу).
-    _findings = collect_findings(results, console_check=console_check,
-                                 index_404_check=index_404_check,
-                                 metrika_reports=metrika_reports,
-                                 calltracking_check=calltracking_check,
-                                 search_check=search_check,
-                                 filters_test=filters_test)
-    _tasks = (group_into_tasks(_findings)
+    _page_findings = collect_findings(results, console_check=console_check,
+                                      index_404_check=index_404_check,
+                                      metrika_reports=metrika_reports,
+                                      calltracking_check=calltracking_check,
+                                      search_check=search_check,
+                                      filters_test=filters_test)
+    # Сайт-уровневые находки индексации (пути/файлы, не одна страница) -
+    # только в «Проблемы» (список), «План работ» их всё ещё агрегирует
+    # extra_site_tasks() ниже - через group_into_tasks они бы задвоились.
+    _findings = _page_findings + indexing_site_findings(indexing_summary)
+    _tasks = (group_into_tasks(_page_findings)
              + extra_site_tasks(indexing_summary=indexing_summary,
                                 wm_metrics=wm_metrics,
                                 service_issues=service_issues,

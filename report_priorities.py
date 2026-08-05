@@ -860,6 +860,115 @@ _SANCTION_CODE_RE = re.compile(
     r'OVEROPT|ADS?_|ADVERT|MOBILE_REDIRECT|DECEPT|CLOAK|DOORWAY', re.I)
 
 
+def _idx_url(indexing_summary, path):
+    """Путь -> полный URL хоста прогона (для гиперссылки в «Проблемах»)."""
+    host = (indexing_summary or {}).get('host', '')
+    if not path:
+        return f'https://{host}/' if host else ''
+    if path.startswith('http'):
+        return path
+    return f'https://{host}{path}' if host else path
+
+
+def indexing_site_findings(indexing_summary: Optional[dict]) -> list:
+    """Сайт-уровневые находки индексации (пути/файлы sitemap и robots.txt,
+    не привязаны к одной странице прогона) - раньше только на листе
+    «Индексация» + агрегатом в «Плане работ» (extra_site_tasks), в
+    «Проблемы» не попадали вообще. Здесь - по одной находке на каждый
+    путь/файл, чтобы список был виден и без открытия детального листа."""
+    s = indexing_summary or {}
+    out = []
+
+    for j in s.get('junk_open') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           f'служебный адрес не закрыт в robots.txt: {j.get("label", "")}',
+                           url=_idx_url(s, j.get('path', ''))))
+
+    for d in s.get('disallowed') or []:
+        out.append(Finding('Ошибка', 'Индексация',
+                           'путь есть в sitemap/каталоге, но закрыт в robots.txt Disallow',
+                           url=_idx_url(s, d.get('path', '')),
+                           detail=f'правило: {d.get("rule", "")}'))
+
+    bd = s.get('blanket_disallow') or []
+    if bd:
+        out.append(Finding('Ошибка', 'Индексация',
+                           'Disallow: / закрывает сайт целиком от индексации',
+                           url=_idx_url(s, '/'),
+                           detail='User-agent: ' + ', '.join(bd)))
+
+    for a in s.get('assets_closed') or []:
+        out.append(Finding('Ошибка', 'Индексация',
+                           'свой CSS/JS закрыт в robots.txt - Google не отрендерит страницу',
+                           url=a.get('url', ''), detail=f'правило: {a.get("rule", "")}'))
+
+    for f in (s.get('directive_check') or {}).get('findings') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           'страница держится только на robots.txt (отвечает 200 без noindex)',
+                           url=_idx_url(s, f.get('path', '')),
+                           detail=f'правило: {f.get("rule", "")} · код {f.get("status", "")}'))
+
+    for a in s.get('advisory_open') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           f'спорный для индекса раздел открыт: {a.get("label", "")}',
+                           url=_idx_url(s, a.get('path', ''))))
+
+    pg = s.get('pagination') or {}
+    if pg.get('status') == 200 and pg.get('canon_ok') is False:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           'на пагинации категории нет canonical на страницу без номера',
+                           url=_idx_url(s, pg.get('base', '')),
+                           detail=f'canonical: {pg.get("canonical") or "нет"}'))
+    if pg.get('loadmore') and pg.get('pag_links') is False:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           'бесконечная прокрутка без ссылок пагинации в HTML',
+                           url=_idx_url(s, pg.get('base', ''))))
+
+    aud = ((s.get('sitemap_audit') or {}))
+    mc = aud.get('missing_catalog') or {}
+    for kind_label, key in (('категория', 'categories'), ('фильтр', 'filters'),
+                            ('услуга', 'services')):
+        for path in mc.get(key) or []:
+            out.append(Finding('Ошибка', 'Индексация',
+                               f'{kind_label} из выгрузки отсутствует в sitemap',
+                               url=_idx_url(s, path)))
+
+    for b in aud.get('bad_urls') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           f'битый/некорректный URL в sitemap: {b.get("why", "")}',
+                           url=b.get('url', '')))
+
+    for fs in aud.get('file_stats') or []:
+        urls_n, bytes_n = fs.get('urls', 0), fs.get('bytes', 0)
+        if urls_n > 50000 or bytes_n > 50 * 1024 * 1024:
+            out.append(Finding('Ошибка', 'Индексация',
+                               'файл sitemap нарушает лимит протокола (50 000 ссылок / 50 МБ)',
+                               url=fs.get('url', ''),
+                               detail=f'{urls_n} URL, {bytes_n // 1048576} МБ'))
+        elif urls_n > 10000 or bytes_n > 10 * 1024 * 1024:
+            out.append(Finding('Предупреждение', 'Индексация',
+                               'файл sitemap больше рекомендуемого лимита (10 000 ссылок / 10 МБ)',
+                               url=fs.get('url', ''),
+                               detail=f'{urls_n} URL, {bytes_n // 1048576} МБ'))
+
+    _tot = aud.get('total') or 0
+    if _tot:
+        _missing_meta = [label for label, key in (
+            ('lastmod', 'with_lastmod'), ('changefreq', 'with_changefreq'),
+            ('priority', 'with_priority')) if aud.get(key, 0) == 0]
+        if _missing_meta:
+            out.append(Finding('Предупреждение', 'Индексация',
+                               f'в sitemap ни у одной записи нет {", ".join(_missing_meta)}',
+                               url=_idx_url(s, '/sitemap.xml')))
+
+    for j in (s.get('html_sitemap') or {}).get('junk_links') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           f'служебная ссылка в HTML-карте сайта: {j.get("label", "")}',
+                           url=j.get('url', '')))
+
+    return out
+
+
 def extra_site_tasks(*, indexing_summary: dict = None,
                      wm_metrics: dict = None,
                      service_issues: list = None,
