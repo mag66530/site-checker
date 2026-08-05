@@ -282,6 +282,48 @@ def upload_from_env(file_path: str, run_type: str, *, log=None) -> dict:
     return res
 
 
+def _пробная_запись(token: str, parent_id: str, *,
+                    proxy_url: str | None = None) -> str:
+    """Создать во временной папке КРОШЕЧНЫЙ ФАЙЛ и всё убрать. '' - успех,
+    иначе текст ошибки.
+
+    Почему именно файл: папка на Диске занимает 0 байт, поэтому она создаётся
+    даже там, где записать отчёт нельзя (у сервисного аккаунта нет своей квоты,
+    и файл, созданный им в чужой папке, списывается с его нулевого места).
+    Проверка «создали папку - значит всё хорошо» давала ложное «доступно», а
+    падало уже на первом прогоне.
+    """
+    tmp_folder = None
+    try:
+        tmp_folder = _create_folder(token, parent_id, ".проверка-доступа",
+                                    proxy_url=proxy_url)
+        meta = {"name": "проверка.txt", "parents": [tmp_folder]}
+        files = {
+            "metadata": ("metadata", _json_bytes(meta), "application/json"),
+            "file": ("проверка.txt", io.BytesIO(b"site-checker"), "text/plain"),
+        }
+        r = requests.post(
+            _UPLOAD,
+            params={"uploadType": "multipart", "supportsAllDrives": "true",
+                    "fields": "id"},
+            files=files, headers=_headers(token),
+            proxies=_proxies(proxy_url), timeout=60)
+        if r.status_code not in (200, 201):
+            return f"HTTP {r.status_code} {r.text[:200]}"
+        return ""
+    except Exception as e:  # noqa: BLE001
+        return str(e)
+    finally:
+        if tmp_folder:
+            try:
+                requests.delete(f"{_FILES}/{tmp_folder}",
+                                params={"supportsAllDrives": "true"},
+                                headers=_headers(token),
+                                proxies=_proxies(proxy_url), timeout=30)
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def check_write_as_user(access_token: str, root_id: str = "root", *,
                         proxy_url: str | None = None) -> dict:
     """Проверка записи ОТ ИМЕНИ подключённого аккаунта проекта (обычный gmail).
@@ -293,19 +335,10 @@ def check_write_as_user(access_token: str, root_id: str = "root", *,
     if not access_token:
         return {"ok": False, "kind": "", "name": "",
                 "error": "аккаунт проекта не подключён (нет токена доступа)"}
-    try:
-        tmp_id = _create_folder(access_token, root_id, ".проверка-доступа",
-                               proxy_url=proxy_url)
-    except Exception as e:  # noqa: BLE001
+    ошибка = _пробная_запись(access_token, root_id, proxy_url=proxy_url)
+    if ошибка:
         return {"ok": False, "kind": "", "name": "",
-                "error": f"нет прав на запись: {e}"}
-    try:
-        requests.delete(f"{_FILES}/{tmp_id}",
-                        params={"supportsAllDrives": "true"},
-                        headers=_headers(access_token),
-                        proxies=_proxies(proxy_url), timeout=30)
-    except Exception:  # noqa: BLE001
-        pass
+                "error": f"нет прав на запись: {ошибка}"}
     return {"ok": True, "kind": "Диск аккаунта проекта", "name": "Мой диск",
             "error": ""}
 
@@ -367,11 +400,11 @@ def check_access(sa_info: dict, root_id: str, *,
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "kind": "", "name": "", "error": str(e)}
 
-    # Пробная запись: создаём временную папку и убираем за собой.
-    try:
-        tmp_id = _create_folder(token, root_id, ".проверка-доступа",
-                               proxy_url=proxy_url)
-    except Exception as e:  # noqa: BLE001
+    # Пробная запись НАСТОЯЩИМ файлом (папка занимает 0 байт и создаётся даже
+    # там, где записать отчёт нельзя) - и убираем за собой.
+    ошибка = _пробная_запись(token, root_id, proxy_url=proxy_url)
+    if ошибка:
+        e = ошибка
         подсказка = ""
         if "storageQuotaExceeded" in str(e) or "quota" in str(e).lower():
             подсказка = (" Папка на ЛИЧНОМ Google-диске: файл, созданный "
@@ -381,12 +414,5 @@ def check_access(sa_info: dict, root_id: str, *,
                          "(кнопка ниже) и расшарить папки проектов на него.")
         return {"ok": False, "kind": kind, "name": name,
                 "error": f"нет прав на запись: {e}.{подсказка}"}
-    try:
-        requests.delete(f"{_FILES}/{tmp_id}",
-                        params={"supportsAllDrives": "true"},
-                        headers=_headers(token), proxies=_proxies(proxy_url),
-                        timeout=30)
-    except Exception:  # noqa: BLE001
-        pass
     return {"ok": True, "kind": kind, "name": name, "error": "",
             "drive_id": drive_id}

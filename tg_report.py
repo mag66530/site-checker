@@ -88,7 +88,15 @@ def drive_env(project_id: str, project_name: str = '') -> dict:
     """Env с настройками Google Диска для фонового прогона (формы/цели/КП).
     Пусто, если у проекта Диск не настроен - тогда выкладка просто не идёт."""
     env = {}
-    refresh = _настройка(project_id, 'gdrive_refresh_token')
+    # Общая привязка служебного аккаунта (один на все проекты) - приоритетна.
+    refresh = ''
+    try:
+        import auth
+        refresh = (auth.gdrive_account_settings(project_id) or {}).get(
+            'refresh_token', '')
+    except Exception:
+        refresh = ''
+    refresh = refresh or _настройка(project_id, 'gdrive_refresh_token')
     root = (_настройка(project_id, 'gdrive_folder_id')
             or _настройка(project_id, 'gdrive_shared_drive_id'))
     if not refresh and not root:

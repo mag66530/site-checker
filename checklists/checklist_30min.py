@@ -169,6 +169,19 @@ def get_google_folder_credentials(project_id):
     return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
 
 
+def _gdrive_refresh(project_id: str) -> str:
+    """Ключ служебного Google-аккаунта для выкладки отчётов: сперва общая
+    привязка (один аккаунт на все проекты), потом привязка самого проекта."""
+    try:
+        import auth
+        v = auth.gdrive_account_settings(project_id)
+        if v.get('refresh_token'):
+            return v['refresh_token']
+    except Exception:  # noqa: BLE001
+        pass
+    return _secret_pid('gdrive_refresh_token', project_id)
+
+
 def _кто_запустил() -> str:
     """«Имя Фамилия» текущего пользователя ('' - не определён). Подпись к
     отчёту: у руководителя в чате смешиваются свои и чужие прогоны."""
@@ -2507,8 +2520,9 @@ if pid:
                 # задана, готовая папка проекта. Пусто = выкладка пропускается.
                 'gdrive_shared_drive_id': _secret_pid('gdrive_shared_drive_id', pid),
                 'gdrive_folder_id': _secret_pid('gdrive_folder_id', pid),
-                # Подключённый аккаунт проекта (обычный gmail): пишем от него.
-                'gdrive_refresh_token': _secret_pid('gdrive_refresh_token', pid),
+                # Служебный Google-аккаунт: общая привязка на всё приложение
+                # (её делают один раз), иначе - привязка самого проекта.
+                'gdrive_refresh_token': _gdrive_refresh(pid),
                 # Ключи OAuth живут в настройках проекта (их видит руководитель),
                 # секрет приложения - запасной источник; _secret_pid уже даёт
                 # именно такой приоритет.

@@ -1077,23 +1077,72 @@ def _google_oauth_creds(pid: str | None = None,
         return cid, csec
 
 
-def render_gdrive_account(pid: str, cur: dict) -> None:
-    """Блок «Google Диск проекта»: подключение ЛИЧНОГО аккаунта (обычный gmail).
+APP_GDRIVE_PID = "_app"          # «проект» для общей привязки Google (state OAuth)
 
-    Нужен там, где Общего диска нет: сервисный аккаунт не может писать в личный
-    Диск (нет своей квоты), а подключённый аккаунт создаёт папки и файлы сам."""
+
+@st.cache_data(ttl=20, show_spinner=False)
+def _c_app_settings() -> dict:
+    return db.get_app_settings()
+
+
+def gdrive_account_settings(pid: str | None = None) -> dict:
+    """Данные подключённого Google-аккаунта для выкладки отчётов.
+
+    Сначала ОБЩАЯ привязка (один служебный аккаунт на все проекты - его
+    подключают один раз, а владельцы просто расшаривают ему папки), потом -
+    привязка конкретного проекта, если её успели сделать раньше."""
+    try:
+        app = _c_app_settings()
+    except Exception:  # noqa: BLE001
+        app = {}
+    if app.get("gdrive_refresh_token"):
+        return {"refresh_token": app["gdrive_refresh_token"],
+                "account": app.get("gdrive_account", ""), "scope": "общий"}
+    if pid:
+        try:
+            proj = _c_proj_settings(pid)
+        except Exception:  # noqa: BLE001
+            proj = {}
+        if proj.get("gdrive_refresh_token"):
+            return {"refresh_token": proj["gdrive_refresh_token"],
+                    "account": proj.get("gdrive_account", ""), "scope": "проект"}
+    return {}
+
+
+def render_gdrive_account(pid: str, cur: dict) -> None:
+    """Блок «Google Диск»: подключение СЛУЖЕБНОГО Google-аккаунта - одного на все
+    проекты.
+
+    Почему не сервисный аккаунт: Google прямо отвечает «Service Accounts do not
+    have storage quota» - файл, созданный им в чужой папке, писать некуда.
+    Почему один аккаунт, а не по одному на проект: вход через Google нужен
+    ровно раз, а владельцы проектов просто расшаривают свои папки на этот
+    обычный адрес почты - без паролей и подтверждений с их стороны."""
     import google_oauth
 
-    st.markdown("**Google Диск проекта**")
-    acc = (cur.get("gdrive_account") or "").strip()
-    if cur.get("gdrive_refresh_token"):
-        st.success(f"Подключён аккаунт: {acc or 'Google'} - отчёты пойдут на его "
-                   f"«Мой диск», в папки проект/год/месяц.")
-        if st.button("Отключить аккаунт", key=f"gd_unlink_{pid}"):
-            db.set_project_settings(pid, {**cur, "gdrive_refresh_token": "",
-                                          "gdrive_account": ""})
-            _invalidate()
-            st.rerun()
+    st.markdown("**Google Диск: аккаунт для выкладки отчётов**")
+    привязка = gdrive_account_settings(pid)
+    if привязка:
+        _чей = ("общий для всех проектов" if привязка["scope"] == "общий"
+                else "привязан к этому проекту")
+        st.success(f"Подключён аккаунт: {привязка['account'] or 'Google'} "
+                   f"({_чей}). Отчёты складываются в папку, указанную выше; "
+                   f"если поле пустое - в «Мой диск» этого аккаунта.")
+        st.caption("Владельцу проекта достаточно расшарить свою папку на этот "
+                   "адрес с правом «Редактор».")
+        _к = st.columns(2)
+        if привязка["scope"] == "общий":
+            if _к[0].button("Отключить общий аккаунт", key="gd_unlink_app"):
+                db.set_app_settings({"gdrive_refresh_token": "",
+                                     "gdrive_account": ""})
+                _c_app_settings.clear()
+                st.rerun()
+        else:
+            if _к[0].button("Отключить аккаунт проекта", key=f"gd_unlink_{pid}"):
+                db.set_project_settings(pid, {**cur, "gdrive_refresh_token": "",
+                                              "gdrive_account": ""})
+                _invalidate()
+                st.rerun()
         return
 
     cid, csec = _google_oauth_creds(pid, cur)
@@ -1110,10 +1159,12 @@ def render_gdrive_account(pid: str, cur: dict) -> None:
         st.caption("Не задан `app.base_url` - без него Google некуда вернуть "
                    "ответ авторизации.")
         return
-    st.caption("Если у аккаунта проекта нет Общего диска - подключите сам "
-               "аккаунт: файлы будут созданы им и лягут на его Диск.")
-    st.link_button("Подключить Google-аккаунт проекта",
-                   google_oauth.auth_url(cid, base, pid))
+    st.caption("Подключается ОДИН служебный Google-аккаунт на все проекты. "
+               "Дальше владельцу каждого проекта достаточно расшарить свою "
+               "папку на его адрес с правом «Редактор» - вход через Google "
+               "второй раз не потребуется.")
+    st.link_button("Подключить служебный Google-аккаунт",
+                   google_oauth.auth_url(cid, base, APP_GDRIVE_PID))
 
 
 def handle_gdrive_oauth_redirect() -> None:
@@ -1133,20 +1184,37 @@ def handle_gdrive_oauth_redirect() -> None:
         return
     # Ключи берём ПО ПРОЕКТУ из state: обработчик срабатывает на любой
     # странице, до того как человек снова выбрал проект в интерфейсе.
-    cid, csec = _google_oauth_creds(pid)
+    # Для общей привязки (state = gdrive:_app) ключи берутся из любого проекта,
+    # где они заполнены - client_id/secret у OAuth-приложения одни на всех.
+    cid, csec = _google_oauth_creds(None if pid == APP_GDRIVE_PID else pid)
+    if pid == APP_GDRIVE_PID and not (cid and csec):
+        for _p in project_keys():
+            cid, csec = _google_oauth_creds(_p)
+            if cid and csec:
+                break
     base = _app_base_url()
     if not (cid and csec and base):
         return
     try:
         res = google_oauth.exchange_code(cid, csec, code, base)
-        vals = dict(db.get_project_settings(pid))
-        if res.get("refresh_token"):
-            vals["gdrive_refresh_token"] = res["refresh_token"]
-        vals["gdrive_account"] = res.get("email", "")
-        db.set_project_settings(pid, vals)
-        _invalidate()
-        st.success(f"✅ Google-аккаунт {res.get('email') or ''} подключён к "
-                   f"проекту «{project_label(pid)}»")
+        if pid == APP_GDRIVE_PID:
+            # Общий служебный аккаунт: одна привязка на всё приложение.
+            vals = {"gdrive_account": res.get("email", "")}
+            if res.get("refresh_token"):
+                vals["gdrive_refresh_token"] = res["refresh_token"]
+            db.set_app_settings(vals)
+            _c_app_settings.clear()
+            st.success(f"✅ Служебный Google-аккаунт {res.get('email') or ''} "
+                       f"подключён. Расшарьте на него папки проектов.")
+        else:
+            vals = dict(db.get_project_settings(pid))
+            if res.get("refresh_token"):
+                vals["gdrive_refresh_token"] = res["refresh_token"]
+            vals["gdrive_account"] = res.get("email", "")
+            db.set_project_settings(pid, vals)
+            _invalidate()
+            st.success(f"✅ Google-аккаунт {res.get('email') or ''} подключён к "
+                       f"проекту «{project_label(pid)}»")
     except Exception as e:  # noqa: BLE001
         st.error(f"❌ Подключить Google не вышло: {e}")
     finally:

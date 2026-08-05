@@ -8,7 +8,8 @@
     user = auth.current_user()
 """
 from .ui import (APP_TAB_KEYS, APP_TABS, admin_panel_page, current_user,
-                 fill_proxy_slot, handle_gdrive_oauth_redirect,
+                 fill_proxy_slot, gdrive_account_settings,
+                 handle_gdrive_oauth_redirect,
                  live_allowed_tabs, live_settings_projects,
                  live_user_projects, logout, manager_cabinet_page,
                  project_setting, project_settings_page, render_account_ui,
@@ -19,4 +20,4 @@ __all__ = ["require_login", "current_user", "logout", "render_account_ui",
            "APP_TAB_KEYS", "tab_label", "manager_cabinet_page",
            "admin_panel_page", "project_settings_page", "project_setting",
            "live_settings_projects", "take_return_slug", "fill_proxy_slot",
-           "handle_gdrive_oauth_redirect"]
+           "handle_gdrive_oauth_redirect", "gdrive_account_settings"]

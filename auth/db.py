@@ -683,6 +683,59 @@ def session_delete_expired() -> None:
         cur.execute("DELETE FROM sessions WHERE expires_at < now()")
 
 
+# ---------- настройки приложения (общие для всех проектов) ----------
+
+_APP_SETTINGS_READY = False
+
+
+def _ensure_app_settings_table() -> None:
+    """Ключ-значение на всё приложение. Нужны вещи, которые не привязаны к
+    проекту: например, служебный Google-аккаунт для выкладки отчётов - его
+    подключают ОДИН раз, а папки проектов просто расшаривают на него."""
+    global _APP_SETTINGS_READY
+    if _APP_SETTINGS_READY:
+        return
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                name       text PRIMARY KEY,
+                value      text NOT NULL,
+                updated_at timestamptz NOT NULL DEFAULT now()
+            );
+            """
+        )
+    _APP_SETTINGS_READY = True
+
+
+@_retry
+def get_app_settings() -> dict:
+    """{name: значение} общих настроек приложения (значения расшифрованы)."""
+    _ensure_app_settings_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT name, value FROM app_settings")
+        return {n: security.decrypt_secret(v) for n, v in cur.fetchall()}
+
+
+@_retry
+def set_app_settings(values: dict) -> None:
+    """Upsert общих настроек; пустое значение = удалить настройку."""
+    _ensure_app_settings_table()
+    to_set = {k: v for k, v in (values or {}).items() if str(v or "").strip()}
+    to_del = [k for k, v in (values or {}).items() if not str(v or "").strip()]
+    with _conn() as c, c.cursor() as cur:
+        if to_set:
+            cur.executemany(
+                """INSERT INTO app_settings (name, value)
+                   VALUES (%s, %s)
+                   ON CONFLICT (name) DO UPDATE
+                     SET value = EXCLUDED.value, updated_at = now()""",
+                [(k, security.encrypt_secret(str(v))) for k, v in to_set.items()],
+            )
+        if to_del:
+            cur.execute("DELETE FROM app_settings WHERE name = ANY(%s)", (to_del,))
+
+
 # ---------- привязка Telegram (уведомления о прогонах) ----------
 
 _TG_READY = False
