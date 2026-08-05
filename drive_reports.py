@@ -47,6 +47,33 @@ def month_folder_name(dt: datetime) -> str:
     return f"{dt.month:02d} - {_МЕСЯЦЫ[dt.month - 1]}"
 
 
+def folder_parts(project_name: str, dt: datetime, run_type: str = "",
+                 свой_диск: bool = False) -> list[str]:
+    """Цепочка папок для отчёта: <Год>/<Месяц>/<Вид прогона>.
+
+    Папку проекта добавляем ТОЛЬКО когда пишем в общий диск, где могут лежать
+    отчёты нескольких проектов. Если диск принадлежит самому проекту (аккаунт
+    подключён этим проектом), лишний уровень не нужен - иначе получалось бы
+    «Диск проекта X / X / 2026 / …».
+
+    ЧИСТАЯ функция - проверяется юнит-тестом.
+    """
+    parts = [] if свой_диск else [project_name or "Проект"]
+    parts += [str(dt.year), month_folder_name(dt)]
+    if run_type:
+        parts.append(run_type)
+    return parts
+
+
+def report_file_name(run_type: str, project_name: str, dt: datetime,
+                     ext: str = ".xlsx") -> str:
+    """Имя файла отчёта: «Проверка форм · SHOPMET · 05.08.2026 14-30.xlsx».
+    Дата в имени - чтобы в папке месяца прогоны различались по датам."""
+    stamp = dt.strftime("%d.%m.%Y %H-%M")
+    куски = [x for x in (run_type, project_name, stamp) if x]
+    return " · ".join(куски) + ext
+
+
 def _token(sa_info: dict, proxy_url: str | None = None) -> str:
     """Access-token сервисного аккаунта под scope drive."""
     from google.oauth2 import service_account
@@ -119,7 +146,8 @@ def upload_report(file_path: str, *, project_name: str, sa_info: dict = None,
                   when: datetime | None = None,
                   file_name: str | None = None,
                   proxy_url: str | None = None,
-                  oauth_token: str | None = None) -> dict:
+                  oauth_token: str | None = None,
+                  run_type: str = "") -> dict:
     """Залить отчёт в <root>/<проект>/<год>/<месяц>/ и вернуть ссылку.
 
     Два режима записи:
@@ -145,7 +173,8 @@ def upload_report(file_path: str, *, project_name: str, sa_info: dict = None,
     name = file_name or os.path.basename(file_path)
     try:
         token = oauth_token or _token(sa_info, proxy_url)
-        parts = [project_name, str(dt.year), month_folder_name(dt)]
+        parts = folder_parts(project_name, dt, run_type,
+                             свой_диск=bool(oauth_token))
         folder_id = ensure_path(token, root_id, parts, drive_id=drive_id,
                                 proxy_url=proxy_url)
         with open(file_path, "rb") as f:
@@ -176,6 +205,62 @@ def upload_report(file_path: str, *, project_name: str, sa_info: dict = None,
 def _json_bytes(obj) -> bytes:
     import json
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
+
+
+def upload_from_env(file_path: str, run_type: str, *, log=None) -> dict:
+    """Выложить отчёт ФОНОВОГО прогона (формы/цели/КП/скорость) на Диск.
+
+    Фоновые прогоны - отдельные процессы без Streamlit, секретов и базы, им
+    настройки прокидывает страница через окружение (см. tg_report.runner_env):
+
+        GDRIVE_PROJECT_NAME     - название проекта (папка на общем диске);
+        GDRIVE_REFRESH_TOKEN    - ключ подключённого аккаунта проекта;
+        GDRIVE_CLIENT_ID/SECRET - ключи OAuth-приложения;
+        GDRIVE_ROOT_ID          - ID общего диска/папки (режим сервисного аккаунта);
+        GDRIVE_PROXY            - (необяз.) прокси.
+
+    Ничего не настроено - тихо возвращаем {} (прогон не должен падать из-за
+    выкладки). → {'link', 'path'} при успехе.
+    """
+    def _log(msg):
+        if log:
+            try:
+                log(msg)
+            except Exception:  # noqa: BLE001
+                pass
+
+    refresh = os.environ.get("GDRIVE_REFRESH_TOKEN", "").strip()
+    root_id = os.environ.get("GDRIVE_ROOT_ID", "").strip()
+    if not refresh and not root_id:
+        return {}
+    proxy = os.environ.get("GDRIVE_PROXY", "").strip() or None
+    project = os.environ.get("GDRIVE_PROJECT_NAME", "").strip() or "Проект"
+    dt = datetime.now()
+    try:
+        oauth = None
+        if refresh:
+            import google_oauth
+            oauth = google_oauth.access_token(
+                os.environ.get("GDRIVE_CLIENT_ID", ""),
+                os.environ.get("GDRIVE_CLIENT_SECRET", ""),
+                refresh, proxy_url=proxy)
+        sa = None
+        if not oauth:
+            from kp_sheets import service_account_info
+            sa = service_account_info()
+        res = upload_report(
+            file_path, project_name=project, sa_info=sa, root_id=root_id,
+            oauth_token=oauth, run_type=run_type, when=dt,
+            file_name=report_file_name(run_type, project, dt),
+            proxy_url=proxy)
+    except Exception as e:  # noqa: BLE001
+        _log(f"⚠ Google Диск: выкладка не выполнена ({e})")
+        return {}
+    if not res.get("ok"):
+        _log(f"⚠ Google Диск: {res.get('error')}")
+        return {}
+    _log(f"✓ Google Диск: отчёт в «{res['path']}» - {res['link']}")
+    return res
 
 
 def check_write_as_user(access_token: str, root_id: str = "root", *,

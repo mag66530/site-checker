@@ -233,6 +233,17 @@ def main() -> int:
             import telegram_notify as tn
             import datetime as _dt
             текст = _сводка_для_telegram(base, результаты)
+            # Отчёт на Google Диск: <Год>/<Месяц>/Проверка целей/<файл>.
+            if out.is_file():
+                try:
+                    import drive_reports
+                    _d = drive_reports.upload_from_env(
+                        str(out), 'Проверка целей', log=_stamp)
+                    if _d.get('link'):
+                        текст += (f'\n\n📁 <a href="{_d["link"]}">Отчёт на '
+                                  f'Google Диске</a>')
+                except Exception as _e:  # noqa: BLE001
+                    _stamp(f'⚠ Google Диск: {_e}')
             _дата = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y')
             res = tn.send_report_from_env(
                 project_name=_ИМЕНА.get(base, base.upper()),

@@ -45,15 +45,78 @@ def is_configured(project_id: str) -> bool:
     return bool(_secret('telegram_bot_token') and _secret(_recipients_key(project_id)))
 
 
-def runner_env(project_id: str) -> dict:
-    """Env-переменные с Telegram-кредами для фонового прогона. Пустой словарь,
-    если Telegram не настроен (тогда прогон просто не отправит отчёт)."""
-    token = _secret('telegram_bot_token')
-    recipients = _secret(_recipients_key(project_id))
-    if not token or not recipients:
-        return {}
-    env = {'TG_BOT_TOKEN': token, 'TG_RECIPIENTS': recipients}
+def _настройка(project_id: str, name: str) -> str:
+    """Значение из «Настроек проекта» (личный кабинет) с откатом на секрет."""
+    try:
+        import auth
+        v = auth.project_setting(project_id, name)
+        if v:
+            return str(v).strip()
+    except Exception:
+        pass
+    return _secret(f'{name}_{project_id}') or _secret(name)
+
+
+def _получатели(project_id: str) -> str:
+    """chat_id получателей: тот, кто запустил (привязка в кабинете) + подписанные
+    на проект руководители; иначе - старый список из секретов."""
+    chats: list[str] = []
+
+    def _add(v):
+        v = str(v or '').strip()
+        if v and v not in chats:
+            chats.append(v)
+
+    try:
+        import auth
+        import telegram_link
+        u = auth.current_user()
+        if u:
+            _add(telegram_link.chat_id_for_user(u['id']))
+    except Exception:
+        pass
+    try:
+        from auth import db as _db
+        for s in _db.telegram_project_subscribers(project_id):
+            _add(s.get('chat_id'))
+    except Exception:
+        pass
+    return ','.join(chats) or _secret(_recipients_key(project_id))
+
+
+def drive_env(project_id: str, project_name: str = '') -> dict:
+    """Env с настройками Google Диска для фонового прогона (формы/цели/КП).
+    Пусто, если у проекта Диск не настроен - тогда выкладка просто не идёт."""
+    env = {}
+    refresh = _настройка(project_id, 'gdrive_refresh_token')
+    root = (_настройка(project_id, 'gdrive_folder_id')
+            or _настройка(project_id, 'gdrive_shared_drive_id'))
+    if not refresh and not root:
+        return env
+    if refresh:
+        env['GDRIVE_REFRESH_TOKEN'] = refresh
+        env['GDRIVE_CLIENT_ID'] = _настройка(project_id, 'google_oauth_client_id')
+        env['GDRIVE_CLIENT_SECRET'] = _настройка(project_id, 'google_oauth_client_secret')
+    if root:
+        env['GDRIVE_ROOT_ID'] = root
+    env['GDRIVE_PROJECT_NAME'] = project_name or project_id
     proxy = _secret('proxy_url')
     if proxy:
-        env['TG_PROXY'] = proxy
+        env['GDRIVE_PROXY'] = proxy
+    return env
+
+
+def runner_env(project_id: str, project_name: str = '') -> dict:
+    """Env-переменные для фонового прогона: Telegram + Google Диск.
+
+    Telegram-часть пустая, если некому слать; Диск-часть - если он не настроен.
+    Прогон в обоих случаях просто пропускает соответствующий шаг."""
+    env = dict(drive_env(project_id, project_name))
+    token = _secret('telegram_bot_token')
+    recipients = _получатели(project_id)
+    if token and recipients:
+        env.update({'TG_BOT_TOKEN': token, 'TG_RECIPIENTS': recipients})
+        proxy = _secret('proxy_url')
+        if proxy:
+            env['TG_PROXY'] = proxy
     return env

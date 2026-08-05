@@ -622,6 +622,17 @@ def main() -> int:
                 if _города:
                     _части.append(f'Города: {escape_html(", ".join(_города))}')
                 _части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')
+                # Отчёт на Google Диск: <Год>/<Месяц>/Проверка форм/<файл>.
+                if _отчёт.is_file():
+                    try:
+                        import drive_reports
+                        _d = drive_reports.upload_from_env(
+                            str(_отчёт), 'Проверка форм', log=_stamp)
+                        if _d.get('link'):
+                            _части.append(
+                                f'📁 <a href="{_d["link"]}">Отчёт на Google Диске</a>')
+                    except Exception as _e:  # noqa: BLE001
+                        _stamp(f'⚠ Google Диск: {_e}')
                 _текст = '\n\n'.join(_части)
                 _res = tn.send_report_from_env(
                     project_name=name, summary_text=_текст,

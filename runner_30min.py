@@ -718,10 +718,15 @@ def _выложить_на_диск(report_path, cfg, creds, proxy_url, log) -> 
                 creds.get('google_oauth_client_secret') or '',
                 _refresh, proxy_url=proxy_url)
         sa = None if _oauth else service_account_info()
+        _имя_проекта = cfg.get('name') or cfg.get('id') or 'Проект'
+        _когда = datetime.now()
         res = drive_reports.upload_report(
-            str(report_path), project_name=cfg.get('name') or cfg.get('id') or 'Проект',
+            str(report_path), project_name=_имя_проекта,
             sa_info=sa, root_id=root_id, oauth_token=_oauth,
             drive_id=(creds.get('gdrive_shared_drive_id') or None) if not _oauth else None,
+            run_type='Чек-лист', when=_когда,
+            file_name=drive_reports.report_file_name('Чек-лист', _имя_проекта,
+                                                     _когда),
             proxy_url=proxy_url)
     except Exception as e:  # noqa: BLE001
         log(f'⚠ Google Диск: выкладка не выполнена ({e})')

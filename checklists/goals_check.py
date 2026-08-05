@@ -301,7 +301,7 @@ with c1:
         # кладём в окружение прогона - goals_run сам отправит сводный отчёт в чат.
         try:
             import tg_report
-            env.update(tg_report.runner_env(_base))
+            env.update(tg_report.runner_env(_base, PROJECTS.get(_base, _base)))
         except Exception:
             pass
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0

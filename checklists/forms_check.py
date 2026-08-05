@@ -1166,7 +1166,7 @@ with _run_col:
             # forms_run сам отправит отчёт в чат после прогона.
             try:
                 import tg_report
-                _tg_env = tg_report.runner_env(pid_key)
+                _tg_env = tg_report.runner_env(pid_key, PROJECTS[pid_key]['name'])
             except Exception:
                 _tg_env = {}
             _launch_background(args, LOG_FILE,

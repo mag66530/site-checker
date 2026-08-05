@@ -447,7 +447,8 @@ with _c1:
             # сам отправит отчёт КП в чат после прогона.
             try:
                 import tg_report
-                _env.update(tg_report.runner_env(pid_key))
+                _env.update(tg_report.runner_env(
+                    pid_key, PROJECTS.get(pid_key, pid_key)))
             except Exception:
                 pass
             _launch(args, extra_env=_env or None)

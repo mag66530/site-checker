@@ -1021,6 +1021,17 @@ def main() -> int:
         else:
             _части.append('Проверены все домены и поддомены проекта')
         _части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')
+        # Отчёт на Google Диск: <Год>/<Месяц>/Проверка КП/<файл>.
+        if xlsx.is_file():
+            try:
+                import drive_reports
+                _d = drive_reports.upload_from_env(str(xlsx), 'Проверка КП',
+                                                   log=_stamp)
+                if _d.get('link'):
+                    _части.append(
+                        f'📁 <a href="{_d["link"]}">Отчёт на Google Диске</a>')
+            except Exception as _e:  # noqa: BLE001
+                _stamp(f'⚠ Google Диск: {_e}')
         _текст = '\n\n'.join(_части)
         _res = tn.send_report_from_env(
             project_name=PROJECT_NAMES[a.project], summary_text=_текст,
