@@ -43,6 +43,17 @@ def test_рабочая_страница_без_доп_проверок_ниче
     assert collect_findings([r]) == []
 
 
+def test_seo_text_warnings_попадают_в_проблемы():
+    """r.seo_text раньше не читался в collect_findings вообще - находки
+    были видны только на листе «Метаданные», в «Проблемы» не попадали."""
+    r = _result(seo_text={'warnings': [
+        'в SEO-тексте нет таблицы (caption+thead) - по чек-листу желательна']})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].section == 'Метаданные' and out[0].level == 'Предупреждение'
+    assert 'нет таблицы' in out[0].problem
+
+
 def test_битые_тексты_дают_находку_на_каждую_переменную():
     """Раньше text_issues были только на отдельном листе «Битые тексты»,
     в collect_findings не итемизировались вообще."""
@@ -664,6 +675,41 @@ def test_indexing_site_findings_lastmod_отсутствует_везде():
     assert len(out) == 1
     assert 'lastmod' in out[0].problem and 'changefreq' in out[0].problem
     assert 'priority' not in out[0].problem
+
+
+def test_indexing_site_findings_required_pages_только_не_найденные():
+    out = indexing_site_findings({'host': 'a.ru', 'required_pages': [
+        {'label': 'Политика конфиденциальности', 'found': '/policy/'},
+        {'label': 'Доставка', 'found': None},
+    ]})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert 'Доставка' in out[0].problem
+
+
+def test_indexing_site_findings_sitemap_checks_нет_директивы():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_checks': {'has_directive': False}})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert 'Sitemap' in out[0].problem
+
+
+def test_indexing_site_findings_sitemap_checks_директива_не_открывается():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_checks': {
+        'has_directive': True, 'matches_project': True,
+        'directives': [{'url': 'https://a.ru/sitemap.xml', 'status': 404}]}})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert out[0].url == 'https://a.ru/sitemap.xml'
+
+
+def test_indexing_site_findings_wm_sitemaps_пусто_или_с_ошибками():
+    out_empty = indexing_site_findings({'host': 'a.ru', 'wm_sitemaps': {'sitemaps': []}})
+    assert len(out_empty) == 1
+    out_err = indexing_site_findings({'host': 'a.ru', 'wm_sitemaps': {'sitemaps': [
+        {'url': 'https://a.ru/sitemap.xml', 'errors': 3}]}})
+    assert len(out_err) == 1
+    assert '3' in out_err[0].problem
 
 
 def test_indexing_site_findings_пусто_если_ничего_не_передано():

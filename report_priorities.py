@@ -566,6 +566,8 @@ def collect_findings(results, *, console_check: dict = None,
                                     city=city, page_type=page_type, url=url))
         out.extend(_from_issue_dict(r.meta, section='Метаданные',
                                     city=city, page_type=page_type, url=url))
+        out.extend(_from_issue_dict(getattr(r, 'seo_text', None), section='Метаданные',
+                                    city=city, page_type=page_type, url=url))
         out.extend(_layout_findings(r.layout, city=city, page_type=page_type,
                                     url=url))
         out.extend(_markup_findings(r.markup, city=city, page_type=page_type,
@@ -1231,6 +1233,50 @@ def indexing_site_findings(indexing_summary: Optional[dict]) -> list:
         out.append(Finding('Предупреждение', 'Индексация',
                            f'служебная ссылка в HTML-карте сайта: {j.get("label", "")}',
                            url=j.get('url', '')))
+
+    for r in s.get('required_pages') or []:
+        if r.get('found'):
+            continue
+        out.append(Finding('Ошибка', 'Индексация',
+                           f'обязательная страница не найдена: {r.get("label", "")}',
+                           url=_idx_url(s, '/')))
+
+    smc = s.get('sitemap_checks') or None
+    if smc is not None:
+        if not smc.get('has_directive'):
+            out.append(Finding('Ошибка', 'Индексация',
+                               'в robots.txt нет директивы Sitemap - роботы не видят карту сайта',
+                               url=_idx_url(s, '/robots.txt')))
+        else:
+            for d in smc.get('directives') or []:
+                if d.get('status') != 200:
+                    out.append(Finding(
+                        'Ошибка', 'Индексация',
+                        'sitemap из robots.txt не открывается',
+                        url=d.get('url', ''),
+                        detail=f'код: {d.get("status") if d.get("status") is not None else "нет ответа"}'))
+            if smc.get('matches_project') is False:
+                out.append(Finding(
+                    'Предупреждение', 'Индексация',
+                    'ни одна директива Sitemap в robots.txt не совпадает с sitemap проекта из настроек',
+                    url=_idx_url(s, '/robots.txt')))
+
+    wm = s.get('wm_sitemaps')
+    if wm is not None:
+        wm_list = wm.get('sitemaps') or []
+        if wm.get('error'):
+            pass  # сбой получения данных Вебмастера - не находка сайта
+        elif not wm_list:
+            out.append(Finding('Ошибка', 'Индексация',
+                               'в Яндекс.Вебмастере не добавлено ни одного sitemap-файла',
+                               url=_idx_url(s, '/')))
+        else:
+            for sm in wm_list:
+                if sm.get('errors'):
+                    out.append(Finding(
+                        'Ошибка', 'Индексация',
+                        f'sitemap в Яндекс.Вебмастере с ошибками: {sm.get("errors")}',
+                        url=sm.get('url', '')))
 
     return out
 
