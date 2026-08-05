@@ -2086,6 +2086,10 @@ def run_check(pid, params, creds, log, progress):
                         if getattr(r, 'has_markup_issues', False)),
                     index_404_dead=((_index_404 or {}).get('total_dead', 0)
                                     + (_index_404 or {}).get('total_soft', 0)))
+                # Кто запустил: у руководителя в чате лежат и свои, и чужие
+                # прогоны по проекту - без подписи не разобрать, чей отчёт.
+                if creds.get('started_by'):
+                    summary_text += f'\n\n👤 Запустил: {creds["started_by"]}'
                 # Отчёт на Google Диск: <Общий диск>/<Проект>/<Год>/<Месяц>/.
                 # Ссылку кладём в сообщение - файл всё равно уходит вложением,
                 # поэтому неудача выкладки прогон не ломает (пишем в лог).

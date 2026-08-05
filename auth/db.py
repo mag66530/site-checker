@@ -694,7 +694,10 @@ def _ensure_telegram_table() -> None:
     code   - одноразовый код, который человек передаёт боту командой
              /start <code> (ссылка из личного кабинета);
     chat_id- заполняется, когда бот увидел этот /start (до тех пор пусто -
-             привязка «ожидает подтверждения»).
+             привязка «ожидает подтверждения»);
+    mode   - что присылать: 'own' - только свои запуски (так у сотрудников),
+             'projects' - все прогоны по проектам человека (доступно
+             руководителю и админу).
     """
     global _TG_READY
     if _TG_READY:
@@ -707,11 +710,15 @@ def _ensure_telegram_table() -> None:
                 code       text NOT NULL,
                 chat_id    text,
                 username   text,
+                mode       text NOT NULL DEFAULT 'own',
                 created_at timestamptz NOT NULL DEFAULT now(),
                 linked_at  timestamptz
             );
             """
         )
+        # Таблица могла быть создана ДО появления режима - добавляем колонку.
+        cur.execute("ALTER TABLE user_telegram ADD COLUMN IF NOT EXISTS "
+                    "mode text NOT NULL DEFAULT 'own';")
         cur.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS user_telegram_code_idx "
             "ON user_telegram (code);"
@@ -763,6 +770,50 @@ def telegram_link_by_code(code: str, chat_id: str, username: str = "") -> Option
         )
         row = cur.fetchone()
         return row[0] if row else None
+
+
+@_retry
+def telegram_set_mode(user_id: str, mode: str) -> None:
+    """Режим уведомлений: 'own' (только свои запуски) или 'projects' (все
+    прогоны по проектам человека). Чужое значение игнорируем - пишем 'own'."""
+    if not user_id:
+        return
+    _ensure_telegram_table()
+    mode = mode if mode in ("own", "projects") else "own"
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("UPDATE user_telegram SET mode = %s WHERE user_id = %s",
+                    (mode, str(user_id)))
+
+
+@_retry
+def telegram_project_subscribers(project_key: str) -> list[dict]:
+    """Кому слать отчёт о ЛЮБОМ прогоне по этому проекту.
+
+    Это те, кто в личном кабинете выбрал «все прогоны по моим проектам»
+    (mode='projects') И у кого этот проект есть в списке. Админ получает по
+    любому проекту - у него доступ ко всем.
+    → [{'user_id', 'chat_id', 'role'}, …]
+    """
+    if not project_key:
+        return []
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            SELECT ut.user_id, ut.chat_id, u.role::text AS role
+              FROM user_telegram ut
+              JOIN users u ON u.id::text = ut.user_id
+             WHERE ut.chat_id IS NOT NULL
+               AND ut.mode = 'projects'
+               AND u.status::text = 'active'
+               AND (u.role::text = 'admin'
+                    OR EXISTS (SELECT 1 FROM user_projects up
+                                WHERE up.user_id::text = ut.user_id
+                                  AND up.project_key = %s))
+            """,
+            (project_key,),
+        )
+        return list(cur.fetchall())
 
 
 @_retry

@@ -674,7 +674,26 @@ def render_telegram_block(user: dict) -> None:
         if row and row.get("chat_id"):
             кто = row.get("username") or row["chat_id"]
             st.success(f"Подключено: {кто}")
-            st.caption("Отчёты о ваших прогонах приходят в этот чат.")
+            # Руководитель (и админ) может следить за всеми прогонами своих
+            # проектов - в том числе за чужими. Сотруднику выбор не нужен:
+            # ему приходят только его собственные запуски.
+            if user["role"] in ("manager", "admin"):
+                _варианты = ["own", "projects"]
+                _подписи = {
+                    "own": "Только мои запуски",
+                    "projects": ("Все прогоны по моим проектам"
+                                 if user["role"] == "manager"
+                                 else "Все прогоны по всем проектам"),
+                }
+                _тек = row.get("mode") if row.get("mode") in _варианты else "own"
+                _новый = st.radio(
+                    "Что присылать", _варианты, index=_варианты.index(_тек),
+                    format_func=lambda k: _подписи[k], key="tg_mode")
+                if _новый != _тек:
+                    db.telegram_set_mode(user["id"], _новый)
+                    st.rerun()
+            else:
+                st.caption("Отчёты о ваших прогонах приходят в этот чат.")
             if st.button("Отключить", key="tg_unlink", use_container_width=True):
                 db.telegram_unlink(user["id"])
                 st.rerun()

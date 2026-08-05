@@ -169,20 +169,54 @@ def get_google_folder_credentials(project_id):
     return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
 
 
+def _кто_запустил() -> str:
+    """«Имя Фамилия» текущего пользователя ('' - не определён). Подпись к
+    отчёту: у руководителя в чате смешиваются свои и чужие прогоны."""
+    try:
+        import auth
+        u = auth.current_user() or {}
+        имя = " ".join(x for x in (u.get("first_name"), u.get("last_name")) if x)
+        return имя or str(u.get("email") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def get_telegram_recipients(project_id):
-    """Кому уходит отчёт о прогоне: ТОМУ, КТО ЕГО ЗАПУСТИЛ (привязка Telegram
-    в личном кабинете). Если человек Telegram не подключил - откатываемся на
-    старый список из секрета telegram_recipients_<проект>, чтобы уже
-    настроенные проекты не остались без уведомлений."""
+    """Кому уходит отчёт о прогоне:
+
+      • ТОМУ, КТО ЗАПУСТИЛ - если он подключил Telegram в личном кабинете;
+      • плюс руководителям/админам, выбравшим в кабинете «все прогоны по моим
+        проектам» (см. db.telegram_project_subscribers) - им видны и чужие
+        запуски по их проектам.
+
+    Сотруднику выбора нет: он получает только свои запуски. Если Telegram не
+    подключил никто - откатываемся на старый список из секрета
+    telegram_recipients_<проект>, чтобы уже настроенные проекты не остались
+    без уведомлений."""
+    chats = []
+
+    def _add(v):
+        v = str(v or '').strip()
+        if v and v not in chats:
+            chats.append(v)
+
     try:
         import auth
         import telegram_link
         _u = auth.current_user()
-        _chat = telegram_link.chat_id_for_user(_u["id"]) if _u else None
-        if _chat:
-            return [str(_chat)]
+        if _u:
+            _add(telegram_link.chat_id_for_user(_u['id']))
     except Exception:  # noqa: BLE001
         pass
+    try:
+        from auth import db as _db
+        for _s in _db.telegram_project_subscribers(project_id):
+            _add(_s.get('chat_id'))
+    except Exception:  # noqa: BLE001
+        pass
+    if chats:
+        return chats
+
     val = _secret(f'telegram_recipients_{project_id}')
     if isinstance(val, str):
         return [val.strip()] if val.strip() else []
@@ -2466,6 +2500,9 @@ if pid:
                 'proxy_url': _c30_effective_proxy,
                 'tg_token': _secret('telegram_bot_token'),
                 'tg_recipients': get_telegram_recipients(pid),
+                # Кто запустил - руководителю, который следит за всеми
+                # прогонами проекта, важно понимать, чей это отчёт.
+                'started_by': _кто_запустил(),
                 # Google Диск для отчётов: общий диск (Shared Drive) и, если
                 # задана, готовая папка проекта. Пусто = выкладка пропускается.
                 'gdrive_shared_drive_id': _secret_pid('gdrive_shared_drive_id', pid),
