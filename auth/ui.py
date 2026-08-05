@@ -72,6 +72,13 @@ PROJECT_SETTING_FIELDS = [
     # диск/папка. Внутри инструмент сам заводит <Проект>/<Год>/<Месяц>/.
     ("gdrive_shared_drive_id", "ID общего диска Google (отчёты проекта)", "text"),
     ("gdrive_folder_id", "ID папки Google (если вместо диска - готовая папка)", "text"),
+    # Ключи OAuth-приложения Google. Технически они общие для всех проектов, но
+    # держим их ЗДЕСЬ, а не в секретах приложения: секреты видит только владелец
+    # хостинга, а настройки проекта - любой руководитель со своими правами.
+    # Вписываются один раз (одни и те же значения можно продублировать в каждый
+    # проект); секрет остаётся запасным источником.
+    ("google_oauth_client_id", "Google OAuth: Client ID (для подключения Диска)", "text"),
+    ("google_oauth_client_secret", "Google OAuth: Client secret", "password"),
 ]
 
 
@@ -996,7 +1003,7 @@ def project_settings_page() -> None:
                     # Подключённый аккаунт проекта: проверяем запись ЕГО
                     # токеном - сервисный аккаунт тут вообще ни при чём.
                     import google_oauth
-                    cid, csec = _google_oauth_creds()
+                    cid, csec = _google_oauth_creds(pid, cur)
                     tok = google_oauth.access_token(cid, csec, _refresh)
                     res = drive_reports.check_write_as_user(
                         tok, _drive_id or "root")
@@ -1025,13 +1032,30 @@ def project_settings_page() -> None:
         st.caption(f"⚠ Блок проверки доступа не загрузился: {e}")
 
 
-def _google_oauth_creds() -> tuple[str, str]:
-    """(client_id, client_secret) приложения для привязки аккаунтов проектов."""
+def _google_oauth_creds(pid: str | None = None,
+                        settings: dict | None = None) -> tuple[str, str]:
+    """(client_id, client_secret) для привязки Google-аккаунтов.
+
+    Порядок: настройки проекта (их видит и правит руководитель прямо в
+    интерфейсе) → секреты приложения (доступны только владельцу хостинга,
+    остаются как запасной вариант для уже настроенных установок)."""
+    cid = csec = ""
+    src = settings
+    if src is None and pid:
+        try:
+            src = _c_proj_settings(pid)
+        except Exception:  # noqa: BLE001
+            src = None
+    if src:
+        cid = str(src.get("google_oauth_client_id") or "").strip()
+        csec = str(src.get("google_oauth_client_secret") or "").strip()
+    if cid and csec:
+        return cid, csec
     try:
-        return (str(st.secrets.get("google_oauth_client_id") or "").strip(),
-                str(st.secrets.get("google_oauth_client_secret") or "").strip())
+        return (cid or str(st.secrets.get("google_oauth_client_id") or "").strip(),
+                csec or str(st.secrets.get("google_oauth_client_secret") or "").strip())
     except Exception:
-        return "", ""
+        return cid, csec
 
 
 def render_gdrive_account(pid: str, cur: dict) -> None:
@@ -1053,13 +1077,15 @@ def render_gdrive_account(pid: str, cur: dict) -> None:
             st.rerun()
         return
 
-    cid, csec = _google_oauth_creds()
+    cid, csec = _google_oauth_creds(pid, cur)
     base = _app_base_url()
     if not (cid and csec):
-        st.caption("Для подключения личного Google-аккаунта нужны секреты "
-                   "`google_oauth_client_id` и `google_oauth_client_secret`. "
-                   "Если у проекта есть Общий диск (Workspace) - подключение "
-                   "аккаунта не требуется, хватит поля с ID диска выше.")
+        st.caption("Заполните выше поля «Google OAuth: Client ID» и «Client "
+                   "secret» (берутся в Google Cloud → Credentials → OAuth "
+                   "client ID, тип Web application) и сохраните - тогда "
+                   "появится кнопка подключения. Если у проекта есть Общий "
+                   "диск (Workspace), подключать аккаунт не нужно: хватит "
+                   "поля с ID диска.")
         return
     if not base:
         st.caption("Не задан `app.base_url` - без него Google некуда вернуть "
@@ -1086,7 +1112,9 @@ def handle_gdrive_oauth_redirect() -> None:
     pid = google_oauth.project_from_state(state or "")
     if not (code and pid):
         return
-    cid, csec = _google_oauth_creds()
+    # Ключи берём ПО ПРОЕКТУ из state: обработчик срабатывает на любой
+    # странице, до того как человек снова выбрал проект в интерфейсе.
+    cid, csec = _google_oauth_creds(pid)
     base = _app_base_url()
     if not (cid and csec and base):
         return

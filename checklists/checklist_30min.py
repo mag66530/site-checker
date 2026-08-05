@@ -2509,8 +2509,11 @@ if pid:
                 'gdrive_folder_id': _secret_pid('gdrive_folder_id', pid),
                 # Подключённый аккаунт проекта (обычный gmail): пишем от него.
                 'gdrive_refresh_token': _secret_pid('gdrive_refresh_token', pid),
-                'google_oauth_client_id': _secret('google_oauth_client_id'),
-                'google_oauth_client_secret': _secret('google_oauth_client_secret'),
+                # Ключи OAuth живут в настройках проекта (их видит руководитель),
+                # секрет приложения - запасной источник; _secret_pid уже даёт
+                # именно такой приоритет.
+                'google_oauth_client_id': _secret_pid('google_oauth_client_id', pid),
+                'google_oauth_client_secret': _secret_pid('google_oauth_client_secret', pid),
                 'metrika': get_metrika_credentials(pid),
                 'gsc': get_gsc_credentials(pid),
                 # Сервисный аккаунт GSC для источника «Google» в «404 в индексе»
