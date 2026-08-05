@@ -1837,9 +1837,13 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         ws.row_dimensions[row].height = 22
         row += 2
     else:
-        row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'indexing', 'issues'), C.err,
-            extra_label='')
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = '· постранично - в «Проблемах» (раздел «Индексация»).'
+        c.font = _font(size=10, italic=True, color=C.text_muted)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 20
+        row += 2
 
     # ── Секция 2: предупреждения (сгруппированы по замечанию) ──
     if warned:
@@ -1851,14 +1855,13 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         c.alignment = _align(indent=1)
         ws.row_dimensions[row].height = 24
         row += 1
-        def _idx_extra(r):
-            _ext = (getattr(r, 'indexing', None) or {}).get('ext_nofollow') or []
-            return ('внешние: ' + ', '.join(_ext[:4])
-                    + (f' … +{len(_ext) - 4}' if len(_ext) > 4 else '')
-                    if _ext else '')
-        row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'indexing', 'warnings'), C.warn,
-            extra=_idx_extra, extra_label='Внешние nofollow-ссылки')
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = '· постранично - в «Проблемах» (раздел «Индексация»).'
+        c.font = _font(size=10, italic=True, color=C.text_muted)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 20
+        row += 2
 
     # ── Секция 3: sitemap ↔ robots противоречия ──
     if indexing_summary:
@@ -1898,7 +1901,6 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 if _agent != '*':
                     _rule += f' (User-agent: {_agent})'
                 _by_rule.setdefault(_rule, []).append(d.get('path', ''))
-            _MAX_PATHS = 100
             for _rule, _paths in sorted(_by_rule.items(),
                                         key=lambda kv: -len(kv[1])):
                 ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
@@ -1910,26 +1912,13 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 c.border = _border()
                 ws.row_dimensions[row].height = 22
                 row += 1
-                for _p in _paths[:_MAX_PATHS]:
-                    ws.merge_cells(start_row=row, start_column=2,
-                                   end_row=row, end_column=5)
-                    c = ws.cell(row=row, column=2)
-                    c.value = _p
-                    c.font = _font(size=9, color=C.text_soft)
-                    c.alignment = _align(indent=2)
-                    c.border = _border(color=C.border_light)
-                    ws.row_dimensions[row].height = 16
-                    row += 1
-                if len(_paths) > _MAX_PATHS:
-                    ws.merge_cells(start_row=row, start_column=2,
-                                   end_row=row, end_column=5)
-                    c = ws.cell(row=row, column=2)
-                    c.value = f'… и ещё {len(_paths) - _MAX_PATHS} путей'
-                    c.font = _font(size=9, italic=True, color=C.text_muted)
-                    c.alignment = _align(indent=2)
-                    ws.row_dimensions[row].height = 16
-                    row += 1
-                row += 1
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = '· пути по каждому правилу - в «Проблемах» (раздел «Индексация»).'
+            c.font = _font(size=9, italic=True, color=C.text_muted)
+            c.alignment = _align(indent=2)
+            ws.row_dimensions[row].height = 16
+            row += 1
         row += 1
 
         def _line(text, color, bold=False):
@@ -1963,11 +1952,9 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                       f'дополнительно закрыты noindex.', C.ok)
             else:
                 _line('Эти страницы реально отвечают 200 и БЕЗ собственного '
-                      'noindex - держатся только на честном слове robots.txt:',
+                      'noindex - держатся только на честном слове robots.txt. '
+                      'Список - в «Проблемах» (раздел «Индексация»).',
                       C.text_muted)
-                for _f in _dc_finds:
-                    _line(f'⚠ {_f.get("path", "")}: Disallow: {_f.get("rule", "")} - '
-                          f'отвечает 200, noindex не стоит', C.warn)
             row += 1
 
         # ── Секция 4: мусор не закрыт в robots (ТЗ 3.3.4.2) ──
@@ -1991,9 +1978,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             else:
                 _line('Эти страницы отвечают 200, НЕ закрыты в robots и (для '
                       'параметрических - без rel="canonical") - мусор попадает '
-                      'в обход робота:', C.text_muted)
-                for j in junk:
-                    _line(f'{j.get("label", "")}: {j.get("path", "")}', C.err)
+                      'в обход робота. Список - в «Проблемах» (раздел '
+                      '«Индексация»).', C.text_muted)
             row += 1
 
         # ── Секция 4.1: пагинация (canonical для Яндекса, JS для Google) ──
@@ -2060,11 +2046,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             else:
                 _line('Чек-лист советует noindex для старых акций/новостей/'
                       'политик. Эти разделы открыты - решить, нужны ли они '
-                      'в индексе (полезный раздел можно оставить):',
-                      C.text_muted)
-                for a in _adv:
-                    _line(f'⚠ {a.get("label", "")}: {a.get("path", "")} - '
-                          f'отвечает 200, noindex не стоит', C.warn)
+                      'в индексе (полезный раздел можно оставить). Список - '
+                      'в «Проблемах» (раздел «Индексация»).', C.text_muted)
             row += 1
 
         # ── Секция 4.2а: обязательные страницы + раздел «Отгрузки» ──
@@ -2210,12 +2193,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             if _assets_closed:
                 _line(f'❌ Файлы .css/.js закрыты в robots.txt '
                       f'({len(_assets_closed)} из {_n_assets}) - Google не '
-                      f'сможет отрендерить страницы:', C.err, bold=True)
-                for _a in _assets_closed[:10]:
-                    _line(f'{_a.get("url", "")}  (Disallow: {_a.get("rule", "")})',
-                          C.err)
-                if len(_assets_closed) > 10:
-                    _line(f'… и ещё {len(_assets_closed) - 10}', C.text_muted)
+                      f'сможет отрендерить страницы. Список - в «Проблемах» '
+                      f'(раздел «Индексация»).', C.err, bold=True)
             elif _n_assets:
                 _line(f'✅ Файлы .css/.js главной ({_n_assets} шт.) открыты '
                       f'для роботов.', C.ok)
@@ -2371,12 +2350,9 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                     _line('✅ Лимиты на файл соблюдены (до 10 000 ссылок '
                           'и 10 МБ).', C.ok)
                 if _bad_urls:
-                    _line(f'❌ Неправильные URL в sitemap ({len(_bad_urls)}):',
+                    _line(f'❌ Неправильные URL в sitemap ({len(_bad_urls)}). '
+                          f'Список - в «Проблемах» (раздел «Индексация»).',
                           C.err, bold=True)
-                    for b in _bad_urls[:20]:
-                        _line(f'{b.get("why", "")}: {b.get("url", "")}', C.err)
-                    if len(_bad_urls) > 20:
-                        _line(f'… и ещё {len(_bad_urls) - 20}', C.text_muted)
                 else:
                     _line('✅ Все URL абсолютные, https и своего хоста.', C.ok)
                 for name, _n in _fld_missing:
@@ -2390,11 +2366,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 elif _miss:
                     _line(f'❌ В sitemap нет {len(_miss)} важных ссылок '
                           f'(категории/фильтры/услуги) из выгрузки - страницы '
-                          f'не попадут в индекс:', C.err, bold=True)
-                    for _p in _miss[:20]:
-                        _line(_p, C.err)
-                    if len(_miss) > 20:
-                        _line(f'… и ещё {len(_miss) - 20}', C.text_muted)
+                          f'не попадут в индекс. Список - в «Проблемах» '
+                          f'(раздел «Индексация»).', C.err, bold=True)
                 elif aud.get('missing_catalog') is not None:
                     _line('✅ Все категории, фильтры и услуги из выгрузки '
                           'есть в sitemap.', C.ok)
@@ -2457,11 +2430,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                       f'руками.', C.warn)
             elif _hm_junk:
                 _line(f'❌ {hm.get("url", "")} - в HTML-карте служебные '
-                      f'ссылки ({len(_hm_junk)}):', C.err, bold=True)
-                for j in _hm_junk[:15]:
-                    _line(f'{j.get("url", "")}', C.err)
-                if len(_hm_junk) > 15:
-                    _line(f'… и ещё {len(_hm_junk) - 15}', C.text_muted)
+                      f'ссылки ({len(_hm_junk)}). Список - в «Проблемах» '
+                      f'(раздел «Индексация»).', C.err, bold=True)
             else:
                 _line(f'✅ {hm.get("url", "")} - существует, служебных '
                       f'ссылок нет.', C.ok)
@@ -3208,8 +3178,8 @@ def _build_stress_sheet(wb, stress_check):
               f'{banned.get("after", 0)} успешных страниц - сайт принял бота '
               f'за парсера: {banned.get("url", "")}', C.err)
     if parse_5xx:
-        for e in parse_5xx[:20]:
-            _line(f'❌ {e.get("code")} на {e.get("url", "")}', C.err)
+        _line(f'❌ Ошибок сервера при обходе: {len(parse_5xx)}. Список - '
+              f'в «Проблемах» (раздел «Нагрузка и парсинг»).', C.err)
     if parse_net:
         _line(f'❌ Обрывы связи при обходе: {len(parse_net)} '
               f'(сервер не отвечал под последовательной нагрузкой)', C.err)
@@ -3263,9 +3233,8 @@ def _build_stress_sheet(wb, stress_check):
               f'(проверено {dups.get("checked", 0)} по '
               f'{dups.get("samples", 0)} страницам)', C.text, bold=True)
         if dup_5xx:
-            for e in dup_5xx[:20]:
-                _line(f'❌ {e.get("code")} на «{e.get("kind", "")}»: '
-                      f'{e.get("url", "")}', C.err)
+            _line(f'❌ Ошибок сервера на кривых дублях URL: {len(dup_5xx)}. '
+                  f'Список - в «Проблемах» (раздел «Нагрузка и парсинг»).', C.err)
         else:
             _line('✅ На кривых дублях адресов сервер отвечает штатно '
                   '(200/301/404), 5xx нет.', C.ok)
@@ -4268,7 +4237,7 @@ def _build_console_sheet(wb, console_check):
         row += 1
         for p in bad:
             errs = p.get('errors') or []
-            ws.row_dimensions[row].height = max(20, 14 * min(len(errs), 6))
+            ws.row_dimensions[row].height = max(20, 14 * min(len(errs), 3))
             # URL
             c = ws.cell(row=row, column=2)
             c.value = p.get('url', '')
@@ -4276,10 +4245,12 @@ def _build_console_sheet(wb, console_check):
             c.font = _font(size=9, color=C.accent, underline='single')
             c.alignment = _align(wrap=True, vertical='top')
             c.border = _border(color=C.border_light)
-            # Ошибки
+            # Ошибки: первые 3 для контекста, полный список - в «Проблемах»
+            # (report_priorities._console_findings хранит там же первые 3).
             c = ws.cell(row=row, column=3)
-            c.value = '\n'.join(f'• {e}' for e in errs[:6]) + (
-                f'\n… и ещё {len(errs) - 6}' if len(errs) > 6 else '')
+            c.value = '\n'.join(f'• {e}' for e in errs[:3]) + (
+                f'\n… и ещё {len(errs) - 3} - полный список в «Проблемах» '
+                f'(раздел «Ошибки JavaScript»)' if len(errs) > 3 else '')
             c.font = _font(size=9, color=C.err)
             c.alignment = _align(wrap=True, vertical='top')
             c.border = _border(color=C.border_light)
@@ -4481,18 +4452,6 @@ def _build_console_sheet(wb, console_check):
 _META_FIELD_LABEL = {'title': 'title', 'description': 'description', 'h1': 'H1'}
 
 
-def _meta_table_header(ws, row, headers):
-    """Строка заголовков таблицы в стиле остальных листов."""
-    for ci, h in enumerate(headers, 2):
-        cell = ws.cell(row=row, column=ci)
-        cell.value = h
-        cell.font = _font(size=9, bold=True, color=C.text_muted)
-        cell.fill = _fill(C.surface)
-        cell.alignment = _align()
-        cell.border = _border()
-    ws.row_dimensions[row].height = 20
-
-
 def _meta_section_title(ws, row, text, color):
     ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
     c = ws.cell(row=row, column=2)
@@ -4510,6 +4469,17 @@ def _meta_ok_line(ws, row, text):
     c.font = _font(size=10, color=C.ok)
     c.alignment = _align(indent=1)
     ws.row_dimensions[row].height = 22
+
+
+def _meta_pointer_line(ws, row, text):
+    """Нейтральная (не зелёная) строка-указатель на детали в «Проблемах» -
+    в отличие от _meta_ok_line не означает «всё в порядке»."""
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+    c = ws.cell(row=row, column=2)
+    c.value = text
+    c.font = _font(size=10, italic=True, color=C.text_muted)
+    c.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 20
 
 
 def _build_meta_sheet(wb, results, meta_summary):
@@ -4601,23 +4571,15 @@ def _build_meta_sheet(wb, results, meta_summary):
             _meta_ok_line(ws, row, '✅ У всех проверенных страниц метаданные в порядке.')
             row += 2
         else:
-            row = _render_issue_groups(
-                ws, row, _issue_groups(bad, 'meta', 'issues'), C.err,
-                extra_label='')
+            _meta_pointer_line(ws, row, '· постранично - в «Проблемах» (раздел «Метаданные»).')
+            row += 2
 
         # ── Секция 2: предупреждения (длины; сгруппированы по замечанию) ──
         if warned:
             _meta_section_title(ws, row, f'Предупреждения (длины)  ({len(warned)})', C.warn)
             row += 1
-
-            def _meta_len(r):
-                m = getattr(r, 'meta', None) or {}
-                return (f'title: {m.get("title_len", 0)} симв. · '
-                        f'description: {m.get("desc_len", 0)} симв.')
-
-            row = _render_issue_groups(
-                ws, row, _issue_groups(warned, 'meta', 'warnings'), C.warn,
-                extra=_meta_len, extra_label='Длины title/description')
+            _meta_pointer_line(ws, row, '· постранично - в «Проблемах» (раздел «Метаданные»).')
+            row += 2
 
     # ── Секции 3-4: дубли метаданных (только если 1.8 выполнялась) ──
     for title_text, groups, note in ((
@@ -4648,58 +4610,19 @@ def _build_meta_sheet(wb, results, meta_summary):
                 fld = _META_FIELD_LABEL.get(g.get('field'), g.get('field'))
                 ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
                 c = ws.cell(row=row, column=2)
-                c.value = f'{fld}: «{g.get("value", "")}»'
+                c.value = (f'{fld}: «{g.get("value", "")}»  -  '
+                          f'{len(g.get("pages", []))} '
+                          f'{_plural_pages(len(g.get("pages", [])))}')
                 c.font = _font(size=10, bold=True, color=C.text)
                 c.fill = _fill(C.surface)
                 c.alignment = _align(wrap=True, indent=1)
                 ws.row_dimensions[row].height = 22
                 row += 1
-                for p in g.get('pages', []):
-                    ws.row_dimensions[row].height = 18
-                    vals = [
-                        (p.get('city') or '-', {'size': 9, 'color': C.text_muted}),
-                        (p.get('type_label', ''), {'size': 9, 'color': C.text_muted}),
-                        (p.get('url', ''), {'size': 9, 'color': C.accent,
-                                            'underline': 'single'}),
-                        ('', {}),
-                    ]
-                    for ci, (val, kw) in enumerate(vals, 2):
-                        cell = ws.cell(row=row, column=ci)
-                        cell.value = val
-                        if kw:
-                            cell.font = _font(**kw)
-                        cell.alignment = _align(vertical='top')
-                        cell.border = _border(color=C.border_light)
-                        if ci == 4 and val:
-                            cell.hyperlink = val
-                    row += 1
-        row += 1
-
-    # ── Секция 5: дубли УРЛОВ ──
-    def _url_dup_table(items, color):
-        nonlocal row
-        _meta_table_header(ws, row, ['Вариант', 'Код',
-                                     'Адрес варианта',
-                                     'Канонический адрес'])
-        row += 1
-        for d in items:
-            ws.row_dimensions[row].height = 20
-            vals = [
-                (d.get('kind', ''), {'size': 9, 'color': C.text_muted}),
-                (d.get('code', ''), {'size': 10, 'color': color}),
-                (d.get('variant', ''), {'size': 10, 'color': color}),
-                (d.get('canonical', ''), {'size': 10, 'color': C.accent,
-                                          'underline': 'single'}),
-            ]
-            for ci, (val, kw) in enumerate(vals, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 5 and val:
-                    cell.hyperlink = val
+            _meta_pointer_line(
+                ws, row,
+                '· страницы по каждой группе - в «Проблемах» (раздел «Метаданные»).')
             row += 1
+        row += 1
 
     # ── Секция: SEO-тексты категорий (нейроответы / AI overviews) ──
     _st_pages = [r for r in results
@@ -4728,9 +4651,8 @@ def _build_meta_sheet(wb, results, meta_summary):
                                    'с ключом, фото, таблицей и структурой.')
             row += 2
         else:
-            row = _render_issue_groups(
-                ws, row, _issue_groups(_st_warned, 'seo_text', 'warnings'),
-                C.warn, extra_label='')
+            _meta_pointer_line(ws, row, '· постранично - в «Проблемах» (раздел «Метаданные»).')
+            row += 2
 
     if meta_summary is not None:
         _meta_section_title(ws, row, f'Дубли УРЛОВ (нет редиректа)  ({len(url_dups)})',
@@ -4743,7 +4665,8 @@ def _build_meta_sheet(wb, results, meta_summary):
                                    '301-редирект на канонический вид.')
             row += 1
         else:
-            _url_dup_table(url_dups, C.err)
+            _meta_pointer_line(ws, row, '· список - в «Проблемах» (раздел «Метаданные»).')
+            row += 1
         row += 1
         # Временные редиректы: склейка не передаётся, 301 обязателен
         if url_not301:
@@ -4751,8 +4674,8 @@ def _build_meta_sheet(wb, results, meta_summary):
                 ws, row,
                 f'Временный редирект вместо 301  ({len(url_not301)})', C.warn)
             row += 1
-            _url_dup_table(url_not301, C.warn)
-            row += 1
+            _meta_pointer_line(ws, row, '· список - в «Проблемах» (раздел «Метаданные»).')
+            row += 2
 
         # ── Тестовые домены (test./dev./stage.…) ──
         _meta_section_title(

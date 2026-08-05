@@ -128,7 +128,7 @@ def test_секция_отчёта_рендерится_с_находками_и
     ws = wb['Индексация']
     text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
     assert 'Заблокированные страницы' in text
-    assert '/starye-tovary/' in text
+    assert 'в «Проблемах»' in text
 
     summary_без_находок = {
         'host': 'example.ru', 'disallowed': [],
