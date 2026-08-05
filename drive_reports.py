@@ -337,8 +337,13 @@ def check_write_as_user(access_token: str, root_id: str = "root", *,
                 "error": "аккаунт проекта не подключён (нет токена доступа)"}
     ошибка = _пробная_запись(access_token, root_id, proxy_url=proxy_url)
     if ошибка:
+        подсказка = ""
+        if "insufficient" in ошибка.lower() or "scope" in ошибка.lower():
+            подсказка = (" Похоже, при входе не был отмечен флажок доступа к "
+                         "Google Диску. Отключите аккаунт и подключите заново, "
+                         "отметив в окне Google все флажки.")
         return {"ok": False, "kind": "", "name": "",
-                "error": f"нет прав на запись: {ошибка}"}
+                "error": f"нет прав на запись: {ошибка}{подсказка}"}
     return {"ok": True, "kind": "Диск аккаунта проекта", "name": "Мой диск",
             "error": ""}
 

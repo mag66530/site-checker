@@ -65,10 +65,35 @@ def exchange_code(client_id: str, client_secret: str, code: str,
         "code": code, "client_id": client_id, "client_secret": client_secret,
         "redirect_uri": redirect_uri, "grant_type": "authorization_code",
     }, proxies=proxies, timeout=30)
-    data = r.json() if r.content else {}
+    try:
+        data = r.json() if r.content else {}
+    except Exception:  # noqa: BLE001
+        data = {}
     if r.status_code != 200 or not data.get("access_token"):
-        raise RuntimeError(f"Google не выдал токен: "
-                           f"{data.get('error_description') or data.get('error') or r.status_code}")
+        код = str(data.get("error") or "")
+        текст = str(data.get("error_description") or "")
+        # Google на все частые ошибки отвечает скупым «Bad Request», поэтому
+        # переводим их в понятные причины: почти всегда это либо повторное
+        # использование кода, либо несовпадение адреса возврата, либо чужая
+        # пара client_id/secret.
+        подсказки = {
+            "invalid_grant": ("код авторизации уже использован или просрочен - "
+                              "нажмите «Подключить» ещё раз и не обновляйте "
+                              "страницу после возврата"),
+            "redirect_uri_mismatch": (
+                f"адрес возврата не совпадает: в Google Cloud → Credentials → "
+                f"ваш OAuth client → Authorized redirect URIs должна быть "
+                f"строка ровно «{redirect_uri}» (без слеша на конце)"),
+            "invalid_client": ("не подходит пара Client ID / Client secret - "
+                               "проверьте, что скопированы из одного и того же "
+                               "OAuth client"),
+            "unauthorized_client": ("этот OAuth client не разрешён для такого "
+                                    "входа - проверьте, что тип клиента "
+                                    "«Web application»"),
+        }
+        причина = подсказки.get(код, "")
+        куски = [x for x in (текст or код or f"HTTP {r.status_code}", причина) if x]
+        raise RuntimeError("Google не выдал токен: " + ". ".join(куски))
     email = ""
     try:
         u = requests.get(USERINFO_URL,
@@ -78,8 +103,19 @@ def exchange_code(client_id: str, client_secret: str, code: str,
             email = str((u.json() or {}).get("email") or "")
     except Exception:  # noqa: BLE001
         pass
+    # Какие права реально выдал человек. В окне согласия галочку доступа к
+    # Диску можно СНЯТЬ - тогда токен выдаётся, подключение выглядит удачным, а
+    # первая же запись падает с «Request had insufficient authentication
+    # scopes». Поэтому проверяем сразу здесь.
+    выдано = str(data.get("scope") or "")
+    if "drive" not in выдано:
+        raise RuntimeError(
+            "доступ к Google Диску не выдан. В окне Google отметьте флажок "
+            "про создание и изменение файлов на Диске (он снимается вручную) "
+            "и повторите подключение.")
     return {"refresh_token": data.get("refresh_token", ""),
-            "access_token": data["access_token"], "email": email}
+            "access_token": data["access_token"], "email": email,
+            "scope": выдано}
 
 
 def access_token(client_id: str, client_secret: str, refresh_token: str,

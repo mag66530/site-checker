@@ -1205,6 +1205,13 @@ def handle_gdrive_oauth_redirect() -> None:
     pid = google_oauth.project_from_state(state or "")
     if not (code and pid):
         return
+    # Код одноразовый: Streamlit успевает перерисовать страницу несколько раз с
+    # теми же параметрами, и второй обмен Google отбивает «Bad Request»
+    # (invalid_grant). Запоминаем уже обработанные коды.
+    _обработанные = st.session_state.setdefault("_gdrive_codes", set())
+    if code in _обработанные:
+        return
+    _обработанные.add(code)
     # Ключи берём ПО ПРОЕКТУ из state: обработчик срабатывает на любой
     # странице, до того как человек снова выбрал проект в интерфейсе.
     # Для общей привязки (state = gdrive:_app) ключи берутся из любого проекта,
