@@ -166,7 +166,8 @@ def upload_report(file_path: str, *, project_name: str, sa_info: dict = None,
                   file_name: str | None = None,
                   proxy_url: str | None = None,
                   oauth_token: str | None = None,
-                  run_type: str = "") -> dict:
+                  run_type: str = "",
+                  share_link: bool = True) -> dict:
     """Залить отчёт в <root>/<проект>/<год>/<месяц>/ и вернуть ссылку.
 
     Два режима записи:
@@ -213,7 +214,15 @@ def upload_report(file_path: str, *, project_name: str, sa_info: dict = None,
             return {"ok": False,
                     "error": f"загрузка: HTTP {r.status_code} {r.text[:200]}"}
         res = r.json() or {}
+        # Открываем доступ по ссылке: отчёт лежит на Диске одного аккаунта, а
+        # ссылку в Telegram получает вся команда. Если организация запрещает
+        # публичные ссылки, файл всё равно загружен - просто пишем это в ответ.
+        _share_err = ""
+        if share_link and res.get("id"):
+            _share_err = share_with_link(token, res["id"], proxy_url=proxy_url)
         return {"ok": True, "id": res.get("id"),
+                "shared": (not _share_err) if share_link else False,
+                "share_error": _share_err,
                 "link": res.get("webViewLink") or
                         f"https://drive.google.com/file/d/{res.get('id')}/view",
                 "path": "/".join(parts)}
@@ -224,6 +233,27 @@ def upload_report(file_path: str, *, project_name: str, sa_info: dict = None,
 def _json_bytes(obj) -> bytes:
     import json
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
+
+
+def share_with_link(token: str, file_id: str, *,
+                    proxy_url: str | None = None) -> str:
+    """Открыть файл «всем, у кого есть ссылка» (только чтение).
+
+    Без этого отчёт виден лишь тому аккаунту, на чьём Диске он лежит: ссылка в
+    Telegram приходит всей команде, а открыть её может один человек.
+    → '' при успехе, иначе текст ошибки (загрузку это не отменяет).
+    """
+    try:
+        r = requests.post(
+            f"{_FILES}/{file_id}/permissions",
+            params={"supportsAllDrives": "true", "fields": "id"},
+            json={"role": "reader", "type": "anyone"},
+            headers=_headers(token), proxies=_proxies(proxy_url), timeout=30)
+        if r.status_code not in (200, 201):
+            return f"HTTP {r.status_code} {r.text[:180]}"
+        return ""
+    except Exception as e:  # noqa: BLE001
+        return str(e)
 
 
 def upload_from_env(file_path: str, run_type: str, *, log=None) -> dict:
@@ -279,6 +309,9 @@ def upload_from_env(file_path: str, run_type: str, *, log=None) -> dict:
         _log(f"⚠ Google Диск: {res.get('error')}")
         return {}
     _log(f"✓ Google Диск: отчёт в «{res['path']}» - {res['link']}")
+    if res.get("share_error"):
+        _log(f"⚠ Google Диск: доступ по ссылке не открылся ({res['share_error']}) "
+             f"- файл увидит только владелец Диска.")
     return res
 
 

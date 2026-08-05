@@ -738,6 +738,9 @@ def _выложить_на_диск(report_path, cfg, creds, proxy_url, log) -> 
         log(f'⚠ Google Диск: {res.get("error")}')
         return {}
     log(f'✓ Google Диск: отчёт в «{res["path"]}» - {res["link"]}')
+    if res.get('share_error'):
+        log(f'⚠ Google Диск: доступ по ссылке не открылся ({res["share_error"]}) '
+            f'- файл увидит только владелец Диска.')
     return res
 
 

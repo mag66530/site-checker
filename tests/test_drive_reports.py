@@ -57,6 +57,57 @@ def test_upload_from_env_без_настроек_молчит(monkeypatch, tmp_p
     assert drive_reports.upload_from_env(str(f), "Проверка форм") == {}
 
 
+class _Ответ:
+    def __init__(self, status=200, payload=None, text=""):
+        self.status_code = status
+        self._p = payload or {}
+        self.text = text
+
+    def json(self):
+        return self._p
+
+
+def _сеть(monkeypatch, вызовы, permissions_status=200):
+    """Подменяем Drive API: папки создаются, файл грузится, права выдаются."""
+    def post(url, **kw):
+        вызовы.append((url, kw.get("json")))
+        if url.endswith("/permissions"):
+            return _Ответ(permissions_status, {"id": "p1"}, "нет прав")
+        if "upload" in url:
+            return _Ответ(200, {"id": "file-1", "webViewLink": "https://drive/f1"})
+        return _Ответ(200, {"id": "folder-1"})
+
+    monkeypatch.setattr(drive_reports.requests, "post", post)
+    monkeypatch.setattr(drive_reports.requests, "get",
+                        lambda *a, **k: _Ответ(200, {"files": []}))
+
+
+def test_отчёт_открывается_по_ссылке(tmp_path, monkeypatch):
+    """Ссылка уходит в Telegram всей команде - файл должен открываться у всех,
+    а не только у владельца Диска."""
+    вызовы = []
+    _сеть(monkeypatch, вызовы)
+    f = tmp_path / "отчёт.xlsx"
+    f.write_bytes(b"PK\x03\x04")
+    res = drive_reports.upload_report(str(f), project_name="X",
+                                      oauth_token="tok", root_id="папка",
+                                      run_type="Проверка форм")
+    assert res["ok"] and res["shared"] is True
+    assert (f"{drive_reports._FILES}/file-1/permissions",
+            {"role": "reader", "type": "anyone"}) in вызовы
+
+
+def test_запрет_публичных_ссылок_не_ломает_выкладку(tmp_path, monkeypatch):
+    _сеть(monkeypatch, [], permissions_status=403)
+    f = tmp_path / "отчёт.xlsx"
+    f.write_bytes(b"PK\x03\x04")
+    res = drive_reports.upload_report(str(f), project_name="X",
+                                      oauth_token="tok", root_id="папка",
+                                      run_type="Чек-лист")
+    assert res["ok"] is True and res["shared"] is False
+    assert "403" in res["share_error"]
+
+
 def test_upload_report_без_файла_не_падает():
     res = drive_reports.upload_report(
         "нет-такого-файла.xlsx", project_name="X", sa_info={"a": 1},
