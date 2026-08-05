@@ -392,6 +392,34 @@ def test_w3c_колонки_на_странице_только_для_выбор
     print('✓ W3C-колонки на «Страницы» только для выборки')
 
 
+def test_гск_страницы_секцией_на_трафик_и_траст():
+    """Лист «Страницы в ГСК» удалён - метрика (индексировано/просканировано
+    + Δ) теперь секция на «Трафик и траст», а не отдельная вкладка."""
+    results = [make_result(url='https://stalmetural.ru/')]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    gsc_pages = {'available': True, 'indexed': 1200, 'crawled_not_indexed': 40,
+                'total': 1240, 'deltas': {'indexed': 15, 'crawled_not_indexed': -3}}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            gsc_pages=gsc_pages,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert 'Страницы в ГСК' not in wb.sheetnames
+        ws = wb['Трафик и траст']
+        cells = [c.value for row in ws.iter_rows() for c in row if c.value]
+        text = ' '.join(str(c) for c in cells)
+        assert 'Страницы в ГСК' in text
+        assert 1200 in cells and 40 in cells and 1240 in cells
+        assert any('+15' in str(c) for c in cells)
+    print('✓ «Страницы в ГСК» - секция на «Трафик и траст»')
+
+
 def test_sheet_ref_переписывает_слитый_лист_иначе_отдаёт_как_есть():
     """_sheet_ref - как _fix_where_refs, но для текста внутри предложений
     («см. лист {ref}»), а не только Task.where. Индексация уходит в

@@ -2559,58 +2559,8 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None,
 # ── Лист «Валидация и скорость» (п.1.16: W3C HTML/CSS + время ресурсов) ─
 
 
-def _build_gsc_pages_sheet(wb, gsc_pages):
-    """Лист «Страницы в ГСК»: проиндексировано / просканировано-не-индексировано /
-    сумма + Δ к прошлому снятию (пункт «Количество страниц в ГСК»)."""
-    if not gsc_pages or not gsc_pages.get('available'):
-        return
-    ws = wb.create_sheet('Страницы в ГСК')
-    d = gsc_pages.get('deltas') or {}
-
-    for i, t in enumerate(('Показатель', 'Значение', 'Δ к прошлому'), 1):
-        c = ws.cell(row=1, column=i, value=t)
-        c.font = _font(bold=True, color=C.bg_elev)
-        c.fill = _fill(C.header_navy)
-        c.border = _border()
-        c.alignment = _align('center' if i > 1 else 'left')
-
-    def _row(r, label, key):
-        c1 = ws.cell(row=r, column=1, value=label)
-        c1.font = _font()
-        c1.border = _border()
-        val = gsc_pages.get(key)
-        c2 = ws.cell(row=r, column=2, value=(val if val is not None else '–'))
-        c2.font = _font(bold=True)
-        c2.alignment = _align('center')
-        c2.border = _border()
-        dv = d.get(key)
-        c3 = ws.cell(row=r, column=3)
-        c3.border = _border()
-        c3.alignment = _align('center')
-        if dv is not None:
-            if dv > 0:
-                c3.value, _col = f'▲ +{dv:g}', C.ok
-            elif dv < 0:
-                c3.value, _col = f'▼ {dv:g}', C.err
-            else:
-                c3.value, _col = '= 0', C.text_muted
-            c3.font = _font(bold=True, color=_col)
-        else:
-            c3.value = '–'
-            c3.font = _font(color=C.text_muted)
-
-    _row(2, 'Проиндексировано', 'indexed')
-    _row(3, 'Просканировано, но пока не проиндексировано', 'crawled_not_indexed')
-    _row(4, 'Сумма', 'total')
-
-    note = 'Числа из отчёта GSC «Индексирование → Страницы».'
-    if gsc_pages.get('manual'):
-        note += ' Введены вручную.'
-    ws.cell(row=6, column=1, value=note).font = _font(italic=True, color=C.text_muted)
-
-    ws.column_dimensions['A'].width = 44
-    ws.column_dimensions['B'].width = 14
-    ws.column_dimensions['C'].width = 16
+# Лист «Страницы в ГСК» удалён - метрика (индексировано/просканировано
+# + дельта) теперь секцией на «Трафик и траст».
 
 
 _HOME_DUPES_VERDICT = {
@@ -3670,14 +3620,15 @@ def _traffic_nums(r):
 _TRAFFIC_INVERT_IDX = {1, 6}
 
 
-def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None):
+def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
+                                  gsc_pages=None):
     """Лист «Трафик и траст»: компактная сводка трафика по странам/периодам
     (визиты, каналы, лиды, конверсия, отказы). Плюс
-    траст проекта (ИКС/DR) и ссылочный профиль (lite, Вебмастер) - обе
-    метрики, не находки, поэтому не в «Проблемы», а здесь, рядом с
-    трафиком (раньше жили отдельными листами внутри «Аналитики»). Каждый
-    блок трафика (текущий/прошлый/Δ) отделён жирной рамкой сверху и снизу,
-    чтобы блоки не сливались."""
+    траст проекта (ИКС/DR), ссылочный профиль (lite, Вебмастер) и
+    страницы в ГСК (индексировано/просканировано + Δ) - все метрики, не
+    находки, поэтому не в «Проблемы», а здесь, рядом с трафиком (раньше
+    жили отдельными листами). Каждый блок трафика (текущий/прошлый/Δ)
+    отделён жирной рамкой сверху и снизу, чтобы блоки не сливались."""
     groups = (traffic or {}).get('groups')
     if not groups:
         rows = (traffic or {}).get('rows') or []
@@ -3685,7 +3636,7 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None):
             groups = [{'country': 'Все домены', 'counters': traffic.get('counters', 0),
                       'rows': rows}]
     has_traffic = bool(groups and any(g.get('rows') for g in groups))
-    if not has_traffic and not trust and not link_profile:
+    if not has_traffic and not trust and not link_profile and not gsc_pages:
         return
 
     ws = wb.create_sheet('Трафик и траст')
@@ -3888,6 +3839,57 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None):
                 cell.alignment = _align(indent=1, wrap=(col == 7))
             ws.row_dimensions[row].height = 16
             row += 1
+
+    # ── Страницы в ГСК (индексировано/просканировано) - метрика, не находка ──
+    if gsc_pages and gsc_pages.get('available'):
+        row += 1
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2, value='Страницы в ГСК (Google Search Console)')
+        c.font = _font(size=13, bold=True, color=C.text)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        for col, title in ((2, 'Показатель'), (3, 'Значение'), (4, 'Δ к прошлому')):
+            h = ws.cell(row=row, column=col, value=title)
+            h.font = _font(size=9, bold=True, color=C.bg_elev)
+            h.fill = _fill(C.header_navy)
+            h.border = _border()
+            h.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 20
+        row += 1
+        deltas = gsc_pages.get('deltas') or {}
+        for label, key in (('Проиндексировано', 'indexed'),
+                           ('Просканировано, но пока не проиндексировано', 'crawled_not_indexed'),
+                           ('Сумма', 'total')):
+            val = gsc_pages.get(key)
+            dv = deltas.get(key)
+            if dv is None:
+                dv_text, dv_color = '–', C.text_muted
+            elif dv > 0:
+                dv_text, dv_color = f'▲ +{dv:g}', C.ok
+            elif dv < 0:
+                dv_text, dv_color = f'▼ {dv:g}', C.err
+            else:
+                dv_text, dv_color = '= 0', C.text_muted
+            for col, v, color, bold in ((2, label, C.text, False),
+                                        (3, val if val is not None else '–', C.text, True),
+                                        (4, dv_text, dv_color, True)):
+                cell = ws.cell(row=row, column=col, value=v)
+                cell.font = _font(size=10, color=color, bold=bold)
+                cell.border = _border(color=C.border_light)
+                cell.alignment = _align(indent=1, horizontal='center' if col > 2 else 'left')
+            ws.row_dimensions[row].height = 18
+            row += 1
+        note = 'Числа из отчёта GSC «Индексирование → Страницы».'
+        if gsc_pages.get('manual'):
+            note += ' Введены вручную.'
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2, value=note)
+        c.font = _font(size=9, italic=True, color=C.text_muted)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 16
+        row += 1
 
 
 # Лист «Динамика трафика» удалён по прямому указанию - трафик по странам/
@@ -4833,7 +4835,7 @@ _SHEET_GROUPS = [
         'Индексация', 'Метаданные',
         'Ошибки JavaScript',
         'Валидация и скорость', 'Страница 404',
-        'Страницы в ГСК', 'Дубли главной', 'Индексация (Арсенкин)',
+        'Дубли главной', 'Индексация (Арсенкин)',
         'Фильтры ПС', 'Нагрузка и парсинг',
     ]),
     ('Верстка', []),                # находки - в «Проблемы», лист удалён
@@ -5387,7 +5389,7 @@ def build_report(
     wm_metrics: dict = None,       # аномалии Вебмастера - лист «Хосты и аномалии»
     admin_settings: dict = None,   # функции настройки в админке (п.1.21) - лист «Настройки в админке»
     yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
-    gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
+    gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - секция на «Трафик и траст»
     home_dupes: dict = None,       # дубли главной страницы - лист «Дубли главной»
     traffic: dict = None,          # сравнение трафика день/месяц/год - лист «Трафик и траст»
     arsenkin: dict = None,         # индексация URL через Арсенкин - лист «Индексация (Арсенкин)»
@@ -5745,7 +5747,7 @@ def build_report(
         ('Структура страниц', 'что чинить в контенте по типам страниц (главная/каталог/листинг/разделы/карточки товаров/технические) - где нет цены, кнопок заказа, заголовка. Красное = баг.'),
         ('Страницы', 'каждая проверенная страница: адрес, код ответа, статус, скорость, битые переменные в тексте, откуда перешли и сколько находок (детали - в «Проблемах»).'),
         ('Хосты и аномалии', 'проблемы уровня сайта/хоста целиком (не одной страницы): фатальные проблемы из сервисов и аномалии обхода/ссылок «от себя-прошлого» - обычно самое срочное.'),
-        ('Трафик и траст', 'краткая сводка трафика по странам/периодам (визиты, каналы, лиды, конверсия, отказы) + траст проекта (ИКС/DR) и lite-профиль беклинков; разбивка трафика по типам страниц - на «Динамике трафика» в «Аналитике».'),
+        ('Трафик и траст', 'краткая сводка трафика по странам/периодам (визиты, каналы, лиды, конверсия, отказы) + траст проекта (ИКС/DR), lite-профиль беклинков и страницы в ГСК.'),
         ('Техничка', 'SEO-техничка: индексация (robots/sitemap/canonical), метаданные и единственность заголовков, микроразметка (OG/Schema), ошибки JavaScript, валидность W3C и скорость, тест страницы 404, санкции ПС, нагрузка/парсинг, битые переменные; 404 в индексе (в т.ч. по данным Метрики) - на листе «Проблемы».'),
         ('Админка', 'работа функций настройки в админке: поддомены/категории/товары/тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
         ('Аналитика', 'письма Вебмастера/GSC/Я.Бизнеса/2ГИС/Google, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений.'),
@@ -5860,7 +5862,7 @@ def build_report(
                                  anomalies)
 
     # ─── Лист «Трафик и траст» - краткая сводка + ИКС/DR + линкпрофиль ──
-    _build_traffic_overview_sheet(wb, traffic, trust, link_profile)
+    _build_traffic_overview_sheet(wb, traffic, trust, link_profile, gsc_pages)
 
     # ─── Лист индексации (п.1.7) - если проверка выполнялась ────────
     _build_indexing_sheet(wb, results, indexing_summary)
@@ -5890,7 +5892,7 @@ def build_report(
 
     # ─── Лист валидации W3C + скорости (п.1.16) - если выполнялась ──────
     _build_w3c_sheet(wb, w3c_check)
-    _build_gsc_pages_sheet(wb, gsc_pages)
+    # Лист «Страницы в ГСК» удалён - секция на «Трафик и траст».
     _build_home_dupes_sheet(wb, home_dupes)
     _build_arsenkin_sheet(wb, arsenkin)
 
