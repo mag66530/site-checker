@@ -167,7 +167,8 @@ def upload_report(file_path: str, *, project_name: str, sa_info: dict = None,
                   proxy_url: str | None = None,
                   oauth_token: str | None = None,
                   run_type: str = "",
-                  share_link: bool = True) -> dict:
+                  share_link: bool = True,
+                  share_role: str = "writer") -> dict:
     """Залить отчёт в <root>/<проект>/<год>/<месяц>/ и вернуть ссылку.
 
     Два режима записи:
@@ -219,7 +220,8 @@ def upload_report(file_path: str, *, project_name: str, sa_info: dict = None,
         # публичные ссылки, файл всё равно загружен - просто пишем это в ответ.
         _share_err = ""
         if share_link and res.get("id"):
-            _share_err = share_with_link(token, res["id"], proxy_url=proxy_url)
+            _share_err = share_with_link(token, res["id"], role=share_role,
+                                         proxy_url=proxy_url)
         return {"ok": True, "id": res.get("id"),
                 "shared": (not _share_err) if share_link else False,
                 "share_error": _share_err,
@@ -236,18 +238,21 @@ def _json_bytes(obj) -> bytes:
 
 
 def share_with_link(token: str, file_id: str, *,
+                    role: str = "writer",
                     proxy_url: str | None = None) -> str:
-    """Открыть файл «всем, у кого есть ссылка» (только чтение).
+    """Открыть файл «всем, у кого есть ссылка».
 
-    Без этого отчёт виден лишь тому аккаунту, на чьём Диске он лежит: ссылка в
-    Telegram приходит всей команде, а открыть её может один человек.
+    Роль по умолчанию - редактор (writer), а не читатель: в режиме чтения
+    Google не даёт даже отфильтровать таблицу, а отчёт как раз для того и
+    нужен, чтобы в нём копались. Без этой выдачи отчёт виден только аккаунту,
+    на чьём Диске он лежит, - а ссылка в Telegram приходит всей команде.
     → '' при успехе, иначе текст ошибки (загрузку это не отменяет).
     """
     try:
         r = requests.post(
             f"{_FILES}/{file_id}/permissions",
             params={"supportsAllDrives": "true", "fields": "id"},
-            json={"role": "reader", "type": "anyone"},
+            json={"role": role, "type": "anyone"},
             headers=_headers(token), proxies=_proxies(proxy_url), timeout=30)
         if r.status_code not in (200, 201):
             return f"HTTP {r.status_code} {r.text[:180]}"

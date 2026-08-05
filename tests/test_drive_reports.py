@@ -82,9 +82,9 @@ def _сеть(monkeypatch, вызовы, permissions_status=200):
                         lambda *a, **k: _Ответ(200, {"files": []}))
 
 
-def test_отчёт_открывается_по_ссылке(tmp_path, monkeypatch):
-    """Ссылка уходит в Telegram всей команде - файл должен открываться у всех,
-    а не только у владельца Диска."""
+def test_отчёт_открывается_по_ссылке_на_редактирование(tmp_path, monkeypatch):
+    """Ссылка уходит в Telegram всей команде - файл должен открываться у всех.
+    Именно редактором: в режиме чтения Google не даёт даже отфильтровать."""
     вызовы = []
     _сеть(monkeypatch, вызовы)
     f = tmp_path / "отчёт.xlsx"
@@ -94,7 +94,7 @@ def test_отчёт_открывается_по_ссылке(tmp_path, monkeypat
                                       run_type="Проверка форм")
     assert res["ok"] and res["shared"] is True
     assert (f"{drive_reports._FILES}/file-1/permissions",
-            {"role": "reader", "type": "anyone"}) in вызовы
+            {"role": "writer", "type": "anyone"}) in вызовы
 
 
 def test_запрет_публичных_ссылок_не_ломает_выкладку(tmp_path, monkeypatch):
