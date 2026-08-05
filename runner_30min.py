@@ -698,8 +698,11 @@ def _выложить_на_диск(report_path, cfg, creds, proxy_url, log) -> 
     уходит в Telegram вложением), причина пишется в лог."""
     if not report_path:
         return {}
-    root_id = (creds.get('gdrive_folder_id') or creds.get('gdrive_root_id')
-               or creds.get('gdrive_shared_drive_id') or '')
+    import drive_reports as _dr
+    # В настройку могли вставить ссылку на папку целиком - берём из неё ID.
+    root_id = _dr.folder_id(creds.get('gdrive_folder_id')
+                            or creds.get('gdrive_root_id')
+                            or creds.get('gdrive_shared_drive_id') or '')
     # Личный аккаунт проекта (обычный gmail): пишем ОТ ЕГО ИМЕНИ - у сервисного
     # аккаунта нет своего места на Диске, в личный Диск он писать не может.
     _refresh = creds.get('gdrive_refresh_token') or ''

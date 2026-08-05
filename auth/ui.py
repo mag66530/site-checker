@@ -995,7 +995,14 @@ def project_settings_page() -> None:
         v = st.session_state.get(f"ps_{pid}_{name}")
         return str(v if v is not None else cur.get(name, "") or "").strip()
 
-    _drive_id = _поле("gdrive_folder_id") or _поле("gdrive_shared_drive_id")
+    # Из поля принимаем и голый ID, и ссылку на папку целиком.
+    try:
+        from drive_reports import folder_id as _folder_id
+    except Exception:  # noqa: BLE001
+        def _folder_id(v):
+            return v
+    _drive_id = _folder_id(_поле("gdrive_folder_id")
+                           or _поле("gdrive_shared_drive_id"))
     if st.button("🔍 Проверить доступ к Google Диску", key=f"gd_check_{pid}"):
         _refresh = (cur.get("gdrive_refresh_token") or "").strip()
         if not _drive_id and not _refresh:

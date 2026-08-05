@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -45,6 +46,24 @@ def month_folder_name(dt: datetime) -> str:
     """«08 - август»: цифра впереди, чтобы папки сортировались по порядку, а не
     по алфавиту. ЧИСТАЯ функция - проверяется юнит-тестом."""
     return f"{dt.month:02d} - {_МЕСЯЦЫ[dt.month - 1]}"
+
+
+def folder_id(value: str) -> str:
+    """ID папки/диска из чего угодно: можно вставить и голый ID, и ссылку
+    целиком («…/drive/folders/<ID>?hl=ru», «…/drive/u/0/folders/<ID>»,
+    «…/file/d/<ID>/view», «…open?id=<ID>»). Лишний хвост с параметрами
+    отбрасываем. ЧИСТАЯ функция - проверяется юнит-тестом."""
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    m = re.search(r"/(?:folders|d)/([A-Za-z0-9_-]{10,})", s)
+    if m:
+        return m.group(1)
+    m = re.search(r"[?&]id=([A-Za-z0-9_-]{10,})", s)
+    if m:
+        return m.group(1)
+    # Голый ID: срезаем случайные параметры/слеши, если их дописали руками.
+    return s.split("?")[0].strip().strip("/")
 
 
 def folder_parts(project_name: str, dt: datetime, run_type: str = "",
@@ -230,7 +249,7 @@ def upload_from_env(file_path: str, run_type: str, *, log=None) -> dict:
                 pass
 
     refresh = os.environ.get("GDRIVE_REFRESH_TOKEN", "").strip()
-    root_id = os.environ.get("GDRIVE_ROOT_ID", "").strip()
+    root_id = folder_id(os.environ.get("GDRIVE_ROOT_ID", ""))
     if not refresh and not root_id:
         return {}
     proxy = os.environ.get("GDRIVE_PROXY", "").strip() or None

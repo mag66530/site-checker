@@ -15,6 +15,20 @@ def test_month_folder_name_сортируется_по_порядку():
     assert имена == sorted(имена)
 
 
+def test_folder_id_принимает_и_ссылку_и_голый_id():
+    ид = "1jjwU_AAxtLVzRtInkY_OLo2IelmZa8RQ"
+    assert drive_reports.folder_id(ид) == ид
+    assert drive_reports.folder_id(
+        f"https://drive.google.com/drive/folders/{ид}?hl=ru") == ид
+    assert drive_reports.folder_id(
+        f"https://drive.google.com/drive/u/0/folders/{ид}") == ид
+    assert drive_reports.folder_id(
+        f"https://drive.google.com/file/d/{ид}/view?usp=sharing") == ид
+    assert drive_reports.folder_id(
+        f"https://drive.google.com/open?id={ид}") == ид
+    assert drive_reports.folder_id("") == ""
+
+
 def test_folder_parts_общий_диск_и_свой_диск():
     dt = datetime(2026, 8, 5)
     # общий диск: несколько проектов рядом → папка проекта нужна
