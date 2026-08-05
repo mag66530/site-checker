@@ -3665,6 +3665,12 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
     for col, w in zip('XYZ', (46, 12, 14)):               # ГСК (длинные подписи)
         ws.column_dimensions[col].width = w
     TRUST_COL, LP_COL, GSC_COL = 11, 15, 22  # смещения от B(2): M/Q/X
+    # Шапка таблицы трафика (при наличии трафика) стоит на row=5, данные - с
+    # row=6 (title@2, подзаголовок@3, зазор@4). Боковые блоки (Траст/Ссылочный
+    # профиль/ГСК) равняют свою шапку и данные на те же номера строк, чтобы
+    # по горизонтали не оказались рядом «шапка» одного блока и «данные»
+    # другого.
+    _SIDE_HDR_ROW, _SIDE_DATA_ROW = 5, 6
 
     ws.merge_cells('B2:Z2')
     c = ws['B2']
@@ -3777,7 +3783,11 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
 
     # ── Траст проекта (ИКС + DR) - метрика, не находка. Своя зона колонок
     # (TRUST_COL), свой курсор строк - высота этого блока (число хостов)
-    # никак не связана с Ссылочным профилем или ГСК.
+    # никак не связана с Ссылочным профилем или ГСК. Заголовок и данные
+    # выровнены на те же номера строк, что у таблицы трафика (row=3 -
+    # заголовок блока, row=5 - шапка таблицы, row=6 - первая строка данных),
+    # чтобы по горизонтали не съезжались «шапка одного блока» и «данные
+    # другого» на одной строке.
     if trust and trust.get('available') and trust.get('hosts'):
         trust_row = 3
         ws.merge_cells(start_row=trust_row, start_column=2 + TRUST_COL,
@@ -3787,7 +3797,7 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
         c.fill = _fill(C.accent_soft)
         c.alignment = _align(indent=1)
         ws.row_dimensions[trust_row].height = 24
-        trust_row += 1
+        trust_row = _SIDE_HDR_ROW
         for col, title in ((2, 'Хост'), (3, 'ИКС (Яндекс)'), (4, 'DR (Open PageRank)')):
             h = ws.cell(row=trust_row, column=col + TRUST_COL, value=title)
             h.font = _font(size=9, bold=True, color=C.bg_elev)
@@ -3828,7 +3838,7 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
         c.fill = _fill(C.accent_soft)
         c.alignment = _align(indent=1)
         ws.row_dimensions[lp_row].height = 24
-        lp_row += 1
+        lp_row = _SIDE_HDR_ROW
         _lp_headers = ('Хост', 'Ссылок', 'Доноров', 'Динамика', 'Статус', 'Что не так')
         for i, title in enumerate(_lp_headers, 2):
             h = ws.cell(row=lp_row, column=i + LP_COL, value=title)
@@ -3876,7 +3886,7 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
         c.fill = _fill(C.accent_soft)
         c.alignment = _align(indent=1)
         ws.row_dimensions[gsc_row].height = 24
-        gsc_row += 1
+        gsc_row = _SIDE_HDR_ROW
         for col, title in ((2, 'Показатель'), (3, 'Значение'), (4, 'Δ к прошлому')):
             h = ws.cell(row=gsc_row, column=col + GSC_COL, value=title)
             h.font = _font(size=9, bold=True, color=C.bg_elev)
