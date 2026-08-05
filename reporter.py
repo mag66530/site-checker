@@ -1837,9 +1837,13 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         ws.row_dimensions[row].height = 22
         row += 2
     else:
-        row = _render_issue_groups(
-            ws, row, _issue_groups(bad, 'indexing', 'issues'), C.err,
-            extra_label='')
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = '· постранично - в «Проблемах» (раздел «Индексация»).'
+        c.font = _font(size=10, italic=True, color=C.text_muted)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 20
+        row += 2
 
     # ── Секция 2: предупреждения (сгруппированы по замечанию) ──
     if warned:
@@ -1851,14 +1855,13 @@ def _build_indexing_sheet(wb, results, indexing_summary):
         c.alignment = _align(indent=1)
         ws.row_dimensions[row].height = 24
         row += 1
-        def _idx_extra(r):
-            _ext = (getattr(r, 'indexing', None) or {}).get('ext_nofollow') or []
-            return ('внешние: ' + ', '.join(_ext[:4])
-                    + (f' … +{len(_ext) - 4}' if len(_ext) > 4 else '')
-                    if _ext else '')
-        row = _render_issue_groups(
-            ws, row, _issue_groups(warned, 'indexing', 'warnings'), C.warn,
-            extra=_idx_extra, extra_label='Внешние nofollow-ссылки')
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+        c = ws.cell(row=row, column=2)
+        c.value = '· постранично - в «Проблемах» (раздел «Индексация»).'
+        c.font = _font(size=10, italic=True, color=C.text_muted)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 20
+        row += 2
 
     # ── Секция 3: sitemap ↔ robots противоречия ──
     if indexing_summary:
@@ -1898,7 +1901,6 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 if _agent != '*':
                     _rule += f' (User-agent: {_agent})'
                 _by_rule.setdefault(_rule, []).append(d.get('path', ''))
-            _MAX_PATHS = 100
             for _rule, _paths in sorted(_by_rule.items(),
                                         key=lambda kv: -len(kv[1])):
                 ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
@@ -1910,26 +1912,13 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 c.border = _border()
                 ws.row_dimensions[row].height = 22
                 row += 1
-                for _p in _paths[:_MAX_PATHS]:
-                    ws.merge_cells(start_row=row, start_column=2,
-                                   end_row=row, end_column=5)
-                    c = ws.cell(row=row, column=2)
-                    c.value = _p
-                    c.font = _font(size=9, color=C.text_soft)
-                    c.alignment = _align(indent=2)
-                    c.border = _border(color=C.border_light)
-                    ws.row_dimensions[row].height = 16
-                    row += 1
-                if len(_paths) > _MAX_PATHS:
-                    ws.merge_cells(start_row=row, start_column=2,
-                                   end_row=row, end_column=5)
-                    c = ws.cell(row=row, column=2)
-                    c.value = f'… и ещё {len(_paths) - _MAX_PATHS} путей'
-                    c.font = _font(size=9, italic=True, color=C.text_muted)
-                    c.alignment = _align(indent=2)
-                    ws.row_dimensions[row].height = 16
-                    row += 1
-                row += 1
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+            c = ws.cell(row=row, column=2)
+            c.value = '· пути по каждому правилу - в «Проблемах» (раздел «Индексация»).'
+            c.font = _font(size=9, italic=True, color=C.text_muted)
+            c.alignment = _align(indent=2)
+            ws.row_dimensions[row].height = 16
+            row += 1
         row += 1
 
         def _line(text, color, bold=False):
@@ -1963,11 +1952,9 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                       f'дополнительно закрыты noindex.', C.ok)
             else:
                 _line('Эти страницы реально отвечают 200 и БЕЗ собственного '
-                      'noindex - держатся только на честном слове robots.txt:',
+                      'noindex - держатся только на честном слове robots.txt. '
+                      'Список - в «Проблемах» (раздел «Индексация»).',
                       C.text_muted)
-                for _f in _dc_finds:
-                    _line(f'⚠ {_f.get("path", "")}: Disallow: {_f.get("rule", "")} - '
-                          f'отвечает 200, noindex не стоит', C.warn)
             row += 1
 
         # ── Секция 4: мусор не закрыт в robots (ТЗ 3.3.4.2) ──
@@ -1991,9 +1978,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             else:
                 _line('Эти страницы отвечают 200, НЕ закрыты в robots и (для '
                       'параметрических - без rel="canonical") - мусор попадает '
-                      'в обход робота:', C.text_muted)
-                for j in junk:
-                    _line(f'{j.get("label", "")}: {j.get("path", "")}', C.err)
+                      'в обход робота. Список - в «Проблемах» (раздел '
+                      '«Индексация»).', C.text_muted)
             row += 1
 
         # ── Секция 4.1: пагинация (canonical для Яндекса, JS для Google) ──
@@ -2060,11 +2046,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             else:
                 _line('Чек-лист советует noindex для старых акций/новостей/'
                       'политик. Эти разделы открыты - решить, нужны ли они '
-                      'в индексе (полезный раздел можно оставить):',
-                      C.text_muted)
-                for a in _adv:
-                    _line(f'⚠ {a.get("label", "")}: {a.get("path", "")} - '
-                          f'отвечает 200, noindex не стоит', C.warn)
+                      'в индексе (полезный раздел можно оставить). Список - '
+                      'в «Проблемах» (раздел «Индексация»).', C.text_muted)
             row += 1
 
         # ── Секция 4.2а: обязательные страницы + раздел «Отгрузки» ──
@@ -2210,12 +2193,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
             if _assets_closed:
                 _line(f'❌ Файлы .css/.js закрыты в robots.txt '
                       f'({len(_assets_closed)} из {_n_assets}) - Google не '
-                      f'сможет отрендерить страницы:', C.err, bold=True)
-                for _a in _assets_closed[:10]:
-                    _line(f'{_a.get("url", "")}  (Disallow: {_a.get("rule", "")})',
-                          C.err)
-                if len(_assets_closed) > 10:
-                    _line(f'… и ещё {len(_assets_closed) - 10}', C.text_muted)
+                      f'сможет отрендерить страницы. Список - в «Проблемах» '
+                      f'(раздел «Индексация»).', C.err, bold=True)
             elif _n_assets:
                 _line(f'✅ Файлы .css/.js главной ({_n_assets} шт.) открыты '
                       f'для роботов.', C.ok)
@@ -2371,12 +2350,9 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                     _line('✅ Лимиты на файл соблюдены (до 10 000 ссылок '
                           'и 10 МБ).', C.ok)
                 if _bad_urls:
-                    _line(f'❌ Неправильные URL в sitemap ({len(_bad_urls)}):',
+                    _line(f'❌ Неправильные URL в sitemap ({len(_bad_urls)}). '
+                          f'Список - в «Проблемах» (раздел «Индексация»).',
                           C.err, bold=True)
-                    for b in _bad_urls[:20]:
-                        _line(f'{b.get("why", "")}: {b.get("url", "")}', C.err)
-                    if len(_bad_urls) > 20:
-                        _line(f'… и ещё {len(_bad_urls) - 20}', C.text_muted)
                 else:
                     _line('✅ Все URL абсолютные, https и своего хоста.', C.ok)
                 for name, _n in _fld_missing:
@@ -2390,11 +2366,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                 elif _miss:
                     _line(f'❌ В sitemap нет {len(_miss)} важных ссылок '
                           f'(категории/фильтры/услуги) из выгрузки - страницы '
-                          f'не попадут в индекс:', C.err, bold=True)
-                    for _p in _miss[:20]:
-                        _line(_p, C.err)
-                    if len(_miss) > 20:
-                        _line(f'… и ещё {len(_miss) - 20}', C.text_muted)
+                          f'не попадут в индекс. Список - в «Проблемах» '
+                          f'(раздел «Индексация»).', C.err, bold=True)
                 elif aud.get('missing_catalog') is not None:
                     _line('✅ Все категории, фильтры и услуги из выгрузки '
                           'есть в sitemap.', C.ok)
@@ -2457,11 +2430,8 @@ def _build_indexing_sheet(wb, results, indexing_summary):
                       f'руками.', C.warn)
             elif _hm_junk:
                 _line(f'❌ {hm.get("url", "")} - в HTML-карте служебные '
-                      f'ссылки ({len(_hm_junk)}):', C.err, bold=True)
-                for j in _hm_junk[:15]:
-                    _line(f'{j.get("url", "")}', C.err)
-                if len(_hm_junk) > 15:
-                    _line(f'… и ещё {len(_hm_junk) - 15}', C.text_muted)
+                      f'ссылки ({len(_hm_junk)}). Список - в «Проблемах» '
+                      f'(раздел «Индексация»).', C.err, bold=True)
             else:
                 _line(f'✅ {hm.get("url", "")} - существует, служебных '
                       f'ссылок нет.', C.ok)
