@@ -7,7 +7,6 @@ reporter.py - формирование xlsx-отчёта.
   • Лист «Страницы» - каждая проверенная страница отдельной строкой (код,
     статус, скорость, отдел, битые переменные, откуда перешли, найдено
     проблем) - без деталей находок, те на «Проблемы»
-  • Лист «Битые тексты» - добавляется ТОЛЬКО если есть находки
 """
 import re
 from copy import copy
@@ -22,7 +21,10 @@ from openpyxl.utils import get_column_letter, range_boundaries
 
 from report_priorities import (
     PRIORITY_LABEL, collect_findings, group_into_tasks, extra_site_tasks,
-    classify,
+    classify, indexing_site_findings, metadata_site_findings,
+    home_dupes_findings, arsenkin_findings, page404_findings,
+    stress_check_findings, ps_filters_findings,
+    service_issues_findings, w3c_findings,
 )
 
 
@@ -851,14 +853,17 @@ def _build_structure_sheet(wb, results):
 # ── Лист «Страницы» - короткая сводка всех проверенных страниц ──────
 
 
-def _build_pages_overview_sheet(wb, results, findings):
+def _build_pages_overview_sheet(wb, results, findings, w3c_check=None):
     """Лист «Страницы»: код/статус/скорость/битые переменные/откуда перешли
     + сколько находок на странице (из «Проблемы») по каждой проверенной
-    странице - без деталей самих находок (те - на «Проблемы»)."""
+    странице - без деталей самих находок (те - на «Проблемы»). Плюс, если
+    была валидация W3C (выборка страниц) - ошибок валидатора и время
+    загрузки ресурсов (детали по типам ресурсов - на «Валидация и скорость»)."""
     if not results:
         return
     from collections import Counter
     counts = Counter(f.url for f in findings if f.url)
+    w3c_by_url = {p.get('url'): p for p in (w3c_check or {}).get('pages') or []}
 
     ws = wb.create_sheet('Страницы')
     ws.sheet_view.showGridLines = False
@@ -871,20 +876,25 @@ def _build_pages_overview_sheet(wb, results, findings):
               ('Скорость, с', 11), ('Оценка скорости', 16),
               ('Кому чинить', 18), ('Найдено проблем', 14),
               ('Битые переменные', 16), ('Откуда перешли', 46)]
+    if w3c_by_url:
+        headers += [('W3C ошибок', 12), ('Загрузка, мс', 12)]
+    last_col = get_column_letter(1 + len(headers))
     ws.column_dimensions['A'].width = 3
     for i, (_title, w) in enumerate(headers, 2):
         ws.column_dimensions[get_column_letter(i)].width = w
 
-    ws.merge_cells('B2:K2')
+    ws.merge_cells(f'B2:{last_col}2')
     c = ws['B2']
     c.value = f'Все проверенные страницы - {len(results)}'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
-    ws.merge_cells('B3:K3')
+    ws.merge_cells(f'B3:{last_col}3')
     c = ws['B3']
     c.value = ('Быстрый обзор: код ответа, статус, скорость и сколько находок '
-              'на странице (сами находки - на листе «Проблемы»).')
+              'на странице (сами находки - на листе «Проблемы»).'
+              + (' W3C/загрузка - только для страниц из выборки валидации '
+                 '(детали - «Валидация и скорость»).' if w3c_by_url else ''))
     c.font = _font(size=10, italic=True, color=C.text_soft)
     ws.row_dimensions[3].height = 18
 
@@ -919,6 +929,15 @@ def _build_pages_overview_sheet(wb, results, findings):
                STATUS_LABEL.get(r.status, r.status), speed_sec, speed_label,
                _dept_result(r), n_prob or None, text_issue_text,
                _build_path_description(r)]
+        if w3c_by_url:
+            wp = w3c_by_url.get(r.url)
+            w3c_errors = w3c_total_ms = None
+            if wp and not wp.get('error'):
+                _h, _cs = wp.get('html') or {}, wp.get('css') or {}
+                if not _h.get('error') and not _cs.get('error'):
+                    w3c_errors = (_h.get('errors', 0) or 0) + (_cs.get('errors', 0) or 0)
+                w3c_total_ms = (wp.get('timings') or {}).get('total_ms')
+            vals += [w3c_errors, w3c_total_ms]
         for ci, v in enumerate(vals, 2):
             cell = ws.cell(row=row, column=ci, value=v)
             cell.font = _font(size=9, color=C.text_soft)
@@ -952,11 +971,15 @@ def _build_pages_overview_sheet(wb, results, findings):
             path_cell.font = _font(name='Consolas', size=9, color=C.text_soft)
         elif not r.is_ok:
             path_cell.font = _font(size=9, italic=True, color=C.text_muted)
+        if w3c_by_url and w3c_errors:
+            err_cell = ws.cell(row=row, column=14)
+            err_cell.font = _font(size=9, bold=True, color=C.warn)
+            err_cell.fill = _fill(C.warn_soft)
         ws.row_dimensions[row].height = 16
         row += 1
 
     last = row - 1
-    ws.auto_filter.ref = f'B{hdr_row}:M{last}'
+    ws.auto_filter.ref = f'B{hdr_row}:{last_col}{last}'
     ws.freeze_panes = f'B{hdr_row + 1}'
 
 
@@ -2537,58 +2560,8 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None,
 # ── Лист «Валидация и скорость» (п.1.16: W3C HTML/CSS + время ресурсов) ─
 
 
-def _build_gsc_pages_sheet(wb, gsc_pages):
-    """Лист «Страницы в ГСК»: проиндексировано / просканировано-не-индексировано /
-    сумма + Δ к прошлому снятию (пункт «Количество страниц в ГСК»)."""
-    if not gsc_pages or not gsc_pages.get('available'):
-        return
-    ws = wb.create_sheet('Страницы в ГСК')
-    d = gsc_pages.get('deltas') or {}
-
-    for i, t in enumerate(('Показатель', 'Значение', 'Δ к прошлому'), 1):
-        c = ws.cell(row=1, column=i, value=t)
-        c.font = _font(bold=True, color=C.bg_elev)
-        c.fill = _fill(C.header_navy)
-        c.border = _border()
-        c.alignment = _align('center' if i > 1 else 'left')
-
-    def _row(r, label, key):
-        c1 = ws.cell(row=r, column=1, value=label)
-        c1.font = _font()
-        c1.border = _border()
-        val = gsc_pages.get(key)
-        c2 = ws.cell(row=r, column=2, value=(val if val is not None else '–'))
-        c2.font = _font(bold=True)
-        c2.alignment = _align('center')
-        c2.border = _border()
-        dv = d.get(key)
-        c3 = ws.cell(row=r, column=3)
-        c3.border = _border()
-        c3.alignment = _align('center')
-        if dv is not None:
-            if dv > 0:
-                c3.value, _col = f'▲ +{dv:g}', C.ok
-            elif dv < 0:
-                c3.value, _col = f'▼ {dv:g}', C.err
-            else:
-                c3.value, _col = '= 0', C.text_muted
-            c3.font = _font(bold=True, color=_col)
-        else:
-            c3.value = '–'
-            c3.font = _font(color=C.text_muted)
-
-    _row(2, 'Проиндексировано', 'indexed')
-    _row(3, 'Просканировано, но пока не проиндексировано', 'crawled_not_indexed')
-    _row(4, 'Сумма', 'total')
-
-    note = 'Числа из отчёта GSC «Индексирование → Страницы».'
-    if gsc_pages.get('manual'):
-        note += ' Введены вручную.'
-    ws.cell(row=6, column=1, value=note).font = _font(italic=True, color=C.text_muted)
-
-    ws.column_dimensions['A'].width = 44
-    ws.column_dimensions['B'].width = 14
-    ws.column_dimensions['C'].width = 16
+# Лист «Страницы в ГСК» удалён - метрика (индексировано/просканировано
+# + дельта) теперь секцией на «Трафик и траст».
 
 
 _HOME_DUPES_VERDICT = {
@@ -3648,14 +3621,15 @@ def _traffic_nums(r):
 _TRAFFIC_INVERT_IDX = {1, 6}
 
 
-def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None):
+def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
+                                  gsc_pages=None):
     """Лист «Трафик и траст»: компактная сводка трафика по странам/периодам
     (визиты, каналы, лиды, конверсия, отказы). Плюс
-    траст проекта (ИКС/DR) и ссылочный профиль (lite, Вебмастер) - обе
-    метрики, не находки, поэтому не в «Проблемы», а здесь, рядом с
-    трафиком (раньше жили отдельными листами внутри «Аналитики»). Каждый
-    блок трафика (текущий/прошлый/Δ) отделён жирной рамкой сверху и снизу,
-    чтобы блоки не сливались."""
+    траст проекта (ИКС/DR), ссылочный профиль (lite, Вебмастер) и
+    страницы в ГСК (индексировано/просканировано + Δ) - все метрики, не
+    находки, поэтому не в «Проблемы», а здесь, рядом с трафиком (раньше
+    жили отдельными листами). Каждый блок трафика (текущий/прошлый/Δ)
+    отделён жирной рамкой сверху и снизу, чтобы блоки не сливались."""
     groups = (traffic or {}).get('groups')
     if not groups:
         rows = (traffic or {}).get('rows') or []
@@ -3663,7 +3637,7 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None):
             groups = [{'country': 'Все домены', 'counters': traffic.get('counters', 0),
                       'rows': rows}]
     has_traffic = bool(groups and any(g.get('rows') for g in groups))
-    if not has_traffic and not trust and not link_profile:
+    if not has_traffic and not trust and not link_profile and not gsc_pages:
         return
 
     ws = wb.create_sheet('Трафик и траст')
@@ -3866,6 +3840,57 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None):
                 cell.alignment = _align(indent=1, wrap=(col == 7))
             ws.row_dimensions[row].height = 16
             row += 1
+
+    # ── Страницы в ГСК (индексировано/просканировано) - метрика, не находка ──
+    if gsc_pages and gsc_pages.get('available'):
+        row += 1
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2, value='Страницы в ГСК (Google Search Console)')
+        c.font = _font(size=13, bold=True, color=C.text)
+        c.fill = _fill(C.accent_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 24
+        row += 1
+        for col, title in ((2, 'Показатель'), (3, 'Значение'), (4, 'Δ к прошлому')):
+            h = ws.cell(row=row, column=col, value=title)
+            h.font = _font(size=9, bold=True, color=C.bg_elev)
+            h.fill = _fill(C.header_navy)
+            h.border = _border()
+            h.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 20
+        row += 1
+        deltas = gsc_pages.get('deltas') or {}
+        for label, key in (('Проиндексировано', 'indexed'),
+                           ('Просканировано, но пока не проиндексировано', 'crawled_not_indexed'),
+                           ('Сумма', 'total')):
+            val = gsc_pages.get(key)
+            dv = deltas.get(key)
+            if dv is None:
+                dv_text, dv_color = '–', C.text_muted
+            elif dv > 0:
+                dv_text, dv_color = f'▲ +{dv:g}', C.ok
+            elif dv < 0:
+                dv_text, dv_color = f'▼ {dv:g}', C.err
+            else:
+                dv_text, dv_color = '= 0', C.text_muted
+            for col, v, color, bold in ((2, label, C.text, False),
+                                        (3, val if val is not None else '–', C.text, True),
+                                        (4, dv_text, dv_color, True)):
+                cell = ws.cell(row=row, column=col, value=v)
+                cell.font = _font(size=10, color=color, bold=bold)
+                cell.border = _border(color=C.border_light)
+                cell.alignment = _align(indent=1, horizontal='center' if col > 2 else 'left')
+            ws.row_dimensions[row].height = 18
+            row += 1
+        note = 'Числа из отчёта GSC «Индексирование → Страницы».'
+        if gsc_pages.get('manual'):
+            note += ' Введены вручную.'
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        c = ws.cell(row=row, column=2, value=note)
+        c.font = _font(size=9, italic=True, color=C.text_muted)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 16
+        row += 1
 
 
 # Лист «Динамика трафика» удалён по прямому указанию - трафик по странам/
@@ -4811,8 +4836,8 @@ _SHEET_GROUPS = [
         'Индексация', 'Метаданные',
         'Ошибки JavaScript',
         'Валидация и скорость', 'Страница 404',
-        'Страницы в ГСК', 'Дубли главной', 'Индексация (Арсенкин)',
-        'Фильтры ПС', 'Нагрузка и парсинг', 'Битые тексты',
+        'Дубли главной', 'Индексация (Арсенкин)',
+        'Фильтры ПС', 'Нагрузка и парсинг',
     ]),
     ('Верстка', []),                # находки - в «Проблемы», лист удалён
     ('Безопасность', []),          # находки - в «Проблемы», лист удалён
@@ -5365,7 +5390,7 @@ def build_report(
     wm_metrics: dict = None,       # аномалии Вебмастера - лист «Хосты и аномалии»
     admin_settings: dict = None,   # функции настройки в админке (п.1.21) - лист «Настройки в админке»
     yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
-    gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - лист «Страницы в ГСК»
+    gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - секция на «Трафик и траст»
     home_dupes: dict = None,       # дубли главной страницы - лист «Дубли главной»
     traffic: dict = None,          # сравнение трафика день/месяц/год - лист «Трафик и траст»
     arsenkin: dict = None,         # индексация URL через Арсенкин - лист «Индексация (Арсенкин)»
@@ -5424,16 +5449,33 @@ def build_report(
                              if d.get('problem') != 'not_301'))
 
     # Находки со всех проверок (лист «Проблемы») + приоритезированный план
-    # работ (лист «План работ») - report_priorities.py. wm_metrics/ps_filters/
-    # service_issues - задачи уровня сайта/хоста, в «Проблемы» не попадают
-    # (там колонки заточены под конкретную страницу).
-    _findings = collect_findings(results, console_check=console_check,
-                                 index_404_check=index_404_check,
-                                 metrika_reports=metrika_reports,
-                                 calltracking_check=calltracking_check,
-                                 search_check=search_check,
-                                 filters_test=filters_test)
-    _tasks = (group_into_tasks(_findings)
+    # работ (лист «План работ») - report_priorities.py. wm_metrics - задачи
+    # уровня хоста, в «Проблемы» не попадают (те же данные видны на листе
+    # «Хосты и аномалии», отдельный дубль не нужен).
+    _page_findings = (collect_findings(results, console_check=console_check,
+                                       index_404_check=index_404_check,
+                                       metrika_reports=metrika_reports,
+                                       calltracking_check=calltracking_check,
+                                       search_check=search_check,
+                                       filters_test=filters_test)
+                      + metadata_site_findings(meta_summary)
+                      + home_dupes_findings(home_dupes)
+                      + arsenkin_findings(arsenkin)
+                      + page404_findings(p404_check)
+                      + stress_check_findings(stress_check))
+    # Сайт-уровневые находки индексации (пути/файлы) и санкции ПС - только
+    # в «Проблемы» (список), «План работ» их агрегирует extra_site_tasks()
+    # ниже - через group_into_tasks они бы задвоились. Остальные (дубли
+    # метаданных, дубли главной, Арсенкин, 404-тест, нагрузка/парсинг)
+    # своей агрегации нигде больше не имеют - идут через group_into_tasks()
+    # как обычные находки. Ошибки сервисов и W3C - тоже только в «Проблемы»
+    # (агрегация service_issues в «План работ» - по хосту, не по issue;
+    # W3C вообще без своей задачи, только числа-колонки на «Страницы»).
+    _findings = (_page_findings + indexing_site_findings(indexing_summary)
+                + ps_filters_findings(ps_filters)
+                + service_issues_findings(service_issues)
+                + w3c_findings(w3c_check))
+    _tasks = (group_into_tasks(_page_findings)
              + extra_site_tasks(indexing_summary=indexing_summary,
                                 wm_metrics=wm_metrics,
                                 service_issues=service_issues,
@@ -5536,8 +5578,7 @@ def build_report(
     if total_text_issues > 0:
         summary_text += (
             f'\nДополнительно: на {len(pages_with_issues)} страницах найдено '
-            f'{total_text_issues} битых переменных в текстах - см. лист '
-            f'{_sheet_ref("Битые тексты")}.'
+            f'{total_text_issues} битых переменных в текстах - см. «Проблемы».'
         )
     if total_content_bugs > 0:
         summary_text += (
@@ -5711,7 +5752,7 @@ def build_report(
         ('Структура страниц', 'что чинить в контенте по типам страниц (главная/каталог/листинг/разделы/карточки товаров/технические) - где нет цены, кнопок заказа, заголовка. Красное = баг.'),
         ('Страницы', 'каждая проверенная страница: адрес, код ответа, статус, скорость, битые переменные в тексте, откуда перешли и сколько находок (детали - в «Проблемах»).'),
         ('Хосты и аномалии', 'проблемы уровня сайта/хоста целиком (не одной страницы): фатальные проблемы из сервисов и аномалии обхода/ссылок «от себя-прошлого» - обычно самое срочное.'),
-        ('Трафик и траст', 'краткая сводка трафика по странам/периодам (визиты, каналы, лиды, конверсия, отказы) + траст проекта (ИКС/DR) и lite-профиль беклинков; разбивка трафика по типам страниц - на «Динамике трафика» в «Аналитике».'),
+        ('Трафик и траст', 'краткая сводка трафика по странам/периодам (визиты, каналы, лиды, конверсия, отказы) + траст проекта (ИКС/DR), lite-профиль беклинков и страницы в ГСК.'),
         ('Техничка', 'SEO-техничка: индексация (robots/sitemap/canonical), метаданные и единственность заголовков, микроразметка (OG/Schema), ошибки JavaScript, валидность W3C и скорость, тест страницы 404, санкции ПС, нагрузка/парсинг, битые переменные; 404 в индексе (в т.ч. по данным Метрики) - на листе «Проблемы».'),
         ('Админка', 'работа функций настройки в админке: поддомены/категории/товары/тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
         ('Аналитика', 'письма Вебмастера/GSC/Я.Бизнеса/2ГИС/Google, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений.'),
@@ -5819,14 +5860,14 @@ def build_report(
     _build_structure_sheet(wb, results)
 
     # ─── Лист «Страницы» - краткая сводка всех проверенных страниц ──
-    _build_pages_overview_sheet(wb, results, _findings)
+    _build_pages_overview_sheet(wb, results, _findings, w3c_check)
 
     # ─── Лист «Хосты и аномалии» - проблемы уровня сайта/хоста ──────
     _build_hosts_anomalies_sheet(wb, service_issues, wm_metrics, link_profile,
                                  anomalies)
 
     # ─── Лист «Трафик и траст» - краткая сводка + ИКС/DR + линкпрофиль ──
-    _build_traffic_overview_sheet(wb, traffic, trust, link_profile)
+    _build_traffic_overview_sheet(wb, traffic, trust, link_profile, gsc_pages)
 
     # ─── Лист индексации (п.1.7) - если проверка выполнялась ────────
     _build_indexing_sheet(wb, results, indexing_summary)
@@ -5856,7 +5897,7 @@ def build_report(
 
     # ─── Лист валидации W3C + скорости (п.1.16) - если выполнялась ──────
     _build_w3c_sheet(wb, w3c_check)
-    _build_gsc_pages_sheet(wb, gsc_pages)
+    # Лист «Страницы в ГСК» удалён - секция на «Трафик и траст».
     _build_home_dupes_sheet(wb, home_dupes)
     _build_arsenkin_sheet(wb, arsenkin)
 
@@ -5893,97 +5934,8 @@ def build_report(
     # отдельный дублирующий лист со списком тех же страниц.
 
     # ═══════════════════════════════════════════════════════════════
-    # ЛИСТ 3: Битые тексты (только если есть)
-    # ═══════════════════════════════════════════════════════════════
-    if total_text_issues > 0:
-        ws3 = wb.create_sheet('Битые тексты')
-        ws3.sheet_view.showGridLines = False
-        ws3.sheet_properties.tabColor = C.warn
-        ws3.freeze_panes = 'A5'
-
-        ws3.column_dimensions['A'].width = 18
-        ws3.column_dimensions['B'].width = 50
-        ws3.column_dimensions['C'].width = 18
-        ws3.column_dimensions['D'].width = 24
-        ws3.column_dimensions['E'].width = 80
-
-        # Заголовок и пояснение
-        ws3.merge_cells('A1:E1')
-        c = ws3['A1']
-        c.value = 'Битые переменные в текстах страниц'
-        c.font = _font(size=14, bold=True)
-        ws3.row_dimensions[1].height = 26
-
-        ws3.merge_cells('A2:E2')
-        c = ws3['A2']
-        c.value = (
-            'Шаблонизатор сайта не подставил значение, и фрагмент шаблона '
-            '({{city}}, %price%, #MIN_PRICE#, undefined и т.п.) остался виден пользователю в тексте страницы. '
-            'Чтобы увидеть проблему - откройте URL и поищите по странице (Ctrl+F) то, '
-            'что в колонке «Что нашлось».'
-        )
-        c.font = _font(size=10, italic=True, color=C.text_soft)
-        c.alignment = _align(wrap=True, vertical='top')
-        ws3.row_dimensions[2].height = 36
-
-        # Шапка таблицы на строке 4
-        ws3.merge_cells('A3:E3')  # пустая разделительная
-
-        hdr_row = 4
-        ws3.row_dimensions[hdr_row].height = 28
-        hdrs = ['Город', 'Открыть страницу', 'Тип шаблона', 'Что нашлось', 'Где это в тексте']
-        for col_idx, label in enumerate(hdrs, 1):
-            c = ws3.cell(row=hdr_row, column=col_idx)
-            c.value = label
-            c.font = _font(size=10, bold=True, color=C.text_muted)
-            c.alignment = _align()
-            c.fill = _fill(C.surface)
-            c.border = _border()
-
-        row_idx = hdr_row + 1
-        for page in pages_with_issues:
-            for issue in page.text_issues:
-                ws3.row_dimensions[row_idx].height = 30
-
-                # Город
-                c = ws3.cell(row=row_idx, column=1)
-                c.value = page.city
-                c.font = _font(size=10)
-                c.alignment = _align(wrap=True)
-                c.border = _border(color=C.border_light)
-
-                # URL - кликабельный
-                c = ws3.cell(row=row_idx, column=2)
-                c.value = page.url
-                c.hyperlink = page.url
-                c.font = _font(name='Consolas', size=10, color=C.accent, underline='single')
-                c.alignment = _align(wrap=True)
-                c.border = _border(color=C.border_light)
-
-                # Тип шаблона
-                c = ws3.cell(row=row_idx, column=3)
-                c.value = issue.pattern
-                c.font = _font(size=10, color=C.text_soft)
-                c.alignment = _align()
-                c.border = _border(color=C.border_light)
-
-                # Что нашлось
-                c = ws3.cell(row=row_idx, column=4)
-                c.value = issue.match
-                c.font = _font(name='Consolas', size=10, bold=True, color=C.warn)
-                c.alignment = _align()
-                c.border = _border(color=C.border_light)
-
-                # Контекст
-                c = ws3.cell(row=row_idx, column=5)
-                c.value = issue.context
-                c.font = _font(name='Consolas', size=9, color=C.text_muted)
-                c.alignment = _align(wrap=True)
-                c.border = _border(color=C.border_light)
-
-                row_idx += 1
-
-        ws3.auto_filter.ref = f'A{hdr_row}:E{hdr_row}'
+    # Лист «Битые тексты» удалён - находки полностью в «Проблемы» через
+    # report_priorities._text_issue_findings().
 
     # Лист «404 из Метрики» удалён - находки (с пометкой, подтверждено ли
     # обходом сайта или только по Метрике) теперь в «Проблемы», раздел

@@ -224,12 +224,12 @@ def test_basic_report_creation():
 
 
 def test_report_with_text_issues():
-    """Если есть битые тексты - добавляется третий лист."""
+    """Битые тексты - находки прямо в «Проблемы», отдельного листа нет."""
     issue1 = TextIssue(pattern='{{...}}', match='{{city}}',
                        context='Купить трубу в {{city}} с доставкой')
     issue2 = TextIssue(pattern='%переменная%', match='%price%',
                        context='Цена от %price% рублей')
-    
+
     results = [
         make_result(url='https://stalmetural.ru/cat-a',
                     text_issues=[issue1], has_text_issues=True),
@@ -237,7 +237,7 @@ def test_report_with_text_issues():
                     text_issues=[issue2], has_text_issues=True),
     ]
     selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
-    
+
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / 'test.xlsx'
         build_report(
@@ -247,17 +247,49 @@ def test_report_with_text_issues():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        # «Битые тексты» теперь - секция внутри группового листа «Техничка».
-        assert 'Техничка' in wb.sheetnames
         assert 'Битые тексты' not in wb.sheetnames
-        ws = wb['Техничка']
+        ws = wb['Проблемы']
         all_cells = []
         for row in ws.iter_rows(values_only=True):
             all_cells.extend(c for c in row if c)
-        assert '{{city}}' in all_cells
-        assert '%price%' in all_cells
-        assert '▸ Битые тексты' in all_cells   # полоса-разделитель секции
-    print('✓ Секция «Битые тексты» в листе «Техничка»')
+        assert '{{city}}' in ' '.join(str(c) for c in all_cells)
+        assert '%price%' in ' '.join(str(c) for c in all_cells)
+    print('✓ Битые тексты - находки прямо в «Проблемы»')
+
+
+def test_indexing_site_findings_попадают_в_проблемы_и_план_работ_без_дублей():
+    """indexing_site_findings (постатейно в «Проблемы») и extra_site_tasks
+    (агрегатом в «Плане работ») читают один indexing_summary независимо -
+    в «Проблемах» видна конкретная страница, в «Плане работ» - сводка
+    без задвоения (одна задача на категорию, не по одной на каждый путь)."""
+    results = [make_result(url='https://stalmetural.ru/', type_label='Главная')]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    indexing_summary = {
+        'host': 'stalmetural.ru',
+        'disallowed': [{'path': '/catalog/a/', 'rule': 'Disallow: /catalog/'},
+                       {'path': '/catalog/b/', 'rule': 'Disallow: /catalog/'}],
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            indexing_summary=indexing_summary,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        prob_cells = [c for row in wb['Проблемы'].iter_rows(values_only=True)
+                     for c in row if c]
+        prob_text = ' '.join(str(c) for c in prob_cells)
+        assert 'https://stalmetural.ru/catalog/a/' in prob_text
+        assert 'https://stalmetural.ru/catalog/b/' in prob_text
+
+        plan_rows = [row for row in wb['План работ'].iter_rows(values_only=True)
+                    if row and row[2] == 'Открыть в robots.txt страницы из sitemap']
+        assert len(plan_rows) == 1   # одна сводная задача, не по одной на путь
+    print('✓ Индексация: сайт-уровневые находки в «Проблемах» без дублей в «Плане работ»')
 
 
 def test_redirect_chain_in_path_column():
@@ -320,6 +352,72 @@ def test_speed_with_comma():
         speed = ws.cell(row=6, column=speed_col).value
         assert speed == '2,34', f'Ожидалось "2,34", получили {speed!r}'
     print('✓ Скорость с запятой')
+
+
+def test_w3c_колонки_на_странице_только_для_выборки():
+    """W3C-колонки появляются на «Страницы» только если была валидация;
+    заполнены только у страниц из выборки, у остальных - пусто."""
+    results = [
+        make_result(url='https://stalmetural.ru/', type_label='Главная'),
+        make_result(url='https://stalmetural.ru/catalog/', type_label='Каталог'),
+    ]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    w3c_check = {'available': True, 'pages': [{
+        'url': 'https://stalmetural.ru/',
+        'html': {'errors': 3, 'warnings': 5}, 'css': {'errors': 2, 'warnings': 0},
+        'timings': {'total_ms': 4818},
+    }]}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            w3c_check=w3c_check,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        ws = wb['Страницы']
+        header_row = [ws.cell(row=5, column=c).value for c in range(1, ws.max_column + 1)]
+        err_col = header_row.index('W3C ошибок') + 1
+        ms_col = header_row.index('Загрузка, мс') + 1
+        by_url = {}
+        for r in range(6, 8):
+            url_col = header_row.index('Адрес страницы') + 1
+            by_url[ws.cell(row=r, column=url_col).value] = (
+                ws.cell(row=r, column=err_col).value, ws.cell(row=r, column=ms_col).value)
+        assert by_url['https://stalmetural.ru/'] == (5, 4818)   # 3 HTML + 2 CSS
+        assert by_url['https://stalmetural.ru/catalog/'] == (None, None)
+    print('✓ W3C-колонки на «Страницы» только для выборки')
+
+
+def test_гск_страницы_секцией_на_трафик_и_траст():
+    """Лист «Страницы в ГСК» удалён - метрика (индексировано/просканировано
+    + Δ) теперь секция на «Трафик и траст», а не отдельная вкладка."""
+    results = [make_result(url='https://stalmetural.ru/')]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    gsc_pages = {'available': True, 'indexed': 1200, 'crawled_not_indexed': 40,
+                'total': 1240, 'deltas': {'indexed': 15, 'crawled_not_indexed': -3}}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            gsc_pages=gsc_pages,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert 'Страницы в ГСК' not in wb.sheetnames
+        ws = wb['Трафик и траст']
+        cells = [c.value for row in ws.iter_rows() for c in row if c.value]
+        text = ' '.join(str(c) for c in cells)
+        assert 'Страницы в ГСК' in text
+        assert 1200 in cells and 40 in cells and 1240 in cells
+        assert any('+15' in str(c) for c in cells)
+    print('✓ «Страницы в ГСК» - секция на «Трафик и траст»')
 
 
 def test_sheet_ref_переписывает_слитый_лист_иначе_отдаёт_как_есть():

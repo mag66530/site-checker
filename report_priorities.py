@@ -436,6 +436,20 @@ def _availability_findings(r) -> list:
                     detail=r.error_message or '')]
 
 
+def _text_issue_findings(r) -> list:
+    """Битые переменные в тексте страницы (шаблон не подставил значение:
+    {{city}}, %price%, undefined и т.п.) - раньше только на отдельном
+    листе «Битые тексты», в «Проблемы» не попадали вообще."""
+    if not getattr(r, 'has_text_issues', False):
+        return []
+    return [
+        Finding('Ошибка', 'Битые тексты',
+               f'битая переменная в тексте: {issue.match}',
+               r.city, r.type_label, r.url,
+               detail=f'тип шаблона: {issue.pattern} · где: {issue.context}')
+        for issue in r.text_issues]
+
+
 def _index_404_code(status) -> int:
     try:
         return int(str(status).strip() or 0)
@@ -547,9 +561,12 @@ def collect_findings(results, *, console_check: dict = None,
     for r in results or []:
         city, page_type, url = r.city, r.type_label, r.url
         out.extend(_availability_findings(r))
+        out.extend(_text_issue_findings(r))
         out.extend(_from_issue_dict(r.indexing, section='Индексация',
                                     city=city, page_type=page_type, url=url))
         out.extend(_from_issue_dict(r.meta, section='Метаданные',
+                                    city=city, page_type=page_type, url=url))
+        out.extend(_from_issue_dict(getattr(r, 'seo_text', None), section='Метаданные',
                                     city=city, page_type=page_type, url=url))
         out.extend(_layout_findings(r.layout, city=city, page_type=page_type,
                                     url=url))
@@ -603,6 +620,10 @@ _RULES = [
      'Починить недоступные страницы',
      'Страница не открывается - покупатель и робот получают ошибку вместо контента.'),
 
+    ('Битые тексты', '', 2, 'Разработка', 'broken_text_vars',
+     'Убрать битые переменные из текста',
+     'Шаблонизатор не подставил значение - фрагмент кода виден покупателю прямо на странице.'),
+
     ('404 в индексе', '', 1, 'SEO + разработка', 'index_404',
      'Убрать из поиска удалённые страницы',
      'Пользователь из поиска попадает в пустоту, вес страниц теряется - нужен 301 на живой раздел.'),
@@ -610,9 +631,38 @@ _RULES = [
     ('Индексация', 'noindex', 1, 'SEO', 'idx_noindex',
      'Проверить расхождение robots/noindex',
      'Сигналы индексации страницы противоречат друг другу - решить, что верно.'),
+    ('Индексация', 'дубль главной', 1, 'Разработка', 'home_dup',
+     'Склеить дубли главной страницы',
+     'Поисковик делит вес и доверие между несколькими адресами одной и той же главной.'),
+    ('Индексация', 'не в индексе', 2, 'SEO', 'arsenkin_not_indexed',
+     'Разобраться, почему страницы не в индексе',
+     'Раз страницы нет в индексе - она не приносит трафик, даже если технически всё верно.'),
     ('Индексация', 'canonical', 2, 'Разработка', 'idx_canonical',
      'Добавить/поправить rel="canonical"',
      'Без canonical поиск сам решает, какой адрес считать основным.'),
+
+    ('Страница 404', '', 2, 'Разработка', 'p404_test',
+     'Починить страницу 404',
+     'Правильная страница 404 (уникальный title, ссылки, форма) удерживает посетителя, а не отпугивает его.'),
+
+    ('Нагрузка и парсинг', 'бота за парсера', 1, 'Разработка', 'stress_banned',
+     'Разобраться с защитой от ботов',
+     'Защита банит и обычных роботов поисковых систем, не только парсеры - риск потери индексации.'),
+    ('Нагрузка и парсинг', '', 2, 'Разработка', 'stress_5xx',
+     'Стабилизировать сервер под нагрузкой',
+     'Ошибки сервера под обходом/нагрузкой роботы воспринимают как нестабильный сайт - хуже краулинг.'),
+
+    ('Фильтры ПС', '', 1, 'SEO', 'ps_sanctions_item',
+     'Разобрать санкции поисковых систем',
+     'Санкция резко режет видимость сайта в поиске.'),
+
+    ('Ошибки сервисов', '', 2, 'SEO + разработка', 'service_issue_item',
+     'Разобрать проблему в сервисах',
+     'Сервис (Вебмастер/GSC/Метрика) диагностировал проблему по официальным данным.'),
+
+    ('Валидация и скорость', '', 3, 'Разработка', 'w3c_errors',
+     'Поправить ошибки валидатора W3C',
+     'Невалидный HTML/CSS может рендериться браузерами по-разному и мешать роботу.'),
 
     ('Блоки на странице', 'похожие товар', 2, 'Разработка', 'blocks_related',
      'Вернуть блок «Похожие товары»',
@@ -664,6 +714,18 @@ _RULES = [
     ('Метаданные', 'длинный', 3, 'SEO', 'meta_len',
      'Привести в норму длины title и description',
      'Поиск обрезает сниппет, теряется призыв к действию.'),
+    ('Метаданные', 'дубль', 1, 'Контент', 'meta_dup_same_city',
+     'Развести дублирующиеся title/description/H1 внутри города',
+     'Поиск считает одинаковые страницы дублями и хуже ранжирует обе.'),
+    ('Метаданные', 'совпадает с другим городом', 3, 'SEO', 'meta_dup_cross_city',
+     'Проверить межгородские совпадения title/description/H1',
+     'Само по себе не санкция, но стоит проверить наличие ключа и города в тексте.'),
+    ('Метаданные', 'зеркало адреса', 2, 'Разработка', 'meta_url_mirror',
+     'Склеить зеркала адреса редиректом/canonical',
+     'Одна страница доступна по нескольким адресам - поиск делит вес между ними.'),
+    ('Метаданные', 'тестовый поддомен', 1, 'Разработка', 'meta_test_domain',
+     'Закрыть тестовый поддомен от индексации',
+     'Открытый тестовый поддомен - полный дубль сайта в индексе.'),
     ('Метаданные', '', 2, 'SEO', 'meta_generic',
      'Проверить метаданные страницы',
      'Title/description/H1 напрямую влияют на клики из поиска.'),
@@ -839,6 +901,384 @@ def group_into_tasks(findings: list) -> list:
 _SANCTION_CODE_RE = re.compile(
     r'THREAT|MALWARE|SECUR|VIRUS|SPAM|QUALITY|SANC|FRAUD|PHISH|CHEAT|'
     r'OVEROPT|ADS?_|ADVERT|MOBILE_REDIRECT|DECEPT|CLOAK|DOORWAY', re.I)
+
+
+_META_FIELD_LABEL = {'title': 'title', 'description': 'description', 'h1': 'H1'}
+
+
+def metadata_site_findings(meta_summary: Optional[dict]) -> list:
+    """Дубли метаданных (same_city/cross_city), дубли УРЛОВ и тестовые
+    домены - раньше только на листе «Метаданные», страничная проверка
+    title/description/H1 уже итемизирована через r.meta, а вот эти
+    межстраничные группы - нет. Один Finding на каждую затронутую
+    страницу группы (не одна строка на группу), чтобы список был виден
+    без открытия детального листа."""
+    s = meta_summary or {}
+    out = []
+
+    for g in s.get('duplicates', {}).get('same_city') or []:
+        field = _META_FIELD_LABEL.get(g.get('field', ''), g.get('field', ''))
+        for p in g.get('pages') or []:
+            out.append(Finding(
+                'Ошибка', 'Метаданные',
+                f'дубль {field} внутри города: одинаковое значение у нескольких страниц',
+                p.get('city', ''), p.get('type_label', ''), p.get('url', ''),
+                detail=g.get('value', '')))
+
+    for g in s.get('duplicates', {}).get('cross_city') or []:
+        field = _META_FIELD_LABEL.get(g.get('field', ''), g.get('field', ''))
+        for p in g.get('pages') or []:
+            out.append(Finding(
+                'Предупреждение', 'Метаданные',
+                f'{field} совпадает с другим городом - нет ключа/города в тексте?',
+                p.get('city', ''), p.get('type_label', ''), p.get('url', ''),
+                detail=g.get('value', '')))
+
+    for d in s.get('url_duplicates') or []:
+        if d.get('problem') == 'duplicate':
+            level, problem = 'Ошибка', 'зеркало адреса отвечает 200 без редиректа - дубль страницы'
+        elif d.get('problem') == 'not_301':
+            level, problem = 'Предупреждение', 'зеркало адреса редиректит временно (302/303/307), а не 301'
+        else:
+            continue
+        out.append(Finding(level, 'Метаданные', problem, url=d.get('variant', ''),
+                           detail=f'канонический адрес: {d.get("canonical", "")}'))
+
+    for t in s.get('test_domains') or []:
+        if t.get('state') != 'indexable':
+            continue
+        out.append(Finding(
+            'Ошибка', 'Метаданные',
+            'тестовый поддомен открыт для индексации - дубль всего сайта',
+            url=f'https://{t.get("host", "")}/'))
+
+    return out
+
+
+def home_dupes_findings(home_dupes: Optional[dict]) -> list:
+    """Реальные дубли главной (адрес отвечает 200, поисковик его НЕ
+    склеивает с канонической главной) - раньше только на листе «Дубли
+    главной». ✔-варианты (склеено/это и есть главная) - не находки."""
+    out = []
+    for v in (home_dupes or {}).get('variants') or []:
+        if v.get('verdict') != 'duplicate':
+            continue
+        out.append(Finding(
+            'Ошибка', 'Индексация',
+            'дубль главной страницы - адрес отвечает 200, но не склеен '
+            'с канонической главной (нет редиректа/canonical)',
+            url=v.get('url', ''), detail=v.get('note', '')))
+    return out
+
+
+def arsenkin_findings(arsenkin: Optional[dict]) -> list:
+    """URL не в индексе Яндекса/Google (по данным Арсенкина) - раньше
+    только на листе «Индексация (Арсенкин)»."""
+    if not arsenkin or not arsenkin.get('available'):
+        return []
+    eng = arsenkin.get('engines') or {'yandex': True, 'google': True}
+    out = []
+    for r in arsenkin.get('rows') or []:
+        missing = [name for name, checked in (('Яндекс', eng.get('yandex')),
+                                              ('Google', eng.get('google')))
+                  if checked and r.get('yandex' if name == 'Яндекс' else 'google') is False]
+        if missing:
+            out.append(Finding(
+                'Ошибка', 'Индексация',
+                f'страница не в индексе: {", ".join(missing)}',
+                url=r.get('url', '')))
+    return out
+
+
+def page404_findings(p404_check: Optional[dict]) -> list:
+    """Тест страницы 404 (код/дизайн/title/ссылки/форма) - раньше только
+    на листе «Страница 404». Хост-уровневая находка (не привязана к
+    конкретной проверенной странице прогона)."""
+    out = []
+    for h in (p404_check or {}).get('hosts') or []:
+        city, host = h.get('city', ''), h.get('host', '')
+        url = f'https://{host}/' if host else ''
+        for t in h.get('issues') or []:
+            out.append(Finding('Ошибка', 'Страница 404', t, city, url=url))
+        for t in h.get('warnings') or []:
+            out.append(Finding('Предупреждение', 'Страница 404', t, city, url=url))
+    return out
+
+
+def stress_check_findings(stress_check: Optional[dict]) -> list:
+    """Ошибки сервера (5xx/обрывы) при быстром обходе, высокой нагрузке и
+    кривых дублях URL - раньше только на листе «Нагрузка и парсинг»."""
+    if not stress_check or not stress_check.get('available'):
+        return []
+    out = []
+    parsing = stress_check.get('parsing') or {}
+    load = stress_check.get('load') or {}
+    dups = stress_check.get('duplicates') or {}
+
+    banned = parsing.get('banned')
+    if banned:
+        out.append(Finding(
+            'Ошибка', 'Нагрузка и парсинг',
+            f'сайт принял бота за парсера и закрыл доступ (код {banned.get("code")}) '
+            f'после {banned.get("after", 0)} успешных страниц',
+            url=banned.get('url', '')))
+
+    for e in parsing.get('server_errors') or []:
+        out.append(Finding('Ошибка', 'Нагрузка и парсинг',
+                           f'ошибка сервера ({e.get("code")}) при быстром обходе',
+                           url=e.get('url', '')))
+
+    _net = len(parsing.get('network_errors') or [])
+    if _net:
+        out.append(Finding('Ошибка', 'Нагрузка и парсинг',
+                           f'обрывы связи при быстром обходе: {_net}'))
+
+    for p in load.get('pages') or []:
+        if p.get('server_5xx') or p.get('network_errors'):
+            out.append(Finding(
+                'Ошибка', 'Нагрузка и парсинг',
+                'сервер отдаёт ошибки под параллельной нагрузкой',
+                url=p.get('url', ''),
+                detail=f'5xx {p.get("server_5xx", 0)}, обрывов '
+                       f'{p.get("network_errors", 0)} из {p.get("sent", 0)} запросов'))
+        elif p.get('degraded'):
+            out.append(Finding(
+                'Предупреждение', 'Нагрузка и парсинг',
+                'ответ замедляется более чем в 3 раза под нагрузкой',
+                url=p.get('url', '')))
+
+    for e in dups.get('server_errors') or []:
+        out.append(Finding(
+            'Ошибка', 'Нагрузка и парсинг',
+            f'ошибка сервера ({e.get("code")}) на кривом дубле URL ({e.get("kind", "")})',
+            url=e.get('url', '')))
+
+    return out
+
+
+def ps_filters_findings(ps_filters: Optional[dict]) -> list:
+    """Санкции/угрозы поисковых систем - реальные (не любая FATAL-проблема
+    Вебмастера, см. _SANCTION_CODE_RE) плюс маркеры ручных мер в почте
+    GSC. Раньше только на листе «Фильтры ПС»; extra_site_tasks() агрегирует
+    те же данные в «План работ» отдельно (эта функция сюда не дублируется -
+    не проходит через group_into_tasks)."""
+    out = []
+    sanc = (ps_filters or {}).get('yandex') or []
+    for s in sanc:
+        if not _SANCTION_CODE_RE.search(str(s.get('code') or '')):
+            continue
+        out.append(Finding(
+            'Ошибка', 'Фильтры ПС',
+            f'санкция/угроза в диагностике Вебмастера: {s.get("title", s.get("code", ""))}',
+            url=f'https://{s.get("host", "")}/' if s.get('host') else '',
+            detail=f'дата: {s.get("date", "")}'))
+    for h in (ps_filters or {}).get('gsc_hits') or []:
+        out.append(Finding(
+            'Ошибка', 'Фильтры ПС',
+            f'маркер ручных мер/безопасности в письме GSC: {h.get("subject", "")}',
+            detail=f'дата: {h.get("date", "")}'))
+    return out
+
+
+_SVC_SEV_TO_LEVEL = {'fatal': 'Ошибка', 'critical': 'Ошибка',
+                     'possible': 'Предупреждение', 'recommendation': 'Предупреждение'}
+
+
+def service_issues_findings(service_issues: Optional[list]) -> list:
+    """Ошибки сервисов (Вебмастер/GSC/Метрика по API, не из почты) - раньше
+    только на листе «Ошибки сервисов». extra_site_tasks() агрегирует те же
+    данные в «План работ» отдельно (по хосту, не по issue) - эта функция
+    сюда не дублируется, не проходит через group_into_tasks. 'info' -
+    справочная информация, не находка, пропускаем."""
+    out = []
+    for i in service_issues or []:
+        level = _SVC_SEV_TO_LEVEL.get(getattr(i, 'severity', None))
+        if not level:
+            continue
+        host = getattr(i, 'host', '')
+        out.append(Finding(
+            level, 'Ошибки сервисов',
+            getattr(i, 'title', '') or getattr(i, 'code', ''),
+            url=f'https://{host}/' if host else '',
+            detail=f'дата: {getattr(i, "date", "")}'))
+    return out
+
+
+def w3c_findings(w3c_check: Optional[dict]) -> list:
+    """Ошибки валидатора W3C (HTML/CSS) по выборке страниц - числа уже
+    видны колонками на «Страницы», но без отдельной находки не попадали
+    бы в «Проблемы» вовсе. Одна находка на страницу (не на ошибку -
+    ошибок валидатора у боевых сайтов обычно десятки, разбивка по каждой
+    не нужна), детали - на «Валидация и скорость»."""
+    out = []
+    for p in (w3c_check or {}).get('pages') or []:
+        if p.get('error'):
+            continue
+        h, cs = p.get('html') or {}, p.get('css') or {}
+        if h.get('error') or cs.get('error'):
+            continue
+        n = (h.get('errors', 0) or 0) + (cs.get('errors', 0) or 0)
+        if not n:
+            continue
+        out.append(Finding(
+            'Предупреждение', 'Валидация и скорость',
+            f'ошибок валидатора W3C (HTML+CSS): {n}',
+            url=p.get('url', ''),
+            detail=f'HTML: {h.get("errors", 0)} · CSS: {cs.get("errors", 0)}'))
+    return out
+
+
+def _idx_url(indexing_summary, path):
+    """Путь -> полный URL хоста прогона (для гиперссылки в «Проблемах»)."""
+    host = (indexing_summary or {}).get('host', '')
+    if not path:
+        return f'https://{host}/' if host else ''
+    if path.startswith('http'):
+        return path
+    return f'https://{host}{path}' if host else path
+
+
+def indexing_site_findings(indexing_summary: Optional[dict]) -> list:
+    """Сайт-уровневые находки индексации (пути/файлы sitemap и robots.txt,
+    не привязаны к одной странице прогона) - раньше только на листе
+    «Индексация» + агрегатом в «Плане работ» (extra_site_tasks), в
+    «Проблемы» не попадали вообще. Здесь - по одной находке на каждый
+    путь/файл, чтобы список был виден и без открытия детального листа."""
+    s = indexing_summary or {}
+    out = []
+
+    for j in s.get('junk_open') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           f'служебный адрес не закрыт в robots.txt: {j.get("label", "")}',
+                           url=_idx_url(s, j.get('path', ''))))
+
+    for d in s.get('disallowed') or []:
+        out.append(Finding('Ошибка', 'Индексация',
+                           'путь есть в sitemap/каталоге, но закрыт в robots.txt Disallow',
+                           url=_idx_url(s, d.get('path', '')),
+                           detail=f'правило: {d.get("rule", "")}'))
+
+    bd = s.get('blanket_disallow') or []
+    if bd:
+        out.append(Finding('Ошибка', 'Индексация',
+                           'Disallow: / закрывает сайт целиком от индексации',
+                           url=_idx_url(s, '/'),
+                           detail='User-agent: ' + ', '.join(bd)))
+
+    for a in s.get('assets_closed') or []:
+        out.append(Finding('Ошибка', 'Индексация',
+                           'свой CSS/JS закрыт в robots.txt - Google не отрендерит страницу',
+                           url=a.get('url', ''), detail=f'правило: {a.get("rule", "")}'))
+
+    for f in (s.get('directive_check') or {}).get('findings') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           'страница держится только на robots.txt (отвечает 200 без noindex)',
+                           url=_idx_url(s, f.get('path', '')),
+                           detail=f'правило: {f.get("rule", "")} · код {f.get("status", "")}'))
+
+    for a in s.get('advisory_open') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           f'спорный для индекса раздел открыт: {a.get("label", "")}',
+                           url=_idx_url(s, a.get('path', ''))))
+
+    pg = s.get('pagination') or {}
+    if pg.get('status') == 200 and pg.get('canon_ok') is False:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           'на пагинации категории нет canonical на страницу без номера',
+                           url=_idx_url(s, pg.get('base', '')),
+                           detail=f'canonical: {pg.get("canonical") or "нет"}'))
+    if pg.get('loadmore') and pg.get('pag_links') is False:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           'бесконечная прокрутка без ссылок пагинации в HTML',
+                           url=_idx_url(s, pg.get('base', ''))))
+
+    aud = ((s.get('sitemap_audit') or {}))
+    mc = aud.get('missing_catalog') or {}
+    for kind_label, key in (('категория', 'categories'), ('фильтр', 'filters'),
+                            ('услуга', 'services')):
+        for path in mc.get(key) or []:
+            out.append(Finding('Ошибка', 'Индексация',
+                               f'{kind_label} из выгрузки отсутствует в sitemap',
+                               url=_idx_url(s, path)))
+
+    for b in aud.get('bad_urls') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           f'битый/некорректный URL в sitemap: {b.get("why", "")}',
+                           url=b.get('url', '')))
+
+    for fs in aud.get('file_stats') or []:
+        urls_n, bytes_n = fs.get('urls', 0), fs.get('bytes', 0)
+        if urls_n > 50000 or bytes_n > 50 * 1024 * 1024:
+            out.append(Finding('Ошибка', 'Индексация',
+                               'файл sitemap нарушает лимит протокола (50 000 ссылок / 50 МБ)',
+                               url=fs.get('url', ''),
+                               detail=f'{urls_n} URL, {bytes_n // 1048576} МБ'))
+        elif urls_n > 10000 or bytes_n > 10 * 1024 * 1024:
+            out.append(Finding('Предупреждение', 'Индексация',
+                               'файл sitemap больше рекомендуемого лимита (10 000 ссылок / 10 МБ)',
+                               url=fs.get('url', ''),
+                               detail=f'{urls_n} URL, {bytes_n // 1048576} МБ'))
+
+    _tot = aud.get('total') or 0
+    if _tot:
+        _missing_meta = [label for label, key in (
+            ('lastmod', 'with_lastmod'), ('changefreq', 'with_changefreq'),
+            ('priority', 'with_priority')) if aud.get(key, 0) == 0]
+        if _missing_meta:
+            out.append(Finding('Предупреждение', 'Индексация',
+                               f'в sitemap ни у одной записи нет {", ".join(_missing_meta)}',
+                               url=_idx_url(s, '/sitemap.xml')))
+
+    for j in (s.get('html_sitemap') or {}).get('junk_links') or []:
+        out.append(Finding('Предупреждение', 'Индексация',
+                           f'служебная ссылка в HTML-карте сайта: {j.get("label", "")}',
+                           url=j.get('url', '')))
+
+    for r in s.get('required_pages') or []:
+        if r.get('found'):
+            continue
+        out.append(Finding('Ошибка', 'Индексация',
+                           f'обязательная страница не найдена: {r.get("label", "")}',
+                           url=_idx_url(s, '/')))
+
+    smc = s.get('sitemap_checks') or None
+    if smc is not None:
+        if not smc.get('has_directive'):
+            out.append(Finding('Ошибка', 'Индексация',
+                               'в robots.txt нет директивы Sitemap - роботы не видят карту сайта',
+                               url=_idx_url(s, '/robots.txt')))
+        else:
+            for d in smc.get('directives') or []:
+                if d.get('status') != 200:
+                    out.append(Finding(
+                        'Ошибка', 'Индексация',
+                        'sitemap из robots.txt не открывается',
+                        url=d.get('url', ''),
+                        detail=f'код: {d.get("status") if d.get("status") is not None else "нет ответа"}'))
+            if smc.get('matches_project') is False:
+                out.append(Finding(
+                    'Предупреждение', 'Индексация',
+                    'ни одна директива Sitemap в robots.txt не совпадает с sitemap проекта из настроек',
+                    url=_idx_url(s, '/robots.txt')))
+
+    wm = s.get('wm_sitemaps')
+    if wm is not None:
+        wm_list = wm.get('sitemaps') or []
+        if wm.get('error'):
+            pass  # сбой получения данных Вебмастера - не находка сайта
+        elif not wm_list:
+            out.append(Finding('Ошибка', 'Индексация',
+                               'в Яндекс.Вебмастере не добавлено ни одного sitemap-файла',
+                               url=_idx_url(s, '/')))
+        else:
+            for sm in wm_list:
+                if sm.get('errors'):
+                    out.append(Finding(
+                        'Ошибка', 'Индексация',
+                        f'sitemap в Яндекс.Вебмастере с ошибками: {sm.get("errors")}',
+                        url=sm.get('url', '')))
+
+    return out
 
 
 def extra_site_tasks(*, indexing_summary: dict = None,
