@@ -68,11 +68,16 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
         args.append('--show-browser')
     _pat1 = re.compile(r'зафиксирована цель [«"]([\w\-.]+)[»"]')
     _pat2 = re.compile(r'Сработала цель:\s*([\w\-.]+)')
+    # События, которые Метрика фиксирует САМА при отправке формы (page-url=
+    # form://). На них держатся цели-конструкторы («Отправка формы») - в коде
+    # сайта у них ничего нет. Форм-движок печатает строку с именем формы.
+    _patf = re.compile(r'Метрика зафиксировала форма(?: на форме [«"]([^»"]+)[»"])?')
     # URL, до которых дошёл прогон форм (переходы + итоговый URL сценария): по ним
     # «Проверка целей» подтверждает url-цели (оформленный заказ / «спасибо»).
     _patu = re.compile(r'(?:URL сценария:|переход →)\s*(https?://\S+)')
     fired: set = set()
     urls: set = set()
+    формы_метрики: set = set()      # формы, чью отправку Метрика зафиксировала
     # Прокси форм-подпроцессу: у «Проверки целей» есть свой прокси прогона
     # (GOALS_PROXY, ставит goals_check из блока «Доступ к сайту»). Форм-движок
     # читает FORMS_PROXY, а не GOALS_PROXY - поэтому для проектов, где формам
@@ -95,6 +100,8 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
                 fired.add(m.group(1))
             for m in _patu.finditer(line):
                 urls.add(m.group(1).rstrip('.,;'))
+            for m in _patf.finditer(line):
+                формы_метрики.add((m.group(1) or '').strip() or 'без имени')
         proc.wait(timeout=1800)
         # Складываем туда же, откуда отчёт целей их читает (_форм_проект).
         d = ROOT / 'cache' / 'forms' / forms_pid
@@ -103,8 +110,11 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
             json.dumps(sorted(fired), ensure_ascii=False), encoding='utf-8')
         (d / 'fired_urls.json').write_text(
             json.dumps(sorted(urls), ensure_ascii=False), encoding='utf-8')
+        (d / 'metrika_forms.json').write_text(
+            json.dumps(sorted(формы_метрики), ensure_ascii=False), encoding='utf-8')
         _stamp(f'ФОРМЫ: готово (код {proc.returncode}); поймано целей форм: '
-               f'{len(fired)}, URL прогона: {len(urls)}')
+               f'{len(fired)}, URL прогона: {len(urls)}, '
+               f'отправок, зафиксированных Метрикой: {len(формы_метрики)}')
     except Exception as e:  # noqa: BLE001
         _stamp(f'ФОРМЫ: не удалось прогнать ({e}) - продолжаю без них')
 
