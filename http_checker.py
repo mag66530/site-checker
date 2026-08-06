@@ -145,6 +145,10 @@ class CheckResult:
     subdomain: str
     type_code: str
     type_label: str
+    # Откуда взят адрес: «Каталог проекта» / «Карта сайта» / «Свой список URL» /
+    # «Тех. страницы». Нужен в отчёте: иначе не отличить страницу из каталога
+    # от случайной, попавшей в прогон из карты сайта.
+    source: str = 'Каталог проекта'
 
     # Результат запроса
     http_code: Optional[int] = None
@@ -938,6 +942,7 @@ async def check_one(
         subdomain=task.subdomain,
         type_code=task.type_code,
         type_label=task.type_label,
+        source=getattr(task, 'source', '') or 'Каталог проекта',
         http_code=a['http_code'],
         status=status,
         is_ok=is_ok,
@@ -1106,6 +1111,7 @@ async def run_batch(
                     return CheckResult(
                         url=task.url, city=task.city, subdomain=task.subdomain,
                         type_code=task.type_code, type_label=task.type_label,
+                        source=getattr(task, 'source', '') or 'Каталог проекта',
                         status=STATUS.CANCELLED, is_ok=False, is_error=False,
                     )
                 result = await check_one(

@@ -63,6 +63,10 @@ class CheckTask:
     subdomain: str
     type_code: str       # 'main', 'catalog', 'category', 'filter', 'product', 'custom'
     type_label: str      # 'Главная', 'Каталог', ...
+    # Откуда взялся адрес: обычная выборка по каталогу проекта, случайная
+    # проверка карт сайта, свой список или технические страницы. Без этого в
+    # отчёте не отличить страницу каталога от случайной из sitemap.
+    source: str = 'Каталог проекта'
 
 
 @dataclass
@@ -443,6 +447,7 @@ def build_plan(
 def build_custom_tasks_typed(
     urls: list[str],
     sources: 'Sources | None' = None,
+    source: str = 'Свой список URL',
 ) -> list[CheckTask]:
     """
     Задачи для своего списка URL **в контексте проекта**: тип определяется
@@ -512,6 +517,7 @@ def build_custom_tasks_typed(
             subdomain=host,
             type_code=tcode,
             type_label=TYPE_LABELS[tcode],
+            source=source,
         ))
 
     return tasks

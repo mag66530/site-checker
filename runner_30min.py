@@ -836,7 +836,8 @@ def run_check(pid, params, creds, log, progress):
                     int(_sm_sample.get('urls_per_map', 5)),
                     proxy_url=proxy_url, log=lambda lvl, msg: log(msg)))
                 if _sampled:
-                    extra = build_custom_tasks_typed(_sampled, src)
+                    extra = build_custom_tasks_typed(_sampled, src,
+                                                     source='Карта сайта')
                     plan.tasks.extend(extra)
                     log(f'Карты сайта (сэмпл): добавлено {len(extra)} URL '
                         f'из {len(_sm_sample["groups"])} видов карт')
@@ -851,7 +852,8 @@ def run_check(pid, params, creds, log, progress):
         if _main and _tech_paths:
             _tech_urls = [f'https://{_main.host}{p}' for p in _tech_paths]
             try:
-                _tt = build_custom_tasks_typed(_tech_urls, src)
+                _tt = build_custom_tasks_typed(_tech_urls, src,
+                                               source='Тех. страницы')
                 for _t in _tt:
                     _p = urlparse(_t.url).path.rstrip('/')
                     if _p.endswith('/specials'):

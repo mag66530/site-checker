@@ -871,7 +871,10 @@ def _build_pages_overview_sheet(wb, results, findings, w3c_check=None):
         C.err if any(r.is_error for r in results) else
         C.warn if any(r.is_warning for r in results) else C.ok)
 
-    headers = [('Город', 16), ('Поддомен', 24), ('Тип', 13),
+    # «Источник» - откуда взялся адрес: обычная выборка по каталогу проекта,
+    # случайная проверка карт сайта, свой список или тех. страницы. Без него в
+    # таблице не отличить страницу каталога от случайной из sitemap.
+    headers = [('Город', 16), ('Поддомен', 24), ('Тип', 13), ('Источник', 16),
               ('Адрес страницы', 55), ('Код', 8), ('Статус', 18),
               ('Скорость, с', 11), ('Оценка скорости', 16),
               ('Кому чинить', 18), ('Найдено проблем', 14),
@@ -924,7 +927,8 @@ def _build_pages_overview_sheet(wb, results, findings, w3c_check=None):
         if r.has_text_issues:
             n = len(r.text_issues)
             text_issue_text = f'{n} {"находка" if n == 1 else "находок"}'
-        vals = [r.city, r.subdomain, r.type_label, r.url,
+        vals = [r.city, r.subdomain, r.type_label,
+               getattr(r, 'source', '') or 'Каталог проекта', r.url,
                r.http_code if r.http_code else '-',
                STATUS_LABEL.get(r.status, r.status), speed_sec, speed_label,
                _dept_result(r), n_prob or None, text_issue_text,
@@ -945,34 +949,40 @@ def _build_pages_overview_sheet(wb, results, findings, w3c_check=None):
             cell.border = _border(color=C.border_light)
         ws.cell(row=row, column=3).font = _font(name='Consolas', size=9,
                                                 color=C.text_muted)
-        url_cell = ws.cell(row=row, column=5)
+        # Источник: адрес не из каталога проекта выделяем - именно он объясняет,
+        # почему в прогоне вдруг оказалась незнакомая страница.
+        _src_cell = ws.cell(row=row, column=5)
+        if (getattr(r, 'source', '') or 'Каталог проекта') != 'Каталог проекта':
+            _src_cell.font = _font(size=9, bold=True, color=C.accent)
+            _src_cell.fill = _fill(C.accent_soft)
+        url_cell = ws.cell(row=row, column=6)
         url_cell.hyperlink = r.url
         url_cell.font = _font(name='Consolas', size=9, color=C.accent,
                               underline='single')
-        status_cell = ws.cell(row=row, column=7)
+        status_cell = ws.cell(row=row, column=8)
         status_color = C.ok if r.is_ok else C.warn if r.is_warning else C.err
         status_fill = C.ok_soft if r.is_ok else C.warn_soft if r.is_warning else C.err_soft
         status_cell.font = _font(size=9, bold=True, color=status_color)
         status_cell.fill = _fill(status_fill)
         if r.speed_rating:
-            speed_cell = ws.cell(row=row, column=9)
+            speed_cell = ws.cell(row=row, column=10)
             speed_cell.font = _font(size=9, bold=True, color=SPEED_COLOR[r.speed_rating])
             speed_cell.fill = _fill(SPEED_FILL[r.speed_rating])
         if n_prob:
-            prob_cell = ws.cell(row=row, column=11)
+            prob_cell = ws.cell(row=row, column=12)
             prob_cell.font = _font(size=9, bold=True, color=C.err)
             prob_cell.fill = _fill(C.err_soft)
         if r.has_text_issues:
-            issue_cell = ws.cell(row=row, column=12)
+            issue_cell = ws.cell(row=row, column=13)
             issue_cell.font = _font(size=9, bold=True, color=C.warn)
             issue_cell.fill = _fill(C.warn_soft)
-        path_cell = ws.cell(row=row, column=13)
+        path_cell = ws.cell(row=row, column=14)
         if r.redirect_chain:
             path_cell.font = _font(name='Consolas', size=9, color=C.text_soft)
         elif not r.is_ok:
             path_cell.font = _font(size=9, italic=True, color=C.text_muted)
         if w3c_by_url and w3c_errors:
-            err_cell = ws.cell(row=row, column=14)
+            err_cell = ws.cell(row=row, column=15)
             err_cell.font = _font(size=9, bold=True, color=C.warn)
             err_cell.fill = _fill(C.warn_soft)
         ws.row_dimensions[row].height = 16
@@ -5203,10 +5213,15 @@ _LEVEL_COLOR = {'Ошибка': 'err', 'Предупреждение': 'warn'}
 _LEVEL_FILL = {'Ошибка': 'err_soft', 'Предупреждение': 'warn_soft'}
 
 
-def _build_problems_sheet(wb, findings):
+def _build_problems_sheet(wb, findings, source_by_url=None):
     """Лист «Проблемы»: одна строка = одна находка на одной странице (все
     проверки чек-листа - report_priorities.collect_findings). Фильтруется
-    по любой колонке (автофильтр)."""
+    по любой колонке (автофильтр).
+
+    source_by_url - {адрес: откуда взят}, чтобы к странице из карты сайта или
+    своего списка приписать источник: иначе непонятно, откуда в отчёте взялся
+    незнакомый URL, которого нет в каталоге проекта."""
+    source_by_url = source_by_url or {}
     _MAX_ROWS = 3000
     ws = wb.create_sheet('Проблемы')
     ws.sheet_view.showGridLines = False
@@ -5257,7 +5272,11 @@ def _build_problems_sheet(wb, findings):
         fix = meta['title']
         if meta.get('why'):
             fix = f'{fix} - {meta["why"]}'
-        vals = (i, f.level, f.section, f.problem, f.city, f.page_type,
+        _тип = f.page_type
+        _ист = source_by_url.get(f.url)
+        if _ист and _ист != 'Каталог проекта':
+            _тип = f'{_тип} · {_ист}' if _тип else _ист
+        vals = (i, f.level, f.section, f.problem, f.city, _тип,
                f.url, f.detail, fix)
         for col_i, (col, _) in enumerate(headers):
             cell = ws[f'{col}{row}']
@@ -5858,7 +5877,11 @@ def build_report(
 
     # ─── Листы «План работ» и «Проблемы» (report_priorities) ────────
     _build_work_plan_sheet(wb, _tasks)
-    _build_problems_sheet(wb, _findings)
+    # Откуда взят каждый адрес - чтобы в «Проблемах» было видно страницы,
+    # попавшие в прогон из карты сайта / своего списка, а не из каталога.
+    _src_by_url = {r.url: getattr(r, 'source', '') for r in results
+                   if getattr(r, 'source', '')}
+    _build_problems_sheet(wb, _findings, _src_by_url)
 
     # ─── Лист структурной проверки (идёт сразу после «Обзора») ──────
     _build_structure_sheet(wb, results)

@@ -508,8 +508,13 @@ def test_страницы_хосты_и_аномалии_трафик_созда
         assert 'Аномалии' not in wb.sheetnames   # слит в «Хосты и аномалии»
 
         pages = wb['Страницы']
-        urls = [pages.cell(row=r, column=5).value for r in range(6, 8)]
+        # Ищем по всей строке, а не по номеру колонки: состав колонок листа
+        # меняется (добавился «Источник»), и жёсткий индекс ломал бы тест на
+        # каждой такой правке.
+        urls = [c.value for row in pages.iter_rows() for c in row if c.value]
         assert 'https://a.ru/catalog/' in urls   # реальный URL, не выдумка
+        # Источник адреса виден в таблице
+        assert 'Каталог проекта' in urls
 
         ha = wb['Хосты и аномалии']
         texts = [c.value for row in ha.iter_rows() for c in row if c.value]
