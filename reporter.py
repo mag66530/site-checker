@@ -27,6 +27,7 @@ from report_priorities import (
     service_issues_findings, w3c_findings,
     url_format_findings, robots_hygiene_findings, content_sections_findings,
     static_delivery_findings, ux_interactive_findings, interlinking_note,
+    yabusiness_findings, review_priority_findings,
 )
 
 
@@ -3452,7 +3453,14 @@ def build_report(
                       # общее время загрузки). Листа больше нет - находки
                       # живут только здесь.
                       + ux_interactive_findings(console_check)
-                      + static_delivery_findings(w3c_check))
+                      + static_delivery_findings(w3c_check)
+                      # Я.Бизнес и отзывы: раньше жили только на листе
+                      # «Я.Бизнес и GMB» и не попадали ни в «Проблемы», ни в
+                      # «План работ». Лист пока оставлен ради таблицы
+                      # приоритета докупки - в колонки «Проблем» она не
+                      # ложится (там строка = страница сайта).
+                      + yabusiness_findings(yabusiness)
+                      + review_priority_findings(review_priority))
     # Сайт-уровневые находки индексации (пути/файлы) и санкции ПС - только
     # в «Проблемы» (список), «План работ» их агрегирует extra_site_tasks()
     # ниже - через group_into_tasks они бы задвоились. Остальные (дубли
