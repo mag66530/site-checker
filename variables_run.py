@@ -36,11 +36,22 @@ WORK_ROOT = ROOT / 'cache' / 'variables'
 
 from proxy_config import project_use_proxy, resolve_proxy
 
-PROJECT_NAMES = {
-    'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром',
-    'mpe': 'МПЭ - Мепэн', 'avia': 'АПС - Авиапромсталь',
-    'mpk': 'МПК - Метпромко', 'mpi': 'МПИ - МетПромИнтекс',
-}
+def _имена_проектов() -> dict:
+    """id → название из projects/*.json. Раньше список был прибит гвоздями, и
+    новый проект (SHOPMET) не запускался: «invalid choice: 'sm'», хотя каталог
+    и КП у него уже были. Теперь достаточно добавить projects/<id>.json."""
+    имена = {}
+    for f in sorted((ROOT / 'projects').glob('*.json')):
+        try:
+            cfg = json.loads(f.read_text(encoding='utf-8'))
+        except Exception:  # noqa: BLE001 - битый json не должен ронять запуск
+            continue
+        if cfg.get('id'):
+            имена[cfg['id']] = cfg.get('name') or cfg['id']
+    return имена
+
+
+PROJECT_NAMES = _имена_проектов()
 
 # Порядок и подписи переменных-колонок. Телефоны - с префиксом «Тел.» (чтобы не
 # путать с колонкой «Город»), в порядке КП: общий → реклама → SEO. «Страна»
