@@ -190,7 +190,14 @@ if _n_sel:
     # Оценка по РЕАЛЬНОМУ плану обхода выбранных сайтов (сколько страниц
     # открываем), а не «на глазок по числу сайтов»: у SHOPMET план из 9
     # страниц, у СМУ - в разы больше, и время отличается кратно.
-    from run_estimate import estimate_goals_seconds, format_estimate
+    # Облако перечитывает файл страницы после обновления кода, но модули из
+    # sys.modules не перезагружает: страница уже новая, run_estimate - ещё
+    # старый, и импорт новой функции ронял всю страницу ImportError.
+    import importlib
+
+    import run_estimate as _re
+    if not hasattr(_re, 'estimate_goals_seconds'):
+        _re = importlib.reload(_re)
     try:
         import goals_tester as _gt
         _est_pages = max(
@@ -200,8 +207,8 @@ if _n_sel:
             for p in _selected)
     except Exception:  # noqa: BLE001
         _est_pages = 10
-    _lo_g, _hi_g = estimate_goals_seconds(_est_pages, _n_sel, run_orders=True)
-    _time_hint = (f' ⏱ Примерное время: **{format_estimate(_lo_g, _hi_g)}** '
+    _lo_g, _hi_g = _re.estimate_goals_seconds(_est_pages, _n_sel, run_orders=True)
+    _time_hint = (f' ⏱ Примерное время: **{_re.format_estimate(_lo_g, _hi_g)}** '
                   f'({_est_pages} страниц на сайт + сквозной заказ в начале).')
 else:
     _time_hint = ''

@@ -360,10 +360,17 @@ if _check_yandex_maps or _check_2gis_maps or _check_google_maps:
 _est_cities_kp = len(_chosen) if _chosen else len(_cities)
 _est_maps = sum((_check_yandex_maps, _check_2gis_maps, _check_google_maps))
 if _est_cities_kp:
-    from run_estimate import estimate_kp_seconds, format_estimate
-    _lo_kp, _hi_kp = estimate_kp_seconds(_est_cities_kp,
-                                         check_site=_check_site, maps=_est_maps)
-    st.caption(f'⏱ Примерное время: **{format_estimate(_lo_kp, _hi_kp)}** · '
+    # Облако перечитывает файл страницы после обновления кода, но модули из
+    # sys.modules не перезагружает: страница уже новая, run_estimate - ещё
+    # старый, и импорт новой функции ронял всю страницу ImportError.
+    import importlib
+
+    import run_estimate as _re
+    if not hasattr(_re, 'estimate_kp_seconds'):
+        _re = importlib.reload(_re)
+    _lo_kp, _hi_kp = _re.estimate_kp_seconds(_est_cities_kp,
+                                             check_site=_check_site, maps=_est_maps)
+    st.caption(f'⏱ Примерное время: **{_re.format_estimate(_lo_kp, _hi_kp)}** · '
                f'{_est_cities_kp} городов'
                + (f', карт: {_est_maps}' if _est_maps else '') + '.')
 

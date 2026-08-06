@@ -426,9 +426,16 @@ else:
     _est_urls = len([u for u in (locals().get('urls_text') or '').splitlines()
                      if u.strip()])
 if _est_urls:
-    from run_estimate import estimate_pagespeed_seconds, format_estimate
-    _lo_ps, _hi_ps = estimate_pagespeed_seconds(_est_urls)
-    st.caption(f'⏱ Примерное время: **{format_estimate(_lo_ps, _hi_ps)}** · '
+    # Облако перечитывает файл страницы после обновления кода, но модули из
+    # sys.modules не перезагружает: страница уже новая, run_estimate - ещё
+    # старый, и импорт новой функции ронял всю страницу ImportError.
+    import importlib
+
+    import run_estimate as _re
+    if not hasattr(_re, 'estimate_pagespeed_seconds'):
+        _re = importlib.reload(_re)
+    _lo_ps, _hi_ps = _re.estimate_pagespeed_seconds(_est_urls)
+    st.caption(f'⏱ Примерное время: **{_re.format_estimate(_lo_ps, _hi_ps)}** · '
                f'~{_est_urls} адресов. Зависит от очереди PageSpeed API.')
 
 c1, c2 = st.columns([3, 1])

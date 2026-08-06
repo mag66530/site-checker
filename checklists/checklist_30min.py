@@ -36,7 +36,15 @@ from sources import (
 )
 from profiles import PROFILES, get_profile_kwargs
 from history import load_history, save_history, WEEKLY_TTL_MS
-from run_estimate import estimate_run_seconds, format_estimate
+# Облако перечитывает файлы страниц после обновления кода, но модули из
+# sys.modules не перезагружает: страница уже новая, run_estimate - ещё старый,
+# и импорт добавленной функции валит страницу ImportError. Перечитываем сами.
+import importlib
+
+import run_estimate as _re
+if not hasattr(_re, 'estimate_run_seconds'):
+    _re = importlib.reload(_re)
+estimate_run_seconds, format_estimate = _re.estimate_run_seconds, _re.format_estimate
 from sitemap import (
     load_product_pathnames, get_cached_products_info, invalidate_sitemap_cache,
 )

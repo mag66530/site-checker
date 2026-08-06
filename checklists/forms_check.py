@@ -1117,9 +1117,16 @@ if not _alive:
     _est_forms = len(_chosen_forms) if _all_forms else 1
     _est_cities = max(1, len(_chosen_cities) or 1)
     _est_admin = bool(st.session_state.get(f'fc_admin_on_{pid_key}'))
-    from run_estimate import estimate_forms_seconds, format_estimate
-    _lo, _hi = estimate_forms_seconds(_est_forms, _est_cities, admin=_est_admin)
-    st.caption(f'⏱ Примерное время: **{format_estimate(_lo, _hi)}** · '
+    # Облако перечитывает файл страницы после обновления кода, но модули из
+    # sys.modules не перезагружает: страница уже новая, run_estimate - ещё
+    # старый, и импорт новой функции ронял всю страницу ImportError.
+    import importlib
+
+    import run_estimate as _re
+    if not hasattr(_re, 'estimate_forms_seconds'):
+        _re = importlib.reload(_re)
+    _lo, _hi = _re.estimate_forms_seconds(_est_forms, _est_cities, admin=_est_admin)
+    st.caption(f'⏱ Примерное время: **{_re.format_estimate(_lo, _hi)}** · '
                f'{_est_forms} форм × {_est_cities} домен(ов). '
                'Оценка грубая: зависит от скорости сайта и числа проб.')
 
