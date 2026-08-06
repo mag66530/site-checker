@@ -107,6 +107,81 @@ def estimate_run_seconds(pages: int, cities: int, checks: dict) -> tuple[int, in
     return int(total * _LOW_FACTOR), int(total * _HIGH_FACTOR)
 
 
+# ── Оценки для остальных проверок ────────────────────────────────────
+# Константы сняты с реальных прогонов, а не выдуманы:
+#   формы  - SHOPMET 7 форм = 8 мин 18 с, ИМП 12 форм = 11 мин 34 с
+#            (≈60-70 с на форму при одном городе);
+#   КП     - SHOPMET 21 город = ~25 с без карт (≈1 с на город).
+FORMS_PER_FORM_SEC = 62          # проверка одной формы: заполнение + пробы
+FORMS_OVERHEAD_SEC = 60          # старт браузера, сборка отчёта
+FORMS_ADMIN_SEC = 90             # сверка заявок в админке (вход + список)
+
+GOALS_PER_PAGE_SEC = 18          # страница плана: загрузка + клики
+GOALS_OVERHEAD_SEC = 60
+GOALS_ORDERS_SEC = 210           # прогон сквозного заказа внутри целей
+
+# Замер: SHOPMET, 21 город без карт - 25 с на весь прогон, включая обновление
+# КП из Google-таблицы. Страницы качаются параллельно, поэтому цена города мала.
+KP_PER_CITY_SEC = 1.0            # страница города: HTTP + сверка с КП
+KP_OVERHEAD_SEC = 12
+KP_MAP_PER_CITY_SEC = 28         # карта (Яндекс/2ГИС/Google) - браузер
+
+PS_PER_URL_SEC = 32              # один замер PageSpeed API (мобайл)
+PS_OVERHEAD_SEC = 20
+
+
+def estimate_forms_seconds(forms: int, cities: int = 1, *,
+                           admin: bool = False) -> tuple[int, int]:
+    """Проверка форм: (минимум, максимум) секунд.
+    forms - сколько форм выбрано, cities - сколько доменов/городов."""
+    forms = max(0, int(forms))
+    cities = max(1, int(cities))
+    total = FORMS_OVERHEAD_SEC + FORMS_PER_FORM_SEC * forms * cities
+    if admin:
+        total += FORMS_ADMIN_SEC
+    return int(total * _LOW_FACTOR), int(total * _HIGH_FACTOR)
+
+
+def estimate_goals_seconds(pages: int, sites: int = 1, *,
+                           with_forms: bool = False,
+                           forms_count: int = 0,
+                           run_orders: bool = True) -> tuple[int, int]:
+    """Проверка целей: (минимум, максимум) секунд.
+
+    pages - страниц в плане обхода на один сайт, sites - сколько сайтов/стран.
+    Внутри целей гоняются формы: по умолчанию только сквозной заказ
+    (run_orders), с галочкой «все формы» - полный прогон (forms_count форм).
+    """
+    pages = max(0, int(pages))
+    sites = max(1, int(sites))
+    total = GOALS_OVERHEAD_SEC + GOALS_PER_PAGE_SEC * pages * sites
+    if with_forms:
+        total += FORMS_OVERHEAD_SEC + FORMS_PER_FORM_SEC * max(0, int(forms_count))
+    elif run_orders:
+        total += GOALS_ORDERS_SEC
+    return int(total * _LOW_FACTOR), int(total * _HIGH_FACTOR)
+
+
+def estimate_kp_seconds(cities: int, *, check_site: bool = True,
+                        maps: int = 0) -> tuple[int, int]:
+    """Проверка КП: (минимум, максимум) секунд.
+    maps - сколько источников карт включено (Яндекс/2ГИС/Google)."""
+    cities = max(0, int(cities))
+    total = KP_OVERHEAD_SEC
+    if check_site:
+        total += KP_PER_CITY_SEC * cities
+    total += KP_MAP_PER_CITY_SEC * cities * max(0, int(maps))
+    return int(total * _LOW_FACTOR), int(total * _HIGH_FACTOR)
+
+
+def estimate_pagespeed_seconds(urls: int) -> tuple[int, int]:
+    """Скорость страниц: (минимум, максимум) секунд. Замеры идут через API
+    Google, поэтому время почти линейно числу адресов."""
+    urls = max(0, int(urls))
+    total = PS_OVERHEAD_SEC + PS_PER_URL_SEC * urls
+    return int(total * _LOW_FACTOR), int(total * _HIGH_FACTOR)
+
+
 def format_estimate(low_sec: int, high_sec: int) -> str:
     """
     Диапазон в человеческий вид: «≈ 12–20 мин».

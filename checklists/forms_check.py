@@ -1111,6 +1111,18 @@ import auth
 from proxy_config import canonical_project_id
 _forms_proxy = auth.fill_proxy_slot(canonical_project_id(pid_key))
 
+# Примерное время прогона по ТЕКУЩЕМУ выбору: число форм × число доменов -
+# главный множитель, поэтому оценка меняется сразу при снятии галочек.
+if not _alive:
+    _est_forms = len(_chosen_forms) if _all_forms else 1
+    _est_cities = max(1, len(_chosen_cities) or 1)
+    _est_admin = bool(st.session_state.get(f'fc_admin_on_{pid_key}'))
+    from run_estimate import estimate_forms_seconds, format_estimate
+    _lo, _hi = estimate_forms_seconds(_est_forms, _est_cities, admin=_est_admin)
+    st.caption(f'⏱ Примерное время: **{format_estimate(_lo, _hi)}** · '
+               f'{_est_forms} форм × {_est_cities} домен(ов). '
+               'Оценка грубая: зависит от скорости сайта и числа проб.')
+
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
     if st.button('▶ Запустить проверку', use_container_width=True, type='primary',

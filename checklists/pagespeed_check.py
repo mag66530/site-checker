@@ -417,6 +417,20 @@ st.divider()
 alive = _pid_alive(_read_pid())
 _no_urls = (not scope.startswith('Выборка')) and not (locals().get('urls_text') or '').strip()
 
+# Примерное время: PageSpeed API считает каждую страницу отдельно и небыстро,
+# поэтому время линейно числу адресов - и заметно растёт от «страниц каждого типа».
+if scope.startswith('Выборка'):
+    # главная + каталог + категории + фильтры (+ товары), все по per_type
+    _est_urls = 2 + int(per_type) * (3 if locals().get('want_products') else 2)
+else:
+    _est_urls = len([u for u in (locals().get('urls_text') or '').splitlines()
+                     if u.strip()])
+if _est_urls:
+    from run_estimate import estimate_pagespeed_seconds, format_estimate
+    _lo_ps, _hi_ps = estimate_pagespeed_seconds(_est_urls)
+    st.caption(f'⏱ Примерное время: **{format_estimate(_lo_ps, _hi_ps)}** · '
+               f'~{_est_urls} адресов. Зависит от очереди PageSpeed API.')
+
 c1, c2 = st.columns([3, 1])
 with c1:
     if st.button('▶ Запустить проверку скорости', use_container_width=True,

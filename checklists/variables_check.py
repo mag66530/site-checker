@@ -355,6 +355,18 @@ if _check_yandex_maps or _check_2gis_maps or _check_google_maps:
     st.caption('⚠ Карты проверяются в браузере - это заметно дольше обычной '
               'сверки сайта (десятки секунд на карточку).')
 
+# Примерное время: сверка сайта - это секунда на город, а каждая карта
+# добавляет браузерную поездку на КАЖДЫЙ город, поэтому оценка меняется в разы.
+_est_cities_kp = len(_chosen) if _chosen else len(_cities)
+_est_maps = sum((_check_yandex_maps, _check_2gis_maps, _check_google_maps))
+if _est_cities_kp:
+    from run_estimate import estimate_kp_seconds, format_estimate
+    _lo_kp, _hi_kp = estimate_kp_seconds(_est_cities_kp,
+                                         check_site=_check_site, maps=_est_maps)
+    st.caption(f'⏱ Примерное время: **{format_estimate(_lo_kp, _hi_kp)}** · '
+               f'{_est_cities_kp} городов'
+               + (f', карт: {_est_maps}' if _est_maps else '') + '.')
+
 st.divider()
 st.subheader('Запуск')
 # Прокси проекта - единый механизм (proxy_config.py): БД личного кабинета →

@@ -187,9 +187,22 @@ with _left:
             _selected.append(p)
 _n_sel = len(_selected)
 if _n_sel:
-    _lo_est, _hi_est = 3 + 5 * _n_sel, 5 + 10 * _n_sel
-    _time_hint = (f' Ориентировочно ~{_lo_est}-{_hi_est} мин '
-                  '(≈5-10 мин на сайт + сквозной заказ в начале).')
+    # Оценка по РЕАЛЬНОМУ плану обхода выбранных сайтов (сколько страниц
+    # открываем), а не «на глазок по числу сайтов»: у SHOPMET план из 9
+    # страниц, у СМУ - в разы больше, и время отличается кратно.
+    from run_estimate import estimate_goals_seconds, format_estimate
+    try:
+        import goals_tester as _gt
+        _est_pages = max(
+            len((_gt.ACTIONS.get(p)
+                 or _gt._план_страна(p, (_gt.загрузить_каталог(p) or {}).get('домен', ''))
+                 ).get('страницы', []))
+            for p in _selected)
+    except Exception:  # noqa: BLE001
+        _est_pages = 10
+    _lo_g, _hi_g = estimate_goals_seconds(_est_pages, _n_sel, run_orders=True)
+    _time_hint = (f' ⏱ Примерное время: **{format_estimate(_lo_g, _hi_g)}** '
+                  f'({_est_pages} страниц на сайт + сквозной заказ в начале).')
 else:
     _time_hint = ''
 st.caption(f'Выбрано сайтов: **{_n_sel} / {len(_доступные)}**.{_time_hint}')
