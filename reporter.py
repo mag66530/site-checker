@@ -25,6 +25,8 @@ from report_priorities import (
     home_dupes_findings, arsenkin_findings, page404_findings,
     stress_check_findings, ps_filters_findings,
     service_issues_findings, w3c_findings,
+    url_format_findings, robots_hygiene_findings, content_sections_findings,
+    static_delivery_findings, ux_interactive_findings, interlinking_note,
 )
 
 
@@ -1735,806 +1737,10 @@ def _idx_signals_text(ix):
     return '; '.join(parts)
 
 
-def _build_indexing_sheet(wb, results, indexing_summary):
-    """Лист проверки индексации: расхождения сигналов страниц с robots.txt
-    (noindex на открытой в robots странице, canonical на закрытый URL)
-    + противоречия sitemap ↔ robots.txt.
-    Добавляется только если проверка индексации выполнялась."""
-    checked = [r for r in results if getattr(r, 'indexing', None)]
-    if not checked and not indexing_summary:
-        return
-
-    bad = [r for r in checked if r.indexing.get('issues')]
-    warned = [r for r in checked if (not r.indexing.get('issues')
-                                     and r.indexing.get('warnings'))]
-    sm_dis = (indexing_summary or {}).get('disallowed') or []
-    _blanket = (indexing_summary or {}).get('blanket_disallow') or []
-    _assets_closed = (indexing_summary or {}).get('assets_closed') or []
-    _aud_mc = (((indexing_summary or {}).get('sitemap_audit') or {})
-               .get('missing_catalog') or {})
-    _aud_missing = ((_aud_mc.get('categories') or [])
-                    + (_aud_mc.get('filters') or [])
-                    + (_aud_mc.get('services') or []))
-    _hm_junk_top = (((indexing_summary or {}).get('html_sitemap') or {})
-                    .get('junk_links') or [])
-    has_bugs = bool(bad or sm_dis or _blanket or _assets_closed
-                    or _aud_missing or _hm_junk_top)
-
-    ws = wb.create_sheet('Индексация')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 18   # Город
-    ws.column_dimensions['C'].width = 14   # Тип
-    ws.column_dimensions['D'].width = 62   # URL / путь
-    ws.column_dimensions['E'].width = 60   # Сигналы / правило
-    ws.column_dimensions['F'].width = 3
-
-    ws.merge_cells('B2:E2')
-    c = ws['B2']
-    c.value = 'Проверка индексации (п.1.7)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:E3')
-    c = ws['B3']
-    c.value = ('Эталон - robots.txt сайта. Ошибка = canonical ведёт на закрытый '
-               'в robots URL. noindex (meta или X-Robots-Tag) сам по себе - НЕ '
-               'ошибка вне зависимости от robots.txt: страница не обязана быть '
-               'закрыта Disallow, если её защищает noindex, сигнал только '
-               'показываем справочно. Плюс «верно настроен rel=canonical»: ровно один тег, '
-               'указывает на себя, не на чужой домен; отсутствие тега - '
-               'предупреждение. hreflang: если теги есть - валидируем (коды '
-               'языков, абсолютные URL, self-reference); отсутствие - не '
-               'ошибка (одноязычному сайту не нужен). Отдельно: пути из '
-               'sitemap/каталога, закрытые Disallow, - противоречие (sitemap '
-               'говорит «в индекс», robots - «нельзя»).')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 44
-
-    row = 5
-
-    # ── Сводка ──
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    _rs = (indexing_summary or {}).get('robots_status')
-    _sm = (indexing_summary or {}).get('sitemaps') or []
-    bits = [f'Проверено страниц: {len(checked)}',
-            f'расхождений с robots: {len(bad)}',
-            f'предупреждений: {len(warned)}']
-    if indexing_summary:
-        bits.append(f'путей каталога проверено по robots: '
-                    f'{indexing_summary.get("checked", 0)}, '
-                    f'под Disallow: {len(sm_dis)}')
-        if _rs is not None:
-            bits.append(f'robots.txt: HTTP {_rs}'
-                        + (f', Sitemap-директив: {len(_sm)}' if _rs == 200 else ''))
-    # hreflang: подтверждение, что проверка была (отсутствие тегов - не ошибка).
-    _hl_pages = sum(1 for r in checked if r.indexing.get('hreflang_count'))
-    _hl_bad = sum(1 for r in checked
-                  if any('hreflang' in w for w in r.indexing.get('warnings') or []))
-    if _hl_pages:
-        bits.append(f'hreflang: на {_hl_pages} страницах'
-                    + (f', с ошибками: {_hl_bad}' if _hl_bad else ', ок'))
-    else:
-        bits.append('hreflang: не используется (одноязычный сайт - ок)')
-    c.value = ' · '.join(bits)
-    c.font = _font(size=10, bold=True,
-                   color=C.err if has_bugs else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 30
-    row += 2
-
-    # ── Секция 1: закрытые страницы выборки (сгруппированы по проблеме) ──
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = f'Расхождения с robots.txt  ({len(bad)})'
-    c.font = _font(size=13, bold=True, color=C.err if bad else C.ok)
-    c.fill = _fill(C.accent_soft)
-    c.alignment = _align(indent=1)
-    ws.row_dimensions[row].height = 24
-    row += 1
-
-    if not bad:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = '✅ Расхождений с robots.txt нет - сигналы страниц согласованы.'
-        c.font = _font(size=10, color=C.ok)
-        c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 22
-        row += 2
-    else:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = '· постранично - в «Проблемах» (раздел «Индексация»).'
-        c.font = _font(size=10, italic=True, color=C.text_muted)
-        c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 20
-        row += 2
-
-    # ── Секция 2: предупреждения (сгруппированы по замечанию) ──
-    if warned:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = f'Предупреждения  ({len(warned)})'
-        c.font = _font(size=13, bold=True, color=C.warn)
-        c.fill = _fill(C.accent_soft)
-        c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = '· постранично - в «Проблемах» (раздел «Индексация»).'
-        c.font = _font(size=10, italic=True, color=C.text_muted)
-        c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 20
-        row += 2
-
-    # ── Секция 3: sitemap ↔ robots противоречия ──
-    if indexing_summary:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = (f'Противоречия sitemap ↔ robots.txt '
-                   f'({len(sm_dis)}) - {indexing_summary.get("host", "")}')
-        c.font = _font(size=13, bold=True, color=C.err if sm_dis else C.ok)
-        c.fill = _fill(C.accent_soft)
-        c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
-        if indexing_summary.get('error'):
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = f'⚠ Проверка не выполнена: {indexing_summary["error"]}'
-            c.font = _font(size=10, color=C.warn)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 22
-            row += 1
-        elif not sm_dis:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = ('✅ Все пути каталога (категории, фильтры, товары) '
-                       'открыты в robots.txt.')
-            c.font = _font(size=10, color=C.ok)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 22
-            row += 1
-        else:
-            # Группируем по правилу: одно правило Disallow бьёт сотни путей -
-            # без группировки каждая строка повторяет одно и то же правило.
-            _by_rule = {}
-            for d in sm_dis:
-                _agent = d.get('agent') or '*'
-                _rule = f'Disallow: {d.get("rule")}'
-                if _agent != '*':
-                    _rule += f' (User-agent: {_agent})'
-                _by_rule.setdefault(_rule, []).append(d.get('path', ''))
-            for _rule, _paths in sorted(_by_rule.items(),
-                                        key=lambda kv: -len(kv[1])):
-                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-                c = ws.cell(row=row, column=2)
-                c.value = (f'{_rule}  -  путей из sitemap/каталога: {len(_paths)}')
-                c.font = _font(size=10, bold=True, color=C.err)
-                c.fill = _fill(C.surface)
-                c.alignment = _align(wrap=True, indent=1)
-                c.border = _border()
-                ws.row_dimensions[row].height = 22
-                row += 1
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = '· пути по каждому правилу - в «Проблемах» (раздел «Индексация»).'
-            c.font = _font(size=9, italic=True, color=C.text_muted)
-            c.alignment = _align(indent=2)
-            ws.row_dimensions[row].height = 16
-            row += 1
-        row += 1
-
-        def _line(text, color, bold=False):
-            nonlocal row
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = text
-            c.font = _font(size=10, bold=bold, color=color)
-            c.alignment = _align(wrap=True, indent=1)
-            ws.row_dimensions[row].height = 20
-            row += 1
-
-        # ── Секция 3а: соблюдение директив - заблокированные страницы вживую ──
-        # Disallow сам по себе не мешает URL попасть в индекс без сниппета,
-        # если на него где-то есть ссылка - надёжна защита с доп. noindex.
-        _dc = indexing_summary.get('directive_check')
-        if _dc and not indexing_summary.get('error'):
-            _dc_finds = _dc.get('findings') or []
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = f'Заблокированные страницы: проверено вживую  ({len(_dc_finds)})'
-            c.font = _font(size=13, bold=True,
-                           color=C.warn if _dc_finds else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-            if not _dc_finds:
-                _line(f'✅ Заблокированные в robots.txt страницы (проверено вживую '
-                      f'{_dc.get("checked", 0)}) либо недоступны напрямую, либо '
-                      f'дополнительно закрыты noindex.', C.ok)
-            else:
-                _line('Эти страницы реально отвечают 200 и БЕЗ собственного '
-                      'noindex - держатся только на честном слове robots.txt. '
-                      'Список - в «Проблемах» (раздел «Индексация»).',
-                      C.text_muted)
-            row += 1
-
-        # ── Секция 4: мусор не закрыт в robots (ТЗ 3.3.4.2) ──
-        junk = indexing_summary.get('junk_open')
-        if junk is not None and not indexing_summary.get('error'):
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = f'Служебные страницы не закрыты в robots.txt  ({len(junk)})'
-            c.font = _font(size=13, bold=True, color=C.err if junk else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-            if not junk:
-                _line('✅ Пагинация, сортировки, метки UTM/печати, AJAX-попапы, '
-                      'служебные экшены и каталоги, поиск, корзина, сравнение, '
-                      'оформление заказа, личный кабинет и админ. панель '
-                      'закрыты в robots.txt (или не существуют на сайте, или у '
-                      'параметрических дублей есть rel="canonical" - тоже '
-                      'валидная защита).', C.ok)
-            else:
-                _line('Эти страницы отвечают 200, НЕ закрыты в robots и (для '
-                      'параметрических - без rel="canonical") - мусор попадает '
-                      'в обход робота. Список - в «Проблемах» (раздел '
-                      '«Индексация»).', C.text_muted)
-            row += 1
-
-        # ── Секция 4.1: пагинация (canonical для Яндекса, JS для Google) ──
-        _pg = indexing_summary.get('pagination')
-        if _pg:
-            _pg_bad = _pg.get('status') == 200 and _pg.get('canon_ok') is False
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = f'Пагинация  ({_pg.get("base", "")})'
-            c.font = _font(size=13, bold=True, color=C.warn if _pg_bad else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-            if _pg.get('status') != 200:
-                _line('✓ Вторая страница пагинации (?PAGEN_1=2) не отдаёт 200 '
-                      '(редирект/404) - дублей пагинации нет.', C.ok)
-            elif _pg.get('canon_ok'):
-                _line(f'✅ Для Яндекса: на странице пагинации rel=canonical '
-                      f'без номера страницы ({_pg.get("canonical", "")}).', C.ok)
-            elif _pg.get('canonical'):
-                _line(f'⚠ canonical пагинации содержит номер страницы '
-                      f'({_pg.get("canonical", "")}) - для Яндекса нужен '
-                      f'canonical на категорию без номера.', C.warn)
-            else:
-                _line('⚠ На странице пагинации (?PAGEN_1=2) нет rel=canonical '
-                      '- для Яндекса нужен canonical на категорию.', C.warn)
-            if _pg.get('loadmore') is True:
-                _line('✅ Для Google: на категории найдена JS-подгрузка '
-                      '(«показать ещё») - контент дозагружается на одной '
-                      'странице.', C.ok)
-                # Бесконечная прокрутка обязана дублироваться ссылками
-                # пагинации в HTML - JS-подгрузку роботы не крутят.
-                if _pg.get('pag_links') is True:
-                    _line('✅ Ссылки пагинации есть в HTML - краулер дойдёт '
-                          'до товаров дальше первой страницы.', C.ok)
-                elif _pg.get('pag_links') is False:
-                    _line('⚠ Бесконечная прокрутка БЕЗ ссылок пагинации в '
-                          'HTML - роботы не увидят товары дальше первой '
-                          'страницы; добавить <a href> на страницы пагинации.',
-                          C.warn)
-            elif _pg.get('loadmore') is False:
-                _line('⚠ Маркеры JS-подгрузки («показать ещё»/load-more) на '
-                      'категории не найдены - проверить вручную, как Google '
-                      'видит остальные товары.', C.warn)
-            row += 1
-
-        # ── Секция 4.2: спорные для индекса страницы (noindex-кандидаты) ──
-        _adv = indexing_summary.get('advisory_open')
-        if _adv is not None and not indexing_summary.get('error'):
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = f'Спорные для индекса страницы  ({len(_adv)})'
-            c.font = _font(size=13, bold=True,
-                           color=C.warn if _adv else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-            if not _adv:
-                _line('✅ Типовые разделы (новости, акции, блог, политика '
-                      'конфиденциальности) не существуют либо уже закрыты '
-                      'noindex/robots.', C.ok)
-            else:
-                _line('Чек-лист советует noindex для старых акций/новостей/'
-                      'политик. Эти разделы открыты - решить, нужны ли они '
-                      'в индексе (полезный раздел можно оставить). Список - '
-                      'в «Проблемах» (раздел «Индексация»).', C.text_muted)
-            row += 1
-
-        # ── Секция 4.2а: обязательные страницы + раздел «Отгрузки» ──
-        _rq = indexing_summary.get('required_pages')
-        if _rq:
-            _rq_missing = [r_ for r_ in _rq if not r_.get('found')]
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = (f'Обязательные страницы  '
-                       f'(не найдено: {len(_rq_missing)})')
-            c.font = _font(size=13, bold=True,
-                           color=C.err if _rq_missing else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-            for r_ in _rq:
-                if r_.get('found'):
-                    _line(f'✅ {r_["label"]}: {r_["found"]}', C.ok)
-                else:
-                    _line(f'❌ {r_["label"]}: страница не найдена (проверены '
-                          f'типовые адреса) - создать', C.err)
-            # Раздел «Отгрузки» - опционален; если есть, должна быть
-            # перелинковка на каталог.
-            _otg = indexing_summary.get('otgruzki') or {}
-            if _otg.get('found'):
-                if _otg.get('catalog_links'):
-                    _line(f'✅ Раздел «Отгрузки» ({_otg["found"]}) - с '
-                          f'перелинковкой на каталог '
-                          f'({_otg["catalog_links"]} ссылок).', C.ok)
-                else:
-                    _line(f'⚠ Раздел «Отгрузки» ({_otg["found"]}) есть, но '
-                          f'ссылок на каталог в нём нет - добавить '
-                          f'перелинковку.', C.warn)
-            else:
-                _line('· Раздел «Отгрузки» не найден - опционален по '
-                      'проекту, не находка.', C.text_muted)
-            # Даты публикации/обновления у статей и новостей.
-            _nd = indexing_summary.get('news_dates')
-            if _nd is None:
-                _line('· Новости/статьи: раздел не найден - проверка дат '
-                      'не применима.', C.text_muted)
-            elif not _nd.get('article'):
-                _line(f'· Новости/статьи ({_nd.get("section", "")}): '
-                      f'статью в разделе не распознали - даты проверить '
-                      f'вручную.', C.text_muted)
-            elif _nd.get('published') and _nd.get('modified'):
-                _line(f'✅ Новости/статьи: дата публикации и обновления '
-                      f'размечены (datePublished/dateModified) - '
-                      f'{_nd.get("article", "")}', C.ok)
-            elif _nd.get('published'):
-                _line(f'⚠ Новости/статьи: есть дата публикации, но нет '
-                      f'даты ОБНОВЛЕНИЯ (dateModified) - '
-                      f'{_nd.get("article", "")}', C.warn)
-            else:
-                _line(f'⚠ Новости/статьи: на статье нет даты публикации '
-                      f'(datePublished / <time datetime>) - '
-                      f'{_nd.get("article", "")}', C.warn)
-            row += 1
-
-        # ── Секция 4.3: перелинковка (внутренний вес) ──
-        # Прокси по выборке прогона (не полный PageRank): классифицируем
-        # внутренние ссылки каждой страницы по цели.
-        _il_pages = [r for r in checked if r.indexing.get('int_links')]
-        if _il_pages:
-            _tot = {'home': 0, 'catalog': 0, 'tech': 0, 'other': 0}
-            _tt_sum: dict = {}
-            for r in _il_pages:
-                for k, v in r.indexing['int_links'].items():
-                    _tot[k] = _tot.get(k, 0) + v
-                for p, n in (r.indexing.get('tech_targets') or {}).items():
-                    _tt_sum[p] = _tt_sum.get(p, 0) + n
-            _all = sum(_tot.values()) or 1
-            _cat_share = _tot['catalog'] * 100 // _all
-            _tech_share = _tot['tech'] * 100 // _all
-            _il_bad = _tot['tech'] >= _tot['catalog']
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = 'Перелинковка (внутренний вес)'
-            c.font = _font(size=13, bold=True, color=C.warn if _il_bad else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-            _line(f'Прокси по выборке прогона ({len(_il_pages)} страниц, не '
-                  f'полный расчёт веса): внутренних ссылок {_all}, из них на '
-                  f'каталог/категории {_cat_share}% · на главную '
-                  f'{_tot["home"] * 100 // _all}% · на тех/инфо {_tech_share}% '
-                  f'· прочее {_tot["other"] * 100 // _all}%.', C.text_muted)
-            if _il_bad:
-                _line('⚠ Ссылок на тех/инфо-страницы не меньше, чем на каталог '
-                      '- внутренний вес льётся на страницы-«паразиты» (обычно '
-                      'распухший футер). Каталог и категории должны получать '
-                      'больше всего ссылок.', C.warn)
-            else:
-                _line('✅ Каталог и категории получают больше внутренних '
-                      'ссылок, чем тех/инфо-страницы.', C.ok)
-            if _tt_sum:
-                _top = sorted(_tt_sum.items(), key=lambda kv: -kv[1])[:5]
-                _line('Топ тех/инфо-получателей ссылок: '
-                      + ' · '.join(f'{p} ({n})' for p, n in _top),
-                      C.text_soft)
-            row += 1
-
-        # ── Секция 4а: гигиена robots.txt (доп. чек-лист) ──
-        # Показываем только если проверка выполнялась (нет error и robots 200)
-        if not indexing_summary.get('error'):
-            _ua = indexing_summary.get('ua_groups')
-            _hyg_bad = bool(_blanket or _assets_closed)
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = 'Гигиена robots.txt'
-            c.font = _font(size=13, bold=True, color=C.err if _hyg_bad else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-            # 1. Disallow: / - сайт закрыт целиком
-            if _blanket:
-                _grp = ', '.join(f'User-agent: {a}' for a in _blanket)
-                _line(f'❌ В robots.txt есть директива «Disallow: /» ({_grp}) - '
-                      f'сайт закрыт от индексации целиком.', C.err, bold=True)
-            else:
-                _line('✅ Директивы «Disallow: /» нет.', C.ok)
-            # 2. Отдельные группы User-agent для Яндекса и Google
-            if _ua:
-                _missing = [n for n, k in (('Yandex', 'yandex'),
-                                           ('Googlebot', 'google'))
-                            if not _ua.get(k)]
-                if _missing:
-                    _line(f'⚠ Нет отдельных групп User-agent: '
-                          f'{", ".join(_missing)} - роботы работают по общей '
-                          f'группе «*».', C.warn)
-                else:
-                    _line('✅ Отдельные группы User-agent для Яндекса и Google '
-                          'заданы.', C.ok)
-                # прочие роботы = группа «*» (правила для всех остальных)
-                if not _ua.get('star'):
-                    _line('⚠ Нет группы User-agent: * - для прочих роботов '
-                          '(кроме Яндекса/Google) правил не задано.', C.warn)
-            # 3. CSS/JS открыты для роботов
-            _n_assets = indexing_summary.get('assets_checked', 0)
-            if _assets_closed:
-                _line(f'❌ Файлы .css/.js закрыты в robots.txt '
-                      f'({len(_assets_closed)} из {_n_assets}) - Google не '
-                      f'сможет отрендерить страницы. Список - в «Проблемах» '
-                      f'(раздел «Индексация»).', C.err, bold=True)
-            elif _n_assets:
-                _line(f'✅ Файлы .css/.js главной ({_n_assets} шт.) открыты '
-                      f'для роботов.', C.ok)
-            row += 1
-
-        # ── Секция 4б: ЧПУ и формат адресов (по всем путям каталога) ──
-        _uf = indexing_summary.get('url_format')
-        if _uf:
-            _uf_bad = bool(_uf.get('total_bad'))
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = (f'ЧПУ и формат адресов  '
-                       f'(проверено {_uf.get("checked", 0)} путей)')
-            c.font = _font(size=13, bold=True, color=C.warn if _uf_bad else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-            if not _uf_bad:
-                _line('✅ Все адреса каталога - ЧПУ: латиница/цифры/дефис в '
-                      'нижнем регистре, без технических параметров.', C.ok)
-            else:
-                for kind, label in (
-                        ('non_sef', 'технические адреса (не ЧПУ: ?ID=, .php)'),
-                        ('cyrillic', 'кириллица в адресе'),
-                        ('uppercase', 'ЗАГЛАВНЫЕ буквы в адресе'),
-                        ('underscore', 'подчёркивания вместо дефисов'),
-                        ('junk_chars', 'пробелы/спецсимволы в адресе')):
-                    _n = _uf.get(kind + '_n', 0)
-                    if not _n:
-                        continue
-                    _line(f'⚠ {label}: {_n} шт.', C.warn, bold=True)
-                    for _p in (_uf.get(kind) or [])[:5]:
-                        _line(_p, C.text_muted)
-                    if _n > 5:
-                        _line(f'… и ещё {_n - 5}', C.text_muted)
-            row += 1
-
-        # ── Секция 5: sitemap-директивы в robots (ТЗ 3.3.6) ──
-        smc = indexing_summary.get('sitemap_checks')
-        if smc is not None:
-            _sm_bad = (not smc.get('has_directive')
-                       or any((d.get('status') or 0) != 200
-                              for d in smc.get('directives') or [])
-                       or smc.get('matches_project') is False)
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = 'Sitemap в robots.txt'
-            c.font = _font(size=13, bold=True, color=C.err if _sm_bad else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-            if not smc.get('has_directive'):
-                _line('❌ В robots.txt нет директивы Sitemap - роботы не видят '
-                      'карту сайта.', C.err, bold=True)
-            else:
-                for d in (smc.get('directives') or []):
-                    _st = d.get('status')
-                    if _st == 200:
-                        _line(f'✅ {d.get("url", "")} - открывается (HTTP 200)', C.ok)
-                    else:
-                        _line(f'❌ {d.get("url", "")} - не открывается '
-                              f'(HTTP {_st if _st is not None else "нет ответа"})',
-                              C.err, bold=True)
-                if smc.get('matches_project') is False:
-                    _line('⚠ Ни одна директива не совпадает с sitemap проекта '
-                          '(sitemap_url из настроек) - проверьте, тот ли адрес '
-                          'указан.', C.warn)
-            row += 1
-
-        def _sec_title(text, bad):
-            nonlocal row
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = text
-            c.font = _font(size=13, bold=True, color=C.err if bad else C.ok)
-            c.fill = _fill(C.accent_soft)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 24
-            row += 1
-
-        # ── Секция 6: структура sitemap (ТЗ 3.4.2) ──
-        aud = indexing_summary.get('sitemap_audit')
-        if aud is not None:
-            _bad_urls = aud.get('bad_urls') or []
-            _tot = aud.get('total', 0)
-            _fld_missing = [
-                (name, aud.get(key, 0))
-                for name, key in (('lastmod', 'with_lastmod'),
-                                  ('changefreq', 'with_changefreq'),
-                                  ('priority', 'with_priority'))
-                if _tot and aud.get(key, 0) == 0
-            ]
-            # лимиты допа (10k/10МБ = предупр.) и протокола (50k/50МБ = баг)
-            _fstats = aud.get('file_stats') or []
-            _over_proto = [f for f in _fstats
-                           if f.get('urls', 0) > 50000
-                           or f.get('bytes', 0) > 50 * 1024 * 1024]
-            _over_dop = [f for f in _fstats if f not in _over_proto
-                         and (f.get('urls', 0) > 10000
-                              or f.get('bytes', 0) > 10 * 1024 * 1024)]
-            _mc = aud.get('missing_catalog') or {}
-            _miss = ((_mc.get('categories') or [])
-                     + (_mc.get('filters') or [])
-                     + (_mc.get('services') or []))
-            _sec_title('Sitemap: структура записей (ТЗ 3.4.2)',
-                       bool(aud.get('error') or _bad_urls or _over_proto
-                            or _miss))
-            if aud.get('error'):
-                _line(f'⚠ Аудит не выполнен: {aud["error"]}', C.warn)
-            else:
-                _line(f'Файлов sitemap: {aud.get("files", 0)} · записей URL: '
-                      f'{_tot} · с lastmod: {aud.get("with_lastmod", 0)} · '
-                      f'с changefreq: {aud.get("with_changefreq", 0)} · '
-                      f'с priority: {aud.get("with_priority", 0)}', C.text_muted)
-                # структура: индекс или одиночный файл
-                _itypes = aud.get('index_types') or []
-                # опознанные типы (без «прочее») - по ним судим о разбивке
-                _named = [t for t in _itypes if t != 'прочее']
-                if aud.get('is_index'):
-                    _line(f'✅ Sitemap - индекс-файл, внутри '
-                          f'{len(aud.get("index_children") or [])} файлов.',
-                          C.ok)
-                    if _named:
-                        _line(f'Разбивка по типам: {", ".join(_named)}'
-                              + (' + прочие' if 'прочее' in _itypes else '')
-                              + '.', C.text_muted)
-                    # разбивки по типам нет (всё «прочее» / один тип), а
-                    # каталог большой - предупреждение (п.5)
-                    if _tot > 10000 and len(_named) < 2:
-                        _line('⚠ Индекс не разбит по типам страниц '
-                              '(категории/фильтры/товары в отдельные файлы) - '
-                              'при большом каталоге так рекомендуется.', C.warn)
-                elif _tot > 10000:
-                    _line(f'⚠ Записей {_tot}, но sitemap - одиночный файл '
-                          f'без индекса; нужен индекс-файл с разбивкой '
-                          f'по типам страниц.', C.warn)
-                else:
-                    _line('✅ Одиночный sitemap - допустимо, страниц немного.',
-                          C.ok)
-                # лимиты на файл
-                for f in _over_proto:
-                    _line(f'❌ {f.get("url", "")} - {f.get("urls", 0)} URL, '
-                          f'{f.get("bytes", 0) // 1048576} МБ: нарушен лимит '
-                          f'протокола (50 000 / 50 МБ).', C.err, bold=True)
-                for f in _over_dop:
-                    _line(f'⚠ {f.get("url", "")} - {f.get("urls", 0)} URL, '
-                          f'{f.get("bytes", 0) // 1048576} МБ: больше '
-                          f'рекомендуемого лимита (10 000 ссылок / 10 МБ '
-                          f'на файл).', C.warn)
-                if _fstats and not _over_proto and not _over_dop:
-                    _line('✅ Лимиты на файл соблюдены (до 10 000 ссылок '
-                          'и 10 МБ).', C.ok)
-                if _bad_urls:
-                    _line(f'❌ Неправильные URL в sitemap ({len(_bad_urls)}). '
-                          f'Список - в «Проблемах» (раздел «Индексация»).',
-                          C.err, bold=True)
-                else:
-                    _line('✅ Все URL абсолютные, https и своего хоста.', C.ok)
-                for name, _n in _fld_missing:
-                    _line(f'⚠ Ни у одной записи нет <{name}> - ТЗ требует '
-                          f'заполнять.', C.warn)
-                # полнота: категории/фильтры/услуги из выгрузки каталога
-                if aud.get('truncated'):
-                    _line('- Полнота (категории/фильтры/услуги в sitemap) не '
-                          'проверена: обход упёрся в лимит файлов/записей.',
-                          C.text_muted)
-                elif _miss:
-                    _line(f'❌ В sitemap нет {len(_miss)} важных ссылок '
-                          f'(категории/фильтры/услуги) из выгрузки - страницы '
-                          f'не попадут в индекс. Список - в «Проблемах» '
-                          f'(раздел «Индексация»).', C.err, bold=True)
-                elif aud.get('missing_catalog') is not None:
-                    _line('✅ Все категории, фильтры и услуги из выгрузки '
-                          'есть в sitemap.', C.ok)
-            row += 1
-
-            # ── Секция 7: даты lastmod (ТЗ 3.4.3) ──
-            la = aud.get('lastmod_analysis') or {}
-            _la_warn = la.get('warnings') or []
-            _sec_title('Sitemap: даты обновления (ТЗ 3.4.3)', bool(_la_warn))
-            if _la_warn:
-                for w in _la_warn:
-                    _line(f'⚠ {w}', C.warn)
-            elif aud.get('with_lastmod'):
-                _cr = la.get('changed_ratio')
-                _extra = (f' С прошлого прогона изменилось '
-                          f'{int(_cr * 100)}% дат.' if _cr is not None else
-                          ' Сравнение с прошлым прогоном появится со '
-                          'следующего запуска.')
-                _line('✅ Признаков динамической генерации дат нет.' + _extra,
-                      C.ok)
-            else:
-                _line('- Дат lastmod в sitemap нет - проверять нечего '
-                      '(см. секцию структуры выше).', C.text_muted)
-            row += 1
-
-        # ── Секция 8: sitemap в Яндекс.Вебмастере (ТЗ 3.4.4) ──
-        wm = indexing_summary.get('wm_sitemaps')
-        if wm is not None:
-            _wm_list = wm.get('sitemaps') or []
-            _wm_bad = (bool(wm.get('error')) or not _wm_list
-                       or any((s.get('errors') or 0) for s in _wm_list))
-            _sec_title('Sitemap в Яндекс.Вебмастере (ТЗ 3.4.4)', _wm_bad)
-            if wm.get('error'):
-                _line(f'⚠ Не удалось получить: {wm["error"]}', C.warn)
-            elif not _wm_list:
-                _line(f'❌ У хоста {wm.get("host", "")} в Вебмастере нет '
-                      f'sitemap-файлов - карта не добавлена.', C.err, bold=True)
-            else:
-                for s in _wm_list:
-                    _err = s.get('errors')
-                    if _err:
-                        _line(f'❌ {s.get("url", "")} - ошибок: {_err}', C.err,
-                              bold=True)
-                    else:
-                        _n = s.get('urls_count')
-                        _line(f'✅ {s.get("url", "")} - без ошибок'
-                              + (f', URL: {_n}' if _n else ''), C.ok)
-
-        # ── Секция 9: HTML-карта сайта (доп. чек-лист) ──
-        hm = indexing_summary.get('html_sitemap')
-        if hm is not None:
-            _hm_junk = hm.get('junk_links') or []
-            _sec_title('HTML-карта сайта', bool(_hm_junk))
-            if hm.get('status') != 200:
-                _line(f'⚠ HTML-карта не найдена по типовым адресам '
-                      f'(/sitemap/, /sitemap.html) - последний ответ '
-                      f'HTTP {hm.get("status") if hm.get("status") is not None else "нет"}'
-                      f'{"; " + hm["error"] if hm.get("error") else ""}. '
-                      f'Если карта живёт по другому адресу - проверить '
-                      f'руками.', C.warn)
-            elif _hm_junk:
-                _line(f'❌ {hm.get("url", "")} - в HTML-карте служебные '
-                      f'ссылки ({len(_hm_junk)}). Список - в «Проблемах» '
-                      f'(раздел «Индексация»).', C.err, bold=True)
-            else:
-                _line(f'✅ {hm.get("url", "")} - существует, служебных '
-                      f'ссылок нет.', C.ok)
-
-
-# ── Группировка «одна проблема - одна строка + список URL» ─────────
-# Как на листе «Уведомления»: не плодим милион одинаковых строк, а
-# группируем страницы по тексту проблемы.
-
-
-def _issue_groups(pages, attr, key):
-    """[(текст проблемы, [CheckResult])] по убыванию количества страниц."""
-    groups = {}
-    for r in pages:
-        data = getattr(r, attr, None) or {}
-        for t in (data.get(key) or []):
-            groups.setdefault(t, []).append(r)
-    return sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
-
-
-def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None,
-                         extra_label='Детали'):
-    """Строка-проблема (текст + сколько страниц), под ней - город/тип/URL.
-    extra(r) - необязательный текст в последнюю колонку (что нашлось на
-    странице), чтобы было видно контекст проблемы, а не только URL.
-    Перед первой группой - навигационная шапка колонок (навy, как на
-    остальных листах отчёта), иначе таблица без подписей."""
-    if groups:
-        for ci, title in enumerate(('Город', 'Тип', 'Ссылка', extra_label), 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = title
-            cell.font = _font(size=9, bold=True, color=C.bg_elev)
-            cell.fill = _fill(C.header_navy)
-            cell.border = _border()
-            cell.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 18
-        row += 1
-    for text, rs in groups:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = f'{text}  -  {len(rs)} {_plural_pages(len(rs))}'
-        c.font = _font(size=10, bold=True, color=color)
-        c.fill = _fill(C.surface)
-        c.alignment = _align(wrap=True, indent=1)
-        c.border = _border()
-        ws.row_dimensions[row].height = 22
-        row += 1
-        for r in rs[:max_urls]:
-            ws.row_dimensions[row].height = 18
-            for ci, (val, kw) in enumerate([
-                (r.city or '-', {'size': 9, 'color': C.text_muted}),
-                (r.type_label, {'size': 9, 'color': C.text_muted}),
-                (r.url, {'size': 9, 'color': C.accent, 'underline': 'single'}),
-                (extra(r) if extra else '', {'size': 9, 'color': C.text_soft}),
-            ], 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                if kw:
-                    cell.font = _font(**kw)
-                cell.alignment = _align(vertical='top')
-                cell.border = _border(color=C.border_light)
-                if ci == 4 and val:
-                    cell.hyperlink = val
-            row += 1
-        if len(rs) > max_urls:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = f'… и ещё {len(rs) - max_urls} {_plural_pages(len(rs) - max_urls)}'
-            c.font = _font(size=9, italic=True, color=C.text_muted)
-            c.alignment = _align(indent=2)
-            ws.row_dimensions[row].height = 16
-            row += 1
-        row += 1
-    return row
-
-
-# Лист «Вёрстка» удалён: находки (viewport/CSS/меню/mixed content/favicon,
-# поиск по сайту не находит категории/теги, фильтрация товаров не
-# работает) полностью попадают в «Проблемы» через report_priorities.py
-# (_layout_findings/_search_check_findings/_filters_test_findings).
-
-
-# Лист «Разметка» (п.1.12, ТЗ 3.5: Schema.org + OpenGraph) удалён -
-# находки полностью и итемизированно в «Проблемы» через
-# report_priorities._markup_findings (вместе с field_details, который
-# раньше показывался отдельной колонкой листа).
-
-
-# Листы «Безопасность» и «Изображения» удалены (04.08.2026): их находки
-# полностью и итемизированно попадают в «Проблемы» через report_priorities.py
-# (generic-обработчик issues/warnings и _images_findings соответственно) -
-# см. build_report(). _issue_groups/_render_issue_groups остаются - их ещё
-# использует _build_layout_sheet и другие живые листы.
+# Группировка «одна проблема - одна строка + список URL» (_issue_groups /
+# _render_issue_groups) удалена вместе с последними листами, которые её
+# использовали: теперь каждая находка - отдельная строка «Проблем», где
+# группировку делает автофильтр, а не отчёт.
 
 
 # ── Лист «Валидация и скорость» (п.1.16: W3C HTML/CSS + время ресурсов) ─
@@ -2544,459 +1750,7 @@ def _render_issue_groups(ws, row, groups, color, max_urls=100, extra=None,
 # + дельта) теперь секцией на «Трафик и траст».
 
 
-_HOME_DUPES_VERDICT = {
-    'main': ('✔ это главная', C.ok),
-    'redirect': ('✔ склеено (редирект)', C.ok),
-    'canonical': ('✔ склеено (canonical)', C.ok),
-    'duplicate': ('✖ ДУБЛЬ', C.err),
-    'absent': ('– адреса нет', C.text_muted),
-    'error': ('⚠ недоступно', C.warn),
-}
-
-
-def _build_home_dupes_sheet(wb, home_dupes):
-    """Лист «Дубли главной»: одна и та же главная не должна открываться по разным
-    адресам с кодом 200 (www/без, http/https, слэши, index.php, ?параметр).
-    Строится, только если проверка выполнялась."""
-    if not home_dupes or not home_dupes.get('available'):
-        return
-    variants = home_dupes.get('variants') or []
-    ws = wb.create_sheet('Дубли главной')
-    ws.sheet_view.showGridLines = False
-
-    # Все таблицы отчёта начинаются с колонки B (в A - узкий отступ): на
-    # групповом листе «Техничка» секции идут одна под другой, и блок, начатый
-    # с A, съезжал влево относительно остальных.
-    dupes = int(home_dupes.get('dupes', 0) or 0)
-    c = ws.cell(row=1, column=2, value='Каноническая главная:')
-    c.font = _font(bold=True)
-    ws.cell(row=1, column=3, value=home_dupes.get('home', '–')).font = _font()
-    c = ws.cell(row=2, column=2, value='Реальных дублей:')
-    c.font = _font(bold=True)
-    c2 = ws.cell(row=2, column=3, value=dupes)
-    c2.font = _font(bold=True, color=(C.err if dupes else C.ok))
-
-    head_row = 4
-    for i, t in enumerate(('Адрес', 'Ответ', 'Что происходит', 'Вердикт'), 2):
-        cell = ws.cell(row=head_row, column=i, value=t)
-        cell.font = _font(bold=True, color=C.bg_elev)
-        cell.fill = _fill(C.header_navy)
-        cell.border = _border()
-        cell.alignment = _align('center' if i > 2 else 'left')
-
-    # дубли - вверх списка, дальше по осмысленному порядку
-    order = {'duplicate': 0, 'error': 1, 'canonical': 2, 'main': 3,
-             'redirect': 4, 'absent': 5}
-    rows = sorted(variants, key=lambda v: order.get(v.get('verdict'), 9))
-    r = head_row + 1
-    for v in rows:
-        verdict = v.get('verdict', 'error')
-        label, color = _HOME_DUPES_VERDICT.get(verdict, ('?', C.text))
-        ca = ws.cell(row=r, column=2, value=v.get('url', ''))
-        ca.font = _font()
-        ca.border = _border()
-        cs = ws.cell(row=r, column=3, value=str(v.get('status', '')))
-        cs.font = _font()
-        cs.border = _border()
-        cs.alignment = _align('center')
-        cn = ws.cell(row=r, column=4, value=v.get('note', ''))
-        cn.font = _font()
-        cn.border = _border()
-        cv = ws.cell(row=r, column=5, value=label)
-        cv.font = _font(bold=True, color=color)
-        cv.border = _border()
-        if verdict == 'duplicate':
-            for col in range(2, 6):
-                ws.cell(row=r, column=col).fill = _fill(C.err_soft)
-        r += 1
-
-    note = ('Дубль = главная открывается по этому адресу с кодом 200, а поисковик '
-            'не склеивает его с главной (нет редиректа и canonical не на главную). '
-            'Лечится 301-редиректом на главную или тегом canonical.')
-    ws.cell(row=r + 1, column=2, value=note).font = _font(italic=True, color=C.text_muted)
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 48
-    ws.column_dimensions['C'].width = 9
-    ws.column_dimensions['D'].width = 40
-    ws.column_dimensions['E'].width = 24
-
-
-def _build_arsenkin_sheet(wb, arsenkin):
-    """Лист «Индексация (Арсенкин)»: есть ли URL в индексе Яндекса и Google
-    (через API Арсенкина). Строится, только если проверка выполнялась."""
-    if not arsenkin or not arsenkin.get('available'):
-        return
-    rows = arsenkin.get('rows') or []
-    eng = arsenkin.get('engines') or {'yandex': True, 'google': True}
-    ws = wb.create_sheet('Индексация (Арсенкин)')
-    ws.sheet_view.showGridLines = False
-
-    # Начинаем с колонки B - как остальные листы отчёта (в A узкий отступ),
-    # иначе на групповом листе «Техничка» секция съезжает влево.
-    ni = int(arsenkin.get('not_indexed', 0) or 0)
-    ws.cell(row=1, column=2, value='Проверено URL:').font = _font(bold=True)
-    ws.cell(row=1, column=3, value=arsenkin.get('checked', len(rows))).font = _font()
-    ws.cell(row=2, column=2, value='Не в индексе:').font = _font(bold=True)
-    c2 = ws.cell(row=2, column=3, value=ni)
-    c2.font = _font(bold=True, color=(C.err if ni else C.ok))
-    _det = []
-    if eng.get('yandex'):
-        _det.append(f'Яндекс: {arsenkin.get("not_indexed_yandex", 0)}')
-    if eng.get('google'):
-        _det.append(f'Google: {arsenkin.get("not_indexed_google", 0)}')
-    ws.cell(row=2, column=4, value='  '.join(_det)).font = _font(color=C.text_muted)
-
-    head_row = 4
-    for i, t in enumerate(('URL', 'В Яндексе', 'В Google'), 2):
-        cell = ws.cell(row=head_row, column=i, value=t)
-        cell.font = _font(bold=True, color=C.bg_elev)
-        cell.fill = _fill(C.header_navy)
-        cell.border = _border()
-        cell.alignment = _align('center' if i > 2 else 'left')
-
-    def _cell(row, col, flag, checked):
-        c = ws.cell(row=row, column=col)
-        c.border = _border()
-        c.alignment = _align('center')
-        if not checked:
-            c.value, c.font = '–', _font(color=C.text_muted)
-        elif flag is True:
-            c.value, c.font = 'Да', _font(bold=True, color=C.ok)
-        elif flag is False:
-            c.value, c.font = 'Нет', _font(bold=True, color=C.err)
-            c.fill = _fill(C.err_soft)
-        else:
-            c.value, c.font = '?', _font(color=C.warn)
-
-    # не в индексе - вверх списка
-    def _rank(r):
-        bad = ((eng.get('yandex') and r.get('yandex') is False)
-               or (eng.get('google') and r.get('google') is False))
-        return 0 if bad else 1
-    r = head_row + 1
-    for row in sorted(rows, key=_rank):
-        cu = ws.cell(row=r, column=2, value=row.get('url', ''))
-        cu.font = _font()
-        cu.border = _border()
-        _cell(r, 3, row.get('yandex'), eng.get('yandex'))
-        _cell(r, 4, row.get('google'), eng.get('google'))
-        r += 1
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 70
-    ws.column_dimensions['C'].width = 12
-    ws.column_dimensions['D'].width = 12
-
-
-def _build_w3c_sheet(wb, w3c_check):
-    """Лист валидации W3C (HTML/CSS) и скорости загрузки ресурсов по выборке
-    страниц. Добавляется, только если проверка выполнялась."""
-    if not w3c_check:
-        return
-    pages = w3c_check.get('pages') or []
-    show = w3c_check.get('show') or {'valid': True, 'static': True}
-    _sv, _ss = show.get('valid', True), show.get('static', True)
-
-    ws = wb.create_sheet('Валидация и скорость')
-    ws.sheet_view.showGridLines = False
-    def _page_fail(p):
-        """Причина, по которой валидность не проверена (403/429/502…), или ''."""
-        return (str((p.get('html') or {}).get('error') or '')
-                or str((p.get('css') or {}).get('error') or ''))
-
-    def _perf_warn(p):
-        """Проблема со сжатием/кешем статики (для окраски вкладки)."""
-        t = p.get('timings') or {}
-        cp = t.get('compression') or {}
-        ca = t.get('caching') or {}
-        return ((cp.get('checked') and cp.get('ok', 0) < cp['checked'])
-                or (ca.get('checked') and ca.get('ok', 0) < ca['checked']))
-
-    _any_err = ((_sv and any((p.get('html') or {}).get('errors')
-                             or (p.get('css') or {}).get('errors')
-                             for p in pages))
-                or (_ss and any(_perf_warn(p) for p in pages)))
-    _any_blocked = _sv and any(_page_fail(p) for p in pages)
-    ws.sheet_properties.tabColor = C.warn if (_any_err or _any_blocked) else C.ok
-
-    for col, w in (('A', 3), ('B', 50), ('C', 20), ('D', 20), ('E', 46), ('F', 3)):
-        ws.column_dimensions[col].width = w
-
-    # Заголовок и вводка зависят от того, какие пункты включены (1.16 / 1.17).
-    if _sv and _ss:
-        _title = 'Валидация W3C, скорость и доставка статики (пп.1.16-1.17)'
-    elif _sv:
-        _title = 'Валидация W3C и скорость ресурсов (п.1.16)'
-    else:
-        _title = 'Сжатие и кеширование статики (п.1.17)'
-    ws.merge_cells('B2:E2')
-    c = ws['B2']
-    c.value = _title
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    _intro = []
-    if _sv:
-        _intro.append('(1.16) HTML валиден - W3C Nu (validator.w3.org); CSS '
-                      'валиден - W3C CSS Validator (jigsaw.w3.org); время '
-                      'загрузки ресурсов - качаем HTML/CSS/JS/шрифты/картинки '
-                      'и суммируем по типам. Ошибки валидатора = предупреждение '
-                      '(у боевых сайтов их часто много).')
-    if _ss:
-        _intro.append('(1.17) сжатие своей статики (Gzip/Brotli, по '
-                      'Content-Encoding) и кеш (Cache-Control/ETag/Expires) - '
-                      'по заголовкам ответа CSS/JS того же домена.')
-    ws.merge_cells('B3:E3')
-    c = ws['B3']
-    c.value = ('По ВЫБОРКЕ страниц (главная/категория/товар). '
-               + ' '.join(_intro))
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
-
-    row = 5
-    if not w3c_check.get('available') or not pages:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = w3c_check.get('note') or 'Проверка не выполнялась.'
-        c.font = _font(size=11, color=C.text_soft)
-        c.alignment = _align(wrap=True)
-        return
-
-    # Баннер: W3C не проверил валидность (403 Cloudflare / 429 лимит / 502 сбой).
-    _fails = [_page_fail(p) for p in pages if _page_fail(p)] if _sv else []
-    _blocked = len(_fails)
-    _reason = _fails[0] if _fails else ''
-    if _blocked:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = (f'⚠ W3C не проверил валидность HTML/CSS на '
-                   f'{_blocked} из {len(pages)} страниц ({_reason}). Это не '
-                   f'ошибка сайта, а лимит/сбой бесплатного сервиса W3C: '
-                   f'повторить проверку 1.16 позже (через час/на следующий '
-                   f'день) и реже включать. Время загрузки ресурсов ниже '
-                   f'измерено корректно.')
-        c.font = _font(size=10, bold=True, color=C.warn)
-        c.fill = _fill(C.warn_soft)
-        c.alignment = _align(wrap=True, vertical='top')
-        ws.row_dimensions[row].height = 56
-        row += 2
-
-    for p in pages:
-        # Заголовок страницы
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = p.get('url', '')
-        c.hyperlink = p.get('url', '')
-        c.font = _font(size=11, bold=True, color=C.accent, underline='single')
-        c.fill = _fill(C.surface)
-        c.alignment = _align(indent=1)
-        c.border = _border()
-        ws.row_dimensions[row].height = 22
-        row += 1
-
-        if p.get('error'):
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = '⚠ ' + p['error']
-            c.font = _font(size=10, color=C.warn)
-            c.alignment = _align(indent=2)
-            ws.row_dimensions[row].height = 18
-            row += 2
-            continue
-
-        def _line(label, value, color=C.text):
-            nonlocal row
-            k = ws.cell(row=row, column=2, value=label)
-            k.font = _font(size=10, color=C.text_muted)
-            k.alignment = _align(indent=2)
-            ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
-            v = ws.cell(row=row, column=3, value=value)
-            v.font = _font(size=10, color=color)
-            v.alignment = _align(wrap=True)
-            ws.row_dimensions[row].height = 18
-            row += 1
-
-        _t = p.get('timings') or {}
-        # ── п.1.16: валидация HTML/CSS + скорость ──
-        if _sv:
-            # HTML
-            _h = p.get('html') or {}
-            if _h.get('error'):
-                _line('HTML (W3C Nu):', f'не проверено – {_h["error"]}',
-                      C.text_muted)
-            else:
-                _he = _h.get('errors')
-                _line('HTML (W3C Nu):',
-                      ('✅ валиден (0 ошибок)' if _he == 0
-                       else f'⚠ {_he} ошибок, {_h.get("warnings", 0)} замечаний'),
-                      C.ok if _he == 0 else C.warn)
-                if _he and _h.get('samples'):
-                    _line('  примеры:', '; '.join(_h['samples'][:2]), C.text_soft)
-            # CSS
-            _cs = p.get('css') or {}
-            if _cs.get('error'):
-                _line('CSS (W3C):', f'не проверено – {_cs["error"]}', C.text_muted)
-            else:
-                _ce = _cs.get('errors')
-                _line('CSS (W3C):',
-                      ('✅ валиден (0 ошибок)' if _ce == 0
-                       else f'⚠ {_ce} ошибок, {_cs.get("warnings", 0)} замечаний'),
-                      C.ok if _ce == 0 else C.warn)
-            # Скорость
-            if _t:
-                bt = _t.get('by_type', {})
-                _parts = [f'HTML {_t.get("html_ms", 0)}мс']
-                for k, ru in (('css', 'CSS'), ('js', 'JS'), ('font', 'шрифты'),
-                              ('img', 'картинки')):
-                    d = bt.get(k) or {}
-                    if d.get('count'):
-                        _parts.append(
-                            f'{ru} {d["ms"]}мс/{d["count"]}шт/{d["kb"]}КБ')
-                _line('Скорость ресурсов:', ' · '.join(_parts), C.text)
-                _sl = _t.get('slowest') or {}
-                if _sl.get('url'):
-                    _line('  самый долгий:',
-                          f'{_sl["ms"]}мс – {_sl["url"].rsplit("/", 1)[-1]} '
-                          f'({_sl.get("kind", "")})', C.text_soft)
-                _line('  итого загрузка:', f'{_t.get("total_ms", 0)} мс',
-                      C.warn if _t.get('total_ms', 0) > 8000 else C.text)
-
-        # ── п.1.17: сжатие и кеш статики ──
-        if _ss and _t:
-            # Сжатие статики (Gzip/Brotli) - по CSS/JS.
-            _cp = _t.get('compression') or {}
-            if _cp.get('checked'):
-                _ok, _n = _cp.get('ok', 0), _cp['checked']
-                _enc = ', '.join(_cp.get('enc') or []) or '–'
-                if _ok >= _n:
-                    _line('Сжатие CSS/JS:',
-                          f'✅ включено ({_enc}) – {_ok} из {_n}', C.ok)
-                elif _ok:
-                    _line('Сжатие CSS/JS:',
-                          f'⚠ частично ({_enc}): сжато {_ok} из {_n}. Без сжатия: '
-                          + '; '.join(u.rsplit('/', 1)[-1]
-                                      for u in _cp.get('missing', [])[:4]),
-                          C.warn)
-                else:
-                    _line('Сжатие CSS/JS:',
-                          f'⚠ НЕ включено (Gzip/Brotli) – 0 из {_n}. Включите '
-                          'сжатие статики на сервере (ускорит загрузку).', C.warn)
-            # Кеширование статики (Cache-Control/ETag/Expires).
-            _ca = _t.get('caching') or {}
-            if _ca.get('checked'):
-                _ok, _n = _ca.get('ok', 0), _ca['checked']
-                if _ok >= _n:
-                    _line('Кеш статики:',
-                          f'✅ настроен (Cache-Control/ETag) – {_ok} из {_n}', C.ok)
-                elif _ok:
-                    _line('Кеш статики:',
-                          f'⚠ частично: с кешем {_ok} из {_n}. Без кеша: '
-                          + '; '.join(u.rsplit('/', 1)[-1]
-                                      for u in _ca.get('missing', [])[:4]),
-                          C.warn)
-                else:
-                    _line('Кеш статики:',
-                          f'⚠ НЕ настроен (Cache-Control/ETag/Expires) – 0 из '
-                          f'{_n}. Настройте заголовки кеша статики.', C.warn)
-        row += 1
-
-
 # ── Лист «Страница 404» (п.1.18) ────────────────────────────────────
-
-
-def _build_404_sheet(wb, p404_check):
-    """Лист проверки 404-страницы: код ответа, дизайн, title/description,
-    ссылки на разделы и форма. Добавляется, только если проверка выполнялась."""
-    if not p404_check:
-        return
-    hosts = p404_check.get('hosts') or []
-    has_bugs = any(h.get('issues') for h in hosts)
-    has_warns = any(h.get('warnings') for h in hosts)
-
-    ws = wb.create_sheet('Страница 404')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = (C.err if has_bugs
-                                    else C.warn if has_warns else C.ok)
-
-    for col, w in (('A', 3), ('B', 24), ('C', 60), ('D', 60), ('E', 3)):
-        ws.column_dimensions[col].width = w
-
-    ws.merge_cells('B2:D2')
-    c = ws['B2']
-    c.value = 'Страница 404 (п.1.18)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:D3')
-    c = ws['B3']
-    c.value = ('Запрашиваем заведомо несуществующий адрес и проверяем: '
-               '(1) код ответа ровно 404 (200 = soft-404 шаблон, баг; '
-               'редирект = предупреждение); (2) дизайн совпадает с главной - '
-               'косвенно, по общим CSS-файлам и шапке/подвалу шаблона '
-               '(пиксельное сравнение без браузера невозможно); '
-               '(3) уникальный <title> (не как у главной) и meta description; '
-               '(4) есть ссылки на основные разделы и форма заявки/телефон; '
-               '(5) несуществующие служебные адреса тоже отдают 404: '
-               'пагинация ?PAGEN_1=999999 (200 прощаем при canonical без '
-               'номера) и мусорный фильтр /filter/…/. Шаблон 404 сквозной - '
-               'проверяются главный домен и один поддомен.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
-
-    row = 5
-    if not p404_check.get('available') or not hosts:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-        c = ws.cell(row=row, column=2)
-        c.value = 'Проверка не выполнялась.'
-        c.font = _font(size=11, color=C.text_soft)
-        c.alignment = _align(wrap=True)
-        return
-
-    for h in hosts:
-        # Заголовок хоста
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-        c = ws.cell(row=row, column=2)
-        _st = h.get('status')
-        c.value = (f'{h.get("city", "")} – {h.get("host", "")}   '
-                   f'(проба: HTTP {_st if _st is not None else "–"})')
-        c.font = _font(size=11, bold=True)
-        c.fill = _fill(C.surface)
-        c.alignment = _align(indent=1)
-        c.border = _border()
-        ws.row_dimensions[row].height = 22
-        row += 1
-
-        def _line(text, color):
-            nonlocal row
-            ws.merge_cells(start_row=row, start_column=2,
-                           end_row=row, end_column=4)
-            c = ws.cell(row=row, column=2)
-            c.value = text
-            c.font = _font(size=10, color=color)
-            c.alignment = _align(indent=2, wrap=True)
-            ws.row_dimensions[row].height = 18
-            row += 1
-
-        if h.get('error'):
-            _line('⚠ ' + h['error'], C.text_muted)
-        elif not h.get('issues') and not h.get('warnings'):
-            _line('✅ Код 404, дизайн шаблона, свой заголовок, ссылки на '
-                  'разделы и форма - всё на месте.', C.ok)
-        else:
-            for t in h.get('issues') or []:
-                _line('❌ ' + t, C.err)
-            for t in h.get('warnings') or []:
-                _line('⚠ ' + t, C.warn)
-        # Подтверждение проб пагинации/фильтра (проблемные уже выше текстом).
-        for p in h.get('probes') or []:
-            if p.get('ok'):
-                _note = f' ({p["note"]})' if p.get('note') else ''
-                _line(f'✓ {p["kind"]}: HTTP {p["status"]}{_note} - корректно',
-                      C.text_muted)
-        row += 1
 
 
 def _wm_alive_url(url, section='optimization/checklist/'):
@@ -3018,236 +1772,7 @@ def _wm_alive_url(url, section='optimization/checklist/'):
 # ── Лист «Фильтры ПС» (п.1.19: санкции поисковых систем) ───────────
 
 
-def _build_ps_filters_sheet(wb, ps_filters):
-    """Лист санкций/фильтров поисковых систем: диагностика Яндекс.Вебмастера
-    (санкционные коды) + маркеры ручных мер в почте GSC. Добавляется, только
-    если проверка выполнялась."""
-    if not ps_filters:
-        return
-    sanc = ps_filters.get('yandex') or []
-    gsc_hits = ps_filters.get('gsc_hits') or []
-    has_bugs = bool(sanc or gsc_hits)
-
-    ws = wb.create_sheet('Фильтры ПС')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.err if has_bugs else C.ok
-
-    for col, w in (('A', 3), ('B', 30), ('C', 60), ('D', 46), ('E', 3)):
-        ws.column_dimensions[col].width = w
-
-    ws.merge_cells('B2:D2')
-    c = ws['B2']
-    c.value = 'Фильтры поисковых систем (п.1.19)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:D3')
-    c = ws['B3']
-    c.value = ('Санкции за переоптимизацию/угрозы. Яндекс: санкционные '
-               'сигналы из диагностики Вебмастера (FATAL и коды угроз/'
-               'качества) - надёжный официальный источник, виден только при '
-               'подтверждённых правах. Google: API ручных мер не существует - '
-               'сканируем почтовые уведомления GSC за 90 дней по маркерам '
-               '(«ручные меры», «security issue» и т.п.) и даём ссылку для '
-               'ручной сверки в Search Console.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
-
-    row = 5
-
-    def _line(text, color, bold=False, link=None):
-        nonlocal row
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-        c = ws.cell(row=row, column=2)
-        c.value = text
-        c.font = _font(size=10, bold=bold, color=color,
-                       underline='single' if link else None)
-        if link:
-            c.hyperlink = link
-        c.alignment = _align(indent=1, wrap=True)
-        ws.row_dimensions[row].height = 18
-        row += 1
-
-    # ── Яндекс ──
-    _line('Яндекс (диагностика Вебмастера)', C.text, bold=True)
-    if not ps_filters.get('wm_collected'):
-        _line('⚠ Сбор диагностики Вебмастера в этом прогоне выключен - '
-              'данные из прошлого кеша либо отсутствуют. Включите галочку '
-              'Вебмастера для свежей проверки.', C.warn)
-    if sanc:
-        for s in sanc:
-            _line(f'❌ {s.get("host", "")}: {s.get("title", s.get("code", ""))} '
-                  f'({s.get("date", "")}) - открыть панель',
-                  C.err, link=_wm_alive_url(s.get('url')))
-    else:
-        _line(f'✅ Санкций/угроз в диагностике Вебмастера нет '
-              f'(хостов: {ps_filters.get("wm_hosts", 0)}, '
-              f'проблем всего: {ps_filters.get("wm_issues_total", 0)} - '
-              f'несанкционные см. лист {_sheet_ref("Ошибки сервисов")}).', C.ok)
-    row += 1
-
-    # ── Google ──
-    _line('Google (уведомления GSC + ручная сверка)', C.text, bold=True)
-    if gsc_hits:
-        for h in gsc_hits:
-            _line(f'❌ {h.get("date", "")}: {h.get("subject", "")}', C.err)
-    else:
-        _line(f'✅ В почтовых уведомлениях GSC за 90 дней маркеров ручных '
-              f'мер/безопасности нет (писем просмотрено: '
-              f'{ps_filters.get("gsc_scanned", 0)}).', C.ok)
-    _line('Ручная сверка (1 клик): Search Console → «Меры, принятые '
-          'вручную» и «Проблемы безопасности».', C.accent,
-          link='https://search.google.com/search-console/manual-actions')
-
-
 # ── Лист «Нагрузка и парсинг» (ошибки сервера: парсинг/нагрузка/дубли) ──
-
-
-def _build_stress_sheet(wb, stress_check):
-    """Лист «Нагрузка и парсинг»: нет ли ошибок сервера (5xx/обрывы) при
-    быстром обходе-парсинге, параллельной нагрузке и кривых дублях URL.
-    Добавляется, только если стресс-пробы выполнялись."""
-    if not stress_check or not stress_check.get('available'):
-        return
-    parsing = stress_check.get('parsing') or {}
-    load = stress_check.get('load') or {}
-    dups = stress_check.get('duplicates') or {}
-
-    parse_5xx = parsing.get('server_errors') or []
-    parse_net = parsing.get('network_errors') or []
-    banned = parsing.get('banned')
-    load_pages = load.get('pages') or []
-    load_5xx = sum(p.get('server_5xx', 0) for p in load_pages)
-    load_net = sum(p.get('network_errors', 0) for p in load_pages)
-    load_degraded = [p for p in load_pages if p.get('degraded')]
-    dup_5xx = dups.get('server_errors') or []
-
-    total_5xx = len(parse_5xx) + load_5xx + len(dup_5xx)
-    has_bugs = bool(total_5xx or parse_net or load_net or banned)
-    has_warn = bool(load_degraded or parsing.get('rate_limited'))
-
-    ws = wb.create_sheet('Нагрузка и парсинг')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = (C.err if has_bugs
-                                    else C.warn if has_warn else C.ok)
-    for col, w in (('A', 3), ('B', 30), ('C', 64), ('D', 44), ('E', 3)):
-        ws.column_dimensions[col].width = w
-
-    ws.merge_cells('B2:D2')
-    c = ws['B2']
-    c.value = 'Нагрузка и парсинг (ошибки сервера)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:D3')
-    c = ws['B3']
-    c.value = ('Сервер не должен отдавать ошибки (5xx) при: (1) быстром '
-               'обходе страниц парсингом; (2) высокой параллельной нагрузке; '
-               '(3) кривых дублях адресов категорий/фильтров/товаров '
-               '(сдвоенный сегмент, двойной слэш, глубокая пагинация, '
-               'сдвоенный GET-параметр). Пробы идут в конце прогона; при '
-               'первых же 5xx/обрывах проба останавливается, чтобы не '
-               'добивать сервер. Бан на парсинге - нагрузку и дубли '
-               'пропускаем (их результат стал бы недостоверным).')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 66
-
-    row = 5
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-    c = ws.cell(row=row, column=2)
-    c.value = (f'Ошибок сервера (5xx) всего: {total_5xx}  ·  обрывов связи: '
-               f'{len(parse_net) + load_net}'
-               + ('  ·  БАН на парсинге' if banned else ''))
-    c.font = _font(size=10, bold=True,
-                   color=C.err if has_bugs else C.warn if has_warn else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 24
-    row += 2
-
-    def _line(text, color, bold=False, link=None):
-        nonlocal row
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-        c = ws.cell(row=row, column=2)
-        c.value = text
-        c.font = _font(size=10, bold=bold, color=color,
-                       underline='single' if link else None)
-        if link:
-            c.hyperlink = link
-        c.alignment = _align(indent=1, wrap=True)
-        ws.row_dimensions[row].height = 18
-        row += 1
-
-    # ── 1. Парсинг ──
-    _line(f'1. Парсинг - быстрый обход (проверено {parsing.get("checked", 0)} '
-          f'из {parsing.get("total", 0)})', C.text, bold=True)
-    if banned:
-        _line(f'❌ Защита закрыла доступ (код {banned.get("code")}) после '
-              f'{banned.get("after", 0)} успешных страниц - сайт принял бота '
-              f'за парсера: {banned.get("url", "")}', C.err)
-    if parse_5xx:
-        _line(f'❌ Ошибок сервера при обходе: {len(parse_5xx)}. Список - '
-              f'в «Проблемах» (раздел «Нагрузка и парсинг»).', C.err)
-    if parse_net:
-        _line(f'❌ Обрывы связи при обходе: {len(parse_net)} '
-              f'(сервер не отвечал под последовательной нагрузкой)', C.err)
-    if parsing.get('rate_limited'):
-        _line(f'⚠ Rate-limit (429): {parsing["rate_limited"]} - сервер '
-              f'притормаживал частые запросы', C.warn)
-    if not (banned or parse_5xx or parse_net):
-        _line('✅ Быстрый обход парсингом прошёл без ошибок сервера и бана.',
-              C.ok)
-    row += 1
-
-    # ── 2. Высокая нагрузка ──
-    if load.get('skipped') == 'ban':
-        _line('2. Высокая нагрузка - пропущено из-за бана на парсинге.',
-              C.text_muted, bold=True)
-    else:
-        _line(f'2. Высокая нагрузка - на каждую страницу залп '
-              f'{load.get("concurrency", 0)} одновременных запросов × '
-              f'{load.get("waves", 0)} волны '
-              f'(итого {load.get("concurrency", 0) * load.get("waves", 0)} '
-              f'запросов на страницу)', C.text, bold=True)
-        for p in load_pages:
-            _base = p.get('baseline_ms')
-            _med = p.get('median_ms')
-            _t = (f' · медиана {_med} мс'
-                  + (f' против {_base} мс в прогоне' if _base else '')
-                  ) if _med else ''
-            if p.get('server_5xx') or p.get('network_errors'):
-                _line(f'❌ {p.get("url", "")}: 5xx {p.get("server_5xx", 0)}, '
-                      f'обрывов {p.get("network_errors", 0)} из '
-                      f'{p.get("sent", 0)} запросов'
-                      + ('  (проба остановлена - не добивали сервер)'
-                         if p.get('stopped') else '') + _t, C.err)
-            elif p.get('degraded'):
-                _line(f'⚠ {p.get("url", "")}: под нагрузкой ответ замедлился '
-                      f'более чем в 3 раза{_t}', C.warn)
-            else:
-                _line(f'✅ {p.get("url", "")}: держит нагрузку без 5xx{_t}',
-                      C.ok)
-        if not load_pages:
-            _line('· Репрезентативных страниц для залпа не набралось - '
-                  'пропуск.', C.text_muted)
-    row += 1
-
-    # ── 3. Дубли URL ──
-    if dups.get('skipped') == 'ban':
-        _line('3. Дубли URL - пропущено из-за бана на парсинге.',
-              C.text_muted, bold=True)
-    else:
-        _line(f'3. Дубли категорий/фильтров/товаров - кривые вариации URL '
-              f'(проверено {dups.get("checked", 0)} по '
-              f'{dups.get("samples", 0)} страницам)', C.text, bold=True)
-        if dup_5xx:
-            _line(f'❌ Ошибок сервера на кривых дублях URL: {len(dup_5xx)}. '
-                  f'Список - в «Проблемах» (раздел «Нагрузка и парсинг»).', C.err)
-        else:
-            _line('✅ На кривых дублях адресов сервер отвечает штатно '
-                  '(200/301/404), 5xx нет.', C.ok)
 
 
 # ── Ссылочный профиль (lite-проверка беклинков, Вебмастер) - секция на
@@ -4123,611 +2648,7 @@ def _build_admin_settings_sheet(wb, admin_settings):
 # ── Лист «Ошибки JavaScript» (п.1.14: консоль браузера) ────────────
 
 
-def _build_console_sheet(wb, console_check):
-    """Лист ошибок JS в консоли: браузер открывал страницы прогона и слушал
-    console.error / необработанные исключения. Добавляется, только если
-    проверка выполнялась (console_check передан)."""
-    if not console_check:
-        return
-    pages = console_check.get('pages') or []
-    bad = [p for p in pages if p.get('errors')]
-
-    # Адаптивность: замеры на сетке ширин 1440/768/390 той же поездкой
-    # браузера (масштаб Ctrl+/- покрыт той же сеткой - тот же рендер).
-    def _mob_issues(p):
-        mob = p.get('mobile') or {}
-        vps = mob.get('viewports') or ({'390': mob} if mob else {})
-        out = []
-        for w, m in sorted(vps.items(), key=lambda kv: -int(kv[0])):
-            if m.get('overflow', 0) > 8:
-                _w = ', '.join(m.get('wide') or [])
-                out.append(f'на {w}px: контент шире экрана на '
-                           f'{m["overflow"]}px - горизонтальный скролл/обрезка'
-                           + (f' ({_w})' if _w else ''))
-            if m.get('overlaps'):
-                out.append(f'на {w}px: блоки накладываются: '
-                           + '; '.join(m['overlaps'][:3]))
-        m390 = vps.get('390') or mob
-        if m390.get('small', 0) >= 3 \
-                and m390['small'] > (m390.get('total') or 1) * 0.2:
-            _ex = '; '.join(m390.get('small_examples') or [])
-            out.append(f'мелкий шрифт меньше 14px (мобильный): '
-                       f'{m390["small"]} из {m390["total"]} текстовых '
-                       f'элементов' + (f' (напр. {_ex})' if _ex else ''))
-        if mob.get('menu_close') == 'not_closed':
-            out.append('меню (мобильное) НЕ закрывается по клику вне области '
-                       '- проверить вручную')
-        if mob.get('menu_close_d') == 'not_closed':
-            out.append('меню/каталог (ПК) НЕ закрывается по клику вне '
-                       'области - проверить вручную')
-        a = p.get('a11y') or {}
-        if a.get('img_broken'):
-            out.append('битые картинки (не загрузились в браузере): '
-                       + ', '.join(a['img_broken'][:4]))
-        if a.get('img_distorted'):
-            out.append('картинки с искажёнными пропорциями (сплющены/'
-                       'растянуты вёрсткой): ' + ', '.join(a['img_distorted'][:4]))
-        return out
-    mob_bad = [(p, _mob_issues(p)) for p in pages if _mob_issues(p)]
-    mob_checked = sum(1 for p in pages if p.get('mobile'))
-
-    ws = wb.create_sheet('Ошибки JavaScript')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = (C.err if bad
-                                    else C.warn if mob_bad else C.ok)
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 66   # URL
-    ws.column_dimensions['C'].width = 80   # Ошибки
-    ws.column_dimensions['D'].width = 3
-
-    ws.merge_cells('B2:C2')
-    c = ws['B2']
-    c.value = 'Ошибки JavaScript в консоли (п.1.14)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:C3')
-    c = ws['B3']
-    c.value = ('Браузер (Playwright) открывал страницы, по которым прошёл '
-               'чек-лист (главная, каталог, категории, фильтры, товары, тех.), '
-               'и слушал консоль: console.error и необработанные исключения '
-               'JavaScript. Шум сторонних сервисов (Метрика, виджеты, чаты, '
-               'reCAPTCHA, блокировщики) отсеивается - показываем ошибки '
-               'самого сайта. Страница с ошибками = баг. Той же поездкой '
-               'замеряется адаптивность на сетке ширин 1440/768/390: нет '
-               'горизонтального скролла ни на одном разрешении, блоки не '
-               'накладываются при изменении ширины окна (масштаб Ctrl+/- '
-               'покрыт той же сеткой - браузер рисует те же макеты), на '
-               '390px шрифт читабелен (мин. 14px).')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 48
-
-    row = 5
-    if not console_check.get('available') or not pages:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
-        c = ws.cell(row=row, column=2)
-        c.value = console_check.get('note') or (
-            'Проверка консоли не выполнялась (нет страниц / браузер недоступен).')
-        c.font = _font(size=11, color=C.text_soft)
-        c.alignment = _align(wrap=True, vertical='top')
-        ws.row_dimensions[row].height = 40
-        return
-
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
-    c = ws.cell(row=row, column=2)
-    c.value = (f'Проверено страниц: {console_check.get("checked", len(pages))} · '
-               f'с ошибками JS: {len(bad)}'
-               + (f' · адаптивность: проблемы на {len(mob_bad)} из '
-                  f'{mob_checked}' if mob_checked else ''))
-    c.font = _font(size=10, bold=True, color=C.err if bad else C.ok)
-    c.fill = _fill(C.surface)
-    c.alignment = _align(wrap=True)
-    ws.row_dimensions[row].height = 26
-    row += 2
-
-    if not bad:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
-        c = ws.cell(row=row, column=2)
-        c.value = '✅ Ошибок JavaScript в консоли ни на одной странице нет.'
-        c.font = _font(size=11, color=C.ok)
-        c.alignment = _align(indent=1)
-        row += 2
-    else:
-        # Заголовки
-        for ci, h in enumerate(['Страница', 'Ошибки в консоли'], 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = h
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
-            cell.fill = _fill(C.surface)
-            cell.alignment = _align()
-            cell.border = _border()
-        ws.row_dimensions[row].height = 20
-        row += 1
-        for p in bad:
-            errs = p.get('errors') or []
-            ws.row_dimensions[row].height = max(20, 14 * min(len(errs), 3))
-            # URL
-            c = ws.cell(row=row, column=2)
-            c.value = p.get('url', '')
-            c.hyperlink = p.get('url', '')
-            c.font = _font(size=9, color=C.accent, underline='single')
-            c.alignment = _align(wrap=True, vertical='top')
-            c.border = _border(color=C.border_light)
-            # Ошибки: первые 3 для контекста, полный список - в «Проблемах»
-            # (report_priorities._console_findings хранит там же первые 3).
-            c = ws.cell(row=row, column=3)
-            c.value = '\n'.join(f'• {e}' for e in errs[:3]) + (
-                f'\n… и ещё {len(errs) - 3} - полный список в «Проблемах» '
-                f'(раздел «Ошибки JavaScript»)' if len(errs) > 3 else '')
-            c.font = _font(size=9, color=C.err)
-            c.alignment = _align(wrap=True, vertical='top')
-            c.border = _border(color=C.border_light)
-            row += 1
-        row += 1
-
-    # ── Мобильная вёрстка (viewport 390px) ──
-    if mob_checked:
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
-        c = ws.cell(row=row, column=2)
-        c.value = f'Адаптивность (1440 / 768 / 390 px)  ({len(mob_bad)})'
-        c.font = _font(size=13, bold=True, color=C.warn if mob_bad else C.ok)
-        c.fill = _fill(C.accent_soft)
-        c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
-        if not mob_bad:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row,
-                           end_column=3)
-            c = ws.cell(row=row, column=2)
-            c.value = ('✅ На всех замеренных ширинах (1440/768/390) нет '
-                       'горизонтального скролла и наложений блоков; на '
-                       'мобильном шрифт читабелен (≥14px).')
-            c.font = _font(size=10, color=C.ok)
-            c.alignment = _align(indent=1)
-        else:
-            for p, probs in mob_bad:
-                ws.row_dimensions[row].height = max(20, 14 * len(probs))
-                c = ws.cell(row=row, column=2)
-                c.value = p.get('url', '')
-                c.hyperlink = p.get('url', '')
-                c.font = _font(size=9, color=C.accent, underline='single')
-                c.alignment = _align(wrap=True, vertical='top')
-                c.border = _border(color=C.border_light)
-                c = ws.cell(row=row, column=3)
-                c.value = '\n'.join(f'⚠ {t}' for t in probs)
-                c.font = _font(size=9, color=C.warn)
-                c.alignment = _align(wrap=True, vertical='top')
-                c.border = _border(color=C.border_light)
-                row += 1
-        # Тач-таргеты (44x44): метрика шаблонная (одни и те же кнопки на
-        # всех страницах) - одна СВОДНАЯ строка, не per-page список.
-        _tt = [( (p.get('mobile') or {}).get('viewports', {}).get('390')
-                 or p.get('mobile') or {}) for p in pages]
-        _tt = [m for m in _tt if m.get('touch_total')]
-        if _tt:
-            _share = sum(m['touch_small'] for m in _tt) \
-                / max(sum(m['touch_total'] for m in _tt), 1)
-            ws.merge_cells(start_row=row, start_column=2, end_row=row,
-                           end_column=3)
-            c = ws.cell(row=row, column=2)
-            if _share > 0.5:
-                _ex = '; '.join((_tt[0].get('touch_examples') or [])[:3])
-                c.value = (f'⚠ Тач-таргеты: {int(_share * 100)}% '
-                           f'кнопок/иконок меньше 44x44px на мобильном - '
-                           f'неудобно попадать пальцем'
-                           + (f' (напр. {_ex})' if _ex else '') + '.')
-                c.font = _font(size=10, color=C.warn)
-            else:
-                c.value = (f'✅ Тач-таргеты: большинство кнопок/иконок '
-                           f'({100 - int(_share * 100)}%) не меньше 44x44px.')
-                c.font = _font(size=10, color=C.ok)
-            c.alignment = _align(indent=1, wrap=True)
-            ws.row_dimensions[row].height = 22
-            row += 1
-        # Контрастность (WCAG): метрика шаблонная - одна сводная строка.
-        _ct = [p.get('a11y') or {} for p in pages]
-        _ct = [a for a in _ct if a.get('contrast_total')]
-        if _ct:
-            _low = sum(a['contrast_low'] for a in _ct)
-            _tot = sum(a['contrast_total'] for a in _ct)
-            _cshare = _low / max(_tot, 1)
-            ws.merge_cells(start_row=row, start_column=2, end_row=row,
-                           end_column=3)
-            c = ws.cell(row=row, column=2)
-            if _cshare > 0.15:
-                _ex = '; '.join((_ct[0].get('contrast_ex') or [])[:3])
-                c.value = (f'⚠ Контрастность (WCAG): {int(_cshare * 100)}% '
-                           f'текста ниже нормы (4.5:1, крупный 3:1) - плохо '
-                           f'читается' + (f' (напр. {_ex})' if _ex else '')
-                           + '.')
-                c.font = _font(size=10, color=C.warn)
-            else:
-                c.value = (f'✅ Контрастность (WCAG): '
-                           f'{100 - int(_cshare * 100)}% текста читается '
-                           f'нормально (порог 4.5:1).')
-                c.font = _font(size=10, color=C.ok)
-            c.alignment = _align(indent=1, wrap=True)
-            ws.row_dimensions[row].height = 22
-            row += 1
-        row += 1
-
-    # ── Интерактив (слайдеры / выпадающие меню, первые страницы) ──
-    _ux_pages = [p for p in pages if p.get('ux')]
-    if _ux_pages:
-        _sl_fail = [p for p in _ux_pages
-                    if (p['ux'] or {}).get('slider') == 'fail']
-        _dd_fail = [p for p in _ux_pages
-                    if (p['ux'] or {}).get('dropdown') == 'fail']
-        _sl_ok = any((p['ux'] or {}).get('slider') == 'ok' for p in _ux_pages)
-        _dd_ok = any((p['ux'] or {}).get('dropdown') == 'ok'
-                     for p in _ux_pages)
-        _ux_bad = bool(_sl_fail or _dd_fail)
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
-        c = ws.cell(row=row, column=2)
-        c.value = 'Интерактив (браузер, первые страницы)'
-        c.font = _font(size=13, bold=True, color=C.warn if _ux_bad else C.ok)
-        c.fill = _fill(C.accent_soft)
-        c.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
-
-        def _ux_line(text, color):
-            nonlocal row
-            ws.merge_cells(start_row=row, start_column=2,
-                           end_row=row, end_column=3)
-            c = ws.cell(row=row, column=2)
-            c.value = text
-            c.font = _font(size=10, color=color)
-            c.alignment = _align(indent=1, wrap=True)
-            ws.row_dimensions[row].height = 18
-            row += 1
-
-        if _sl_fail:
-            _ux_line('⚠ Слайдер не отреагировал на стрелку «вперёд» - '
-                     'проверить вручную: '
-                     + ', '.join(p['url'] for p in _sl_fail[:3]), C.warn)
-        elif _sl_ok:
-            _ux_line('✅ Слайдер листается по стрелке.', C.ok)
-        else:
-            _ux_line('· Слайдер на проверенных страницах не распознан - '
-                     'пропуск.', C.text_muted)
-        if _dd_fail:
-            _ux_line('⚠ Выпадающее меню не открылось по наведению - '
-                     'проверить вручную: '
-                     + ', '.join(p['url'] for p in _dd_fail[:3]), C.warn)
-        elif _dd_ok:
-            _ux_line('✅ Выпадающее меню открывается по наведению.', C.ok)
-        else:
-            _ux_line('· Выпадающих подменю в шапке не распознано - пропуск.',
-                     C.text_muted)
-        # Cookie-popup запоминает выбор минимум неделю.
-        _ck = [(p, (p.get('ux') or {}).get('cookie')) for p in pages]
-        _ck = [(p, v) for p, v in _ck if v]
-        _ck_bad = [(p, v) for p, v in _ck
-                   if v.get('status') in ('short', 'not_remembered')]
-        _ck_ok = [(p, v) for p, v in _ck if v.get('status') == 'ok']
-        if _ck_bad:
-            p0, v0 = _ck_bad[0]
-            if v0.get('status') == 'short':
-                _ux_line(f'⚠ Cookie-баннер запоминает выбор лишь на '
-                         f'{v0.get("days")} дн. (нужно ≥7) - '
-                         f'{p0["url"]}', C.warn)
-            else:
-                _ux_line(f'⚠ Cookie-баннер НЕ запоминает выбор (появляется '
-                         f'снова после перезагрузки) - {p0["url"]}', C.warn)
-        elif _ck_ok:
-            v0 = _ck_ok[0][1]
-            _d = (f' (срок {v0["days"]} дн.)' if v0.get('days') else '')
-            _ux_line(f'✅ Cookie-баннер запоминает выбор минимум неделю{_d}.',
-                     C.ok)
-        elif not _ck:
-            _ux_line('· Cookie-баннер с кнопкой согласия не распознан - '
-                     'пропуск.', C.text_muted)
-        # Модальная форма: закрывается по клику вне (пункт «меню и формы»).
-        # Проверяется на ПК (1440) и на мобильном (390); на странице форм
-        # несколько - показываем НАЗВАНИЕ формы + URL.
-        def _fc_norm(v):
-            if isinstance(v, dict):
-                return v.get('status'), v.get('name') or 'модальная форма'
-            return v, 'модальная форма'
-        _fc = []
-        for p in pages:
-            mob = p.get('mobile') or {}
-            for key, dev in (('form_close', 'ПК'), ('form_close_m', 'моб.')):
-                s, n = _fc_norm(mob.get(key))
-                if s:
-                    _fc.append((p, s, n, dev))
-        _fc_fail = [(p, n, d) for p, s, n, d in _fc if s == 'not_closed']
-        _fc_ok = [(p, n, d) for p, s, n, d in _fc if s == 'ok']
-        if _fc_fail:
-            _ux_line('⚠ Модальная форма НЕ закрывается по клику вне неё - '
-                     'проверить вручную: '
-                     + '; '.join(f'«{n}» [{d}] ({p["url"]})'
-                                 for p, n, d in _fc_fail[:3]), C.warn)
-        if _fc_ok:
-            _devs = ', '.join(sorted({d for _, _, d in _fc_ok}))
-            _n0 = _fc_ok[0][1]
-            _ux_line(f'✅ Модальная форма «{_n0}» закрывается по клику '
-                     f'вне неё ({_devs}).', C.ok)
-        if not _fc_fail and not _fc_ok:
-            _ux_line('· Модальная форма не распознана (кнопка звонка/заявки '
-                     'не найдена или окно на весь экран) - пропуск.',
-                     C.text_muted)
-
-
 # ── Лист «Метаданные» (п.1.8: title/description/H1, дубли, URL) ─────
-
-_META_FIELD_LABEL = {'title': 'title', 'description': 'description', 'h1': 'H1'}
-
-
-def _meta_section_title(ws, row, text, color):
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = text
-    c.font = _font(size=13, bold=True, color=color)
-    c.fill = _fill(C.accent_soft)
-    c.alignment = _align(indent=1)
-    ws.row_dimensions[row].height = 24
-
-
-def _meta_ok_line(ws, row, text):
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = text
-    c.font = _font(size=10, color=C.ok)
-    c.alignment = _align(indent=1)
-    ws.row_dimensions[row].height = 22
-
-
-def _meta_pointer_line(ws, row, text):
-    """Нейтральная (не зелёная) строка-указатель на детали в «Проблемах» -
-    в отличие от _meta_ok_line не означает «всё в порядке»."""
-    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-    c = ws.cell(row=row, column=2)
-    c.value = text
-    c.font = _font(size=10, italic=True, color=C.text_muted)
-    c.alignment = _align(indent=1)
-    ws.row_dimensions[row].height = 20
-
-
-def _build_meta_sheet(wb, results, meta_summary):
-    """Лист метаданных: проблемы title/description/H1 на страницах +
-    дубли внутри города / между городами + дубли УРЛОВ.
-    Добавляется только если проверка метаданных выполнялась."""
-    checked = [r for r in results if getattr(r, 'meta', None)]
-    # SEO-тексты категорий (галочка 1.6) живут на этом же листе - лист
-    # нужен и когда метаданные (1.8) выключены, а 1.6 включена.
-    _seo_pages = [r for r in results
-                  if getattr(r, 'seo_text', None) is not None]
-    if not checked and not meta_summary and not _seo_pages:
-        return
-
-    bad = [r for r in checked if r.meta.get('issues')]
-    warned = [r for r in checked if (not r.meta.get('issues')
-                                     and r.meta.get('warnings'))]
-    dups = (meta_summary or {}).get('duplicates') or {}
-    same_city = dups.get('same_city') or []
-    cross_city = dups.get('cross_city') or []
-    url_dups_all = (meta_summary or {}).get('url_duplicates') or []
-    url_dups = [d for d in url_dups_all if d.get('problem') != 'not_301']
-    url_not301 = [d for d in url_dups_all if d.get('problem') == 'not_301']
-    test_domains = (meta_summary or {}).get('test_domains') or []
-    td_open = [t for t in test_domains if t.get('state') == 'indexable']
-    has_bugs = bool(bad or same_city or cross_city or url_dups or td_open)
-    _seo_warned = any((r.seo_text or {}).get('warnings') for r in _seo_pages)
-
-    ws = wb.create_sheet('Метаданные')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = (C.err if has_bugs
-                                    else C.warn if _seo_warned else C.ok)
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 18   # Город
-    ws.column_dimensions['C'].width = 14   # Тип
-    ws.column_dimensions['D'].width = 62   # URL
-    ws.column_dimensions['E'].width = 60   # Проблема / значение
-    ws.column_dimensions['F'].width = 3
-
-    ws.merge_cells('B2:E2')
-    c = ws['B2']
-    c.value = 'Метаданные и дубли (п.1.8)'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:E3')
-    c = ws['B3']
-    c.value = ('Каждая страница выборки: title, meta description и H1 есть и не '
-               'пустые, город поддомена присутствует в title/description, длины '
-               'в рекомендуемых рамках (title 10–70 символов, description '
-               '50–160). Выход за рамки - предупреждение (не баг). Дубли: '
-               'одинаковые title/description/H1 '
-               'у разных страниц одного города - баг; совпадение между '
-               'городами - повод проверить, есть ли в тексте ключ и город. '
-               'Дубли УРЛОВ: варианты '
-               'адреса (http, без слэша, www, index.php/index.html) должны '
-               '301-редиректить - ответ 200 без редиректа = страница доступна '
-               'по двум адресам; временный 302 вместо 301 = предупреждение.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
-
-    row = 5
-
-    # Мета-секции - только если метаданные (1.8) реально проверялись:
-    # при включённой одной 1.6 лист живёт ради SEO-текстов, и пустые
-    # «Проверено: 0» не рисуем.
-    if checked or meta_summary:
-        # ── Сводка ──
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = (f'Проверено страниц: {len(checked)} · с проблемами: {len(bad)} · '
-                   f'предупреждений: {len(warned)} · дублей в городе: {len(same_city)} · '
-                   f'межгородских: {len(cross_city)} · дублей URL: {len(url_dups)} · '
-                   f'временных редиректов: {len(url_not301)}')
-        c.font = _font(size=10, bold=True, color=C.err if has_bugs else C.ok)
-        c.fill = _fill(C.surface)
-        c.alignment = _align(wrap=True)
-        ws.row_dimensions[row].height = 30
-        row += 2
-
-    if checked:
-        # ── Секция 1: проблемы на страницах (сгруппированы по проблеме) ──
-        _meta_section_title(ws, row, f'Проблемы метаданных на страницах  ({len(bad)})',
-                            C.err if bad else C.ok)
-        row += 1
-        if not bad:
-            _meta_ok_line(ws, row, '✅ У всех проверенных страниц метаданные в порядке.')
-            row += 2
-        else:
-            _meta_pointer_line(ws, row, '· постранично - в «Проблемах» (раздел «Метаданные»).')
-            row += 2
-
-        # ── Секция 2: предупреждения (длины; сгруппированы по замечанию) ──
-        if warned:
-            _meta_section_title(ws, row, f'Предупреждения (длины)  ({len(warned)})', C.warn)
-            row += 1
-            _meta_pointer_line(ws, row, '· постранично - в «Проблемах» (раздел «Метаданные»).')
-            row += 2
-
-    # ── Секции 3-4: дубли метаданных (только если 1.8 выполнялась) ──
-    for title_text, groups, note in ((
-        (f'Дубли внутри города  ({len(same_city)})', same_city,
-         'Одинаковое значение у разных страниц одного поддомена.'),
-        (f'Одинаковый текст на разных городах  ({len(cross_city)})', cross_city,
-         'Значение совпадает у разных поддоменов. Само по себе повторение '
-         'между городами - не санкция: поддомены это разные хосты под свои '
-         'регионы. Смотреть надо на другое: несёт ли текст ключ и город. '
-         '«Каталог» на всех городах плох не повтором, а тем, что в нём нет '
-         'ни ключевого слова, ни города - тогда как на главной шаблон город '
-         'подставляет. Правильно: «Каталог металлопроката в Москве».'),
-    ) if meta_summary is not None else ()):
-        _meta_section_title(ws, row, title_text, C.err if groups else C.ok)
-        row += 1
-        if not groups:
-            _meta_ok_line(ws, row, '✅ Дублей не найдено.')
-            row += 1
-        else:
-            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-            c = ws.cell(row=row, column=2)
-            c.value = note
-            c.font = _font(size=9, italic=True, color=C.text_muted)
-            c.alignment = _align(indent=1)
-            ws.row_dimensions[row].height = 18
-            row += 1
-            for g in groups:
-                fld = _META_FIELD_LABEL.get(g.get('field'), g.get('field'))
-                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-                c = ws.cell(row=row, column=2)
-                c.value = (f'{fld}: «{g.get("value", "")}»  -  '
-                          f'{len(g.get("pages", []))} '
-                          f'{_plural_pages(len(g.get("pages", [])))}')
-                c.font = _font(size=10, bold=True, color=C.text)
-                c.fill = _fill(C.surface)
-                c.alignment = _align(wrap=True, indent=1)
-                ws.row_dimensions[row].height = 22
-                row += 1
-            _meta_pointer_line(
-                ws, row,
-                '· страницы по каждой группе - в «Проблемах» (раздел «Метаданные»).')
-            row += 1
-        row += 1
-
-    # ── Секция: SEO-тексты категорий (нейроответы / AI overviews) ──
-    _st_pages = [r for r in results
-                 if getattr(r, 'seo_text', None) is not None]
-    if _st_pages:
-        _st_warned = [r for r in _st_pages if r.seo_text.get('warnings')]
-        _meta_section_title(
-            ws, row,
-            f'SEO-тексты категорий (нейроответы)  ({len(_st_warned)})',
-            C.warn if _st_warned else C.ok)
-        row += 1
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
-        c = ws.cell(row=row, column=2)
-        c.value = ('Формальные признаки текста для нейроответов/AI overviews: '
-                   'текст есть, содержит главный ключ (из H1), фото с alt, '
-                   'таблица с caption+thead, структура (h2/h3, таблицы, '
-                   'нумерованные списки). Смысловую полноту ответа и '
-                   'LSI-слова машина не оценит - это семантическое ядро и '
-                   'ручная вычитка.')
-        c.font = _font(size=9, italic=True, color=C.text_muted)
-        c.alignment = _align(indent=1, wrap=True)
-        ws.row_dimensions[row].height = 30
-        row += 1
-        if not _st_warned:
-            _meta_ok_line(ws, row, '✅ На проверенных категориях SEO-тексты '
-                                   'с ключом, фото, таблицей и структурой.')
-            row += 2
-        else:
-            _meta_pointer_line(ws, row, '· постранично - в «Проблемах» (раздел «Метаданные»).')
-            row += 2
-
-    if meta_summary is not None:
-        _meta_section_title(ws, row, f'Дубли УРЛОВ (нет редиректа)  ({len(url_dups)})',
-                            C.err if url_dups else C.ok)
-        row += 1
-        if not url_dups:
-            _meta_ok_line(ws, row, '✅ Все варианты адресов (HTTP→HTTPS, '
-                                   'слэш на конце, www/без www, index.php/'
-                                   'index.html/home.php) отдают постоянный '
-                                   '301-редирект на канонический вид.')
-            row += 1
-        else:
-            _meta_pointer_line(ws, row, '· список - в «Проблемах» (раздел «Метаданные»).')
-            row += 1
-        row += 1
-        # Временные редиректы: склейка не передаётся, 301 обязателен
-        if url_not301:
-            _meta_section_title(
-                ws, row,
-                f'Временный редирект вместо 301  ({len(url_not301)})', C.warn)
-            row += 1
-            _meta_pointer_line(ws, row, '· список - в «Проблемах» (раздел «Метаданные»).')
-            row += 2
-
-        # ── Тестовые домены (test./dev./stage.…) ──
-        _meta_section_title(
-            ws, row, f'Тестовые домены  ({len(td_open)})',
-            C.err if td_open else C.ok)
-        row += 1
-        if not test_domains:
-            _meta_ok_line(ws, row, '✅ Типовые тестовые поддомены (test., dev., '
-                                   'stage., beta., demo., old., new.) не '
-                                   'существуют или редиректят на основной сайт.')
-            row += 1
-        else:
-            for t in test_domains:
-                ws.merge_cells(start_row=row, start_column=2,
-                               end_row=row, end_column=5)
-                c = ws.cell(row=row, column=2)
-                if t.get('state') == 'indexable':
-                    c.value = (f'❌ https://{t.get("host", "")}/ отвечает 200 и '
-                               f'ОТКРЫТ для индексации - дубль всего сайта в '
-                               f'индексе; закрыть (noindex / Disallow: /) или '
-                               f'убрать')
-                    c.font = _font(size=10, color=C.err)
-                else:
-                    c.value = (f'✓ https://{t.get("host", "")}/ существует, но '
-                               f'закрыт от индексации (noindex/robots) - ок')
-                    c.font = _font(size=10, color=C.text_muted)
-                c.alignment = _align(indent=2, wrap=True)
-                ws.row_dimensions[row].height = 18
-                row += 1
-
-
-# Лист «Контакты по городам» удалён (04.08.2026): находки (конкретное поле/
-# город/что не так) полностью попадают в «Проблемы» через
-# report_priorities._kp_findings - полная ✓/✗-матрица по городам не нужна,
-# только реальные расхождения.
-
-
-# Лист «Замена рекл. номера» удалён: находки (конфиг ≠ КП, подмена не
-# работает в рекламе/поиске) полностью попадают в «Проблемы» через
-# report_priorities._calltracking_findings - полная таблица по каждому
-# городу (даже без проблем) не нужна.
-
 
 # ── Лист «Автокликер» ──────────────────────────────────────────────
 
@@ -4846,13 +2767,7 @@ def _build_autoclick_sheet(wb, autoclick):
 _SHEET_GROUPS = [
     # «Структура страниц» - НЕ в группе: остаётся отдельным листом сразу
     # после «Обзора» (как было до пересборки).
-    ('Техничка', [
-        'Индексация', 'Метаданные',
-        'Ошибки JavaScript',
-        'Валидация и скорость', 'Страница 404',
-        'Дубли главной', 'Индексация (Арсенкин)',
-        'Фильтры ПС', 'Нагрузка и парсинг',
-    ]),
+    ('Техничка', []),               # находки - в «Проблемы», листы удалены
     ('Верстка', []),                # находки - в «Проблемы», лист удалён
     ('Безопасность', []),          # находки - в «Проблемы», лист удалён
     ('КП', []),                     # находки - в «Проблемы», листы удалены
@@ -4883,15 +2798,16 @@ _GROUP_NOTES = {
                      '(раздел «Безопасность»), приоритет – на «План работ».'),
     'Формы': ('Детальная проверка форм – в отдельном отчёте форм-тестера '
               '(свой файл). Здесь, в основном отчёте, форма заявки/телефон '
-              'проверяется как часть страниц (см. лист «Структура страниц» '
-              'и лист «Техничка», раздел «Страница 404»).'),
+              'проверяется как часть страниц (см. лист «Структура страниц», '
+              'а находки теста 404-страницы – на листе «Проблемы», раздел '
+              '«Страница 404»).'),
     'Контент': ('Изображения (alt, современные форматы webp/avif, вес, '
                 'lazy, уникальность картинок категорий, фото товаров не '
                 'дублируются между категориями) – находки на листе '
                 '«Проблемы» (раздел «Изображения»). SEO-текст частотных '
-                'категорий (нейроответы) – на листе «Техничка» '
-                '(«Метаданные»); блоки товара (похожие/отзывы/сортировка/'
-                'цены) – на листе «Структура страниц».'),
+                'категорий (нейроответы) – там же, раздел «Метаданные»; '
+                'блоки товара (похожие/отзывы/сортировка/цены) – на листе '
+                '«Структура страниц».'),
 }
 
 _GROUP_TAB_RANK = {C.err: 0, C.warn: 1}   # для агрегированного цвета вкладки
@@ -4905,15 +2821,28 @@ def _old_to_group_map() -> dict:
     return {old: grp for grp, olds in _SHEET_GROUPS for old in olds}
 
 
+# Листы, которых больше нет: их находки целиком собраны в «Проблемы» и там
+# различаются колонкой «Раздел». Ссылки на такой лист («см. лист «Индексация»»)
+# без подмены вели бы на несуществующую вкладку.
+_MOVED_TO_PROBLEMS = {
+    'Индексация', 'Метаданные', 'Ошибки JavaScript', 'Валидация и скорость',
+    'Страница 404', 'Дубли главной', 'Индексация (Арсенкин)', 'Фильтры ПС',
+    'Нагрузка и парсинг', 'Вёрстка', 'Безопасность', 'Изображения', 'Разметка',
+}
+
+
 def _sheet_ref(name: str) -> str:
-    """«X» -> «Группа», раздел «X»» для листа, который _regroup_into_groups
-    сливает в групповой (Индексация/Метаданные/… -> Техничка/Аналитика и
-    т.п.) - для текста внутри предложений («см. лист {ref}»). Листы вне
-    группировки (Обзор/Проблемы/Структура страниц/Страницы/Хосты и
-    аномалии/…) возвращаются как есть - «X»."""
+    """«X» -> ссылка на существующую вкладку для текста «см. лист {ref}»:
+    лист, который _regroup_into_groups сливает в групповой (Ошибки сервисов ->
+    Аналитика) - «Группа», раздел «X»; удалённый лист, находки которого уехали
+    в «Проблемы» (Индексация/Метаданные/…) - «Проблемы», раздел «X». Листы вне
+    группировки (Обзор/Проблемы/Структура страниц/Страницы/Хосты и аномалии/…)
+    возвращаются как есть - «X»."""
     grp = _old_to_group_map().get(name)
     if grp and grp != name:
         return f'«{grp}», раздел «{name}»'
+    if name in _MOVED_TO_PROBLEMS:
+        return f'«Проблемы», раздел «{name}»'
     return f'«{name}»'
 
 
@@ -5213,14 +3142,18 @@ _LEVEL_COLOR = {'Ошибка': 'err', 'Предупреждение': 'warn'}
 _LEVEL_FILL = {'Ошибка': 'err_soft', 'Предупреждение': 'warn_soft'}
 
 
-def _build_problems_sheet(wb, findings, source_by_url=None):
+def _build_problems_sheet(wb, findings, source_by_url=None, interlinking=None):
     """Лист «Проблемы»: одна строка = одна находка на одной странице (все
     проверки чек-листа - report_priorities.collect_findings). Фильтруется
     по любой колонке (автофильтр).
 
     source_by_url - {адрес: откуда взят}, чтобы к странице из карты сайта или
     своего списка приписать источник: иначе непонятно, откуда в отчёте взялся
-    незнакомый URL, которого нет в каталоге проекта."""
+    незнакомый URL, которого нет в каталоге проекта.
+
+    interlinking - вывод о перелинковке по САЙТУ (report_priorities.
+    interlinking_note): это не дефект конкретной страницы, поэтому идёт
+    отдельным блоком ПОД таблицей и только когда есть проблема."""
     source_by_url = source_by_url or {}
     _MAX_ROWS = 3000
     ws = wb.create_sheet('Проблемы')
@@ -5272,6 +3205,11 @@ def _build_problems_sheet(wb, findings, source_by_url=None):
         fix = meta['title']
         if meta.get('why'):
             fix = f'{fix} - {meta["why"]}'
+        # Справочные цифры находки (замеры скорости, объёмы, «проверено N
+        # путей») - раньше они стояли строкой на детальном листе; листов
+        # больше нет, поэтому дописываем их сюда.
+        if getattr(f, 'fix_note', ''):
+            fix = f'{fix} {f.fix_note}'
         _тип = f.page_type
         _ист = source_by_url.get(f.url)
         if _ист and _ист != 'Каталог проекта':
@@ -5305,6 +3243,29 @@ def _build_problems_sheet(wb, findings, source_by_url=None):
         c = ws.cell(row=row, column=2)
         c.value = f'…показаны первые {_MAX_ROWS} из {len(ordered)} находок.'
         c.font = _font(size=10, italic=True, color=C.text_muted)
+
+    # Перелинковка - вывод по всему сайту, а не по странице: в таблицу с
+    # автофильтром такую строку класть некуда (нет ни адреса, ни типа
+    # страницы), поэтому показываем блоком под таблицей.
+    if interlinking:
+        row += 2
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=10)
+        c = ws.cell(row=row, column=2, value='Перелинковка (внутренний вес)')
+        c.font = _font(size=12, bold=True, color=C.warn)
+        c.fill = _fill(C.warn_soft)
+        c.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 22
+        row += 1
+        for текст, стиль in ((interlinking.get('text', ''), C.text),
+                             (interlinking.get('detail', ''), C.text_muted)):
+            if not текст:
+                continue
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=10)
+            c = ws.cell(row=row, column=2, value=текст)
+            c.font = _font(size=10, color=стиль)
+            c.alignment = _align(wrap=True, vertical='top', indent=1)
+            ws.row_dimensions[row].height = _row_height_for(текст, 230)
+            row += 1
 
 
 # ── Лист «План работ» - приоритезированные задачи (report_priorities) ──
@@ -5485,7 +3446,13 @@ def build_report(
                       + home_dupes_findings(home_dupes)
                       + arsenkin_findings(arsenkin)
                       + page404_findings(p404_check)
-                      + stress_check_findings(stress_check))
+                      + stress_check_findings(stress_check)
+                      # Бывшие секции листа «Техничка»: интерактив (слайдер/
+                      # меню/cookie/модалка) и доставка статики (сжатие, кеш,
+                      # общее время загрузки). Листа больше нет - находки
+                      # живут только здесь.
+                      + ux_interactive_findings(console_check)
+                      + static_delivery_findings(w3c_check))
     # Сайт-уровневые находки индексации (пути/файлы) и санкции ПС - только
     # в «Проблемы» (список), «План работ» их агрегирует extra_site_tasks()
     # ниже - через group_into_tasks они бы задвоились. Остальные (дубли
@@ -5497,7 +3464,14 @@ def build_report(
     _findings = (_page_findings + indexing_site_findings(indexing_summary)
                 + ps_filters_findings(ps_filters)
                 + service_issues_findings(service_issues)
-                + w3c_findings(w3c_check))
+                + w3c_findings(w3c_check)
+                # Тоже бывшие секции «Технички»: ЧПУ-адреса (строка на адрес),
+                # гигиена robots.txt и разделы «Отгрузки»/новости. Как и
+                # прочие сайт-уровневые - только в «Проблемы», в «План работ»
+                # они попадают через group_into_tasks ниже не идут.
+                + url_format_findings(indexing_summary)
+                + robots_hygiene_findings(indexing_summary)
+                + content_sections_findings(indexing_summary))
     _tasks = (group_into_tasks(_page_findings)
              + extra_site_tasks(indexing_summary=indexing_summary,
                                 wm_metrics=wm_metrics,
@@ -5771,12 +3745,11 @@ def build_report(
     nav_items = [
         ('Обзор', 'эта страница: сколько проверено, сколько работает и сколько сломано.'),
         ('План работ', 'все задачи по приоритету: что чинить, почему это важно и кому передать.'),
-        ('Проблемы', 'каждая находка отдельной строкой: уровень, раздел, адрес страницы. Фильтруется как угодно.'),
+        ('Проблемы', 'каждая находка отдельной строкой: уровень, раздел, адрес страницы. Фильтруется как угодно. Здесь же вся SEO-техничка: индексация (robots/sitemap/canonical/ЧПУ), метаданные, микроразметка, ошибки JavaScript, валидность W3C, скорость и доставка статики, тест страницы 404, санкции ПС, нагрузка/парсинг, 404 в индексе.'),
         ('Структура страниц', 'что чинить в контенте по типам страниц (главная/каталог/листинг/разделы/карточки товаров/технические) - где нет цены, кнопок заказа, заголовка. Красное = баг.'),
         ('Страницы', 'каждая проверенная страница: адрес, код ответа, статус, скорость, битые переменные в тексте, откуда перешли и сколько находок (детали - в «Проблемах»).'),
         ('Хосты и аномалии', 'проблемы уровня сайта/хоста целиком (не одной страницы): фатальные проблемы из сервисов и аномалии обхода/ссылок «от себя-прошлого» - обычно самое срочное.'),
         ('Трафик и траст', 'краткая сводка трафика по странам/периодам (визиты, каналы, лиды, конверсия, отказы) + траст проекта (ИКС/DR), lite-профиль беклинков и страницы в ГСК.'),
-        ('Техничка', 'SEO-техничка: индексация (robots/sitemap/canonical), метаданные и единственность заголовков, микроразметка (OG/Schema), ошибки JavaScript, валидность W3C и скорость, тест страницы 404, санкции ПС, нагрузка/парсинг, битые переменные; 404 в индексе (в т.ч. по данным Метрики) - на листе «Проблемы».'),
         ('Админка', 'работа функций настройки в админке: поддомены/категории/товары/тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
         ('Аналитика', 'письма Вебмастера/GSC/Я.Бизнеса/2ГИС/Google, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений.'),
         ('Контент', 'если есть лист - уникальность контента (text.ru); изображения, вёрстка, КП и контакты - все на листе «Проблемы».'),
@@ -5881,7 +3854,8 @@ def build_report(
     # попавшие в прогон из карты сайта / своего списка, а не из каталога.
     _src_by_url = {r.url: getattr(r, 'source', '') for r in results
                    if getattr(r, 'source', '')}
-    _build_problems_sheet(wb, _findings, _src_by_url)
+    _build_problems_sheet(wb, _findings, _src_by_url,
+                          interlinking=interlinking_note(results))
 
     # ─── Лист структурной проверки (идёт сразу после «Обзора») ──────
     _build_structure_sheet(wb, results)
@@ -5896,17 +3870,11 @@ def build_report(
     # ─── Лист «Трафик и траст» - краткая сводка + ИКС/DR + линкпрофиль ──
     _build_traffic_overview_sheet(wb, traffic, trust, link_profile, gsc_pages)
 
-    # ─── Лист индексации (п.1.7) - если проверка выполнялась ────────
-    _build_indexing_sheet(wb, results, indexing_summary)
-
     # Листы «Заголовки и мета» и «Регион и СНГ» удалены - их находки
     # (единственность title/description/H1, чужой город/телефон/почта,
     # СНГ-чистота, технический регион по гео-тегам) полностью попадают в
     # «Проблемы» через report_priorities.py (_meta_unique_findings/
     # _region_findings/_cis_findings/_geo_findings).
-
-    # ─── Лист метаданных (п.1.8) - если проверка выполнялась ────────
-    _build_meta_sheet(wb, results, meta_summary)
 
     # Лист «Вёрстка» удалён - находки (viewport/CSS/меню/mixed content/
     # favicon, поиск по сайту, фильтрация товаров) полностью в «Проблемы».
@@ -5919,25 +3887,23 @@ def build_report(
     # report_priorities.py (generic-обработчик issues/warnings и
     # _images_findings соответственно).
 
-    # ─── Лист ошибок JS в консоли (п.1.14) - если проверка выполнялась ──
-    _build_console_sheet(wb, console_check)
+    # Групповой лист «Техничка» и все его секции (Индексация, Метаданные,
+    # Ошибки JavaScript, Валидация и скорость, Страница 404, Дубли главной,
+    # Индексация (Арсенкин), Фильтры ПС, Нагрузка и парсинг) удалены: их
+    # находки целиком собраны в «Проблемы» - там таблица с автофильтром, где
+    # видно и уровень, и раздел, и адрес. Всё, что было НЕ находкой (✅-строки,
+    # счётчики, замеры), либо ушло хвостом в колонку «Как исправить», либо
+    # убрано как справочный шум. Сборщики: indexing_site_findings,
+    # url_format_findings, robots_hygiene_findings, content_sections_findings,
+    # metadata_site_findings, _console_findings, ux_interactive_findings,
+    # w3c_findings, static_delivery_findings, page404_findings,
+    # home_dupes_findings, arsenkin_findings, ps_filters_findings,
+    # stress_check_findings. Перелинковка (вывод по сайту, а не по странице) -
+    # блоком под таблицей «Проблемы» через interlinking_note.
 
-    # ─── Лист валидации W3C + скорости (п.1.16) - если выполнялась ──────
-    _build_w3c_sheet(wb, w3c_check)
     # Лист «Страницы в ГСК» удалён - секция на «Трафик и траст».
-    _build_home_dupes_sheet(wb, home_dupes)
-    _build_arsenkin_sheet(wb, arsenkin)
-
-    # ─── Лист «Страница 404» (п.1.18) - если проверка выполнялась ──────
-    _build_404_sheet(wb, p404_check)
 
     # Лист «404 в индексе» удалён - находки уже в «Проблемы».
-
-    # ─── Лист «Фильтры ПС» (п.1.19) - если проверка выполнялась ────────
-    _build_ps_filters_sheet(wb, ps_filters)
-
-    # ─── Лист «Нагрузка и парсинг» - если стресс-пробы выполнялись ─────
-    _build_stress_sheet(wb, stress_check)
 
     # Листы «Ссылочный профиль» и «Траст проекта» удалены - обе метрики
     # (не находки) теперь секциями на листе «Трафик и траст».

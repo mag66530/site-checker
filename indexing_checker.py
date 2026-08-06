@@ -1033,7 +1033,7 @@ _RE_CYR = re.compile(r'[а-яё]', re.I)
 _RE_UPPER = re.compile(r'[A-Z]')
 _RE_SLUG_JUNK = re.compile(r'[^a-z0-9\-_./]')
 
-_EXAMPLES = 10        # сколько примеров каждого типа показывать в отчёте
+_MAX_BAD_PATHS = 500  # потолок адресов одного типа (каждый - строка «Проблем»)
 
 
 def check_url_format(paths: list) -> dict:
@@ -1050,7 +1050,11 @@ def check_url_format(paths: list) -> dict:
            'underscore': [], 'junk_chars': []}
 
     def _add(kind, p):
-        if len(out[kind]) < _EXAMPLES:
+        # Держим адреса целиком (до потолка), а не 10 примеров: в «Проблемах»
+        # каждый кривой адрес - отдельная строка, иначе исполнителю непонятно,
+        # что именно править. Потолок - чтобы отчёт не раздувался на сайтах,
+        # где не-ЧПУ вообще весь каталог.
+        if len(out[kind]) < _MAX_BAD_PATHS:
             out[kind].append(p)
         out[kind + '_n'] += 1
 
