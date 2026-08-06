@@ -77,6 +77,10 @@ PROJECTS = {
             'yandex': 'mepen88@yandex.ru', 'domain': 'mepen.ru'},
     'imp': {'name': 'ИМП - Инметпром', 'google': 'inmetprom77@gmail.com',
             'yandex': 'inmetprom77@yandex.ru', 'domain': 'inmetprom.ru'},
+    # Почты кабинетов проекта пока не переданы - страница честно покажет
+    # прочерк вместо адреса, а не выдаст чужой аккаунт.
+    'sm': {'name': 'SM - SHOPMET', 'google': '', 'yandex': '',
+           'domain': 'shopmet.ru'},
 }
 
 
@@ -185,9 +189,13 @@ st.session_state['ac_project_sel'] = pid
 proj = PROJECTS[pid]
 st.markdown(
     f"Войди в браузере в аккаунты проекта **{proj['name']}**:\n"
-    f"- Google (GSC): `{proj['google']}`\n"
-    f"- Yandex (Вебмастер): `{proj['yandex']}`"
+    f"- Google (GSC): `{proj['google'] or '— почта не задана'}`\n"
+    f"- Yandex (Вебмастер): `{proj['yandex'] or '— почта не задана'}`"
 )
+if not (proj.get('google') and proj.get('yandex')):
+    st.warning('У проекта не указаны почты кабинетов - допишите их в PROJECTS '
+               '(checklists/autoclickers.py), иначе непонятно, под каким '
+               'аккаунтом логиниться.')
 
 _cloud_session = _session_secret(pid)
 if _cdp:

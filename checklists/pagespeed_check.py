@@ -35,7 +35,7 @@ PID_FILE = OUT_ROOT / 'run.pid'
 PROJECTS = {
     'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром',
     'mpe': 'МПЭ - Мепэн', 'mpi': 'МПИ - МетПромИнтекс',
-    'sm': 'SHOPMET',
+    'sm': 'SM - SHOPMET',
 }
 
 # цвета (в тон приложению + пороги Google)

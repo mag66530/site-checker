@@ -37,7 +37,7 @@ PROJECT_NAMES = {
     'mpe_cart': 'МПЭ - Корзина',
     'avia': 'АПС - Авиапромсталь',
     'metpromko': 'МПК - Метпромко',
-    'shopmet': 'SHOPMET',
+    'shopmet': 'SM - SHOPMET',
 }
 
 

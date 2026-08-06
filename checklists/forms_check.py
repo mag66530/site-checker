@@ -98,7 +98,7 @@ PROJECTS = {
     'mpe': {'name': 'МПЭ - Мепэн', 'domain': 'mepen.ru'},
     'avia': {'name': 'АПС - Авиапромсталь', 'domain': 'aviastal.ru'},
     'metpromko': {'name': 'МПК - Метпромко', 'domain': 'metpromko.ru'},
-    'shopmet': {'name': 'SHOPMET', 'domain': 'shopmet.ru'},
+    'shopmet': {'name': 'SM - SHOPMET', 'domain': 'shopmet.ru'},
 }
 
 # Проекты-варианты берут справочник городов у «родителя» (свой config.py,
