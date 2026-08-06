@@ -52,9 +52,15 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
     cache/forms/<base>/fired_goals.json - отчёт целей их подхватит."""
     import re
     import json
+    import goals_tester as gt
+    # У части проектов id в «Проверке целей» и в форм-тестере РАЗНЫЕ: цели знают
+    # проект как «sm», а конфиг форм лежит под «shopmet». Без перевода запуск
+    # падал на разборе аргументов («--project sm» форм-тестер не знает), и цели
+    # отправки форм оставались непроверенными.
+    forms_pid = gt._форм_проект(base)
     _что = 'заказ (корзина → оформление)' if only_orders else 'все формы'
-    _stamp(f'ФОРМЫ: запускаю прогон ({_что}) для «{base}» (Москва) - поймать цели')
-    args = [sys.executable, 'forms_run.py', '--project', base, '--no-admin',
+    _stamp(f'ФОРМЫ: запускаю прогон ({_что}) для «{forms_pid}» (Москва) - поймать цели')
+    args = [sys.executable, 'forms_run.py', '--project', forms_pid, '--no-admin',
             '--check-goals']       # цели ловим ЗДЕСЬ (в «Проверке целей»)
     if only_orders:
         args.append('--only-orders')
@@ -74,7 +80,7 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
     # заказ-сценарий 403-ится, не доходит до /cart/ и корзинные url-цели красные.
     _env = os.environ.copy()
     _gp = (os.environ.get('GOALS_PROXY') or '').strip()
-    if _gp and not _env.get('FORMS_PROXY') and _forms_uses_proxy(base):
+    if _gp and not _env.get('FORMS_PROXY') and _forms_uses_proxy(forms_pid):
         _env['FORMS_PROXY'] = _gp
         _stamp(f'ФОРМЫ: прокси прогона проброшен форм-движку ({_gp.split("@")[-1]})')
     try:
@@ -90,7 +96,8 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
             for m in _patu.finditer(line):
                 urls.add(m.group(1).rstrip('.,;'))
         proc.wait(timeout=1800)
-        d = ROOT / 'cache' / 'forms' / base
+        # Складываем туда же, откуда отчёт целей их читает (_форм_проект).
+        d = ROOT / 'cache' / 'forms' / forms_pid
         d.mkdir(parents=True, exist_ok=True)
         (d / 'fired_goals.json').write_text(
             json.dumps(sorted(fired), ensure_ascii=False), encoding='utf-8')
