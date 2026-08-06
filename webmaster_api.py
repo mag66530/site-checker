@@ -302,6 +302,35 @@ def _extract_inprogress_codes(payload) -> set:
     return codes
 
 
+def _без_зеркал(хосты: list) -> list:
+    """Оставить по ОДНОЙ записи на домен: https-зеркало вместо http.
+
+    В Вебмастере один и тот же сайт обычно добавлен дважды - «http:site:80» и
+    «https:site:443», это разные host_id с одинаковым доменом. Раньше цикл
+    опрашивал оба: вдвое больше запросов, а в логе один хост шёл двумя
+    строками с разными числами («активных 0» у мёртвого http-зеркала и
+    «активных 18» у рабочего https) - читалось как сбой.
+
+    Вход/выход: [(домен, host_id, url), …]. ЧИСТАЯ функция - юнит-тест без сети.
+    """
+    лучшие: dict[str, tuple] = {}
+    for запись in хосты:
+        домен = запись[0]
+        if not домен:
+            continue
+        hid = str(запись[1] or '')
+        текущий = лучшие.get(домен)
+        if текущий is None:
+            лучшие[домен] = запись
+            continue
+        # https выигрывает у http; при прочих равных - первая запись.
+        если_https = hid.lower().startswith('https:')
+        было_https = str(текущий[1] or '').lower().startswith('https:')
+        if если_https and not было_https:
+            лучшие[домен] = запись
+    return list(лучшие.values())
+
+
 def _parse_diagnostics(project_id: str, host: str, host_id: str,
                        payload: dict, inprogress_codes: set = None) -> list:
     """Из ответа /diagnostics/ собрать список ServiceIssue (только активные).
@@ -385,6 +414,7 @@ def fetch_webmaster_issues(project_id: str, token: str,
             selected = [(_norm_host(h.get('ascii_host_url', '')),
                          h.get('host_id'), h.get('ascii_host_url', ''))
                         for h in api_hosts]
+        selected = _без_зеркал(selected)
 
         all_issues = []
         _dumped = False
@@ -440,7 +470,12 @@ def fetch_webmaster_issues(project_id: str, token: str,
                 # Диагностика: если сырых проблем много, а активных 0 - видно в логе
                 _log(f'  {host_norm}: в ответе {_raw_n}, активных {len(hi)}')
                 if _raw_n and not hi and isinstance(_raw, dict):
-                    _log(f'    ключи/шаблон: {list(_raw)[:6]}')
+                    # Не ошибка: Вебмастер отдаёт ВСЕ известные проверки, и у
+                    # чистого сайта они все в состоянии «отсутствует». Раньше
+                    # сюда печатался список кодов - читалось как список проблем,
+                    # хотя проблем как раз нет.
+                    _log(f'    все {_raw_n} проверок в состоянии «нет проблемы» '
+                         f'- активных замечаний у сайта нет')
             except Exception as e:
                 _log(f'⚠ Вебмастер-API ({host_norm}): {e}')
 
