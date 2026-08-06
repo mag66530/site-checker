@@ -81,6 +81,8 @@ PROJECTS = {
     # прочерк вместо адреса, а не выдаст чужой аккаунт.
     'sm': {'name': 'SM - SHOPMET', 'google': '', 'yandex': '',
            'domain': 'shopmet.ru'},
+    'mpi': {'name': 'МПИ - МетПромИнтекс', 'google': '', 'yandex': '',
+            'domain': 'metpromintex.ru'},
 }
 
 
