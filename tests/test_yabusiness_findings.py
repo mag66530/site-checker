@@ -142,6 +142,58 @@ def test_отзывы_не_выполнялись_молчим():
     assert review_priority_findings({'available': False, 'note': 'нет конфига'}) == []
 
 
+# ── Лист «Я.Бизнес и GMB»: только таблица докупки ─────────────────────
+
+def _лист_отзывов(rp):
+    from openpyxl import Workbook
+
+    import reporter
+    wb = Workbook()
+    wb.remove(wb.active)
+    reporter._build_yabusiness_sheet(wb, rp)
+    return wb
+
+
+def test_лист_содержит_только_таблицу_докупки():
+    wb = _лист_отзывов({'available': True, 'total_branches': 1,
+                        'low_rating_count': 1, 'branches': [_филиал()]})
+    ws = wb['Я.Бизнес и GMB']
+    значения = [str(c.value) for row in ws.iter_rows() for c in row if c.value]
+    текст = ' '.join(значения)
+    assert 'Отзывы: приоритет докупки' in текст
+    assert 'Пермь' in текст and 'Докупить' in текст
+    # блоков Я.Бизнеса на листе больше нет - они в «Проблемах»
+    for ушло in ('Поддомены без организации', 'Поддомены с организацией',
+                 'Организации без поддомена', 'объединены в Сеть',
+                 'Заполненность профиля'):
+        assert ушло not in текст, f'блок «{ушло}» вернулся на лист'
+
+
+def test_лист_фильтруется_по_городам():
+    wb = _лист_отзывов({'available': True, 'total_branches': 1,
+                        'low_rating_count': 0, 'branches': [
+                            _филиал(rating=4.9, low_rating=False)]})
+    assert wb['Я.Бизнес и GMB'].auto_filter.ref                # таблица рабочая
+
+
+def test_листа_нет_без_проверки_отзывов():
+    """Данные Я.Бизнеса без отзывов лист не создают - всё уехало в «Проблемы»."""
+    from openpyxl import Workbook
+
+    import reporter
+    wb = Workbook()
+    wb.remove(wb.active)
+    reporter._build_yabusiness_sheet(wb, None)
+    assert 'Я.Бизнес и GMB' not in wb.sheetnames
+
+
+def test_отзывы_не_выполнялись_лист_объясняет_причину():
+    wb = _лист_отзывов({'available': False, 'note': 'нет конфига reviews-sm.csv'})
+    значения = [str(c.value) for row in wb['Я.Бизнес и GMB'].iter_rows()
+                for c in row if c.value]
+    assert any('reviews-sm.csv' in v for v in значения)
+
+
 # ── Задачи «Плана работ» ──────────────────────────────────────────────
 
 def test_находки_группируются_в_задачи_с_понятными_названиями():

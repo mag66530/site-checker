@@ -1867,229 +1867,103 @@ def _collect_anomaly_rows(wm_metrics, link_profile):
 # ── Лист «Я.Бизнес/GMB» ─────────────────────────────────────────────
 
 
-def _build_yabusiness_sheet(wb, yabusiness, review_priority=None):
-    """Лист «Я.Бизнес/GMB»: каждый поддомен зарегистрирован под свой регион
-    (Яндекс.Бизнес). Внизу - единая проверка отзывов (приоритет докупки,
-    Яндекс+2ГИС). Данные из кабинета Справочника на сессии. Добавляется,
-    только если проверка выполнялась."""
-    if not yabusiness:
+def _build_yabusiness_sheet(wb, review_priority=None):
+    """Лист «Я.Бизнес и GMB»: приоритет докупки отзывов (Яндекс + 2ГИС).
+
+    Остальные пункты Я.Бизнеса (поддомен без карточки, карточки без
+    поддомена, филиалы вне Сети, незаполненные поля профиля) с листа убраны -
+    они целиком собираются в «Проблемы» через
+    report_priorities.yabusiness_findings, где их видно вместе с остальными
+    находками и можно фильтровать. Здесь остаётся ровно то, что в колонки
+    «Проблем» не ложится: рабочая таблица по городам с рейтингами обоих
+    сервисов и числом отзывов к докупке."""
+    rp = review_priority
+    if not rp:
         return
-    missing = yabusiness.get('missing') or []
-    matched = yabusiness.get('matched') or []
-    orphans = yabusiness.get('orphan_orgs') or []
-    has_problem = bool(missing) or not yabusiness.get('available')
 
     ws = wb.create_sheet('Я.Бизнес и GMB')
     ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = (C.err if missing else C.ok
-                                    if yabusiness.get('available') else C.warn)
-    for col, w in (('A', 3), ('B', 26), ('C', 30), ('D', 42),
-                   ('E', 12), ('F', 12), ('G', 13), ('H', 11), ('I', 3)):
+    _low = rp.get('low_rating_count', 0) if rp.get('available') else 0
+    ws.sheet_properties.tabColor = (
+        C.err if _low else C.ok if rp.get('available') else C.warn)
+    for col, w in (('A', 3), ('B', 26), ('C', 13), ('D', 11),
+                   ('E', 14), ('F', 12), ('G', 14), ('H', 11), ('I', 3)):
         ws.column_dimensions[col].width = w
 
-    ws.merge_cells('B2:D2')
+    ws.merge_cells('B2:H2')
     c = ws['B2']
-    c.value = 'Я.Бизнес / GMB'
+    c.value = 'Отзывы: приоритет докупки'
     c.font = _font(size=16, bold=True)
     ws.row_dimensions[2].height = 26
 
-    ws.merge_cells('B3:D3')
+    ws.merge_cells('B3:H3')
     c = ws['B3']
-    c.value = ('Каждый поддомен (город) должен быть зарегистрирован в '
-               'Яндекс.Бизнесе под своим регионом. Берём организации '
-               'аккаунта из кабинета Справочника (город/регион карточки) и '
-               'сверяем с городами поддоменов. «Сети» без единого города '
-               'пропускаем (это группы). Данные - на сессии Яндекса (как '
-               'автокликеры); при партнёрском доступе перейдём на API.')
+    c.value = ('Рейтинг филиала = худший из Яндекс/2ГИС. Докупаем по 2 отзыва '
+               '(3 при низком рейтинге). Порядок: рейтинг < 4.7 выше, затем '
+               'города от миллионников к меньшим. Сами находки по Я.Бизнесу '
+               '(нет карточки под город, филиалы вне Сети, незаполненный '
+               'профиль) - на листе «Проблемы», раздел «Я.Бизнес».')
     c.font = _font(size=10, italic=True, color=C.text_soft)
     c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 56
+    ws.row_dimensions[3].height = 46
 
     row = 5
-    if not yabusiness.get('available'):
-        ws.merge_cells(f'B{row}:D{row}')
-        cc = ws[f'B{row}']
-        cc.value = f'⚪ {yabusiness.get("note", "Проверка не выполнена.")}'
+    if not rp.get('available'):
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+        cc = ws.cell(row=row, column=2,
+                     value='⚪ ' + (rp.get('note') or 'проверка не выполнялась'))
         cc.font = _font(size=10, color=C.text_muted)
         cc.alignment = _align(indent=1, wrap=True)
         return
 
-    n_sub = yabusiness.get('total_subdomains', 0)
-    ws.merge_cells(f'B{row}:D{row}')
-    cc = ws[f'B{row}']
-    cc.value = (f'Поддоменов: {n_sub}  ·  с орг под свой город: '
-                f'{len(matched)}  ·  БЕЗ орг: {len(missing)}  ·  активных '
-                f'карточек в аккаунте: {yabusiness.get("active_orgs", 0)} '
-                f'(сетей/пустых: {yabusiness.get("chains_or_empty", 0)})')
-    cc.font = _font(size=11, bold=True, color=C.err if missing else C.ok)
-    cc.fill = _fill(C.surface)
-    cc.alignment = _align(indent=1, wrap=True)
+    low = rp.get('low_rating_count', 0)
+    tot = rp.get('total_branches', 0)
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
+    h = ws.cell(row=row, column=2,
+                value=('❌ ' if low else '✅ ')
+                + f'Филиалов с рейтингом < 4.7: {low} из {tot}')
+    h.font = _font(size=11, bold=True, color=C.err if low else C.ok)
+    h.fill = _fill(C.surface)
+    h.alignment = _align(indent=1)
     ws.row_dimensions[row].height = 22
     row += 2
 
-    def _hdr(text):
-        nonlocal row
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-        h = ws.cell(row=row, column=2, value=text)
-        h.font = _font(size=11, bold=True, color=C.text)
-        h.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 20
+    cols = [('Город', 2), ('Рейтинг Я', 3), ('Отз. Я', 4),
+            ('Рейтинг 2ГИС', 5), ('Отз. 2ГИС', 6),
+            ('Рейтинг (мин)', 7), ('Докупить', 8)]
+    for name, ci in cols:
+        hc = ws.cell(row=row, column=ci, value=name)
+        hc.font = _font(size=9, bold=True, color=C.bg_elev)
+        hc.fill = _fill(C.header_navy)
+        hc.alignment = _align(indent=1)
+        hc.border = _border()
+    ws.row_dimensions[row].height = 18
+    _hdr_row = row
+    row += 1
+
+    def _rv(v):
+        return '' if v is None else v
+
+    for b in (rp.get('branches') or []):
+        y = b.get('yandex') or {}
+        g = b.get('twogis') or {}
+        low_b = b.get('low_rating')
+        vals = [b.get('city') or '', _rv(y.get('rating')), _rv(y.get('count')),
+                _rv(g.get('rating')), _rv(g.get('count')), _rv(b.get('rating')),
+                b.get('order')]
+        for j, (_name, ci) in enumerate(cols):
+            cell = ws.cell(row=row, column=ci, value=vals[j])
+            clr = C.err if (ci == 7 and low_b) else C.text
+            cell.font = _font(size=9, color=clr, bold=(ci == 7 and low_b))
+            cell.alignment = _align(indent=1)
+            cell.border = _border(color=C.border_light)
+        ws.row_dimensions[row].height = 15
         row += 1
 
-    # Поддомены без орг - главная находка.
-    if missing:
-        _hdr(f'❌ Поддомены без организации под их город ({len(missing)})')
-        for m in missing:
-            ws.cell(row=row, column=2, value=m.get('city') or '').font = _font(
-                size=10, color=C.err)
-            uc = ws.cell(row=row, column=3, value=m.get('url') or '')
-            uc.font = _font(size=9, color=C.accent, underline='single')
-            if m.get('url'):
-                uc.hyperlink = m['url']
-            ws.cell(row=row, column=4,
-                    value='нет карточки в Я.Бизнесе под этот город').font = \
-                _font(size=9, color=C.text_soft)
-            ws.row_dimensions[row].height = 15
-            row += 1
-        row += 1
-
-    # Поддомены с орг.
-    if matched:
-        _hdr(f'✅ Поддомены с организацией ({len(matched)})')
-        for m in matched:
-            o = m.get('org') or {}
-            ws.cell(row=row, column=2, value=m.get('city') or '').font = _font(
-                size=10, color=C.ok)
-            ws.cell(row=row, column=3,
-                    value=f'орг {o.get("permalink","")} · регион '
-                    f'{o.get("region","")}').font = _font(
-                size=9, color=C.text_soft)
-            ws.cell(row=row, column=4, value=o.get('addr') or '').font = _font(
-                size=9, color=C.text_muted)
-            ws.row_dimensions[row].height = 15
-            row += 1
-        row += 1
-
-    # Организации без поддомена (лишние/чужие города).
-    if orphans:
-        _hdr(f'⚠ Организации без поддомена ({len(orphans)})')
-        for o in orphans:
-            ws.cell(row=row, column=2, value=o.get('city') or '').font = _font(
-                size=10, color=C.warn)
-            ws.cell(row=row, column=3,
-                    value=f'орг {o.get("permalink","")} · регион '
-                    f'{o.get("region","")}').font = _font(size=9, color=C.text_soft)
-            ws.cell(row=row, column=4, value=o.get('addr') or '').font = _font(
-                size=9, color=C.text_muted)
-            ws.row_dimensions[row].height = 15
-            row += 1
-        row += 1
-
-    # ── Пункт: все филиалы объединены в Сеть ──
-    cch = yabusiness.get('chain_check') or {}
-    if cch:
-        row += 1
-        united = cch.get('united')
-        _hdr(('✅ ' if united else '❌ ') + 'Все филиалы объединены в Сеть')
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
-        cc = ws.cell(row=row, column=2)
-        if united:
-            cc.value = (f'все филиалы объединены в сети (в сетях '
-                        f'{cch.get("chain_members", 0)} филиалов, отдельных '
-                        f'компаний нет)')
-            cc.font = _font(size=10, color=C.ok)
-        else:
-            cc.value = (f'НЕ объединены: {cch.get("standalone_companies", 0)} '
-                        f'отдельных компаний (карточек) вне сети; в сетях '
-                        f'{cch.get("chain_members", 0)} филиалов, сетей '
-                        f'{cch.get("chains", 0)} - отдельные свести в Сеть')
-            cc.font = _font(size=10, color=C.err)
-        cc.alignment = _align(indent=1, wrap=True)
-        ws.row_dimensions[row].height = 30
-        row += 2
-
-    # ── Пункт: максимально заполнен профиль ──
-    pch = yabusiness.get('profile_check') or {}
-    porgs = pch.get('orgs') or []
-    if porgs:
-        row += 1
-        _hdr(('✅ ' if pch.get('all_full') else '⚠ ')
-             + f'Заполненность профиля организаций ({len(porgs)})')
-        for o in porgs:
-            miss = o.get('missing') or []
-            ws.cell(row=row, column=2, value=o.get('city') or '').font = _font(
-                size=10, color=C.ok if not miss else C.warn)
-            ws.cell(row=row, column=3,
-                    value=f'заполнено {o.get("filled",0)}/{o.get("total",0)}'
-                    ).font = _font(size=9, color=C.text_soft)
-            ws.cell(row=row, column=4,
-                    value=('всё заполнено' if not miss
-                           else 'не заполнено: ' + ', '.join(miss))).font = \
-                _font(size=9, color=C.text_muted if not miss else C.warn)
-            ws.row_dimensions[row].height = 15
-            row += 1
-
-    # ── Отзывы: приоритет докупки (единая проверка отзывов, Яндекс + 2ГИС) ──
-    rp = review_priority
-    if rp:
-        row += 1
-        if not rp.get('available'):
-            _hdr('Отзывы: приоритет докупки')
-            ws.merge_cells(start_row=row, start_column=2, end_row=row,
-                           end_column=8)
-            cc = ws.cell(row=row, column=2,
-                         value='⚪ ' + (rp.get('note') or 'не выполнялось'))
-            cc.font = _font(size=10, color=C.text_muted)
-            cc.alignment = _align(indent=1, wrap=True)
-            row += 1
-        else:
-            low = rp.get('low_rating_count', 0)
-            tot = rp.get('total_branches', 0)
-            _hdr(('❌ ' if low else '✅ ')
-                 + f'Отзывы: приоритет докупки - с рейтингом < 4.7: {low} '
-                 + f'из {tot}')
-            ws.merge_cells(start_row=row, start_column=2, end_row=row,
-                           end_column=8)
-            nt = ws.cell(row=row, column=2, value=(
-                'Рейтинг филиала = худший из Яндекс/2ГИС. Докупаем по 2 отзыва '
-                '(3 при низком рейтинге). Порядок: рейтинг < 4.7 выше, затем '
-                'города от миллионников к меньшим.'))
-            nt.font = _font(size=9, italic=True, color=C.text_soft)
-            nt.alignment = _align(indent=1, wrap=True)
-            ws.row_dimensions[row].height = 26
-            row += 1
-            cols = [('Город', 2), ('Рейтинг Я', 3), ('Отз. Я', 4),
-                    ('Рейтинг 2ГИС', 5), ('Отз. 2ГИС', 6),
-                    ('Рейтинг (мин)', 7), ('Докупить', 8)]
-            for name, ci in cols:
-                h = ws.cell(row=row, column=ci, value=name)
-                h.font = _font(size=9, bold=True, color=C.text)
-                h.fill = _fill(C.surface)
-                h.alignment = _align(indent=1)
-                h.border = _border()
-            ws.row_dimensions[row].height = 16
-            row += 1
-
-            def _rv(v):
-                return '' if v is None else v
-
-            for b in (rp.get('branches') or []):
-                y = b.get('yandex') or {}
-                g = b.get('twogis') or {}
-                low_b = b.get('low_rating')
-                vals = [b.get('city') or '', _rv(y.get('rating')),
-                        _rv(y.get('count')), _rv(g.get('rating')),
-                        _rv(g.get('count')), _rv(b.get('rating')),
-                        b.get('order')]
-                for j, (_name, ci) in enumerate(cols):
-                    cell = ws.cell(row=row, column=ci, value=vals[j])
-                    clr = C.err if (ci == 7 and low_b) else C.text
-                    cell.font = _font(size=9, color=clr,
-                                      bold=(ci == 7 and low_b))
-                    cell.alignment = _align(indent=1)
-                    cell.border = _border()
-                ws.row_dimensions[row].height = 15
-                row += 1
+    # Фильтр по городам/рейтингу - таблица рабочая, по ней покупают отзывы.
+    if row - 1 > _hdr_row:
+        ws.auto_filter.ref = f'B{_hdr_row}:H{row - 1}'
+        ws.freeze_panes = f'B{_hdr_row + 1}'
 
 
 _TRAFFIC_COLS = [
@@ -3920,8 +3794,11 @@ def build_report(
     # ─── Лист «Настройки в админке» - если проверка выполнялась ────────
     _build_admin_settings_sheet(wb, admin_settings)
 
-    # ─── Лист «Я.Бизнес/GMB» + единая проверка отзывов (приоритет докупки) ──
-    _build_yabusiness_sheet(wb, yabusiness, review_priority)
+    # ─── Лист «Я.Бизнес и GMB»: только приоритет докупки отзывов ──────
+    # Остальные пункты Я.Бизнеса (нет карточки под город, карточки без
+    # поддомена, филиалы вне Сети, незаполненный профиль) - в «Проблемы»
+    # через yabusiness_findings, лист их больше не показывает.
+    _build_yabusiness_sheet(wb, review_priority)
 
     # Лист «Динамика трафика» удалён - сводка трафика уже на «Трафик и траст».
 
