@@ -83,6 +83,12 @@ PROJECTS = {
            'domain': 'shopmet.ru'},
     'mpi': {'name': 'МПИ - МетПромИнтекс', 'google': '', 'yandex': '',
             'domain': 'metpromintex.ru'},
+    # Почты кабинетов (GSC/Вебмастер) пока не переданы - страница честно
+    # покажет прочерк вместо адреса; впишите, когда будут.
+    'avia': {'name': 'АПС - Авиапромсталь', 'google': '', 'yandex': '',
+             'domain': 'aviastal.ru'},
+    'mpk': {'name': 'МПК - Метпромко', 'google': '', 'yandex': '',
+            'domain': 'metpromko.ru'},
 }
 
 
