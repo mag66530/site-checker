@@ -1007,7 +1007,13 @@ def run_check(pid, params, creds, log, progress):
                 _hm = asyncio.run(audit_html_sitemap(
                     _main.host, proxy_url=proxy_url))
                 _idx_summary['html_sitemap'] = _hm
-                if _hm.get('status') != 200:
+                if _hm.get('blocked'):
+                    # 403/429/503 - нас не пустили; про наличие карты это
+                    # ничего не говорит.
+                    log(f'⚠ HTML-карту сайта проверить не удалось: сайт '
+                        f'ответил HTTP {_hm["blocked"]} (защита от ботов '
+                        f'или лимит запросов)')
+                elif _hm.get('status') != 200:
                     log(f'⚠ HTML-карта сайта не найдена '
                         f'(HTTP {_hm.get("status")})')
                 elif _hm.get('junk_links'):

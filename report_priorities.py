@@ -1739,6 +1739,17 @@ def indexing_site_findings(indexing_summary: Optional[dict]) -> list:
     for r in s.get('required_pages') or []:
         if r.get('found'):
             continue
+        # Сайт ответил 403/429/503 - это про защиту от ботов, а не про то, что
+        # страницы нет. Выдавать одно за другое нельзя: «нет страницы» уходит
+        # клиенту в работу, а тут мы просто не смогли посмотреть.
+        if r.get('blocked'):
+            out.append(Finding(
+                'Предупреждение', 'Индексация',
+                f'обязательную страницу не удалось проверить: {r.get("label", "")}',
+                url=_idx_url(s, '/'),
+                detail=f'сайт ответил HTTP {r["blocked"]} (защита от ботов '
+                       f'или лимит запросов) - открыть типовые адреса вручную'))
+            continue
         out.append(Finding('Ошибка', 'Индексация',
                            f'обязательная страница не найдена: {r.get("label", "")}',
                            url=_idx_url(s, '/')))
