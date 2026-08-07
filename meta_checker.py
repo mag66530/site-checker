@@ -455,6 +455,28 @@ def _short(s: str, n: int = 60) -> str:
     return s if len(s) <= n else s[:n - 1] + '…'
 
 
+# Чистота H1. <br> внутри допустим (перенос строки). Исключение из «тегов
+# внутри»: ВЕСЬ текст H1 обёрнут в ОДИН <span> БЕЗ атрибутов (частый шаблон
+# <h1><span>Название</span></h1>) - визуально ничего не меняет и для поиска
+# безвреден, багом не считаем. Всё остальное - атрибуты (style/class/id),
+# несколько тегов, вложенность, эмфазис/блочные теги (<b>/<i>/<div>…), частичная
+# обёртка - это реальная разметка/стили, их по-прежнему ловим.
+_RE_H1_BR = re.compile(r'<\s*/?\s*br\s*/?\s*>', re.I)
+_RE_H1_TAG = re.compile(r'<\s*/?[a-z]', re.I)
+_RE_H1_BENIGN_SPAN = re.compile(r'\s*<span\s*>[^<>]*</span\s*>\s*', re.I)
+
+
+def _h1_has_inner_markup(inner: str) -> bool:
+    """Есть ли внутри <h1> РЕАЛЬНАЯ разметка/стили (а не чистый текст/один голый
+    <span>). True → показать бага «теги внутри H1»."""
+    s = _RE_H1_BR.sub(' ', inner)
+    if not _RE_H1_TAG.search(s):
+        return False                     # тегов (кроме <br>) нет - чистый текст
+    if _RE_H1_BENIGN_SPAN.fullmatch(s):
+        return False                     # весь H1 - один <span> без атрибутов
+    return True
+
+
 def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict:
     """Проверка единственности title/description/H1 (+ дубли H2).
     Возвращает {'issues': [...], 'counts': {...}}."""
@@ -501,7 +523,7 @@ def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict
     m_h1 = re.search(r'<h1\b[^>]*>(.*?)</h1>', h, re.I | re.S)
     if m_h1:
         inner = m_h1.group(1)
-        if re.search(r'<(?!/?br\b)[a-z]', inner, re.I):
+        if _h1_has_inner_markup(inner):
             issues.append({'тип': 'h1', 'найдено': 'теги внутри',
                            'пояснение': 'внутри H1 вложенные теги/стили - '
                                         'H1 должен быть чистым текстом: '
