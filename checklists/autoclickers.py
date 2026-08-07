@@ -79,10 +79,11 @@ PROJECTS = {
             'yandex': 'inmetprom77@yandex.ru', 'domain': 'inmetprom.ru'},
     # Почты кабинетов проекта пока не переданы - страница честно покажет
     # прочерк вместо адреса, а не выдаст чужой аккаунт.
-    'sm': {'name': 'SM - SHOPMET', 'google': '', 'yandex': '',
-           'domain': 'shopmet.ru'},
-    'mpi': {'name': 'МПИ - МетПромИнтекс', 'google': '', 'yandex': '',
-            'domain': 'metpromintex.ru'},
+    # У SHOPMET и МПИ кабинеты на одном аккаунте (metpromintex@…).
+    'sm': {'name': 'SM - SHOPMET', 'google': 'metpromintex@gmail.com',
+           'yandex': 'metpromintex@yandex.com', 'domain': 'shopmet.ru'},
+    'mpi': {'name': 'МПИ - МетПромИнтекс', 'google': 'metpromintex@gmail.com',
+            'yandex': 'metpromintex@yandex.com', 'domain': 'metpromintex.ru'},
     # Почты кабинетов (GSC/Вебмастер) пока не переданы - страница честно
     # покажет прочерк вместо адреса; впишите, когда будут.
     'avia': {'name': 'АПС - Авиапромсталь', 'google': '', 'yandex': '',
