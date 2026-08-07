@@ -385,6 +385,11 @@ def _extract_stylesheet_links(html: str, base_url: str) -> list[str]:
 
 _RE_IMG_ANY = re.compile(
     r'<img\b[^>]*?(?:data-src|src)\s*=\s*["\']([^"\']+)["\']', re.I)
+# Неотрендеренный клиентский шаблон в src: {{...}} (Handlebars/Vue), ${...}
+# (JS-литералы), <%...%> (EJS/ASP), #{...} (Pug). Это НЕ адрес файла, а заготовка
+# карточки - реальные картинки подставит JS. Проверять её как картинку
+# бессмысленно (всегда «404»), иначе ложная «битая картинка» на каждом листинге.
+_RE_TEMPLATE_SRC = re.compile(r'\{\{|\}\}|\$\{|<%|%>|#\{')
 
 
 def _extract_img_srcs(html: str, base_url: str, limit: int = 15) -> list[str]:
@@ -395,6 +400,12 @@ def _extract_img_srcs(html: str, base_url: str, limit: int = 15) -> list[str]:
         src = src.strip()
         if not src or src.startswith('data:'):
             continue
+        # Заготовка-шаблон, а не файл - пропускаем (её «404» - ложь).
+        if _RE_TEMPLATE_SRC.search(src):
+            continue
+        # Браузер нормализует обратные слеши в URL (\ -> /) для http(s); повторяем,
+        # иначе HEAD по литеральному '\' даёт ложный 404, хотя картинка грузится.
+        src = src.replace('\\', '/')
         absu = urljoin(base_url, src).split('#')[0]
         sp = urlsplit(absu)
         if sp.scheme not in ('http', 'https') or sp.netloc != host:
