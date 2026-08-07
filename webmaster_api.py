@@ -256,7 +256,10 @@ def _get(token: str, path: str, proxy_url: Optional[str] = None,
         if r.status_code == 401:
             raise PermissionError('OAuth токен невалиден или просрочен (401)')
         if r.status_code == 403:
-            raise PermissionError('Нет доступа (403): проверь scope webmaster:hostinfo')
+            raise PermissionError(
+                'Нет доступа (403): либо у токена нет scope webmaster:hostinfo, '
+                'либо у аккаунта нет прав на эти данные хоста (напр. доступ '
+                'делегированный, а данные - только для владельца)')
         if r.status_code == 429:
             time.sleep(delay)
             delay = min(delay * 2, 40)

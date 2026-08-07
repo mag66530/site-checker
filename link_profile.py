@@ -222,30 +222,48 @@ def fetch_link_profile(project_id, token, proxy_url=None, log=None):
 
         _cutoff = _recent_cutoff()       # граница «внезапности» доноров - раз на прогон
         hosts_out = []
+        _denied = 0                      # хостов, где /links/external отдал 403
         for host_norm, host_id in selected:
             if not host_id:
                 continue
+            _s_err = _h_err = None
             try:
                 samples = _get(
                     token, f'/user/{user_id}/hosts/{host_id}/links/external/samples',
                     proxy_url, params={'offset': 0, 'limit': SAMPLE_LIMIT})
             except Exception as e:
-                _log(f'⚠ Ссылочный профиль ({host_norm}) samples: {e}')
-                samples = None
+                samples, _s_err = None, e
             try:
                 history = _get(
                     token, f'/user/{user_id}/hosts/{host_id}/links/external/history',
                     proxy_url, params={'indicator': 'LINKS_TOTAL_COUNT'})
             except Exception as e:
-                _log(f'⚠ Ссылочный профиль ({host_norm}) history: {e}')
-                history = None
+                history, _h_err = None, e
             if samples is None and history is None:
+                # Системный 403 по /links/external НЕ спамим на каждый хост
+                # (было 242×2 строки): ИКС этим же токеном берётся (см. траст),
+                # значит scope есть - копим в счётчик, объясним одной строкой ниже.
+                # Прочие ошибки (сеть/таймаут) показываем как раньше.
+                _e = _s_err or _h_err
+                if _e is not None and '403' in str(_e):
+                    _denied += 1
+                else:
+                    _log(f'⚠ Ссылочный профиль ({host_norm}): {_e}')
                 continue
             hosts_out.append(build_host_profile(
                 host_norm, _links_panel_url(host_id), samples, history,
                 recent_cutoff=_cutoff))
+        note = None
+        if _denied:
+            note = (f'API Вебмастера вернул 403 на внешние ссылки по {_denied} '
+                    f'хост(ам). ИКС по ним берётся тем же токеном, значит scope '
+                    f'webmaster:hostinfo есть - дело НЕ в токене. Вероятно, доступ '
+                    f'к хостам делегированный (представитель), а данные по внешним '
+                    f'ссылкам Яндекс отдаёт только ВЛАДЕЛЬЦУ - сверяйте вручную в '
+                    f'панели Вебмастера/GSC.')
+            _log('⚠ Ссылочный профиль: ' + note)
         return {'available': True, 'hosts': hosts_out,
-                'gsc_links_url': GSC_LINKS_URL}
+                'gsc_links_url': GSC_LINKS_URL, 'note': note}
     except PermissionError as e:
         return {'available': False, 'note': f'Доступ к API Вебмастера: {e}'}
     except Exception as e:
