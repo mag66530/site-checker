@@ -21,6 +21,9 @@ class _FakeMissingLoc:
     def is_visible(self):
         return False
 
+    def evaluate(self, js, *a):
+        return False
+
     def click(self, timeout=None, force=None):
         raise Exception("not found")  # noqa: BLE001
 
@@ -51,6 +54,10 @@ class _FakeCloseBtn:
     def is_visible(self):
         return True
 
+    def evaluate(self, js, *a):
+        # заглушка _реально_видим: крестик открытой модалки видно
+        return True
+
     def click(self, timeout=None, force=None):
         self._on_click()
 
@@ -73,6 +80,12 @@ class _FakeModal:
         return 1 if self._state["visible"] else 0
 
     def is_visible(self):
+        return self._state["visible"]
+
+    def evaluate(self, js, *a):
+        # заглушка _реально_видим: прозрачность/скрытие родителей. Настоящая
+        # проверка нужна из-за модалок, закрываемых через opacity:0 - для
+        # Playwright они остаются «видимыми» (см. test_modal_close_browser.py).
         return self._state["visible"]
 
     def locator(self, sel):
