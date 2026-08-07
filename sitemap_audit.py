@@ -215,12 +215,17 @@ async def audit_html_sitemap(host: str, *, proxy_url=None) -> dict:
     """HTML-карта сайта (доп. чек-лист): существует по типовому адресу
     и не содержит ссылок на служебные страницы.
 
-    Возвращает {'url': str|None, 'status': int|None,
-                'junk_links': [{'url','label'}], 'error': str|None}."""
+    Возвращает {'url': str|None, 'status': int|None, 'blocked': int|None,
+                'junk_links': [{'url','label'}], 'error': str|None}.
+
+    blocked - код вида 403/429/503, если сайт не пустил пробу. Тогда «карта не
+    найдена» сказать нельзя: мы просто не смогли посмотреть."""
     import aiohttp
     from urllib.parse import urlsplit, urljoin
     from sitemap import _sitemap_headers
-    out = {'url': None, 'status': None, 'junk_links': [], 'error': None}
+    from indexing_checker import is_blocked_status
+    out = {'url': None, 'status': None, 'blocked': None,
+           'junk_links': [], 'error': None}
     try:
         async with aiohttp.ClientSession(headers=_sitemap_headers()) as session:
             html = None
@@ -237,6 +242,8 @@ async def audit_html_sitemap(host: str, *, proxy_url=None) -> dict:
                             break
                         if out['status'] is None:
                             out['url'], out['status'] = u, r.status
+                        if out['blocked'] is None and is_blocked_status(r.status):
+                            out['blocked'] = r.status
                 except Exception as e:
                     if out['error'] is None:
                         out['error'] = str(e)

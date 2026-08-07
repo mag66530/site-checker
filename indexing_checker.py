@@ -500,6 +500,23 @@ _ADVISORY_PATHS = [
     ('политика конфиденциальности', '/privacy/'),
 ]
 
+# Коды «сайт нас не пустил»: ответ говорит о защите/лимите, а НЕ о том, что
+# страницы нет. Сайты под антиботом (у МПИ это видно прямо: любой запрос
+# уводит на /challenge) отдают такое на служебные пробы, и раньше это
+# читалось как «страница не найдена - создать», хотя страница могла
+# существовать. Разница принципиальная: «нет страницы» - задача клиенту,
+# «нас не пустили» - ограничение проверки, и врать об этом нельзя.
+#   403 - доступ запрещён (часто как раз антибот/WAF)
+#   429 - слишком много запросов
+#   503 - временно недоступен (типовой ответ страницы-испытания)
+BLOCKED_STATUSES = (403, 429, 503)
+
+
+def is_blocked_status(status) -> bool:
+    """Ответ - про защиту сайта, а не про отсутствие страницы."""
+    return status in BLOCKED_STATUSES
+
+
 # Обязательные страницы (чек-лист: «созданы страницы Конфиденциальность,
 # Cookies, Доставка, Оплата»). У каждой - типовые варианты адреса; страница
 # есть, если ХОТЯ БЫ ОДИН вариант отвечает 200 (не редиректом на главную).
@@ -894,14 +911,21 @@ async def check_paths_against_robots(host: str, paths: list, *,
                          and not re.search(
                              r'auth|login|register|basket|cart|\.php',
                              p_, re.I)][:2]
-                found = None
+                found, blocked_st = None, None
                 for v in smart + list(variants):
                     st, fpath, _h = await _fetch_final(f'https://{host}{v}')
                     # Редирект на главную = страницы нет (заглушка-склейка).
                     if st == 200 and (fpath or '/').strip('/'):
                         found = fpath
                         break
-                out['required_pages'].append({'label': label, 'found': found})
+                    # Запомним, что сайт нас не пустил: без этого «страницы
+                    # нет» и «нас не пустили» выглядят одинаково.
+                    if blocked_st is None and is_blocked_status(st):
+                        blocked_st = st
+                out['required_pages'].append({
+                    'label': label, 'found': found,
+                    'blocked': None if found else blocked_st,
+                })
 
             # Даты публикации/обновления у статей и новостей.
             out['news_dates'] = None
