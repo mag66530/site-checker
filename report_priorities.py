@@ -175,6 +175,51 @@ def _describe_img_src(src: str) -> str:
     return src
 
 
+def _img_name(u: str) -> str:
+    """Имя файла картинки из адреса/пути (для компактного detail)."""
+    u = (u or '').strip()
+    return u.rstrip('/').rsplit('/', 1)[-1] or u
+
+
+def _img_list_detail(items, *, sized=False, limit=10) -> str:
+    """Компактный список картинок для колонки «Подробности»: имена файлов
+    (для веса - с килобайтами). Больше limit - хвост сворачиваем в «…и ещё N»,
+    чтобы строка отчёта не разрасталась (человек раскроет ячейку сам)."""
+    parts, seen = [], set()
+    for it in items or []:
+        if isinstance(it, dict):
+            name, kb = _img_name(it.get('url', '')), it.get('kb')
+            part = f'{name} ({kb} КБ)' if (sized and kb) else name
+        else:
+            part = _img_name(str(it))
+        if part and part not in seen:
+            seen.add(part)
+            parts.append(part)
+    shown = '; '.join(parts[:limit])
+    if len(parts) > limit:
+        shown += f' …и ещё {len(parts) - limit}'
+    return shown
+
+
+def _img_warning_detail(text: str, im: dict) -> str:
+    """Какие ИМЕННО картинки стоят за предупреждением (вес/форматы/lazy/имена):
+    адрес страницы уже есть в своей колонке, а тут - список конкретных файлов,
+    иначе на странице с десятками картинок непонятно, что чинить."""
+    t = (text or '').lower()
+    names = im.get('names') or {}
+    if 'больше' in t and 'кб' in t:                 # тяжёлые (>300 КБ)
+        return _img_list_detail(im.get('heavy'), sized=True)
+    if 'тяжелее' in t:                              # 150-300 КБ
+        return _img_list_detail(im.get('mid'), sized=True)
+    if 'современные форматы' in t:                  # legacy jpg/png/gif
+        return _img_list_detail(im.get('legacy'))
+    if 'не совпадают с alt' in t:                   # имена ≠ транслит alt
+        return _img_list_detail(names.get('mismatch'))
+    if 'ленивая загрузка' in t and 'видео' not in t:  # картинки без lazy
+        return _img_list_detail(im.get('eager'))
+    return ''
+
+
 def _images_findings(images: Optional[dict], *, city, page_type, url) -> list:
     """Изображения: конкретная картинка (без alt / битая 404) - отдельной
     находкой с адресом картинки в detail, а не общий текст на всю страницу
@@ -197,7 +242,8 @@ def _images_findings(images: Optional[dict], *, city, page_type, url) -> list:
                            detail=_describe_img_src(b.get('url', ''))))
     for text in im.get('warnings') or []:
         out.append(Finding('Предупреждение', 'Изображения', str(text),
-                           city, page_type, url))
+                           city, page_type, url,
+                           detail=_img_warning_detail(str(text), im)))
     for w in im.get('cat_warnings') or []:
         d = im.get('cat_dup') or im.get('cat_img') or {}
         out.append(Finding('Предупреждение', 'Изображения', str(w),
