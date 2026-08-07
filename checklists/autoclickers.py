@@ -86,8 +86,8 @@ PROJECTS = {
             'yandex': 'metpromintex@yandex.com', 'domain': 'metpromintex.ru'},
     # Почты кабинетов (GSC/Вебмастер) пока не переданы - страница честно
     # покажет прочерк вместо адреса; впишите, когда будут.
-    'avia': {'name': 'АПС - Авиапромсталь', 'google': '', 'yandex': '',
-             'domain': 'aviastal.ru'},
+    'avia': {'name': 'АПС - Авиапромсталь', 'google': 'aviastal@gmail.com',
+             'yandex': 'aviastalru@yandex.ru', 'domain': 'aviastal.ru'},
     'mpk': {'name': 'МПК - Метпромко', 'google': '', 'yandex': '',
             'domain': 'metpromko.ru'},
 }
