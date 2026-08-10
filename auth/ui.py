@@ -66,7 +66,9 @@ PROJECT_SETTING_FIELDS = [
     ("metrika_oauth", "OAuth-токен Метрики", "password"),
     ("webmaster_oauth", "OAuth-токен Вебмастера", "password"),
     ("yandex_oauth", "OAuth-токен Яндекса", "password"),
-    ("autoclick_session", "Сессия Яндекса (base64, автокликеры/Я.Бизнес)", "textarea"),
+    # Одна строка сессии покрывает ОБА кабинета: экспорт забирает cookies и
+    # Яндекса, и Google - значит и Вебмастер, и Search Console, и Справочник.
+    ("autoclick_session", "Сессия браузера: Яндекс + Google (base64) - автокликеры, Я.Бизнес", "textarea"),
     ("gsc_service_account", "Сервис-аккаунт GSC (JSON)", "textarea"),
     # Ящики проекта для раздела «Уведомления» (письма Вебмастера, Я.Бизнеса,
     # 2ГИС, Google Search Console). Читаются по IMAP, поэтому нужен ПАРОЛЬ
