@@ -254,6 +254,12 @@ TECH_PAGE_PATHS = {
         '/about', '/contacts', '/delivery', '/payment',
         '/providers', '/vacancies',
     ],
+    # SHOPMET - тоже Next.js, адреса без завершающего слеша. Список собран по
+    # шапке и подвалу и проверен вживую (каждая отдаёт 200); типовых /delivery,
+    # /payment, /vacancies у проекта нет - страницы «Оплата и доставка» нет.
+    'sm': [
+        '/about', '/contacts', '/privacy', '/cookie', '/sitemap', '/search',
+    ],
 }
 
 
@@ -308,6 +314,9 @@ TECH_PAGE_LABELS = {
     # МПИ (пути на сайте без слеша - tech_page_label нормализует их сам)
     '/vacancies/': 'Вакансии',
     '/providers/': 'Поставщики',
+    # SHOPMET
+    '/privacy/': 'Политика конфиденциальности',
+    '/cookie/': 'Соглашение по cookie',
 }
 
 

@@ -82,6 +82,10 @@ GSC_GMAIL_CONFIG = {
         'secret_email': 'gsc_mpe_email',
         'secret_password': 'gsc_mpe_password',
     },
+    'sm': {
+        'secret_email': 'gsc_sm_email',
+        'secret_password': 'gsc_sm_password',
+    },
 }
 
 # Яндекс-почта - папка «Я.Бизнес» (те же credentials что у Метрики/Вебмастера)
@@ -89,6 +93,7 @@ YABUSINESS_YANDEX_CONFIG = {
     'smu': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_smu_email', 'secret_password': 'metrika_smu_password'},
     'imp': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_imp_email', 'secret_password': 'metrika_imp_password'},
     'mpe': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_mpe_email', 'secret_password': 'metrika_mpe_password'},
+    'sm': {'folder': 'Я.Бизнес', 'secret_email': 'metrika_sm_email', 'secret_password': 'metrika_sm_password'},
 }
 
 # Яндекс-почта - папка «2ГИС»
@@ -96,6 +101,7 @@ TWOGIS_YANDEX_CONFIG = {
     'smu': {'folder': '2ГИС', 'secret_email': 'metrika_smu_email', 'secret_password': 'metrika_smu_password'},
     'imp': {'folder': '2ГИС', 'secret_email': 'metrika_imp_email', 'secret_password': 'metrika_imp_password'},
     'mpe': {'folder': '2ГИС', 'secret_email': 'metrika_mpe_email', 'secret_password': 'metrika_mpe_password'},
+    'sm': {'folder': '2ГИС', 'secret_email': 'metrika_sm_email', 'secret_password': 'metrika_sm_password'},
 }
 
 # Яндекс-почта - папка с письмами Google Search Console (названа по-разному:
@@ -104,6 +110,7 @@ GOOGLE_FOLDER_YANDEX_CONFIG = {
     'mpe': {'folder': 'Гугл', 'secret_email': 'metrika_mpe_email', 'secret_password': 'metrika_mpe_password'},
     'smu': {'folder': 'Гугл', 'secret_email': 'metrika_smu_email', 'secret_password': 'metrika_smu_password'},
     'imp': {'folder': 'Google Search Console', 'secret_email': 'metrika_imp_email', 'secret_password': 'metrika_imp_password'},
+    'sm': {'folder': 'Гугл', 'secret_email': 'metrika_sm_email', 'secret_password': 'metrika_sm_password'},
 }
 
 # Gmail - те же ящики что GSC, письма от no-reply@accounts.google.com
@@ -111,6 +118,7 @@ GOOGLE_ACCOUNTS_CONFIG = {
     'smu': {'secret_email': 'gsc_smu_email', 'secret_password': 'gsc_smu_password'},
     'imp': {'secret_email': 'gsc_imp_email', 'secret_password': 'gsc_imp_password'},
     'mpe': {'secret_email': 'gsc_mpe_email', 'secret_password': 'gsc_mpe_password'},
+    'sm': {'secret_email': 'gsc_sm_email', 'secret_password': 'gsc_sm_password'},
 }
 
 # Порядок приоритетов для сортировки (меньший индекс = выше)
