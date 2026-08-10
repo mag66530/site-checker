@@ -11,5 +11,6 @@
   "trailing_slash": false,
   "has_filters": false,
   "use_proxy": false,
+  "gsc_resource": "sc-domain:shopmet.ru",
   "kp_sheet_url": "https://docs.google.com/spreadsheets/d/1FVf9tM1_V06n1VDQU7Fkk8HvvfimEuRwq8FtP8865xY/edit?usp=sharing"
 }

@@ -57,7 +57,7 @@ from metrika_404 import MAILBOX_CONFIG
 from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG, GSC_GMAIL_CONFIG,
     YABUSINESS_YANDEX_CONFIG, TWOGIS_YANDEX_CONFIG, GOOGLE_ACCOUNTS_CONFIG,
-    GOOGLE_FOLDER_YANDEX_CONFIG,
+    GOOGLE_FOLDER_YANDEX_CONFIG, DEFAULT_FOLDERS,
     fetch_webmaster_yandex, fetch_gsc_gmail,
     fetch_yandex_folder_simple, fetch_google_accounts,
     load_notifications,
@@ -106,18 +106,41 @@ def _secret_pid(base, project_id):
     return _secret(base)
 
 
-def get_metrika_credentials(project_id):
-    cfg = MAILBOX_CONFIG.get(project_id)
+# Ящики проекта: поля личного кабинета для каждого почтовика. Настройки
+# проекта ПЕРВЫЕ - руководитель заводит новый проект сам, без доступа к
+# секретам приложения; секреты остаются для уже настроенных проектов.
+_MAIL_FIELDS = {
+    'yandex': ('mail_yandex_login', 'mail_yandex_password'),
+    'google': ('mail_google_login', 'mail_google_password'),
+}
+
+
+def _mail_creds(kind, project_id, cfg):
+    """(логин, пароль) ящика проекта: сначала настройки из кабинета, потом
+    секреты приложения по именам из cfg. cfg может быть None - тогда работают
+    только настройки проекта (новый проект не требует правки кода)."""
+    поле_логин, поле_пароль = _MAIL_FIELDS[kind]
+    логин = пароль = None
+    try:
+        import auth
+        логин = auth.project_setting(project_id, поле_логин) or None
+        пароль = auth.project_setting(project_id, поле_пароль) or None
+    except Exception:
+        pass
+    if логин and пароль:
+        return логин, пароль
     if not cfg:
-        return None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
+        return логин, пароль
+    return (логин or _secret(cfg['secret_email']),
+            пароль or _secret(cfg['secret_password']))
+
+
+def get_metrika_credentials(project_id):
+    return _mail_creds('yandex', project_id, MAILBOX_CONFIG.get(project_id))
 
 
 def get_gsc_credentials(project_id):
-    cfg = GSC_GMAIL_CONFIG.get(project_id)
-    if not cfg:
-        return None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
+    return _mail_creds('google', project_id, GSC_GMAIL_CONFIG.get(project_id))
 
 
 def get_gsc_sa(project_id):
@@ -150,31 +173,26 @@ def get_gsc_sa(project_id):
 
 def get_yabusiness_credentials(project_id):
     cfg = YABUSINESS_YANDEX_CONFIG.get(project_id)
-    if not cfg:
-        return None, None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
+    л, п = _mail_creds('yandex', project_id, cfg)
+    return л, п, (cfg or {}).get('folder', DEFAULT_FOLDERS['yabusiness'])
 
 
 def get_twogis_credentials(project_id):
     cfg = TWOGIS_YANDEX_CONFIG.get(project_id)
-    if not cfg:
-        return None, None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
+    л, п = _mail_creds('yandex', project_id, cfg)
+    return л, п, (cfg or {}).get('folder', DEFAULT_FOLDERS['twogis'])
 
 
 def get_google_accounts_credentials(project_id):
-    cfg = GOOGLE_ACCOUNTS_CONFIG.get(project_id)
-    if not cfg:
-        return None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
+    return _mail_creds('google', project_id,
+                       GOOGLE_ACCOUNTS_CONFIG.get(project_id))
 
 
 def get_google_folder_credentials(project_id):
     """Яндекс-папка с письмами GSC («Гугл» / «Google Search Console»)."""
     cfg = GOOGLE_FOLDER_YANDEX_CONFIG.get(project_id)
-    if not cfg:
-        return None, None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
+    л, п = _mail_creds('yandex', project_id, cfg)
+    return л, п, (cfg or {}).get('folder', DEFAULT_FOLDERS['google_folder'])
 
 
 def _gdrive_refresh(project_id: str) -> str:
@@ -651,14 +669,16 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             _proxy = proxy_url   # с учётом use_proxy проекта (как для страниц)
 
             _yw_e, _yw_p = creds['metrika']
-            _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
-            if _yw_e and _yw_p and _yw_cfg:
+            _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid) or {}
+            _yw_folder = _yw_cfg.get('folder', DEFAULT_FOLDERS['webmaster'])
+            if _yw_e and _yw_p:
                 try:
-                    fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_cfg['folder'], 30, _proxy, _nlog)
+                    fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_folder, 30, _proxy, _nlog)
                 except Exception as _e:
                     append_log(f'⚠ Вебмастер: {_e}')
             else:
-                append_log(f'⚠ Вебмастер: креды не найдены (metrika_{pid}_email / metrika_{pid}_password)')
+                append_log('⚠ Вебмастер: не задана почта проекта - впишите её в '
+                           '«Настройки проекта» (почта Яндекса + пароль приложения)')
 
             _gsc_e, _gsc_p = creds['gsc']
             if _gsc_e and _gsc_p:
@@ -668,7 +688,8 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
                 except Exception as _e:
                     append_log(f'⚠ GSC: {_e}')
             else:
-                append_log(f'⚠ GSC: креды не найдены (gsc_{pid}_email / gsc_{pid}_password). '
+                append_log('⚠ GSC: не задан Gmail проекта - впишите его в '
+                           '«Настройки проекта» (Gmail + пароль приложения). '
                            f'Похожие ключи в секретах: {creds.get("secret_keys_hint") or "нет"}')
 
             _yab_e, _yab_p, _yab_f = creds['yab']

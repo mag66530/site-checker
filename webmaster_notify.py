@@ -113,6 +113,18 @@ GOOGLE_FOLDER_YANDEX_CONFIG = {
     'sm': {'folder': 'Гугл', 'secret_email': 'metrika_sm_email', 'secret_password': 'metrika_sm_password'},
 }
 
+# Папки Яндекс-почты по умолчанию - для проекта, которого нет в словарях выше.
+# Почта и пароль такого проекта берутся из настроек в личном кабинете, а имена
+# папок у всех наших проектов одинаковые, поэтому правка кода больше не нужна:
+# добавили проект в кабинете - «Уведомления» работают.
+DEFAULT_FOLDERS = {
+    'metrika': 'Я.Метрика 404 и др',
+    'webmaster': 'Вебмастер',
+    'yabusiness': 'Я.Бизнес',
+    'twogis': '2ГИС',
+    'google_folder': 'Гугл',
+}
+
 # Gmail - те же ящики что GSC, письма от no-reply@accounts.google.com
 GOOGLE_ACCOUNTS_CONFIG = {
     'smu': {'secret_email': 'gsc_smu_email', 'secret_password': 'gsc_smu_password'},
