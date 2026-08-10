@@ -130,12 +130,34 @@ def test_критично_низкий_рейтинг_помечен_первы�
 def test_рейтинг_не_получен_отдельная_находка_а_не_низкий_рейтинг():
     """rating=None помечается low_rating, но это «не проверили», а не «плохо»."""
     находки = review_priority_findings({'available': True, 'branches': [
-        _филиал(rating=None, yandex={'rating': None, 'count': None},
+        _филиал(rating=None, unknown=True,
+                yandex={'rating': None, 'count': None},
                 twogis={'rating': None, 'count': None})]})
     f = находки[0]
     assert 'не удалось получить рейтинг' in f.problem
     assert 'ниже 4.7' not in f.problem
-    assert 'reviews-' in f.fix_note                # подсказка про конфиг
+    assert 'yandex_map_url' in f.fix_note           # подсказка, где чинить ссылки
+    assert classify(f)['title'] == 'Починить сбор рейтингов филиалов'
+
+
+def test_филиал_без_единого_отзыва_не_путается_с_низким_рейтингом():
+    """Карточка ответила, отзывов 0: рейтинга нет, но это не сбой чтения."""
+    f = review_priority_findings({'available': True, 'branches': [
+        _филиал(rating=None, no_reviews=True,
+                yandex={'rating': None, 'count': 0},
+                twogis={'rating': None, 'count': 0})]})[0]
+    assert 'нет ни одного отзыва' in f.problem
+    assert classify(f)['title'] == 'Набрать первые отзывы филиалам без отзывов'
+
+
+def test_отзывы_есть_а_рейтинга_нет():
+    """Отзывы оставлены без звёзд - рейтинг не считается."""
+    f = review_priority_findings({'available': True, 'branches': [
+        _филиал(rating=None, no_rating_yet=True,
+                yandex={'rating': None, 'count': 0},
+                twogis={'rating': None, 'count': 3})]})[0]
+    assert 'рейтинг не выставлен' in f.problem
+    assert classify(f)['title'] == 'Добрать отзывы с оценкой'
 
 
 def test_отзывы_не_выполнялись_молчим():
