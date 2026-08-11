@@ -308,9 +308,11 @@ def check_index_404(project_id: str, token: str, proxy_url: Optional[str] = None
 
 
 def _resolve_token(pid: str) -> Optional[str]:
-    return (os.environ.get(f'yandex_oauth_{pid}')
-            or os.environ.get(f'webmaster_oauth_{pid}')
-            or os.environ.get('yandex_oauth') or os.environ.get('webmaster_oauth'))
+    # webmaster_oauth впереди: у проекта бывают заполнены оба поля, и токен с
+    # нужными правами кладут в поле с точным названием (см. checklist_30min).
+    return (os.environ.get(f'webmaster_oauth_{pid}')
+            or os.environ.get(f'yandex_oauth_{pid}')
+            or os.environ.get('webmaster_oauth') or os.environ.get('yandex_oauth'))
 
 
 def _main():

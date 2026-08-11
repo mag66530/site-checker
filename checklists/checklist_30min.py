@@ -2539,9 +2539,14 @@ if pid:
             except Exception:
                 _sk_hint, _wm_hint = [], []
             # Токен Яндекс OAuth (Вебмастер-API; тот же подойдёт для Метрики).
-            # Имя секрета: yandex_oauth_<pid> (с запасными вариантами).
-            _wm_token = (_secret_pid('yandex_oauth', pid)
-                         or _secret_pid('webmaster_oauth', pid))
+            # ПОРЯДОК ВАЖЕН: поле «OAuth-токен Вебмастера» (webmaster_oauth)
+            # главнее «OAuth-токена Яндекса» (yandex_oauth). Раньше было
+            # наоборот, и это стоило дня разбирательств: у проекта заполнены
+            # ОБА поля, человек перевыпустил токен с недостающим правом и
+            # положил его в поле с точным названием, а прогон продолжал брать
+            # старый - в логе снова «нет права EXTERNAL_LINKS».
+            _wm_token = (_secret_pid('webmaster_oauth', pid)
+                         or _secret_pid('yandex_oauth', pid))
             creds = {
                 'proxy_url': _c30_effective_proxy,
                 'tg_token': _secret('telegram_bot_token'),

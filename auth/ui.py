@@ -64,8 +64,12 @@ PROJECT_SETTING_FIELDS = [
     ("pagespeed_api_key", "Ключ PageSpeed API", "password"),
     ("metrika_counter", "Номер счётчика Метрики", "text"),
     ("metrika_oauth", "OAuth-токен Метрики", "password"),
-    ("webmaster_oauth", "OAuth-токен Вебмастера", "password"),
-    ("yandex_oauth", "OAuth-токен Яндекса", "password"),
+    # Два поля делают одно и то же (Вебмастер-API), исторически. Главное -
+    # webmaster_oauth: если заполнены оба, берётся оно. Без этой подписи
+    # человек кладёт новый токен в одно поле, а прогон продолжает брать
+    # старый из другого - и в логе снова «не хватает прав».
+    ("webmaster_oauth", "OAuth-токен Вебмастера (основной)", "password"),
+    ("yandex_oauth", "OAuth-токен Яндекса (запасной, если поле выше пустое)", "password"),
     # Одна строка сессии покрывает ОБА кабинета: экспорт забирает cookies и
     # Яндекса, и Google - значит и Вебмастер, и Search Console, и Справочник.
     ("autoclick_session", "Сессия браузера: Яндекс + Google (base64) - автокликеры, Я.Бизнес", "textarea"),
