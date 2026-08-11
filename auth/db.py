@@ -66,6 +66,17 @@ def _retry(fn):
         for attempt in range(5):
             try:
                 return fn(*args, **kwargs)
+            except psycopg.errors.QueryCanceled as e:
+                # Запрос упёрся в statement_timeout - повторять бессмысленно:
+                # он и в следующий раз не уложится, а пользователь ждёт впятеро
+                # дольше. Обычно это не «сервер занят», а канал не пропускает
+                # ответ (см. STATEMENT_TIMEOUT_MS).
+                raise TimeoutError(
+                    'База не ответила за '
+                    f'{STATEMENT_TIMEOUT_MS // 1000} с. Если зависают именно '
+                    'большие настройки (сессия браузера) - проблема в канале '
+                    'до базы: сеть режет крупные пакеты. Проверьте VPN/прокси '
+                    'или уменьшите MTU сетевого интерфейса.') from e
             except _RETRY_ERRORS as e:
                 last = e
                 if attempt < 4:
@@ -74,12 +85,60 @@ def _retry(fn):
     return wrap
 
 
+# Потолок на ОДИН запрос. Без него страница висит бесконечно: connect_timeout
+# закрывает только установку соединения, а уже открытый коннект, где пакеты
+# теряются в сети, ждёт вечно. Живой случай: на канале с MTU меньше 1500 и
+# заблокированным ICMP большие значения (сессия браузера ~15 КБ) не доходили,
+# и «Автокликеры» грузились без конца, вместо того чтобы сказать об ошибке.
+STATEMENT_TIMEOUT_MS = 20_000
+
+# Серверного таймаута мало: сервер запрос ВЫПОЛНИЛ быстро, а вот ответ не
+# доходит - клиент ждёт данные, которых не будет. Поэтому поверх ещё и
+# клиентский дедлайн: операция уходит в отдельный поток, и если он не уложился,
+# работа продолжается без настроек (проверка честно скажет, что их нет), а не
+# зависает навсегда.
+CLIENT_DEADLINE_SEC = 25
+
+
+def _with_deadline(fn, *args, **kwargs):
+    """Выполнить операцию с жёстким клиентским дедлайном.
+
+    Поток - демон: если запрос завис на сокете, ждать его завершения нельзя,
+    иначе процесс не выйдет (ThreadPoolExecutor на выходе дожидается своих
+    потоков). Зависший поток тихо умрёт вместе с процессом."""
+    import queue
+    import threading
+
+    ящик: 'queue.Queue' = queue.Queue(maxsize=1)
+
+    def _работа():
+        try:
+            ящик.put(('ok', fn(*args, **kwargs)))
+        except BaseException as e:      # noqa: BLE001 - отдаём вызывающему как есть
+            ящик.put(('err', e))
+
+    threading.Thread(target=_работа, daemon=True,
+                     name='db-deadline').start()
+    try:
+        вид, значение = ящик.get(timeout=CLIENT_DEADLINE_SEC)
+    except queue.Empty:
+        raise TimeoutError(
+            f'База не ответила за {CLIENT_DEADLINE_SEC} с. Если зависают '
+            'именно большие настройки (сессия браузера ~15 КБ) - канал до '
+            'базы режет крупные пакеты: проверьте VPN/прокси или уменьшите '
+            'MTU сетевого интерфейса.') from None
+    if вид == 'err':
+        raise значение
+    return значение
+
+
 def _new_conn():
     # autocommit: каждый стейтмент коммитится сразу. Многооператорные операции
     # (set_user_projects) теряют атомарность, но идемпотентны и под @_retry.
     return psycopg.connect(
         _db_url(), connect_timeout=5, autocommit=True,
         prepare_threshold=None,
+        options=f'-c statement_timeout={STATEMENT_TIMEOUT_MS}',
         keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
     )
 
@@ -390,8 +449,7 @@ def _ensure_proj_settings_table() -> None:
 
 
 @_retry
-def get_project_settings(project_key: str) -> dict:
-    """{name: значение (расшифрованное)} настроек проекта."""
+def _get_project_settings_raw(project_key: str) -> dict:
     _ensure_proj_settings_table()
     with _conn() as c, c.cursor() as cur:
         cur.execute(
@@ -399,6 +457,16 @@ def get_project_settings(project_key: str) -> dict:
             (project_key,),
         )
         return {n: security.decrypt_secret(v) for n, v in cur.fetchall()}
+
+
+def get_project_settings(project_key: str) -> dict:
+    """{name: значение (расшифрованное)} настроек проекта.
+
+    Под клиентским дедлайном: в этой выборке лежит сессия браузера (~15 КБ), и
+    на «узком» канале ответ может не дойти - страница висела бесконечно.
+    Лучше отдать пустой словарь и дать проверкам сказать «настройка не задана»,
+    чем заморозить интерфейс."""
+    return _with_deadline(_get_project_settings_raw, project_key)
 
 
 @_retry

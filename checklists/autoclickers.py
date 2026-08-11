@@ -241,6 +241,18 @@ def _session_info(b64: str) -> dict:
 
 
 _cloud_session = _session_secret(pid)
+
+# База могла не отдать настройки (обрыв канала на больших значениях). Без этого
+# сообщения страница просто говорила бы «сессии нет» - и было бы непонятно, что
+# сессия на месте, а не прочиталась.
+try:
+    import auth as _auth
+    _db_err = _auth.settings_db_error()
+except Exception:
+    _db_err = ''
+if _db_err:
+    st.error(f'⚠ Настройки проекта не прочитались: {_db_err}')
+
 if _cloud_session:
     _инфо = _session_info(_cloud_session)
     if _инфо and not (_инфо['yandex'] and _инфо['google']):

@@ -219,7 +219,14 @@ def _c_all_rights() -> dict:
 
 @st.cache_data(ttl=20, show_spinner=False)
 def _c_proj_settings(pk: str) -> dict:
-    return db.get_project_settings(pk)
+    """Настройки проекта. Недоступность базы кэшируем как «настроек нет»:
+    иначе при обрыве канала КАЖДЫЙ рендер страницы заново ждёт дедлайн и
+    интерфейс стоит колом. Причину показываем один раз - см. вызов ниже."""
+    try:
+        return db.get_project_settings(pk)
+    except TimeoutError as e:
+        st.session_state['_settings_db_error'] = str(e)
+        return {}
 
 
 def live_settings_projects(user: dict) -> list[str]:
@@ -242,6 +249,13 @@ def project_setting(project_id: str, name: str):
         return _c_proj_settings(str(project_id)).get(name) or None
     except Exception:
         return None
+
+
+def settings_db_error() -> str:
+    """Почему настройки проекта не прочитались (или ''). Страницы показывают
+    это сообщение сами: без него «настройка не задана» выглядит как ошибка
+    пользователя, хотя на деле не отвечает база."""
+    return st.session_state.get('_settings_db_error', '')
 
 
 def _invalidate() -> None:
