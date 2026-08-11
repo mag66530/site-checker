@@ -1350,249 +1350,251 @@ def _format_states(states) -> str:
     return '\n'.join(f'{n} - {label}' for label, n in agg.most_common())
 
 
-# Секции в порядке убывания релевантности:
-# (source_key, title, has_priority)
-_NOTIF_SECTIONS = [
-    ('yandex_webmaster', 'Вебмастер. Почта',        True),
-    ('gsc',              'Google Search Console',   True),
-    ('ya_business',      'Я.Бизнес',                False),
-    ('twogis',           '2ГИС',                    False),
-    ('google_accounts',  'Google',                  False),
-]
+# Источник события - человеческим языком. Почту и API одного сервиса
+# различаем: письмо приходит с задержкой и часто дублирует то, что API уже
+# отдал, - на одном листе иначе не понять, откуда строка.
+_ИСТОЧНИК = {
+    'yandex_webmaster': 'Вебмастер (почта)',
+    'gsc':              'Search Console (почта)',
+    'ya_business':      'Я.Бизнес (почта)',
+    'twogis':           '2ГИС (почта)',
+    'google_accounts':  'Google (почта)',
+    'webmaster':        'Вебмастер (API)',
+    'metrika':          'Метрика (API)',
+}
+
+# Уровень события. У писем своя шкала приоритетов, у проблем из API - своя
+# серьёзность; сводим к общей, иначе в одной колонке будут разные слова.
+_УРОВЕНЬ_ПИСЬМА = {'critical': 'Критично', 'important': 'Важно',
+                   'recommendation': 'Рекомендация', 'info': 'Инфо'}
+_УРОВЕНЬ_API = {'fatal': 'Критично', 'critical': 'Критично',
+                'possible': 'Важно', 'recommendation': 'Рекомендация',
+                'info': 'Инфо'}
+_УРОВЕНЬ_ПОРЯДОК = {'Критично': 0, 'Важно': 1, 'Рекомендация': 2, 'Инфо': 3}
+_УРОВЕНЬ_ЦВЕТ = {'Критично': C.err, 'Важно': C.warn,
+                 'Рекомендация': C.text_soft, 'Инфо': C.text_muted}
+_УРОВЕНЬ_ФОН = {'Критично': C.err_soft, 'Важно': C.warn_soft}
 
 
-def _build_notifications_sheet(wb, notifications):
-    """Лист «Уведомления» - письма по источникам (Вебмастер/GSC/Я.Бизнес/
-    2ГИС/Google) за период проверки. Структурирован секциями. Ошибки прямо
-    из сервисов (не из почты) - отдельным листом «Ошибки сервисов», чтобы
-    не дублировать одни и те же данные дважды. Добавляется всегда: при
-    пустых данных показывает заглушку."""
-    notifications = notifications or []
-    ws = wb.create_sheet('Уведомления')
-    ws.sheet_view.showGridLines = False
+def _собрать_события(notifications, service_issues) -> list:
+    """Письма и проблемы из API → плоский список строк одной таблицы.
 
-    has_critical = any(n.priority == 'critical' for n in notifications)
-    ws.sheet_properties.tabColor = C.err if has_critical else C.accent
+    Письма с одинаковой темой по разным сайтам сводим в одну строку (как было
+    в старом листе): у проекта на 240 поддоменов одно и то же письмо приходит
+    240 раз, и построчный список читать невозможно."""
+    строки = []
 
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 14   # Дата
-    ws.column_dimensions['C'].width = 18   # Приоритет / пусто
-    ws.column_dimensions['D'].width = 18   # Категория / пусто
-    ws.column_dimensions['E'].width = 50   # Тема
-    ws.column_dimensions['F'].width = 42   # Домены / Сайты
-    ws.column_dimensions['G'].width = 60   # Превью / Состояние (Вебмастер-API)
-    ws.column_dimensions['H'].width = 22   # Отдел / Кол-во
-    ws.column_dimensions['I'].width = 22   # Отдел (секция Вебмастер-API)
-
-    # ── Заголовок листа ──
-    ws.merge_cells('B2:H2')
-    c = ws['B2']
-    c.value = 'Уведомления'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:H3')
-    c = ws['B3']
-    c.value = (
-        'Письма от Яндекс.Вебмастера, GSC, Я.Бизнеса, 2ГИС и Google '
-        'за период проверки. Красная вкладка = есть критические уведомления.'
-    )
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 24
-
-    # Нет писем - показываем заглушку и выходим
-    if not notifications:
-        ws.merge_cells('B5:H5')
-        c = ws['B5']
-        c.value = ('За период проверки писем не найдено. '
-                   'Если ждёте уведомления - проверьте секреты почты и пароли приложений '
-                   '(Gmail требует App Password), затем запустите прогон с галкой '
-                   '«Собрать уведомления из почты».')
-        c.font = _font(size=11, color=C.text_soft)
-        c.alignment = _align(wrap=True, vertical='top')
-        ws.row_dimensions[5].height = 60
-        return
-
-    # Разбиваем по источникам
     from collections import defaultdict
-    by_source = defaultdict(list)
+    по_источнику = defaultdict(list)
     for n in notifications:
-        by_source[n.source].append(n)
+        по_источнику[n.source].append(n)
 
-    row = 5
+    for источник, письма in по_источнику.items():
+        for g in _group_notifs_by_theme(письма):
+            n0 = g['first']
+            детали = (n0.body_preview or '')[:400]
+            ссылка = getattr(n0, 'review_url', None)
+            # У отзывов 2ГИС вместо текста письма - оценка и ссылка на отзыв.
+            рейтинг = getattr(n0, 'rating', None)
+            if рейтинг is not None:
+                звёзды, _ = _review_rating_cell(рейтинг)
+                детали = (f'{звёзды} · читать отзыв' if ссылка
+                          else str(звёзды))
+            строки.append({
+                'уровень': _УРОВЕНЬ_ПИСЬМА.get(n0.priority, 'Инфо'),
+                'источник': _ИСТОЧНИК.get(источник, источник),
+                'дата': g['date'] or '',
+                'событие': g['theme'],
+                'сайты': ', '.join(g['domains']),
+                'кол': len(g['domains']) or 1,
+                'детали': детали,
+                'ссылка': ссылка,
+                'отдел': _dept_notif(n0),
+            })
 
-    for source_key, section_title, has_priority in _NOTIF_SECTIONS:
-        items = by_source.get(source_key, [])
-        if not items:
-            continue
+    # Проблемы из API: группируем по названию - у одной проблемы обычно
+    # десятки затронутых хостов.
+    по_проблеме = defaultdict(list)
+    for i in service_issues or []:
+        уровень = _УРОВЕНЬ_API.get(getattr(i, 'severity', ''), 'Инфо')
+        по_проблеме[(getattr(i, 'service', ''), уровень,
+                     getattr(i, 'title', '') or getattr(i, 'code', ''))].append(i)
 
-        # ── Заголовок секции ──
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
-        sc = ws.cell(row=row, column=2)
-        sc.value = f'{section_title}  ({len(items)})'
-        sc.font = _font(size=13, bold=True, color=C.accent)
-        sc.fill = _fill(C.accent_soft)
-        sc.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
+    for (сервис, уровень, название), items in по_проблеме.items():
+        хосты = [h for h in (getattr(x, 'host', '') for x in items) if h]
+        i0 = items[0]
+        # Состояния показываем свёрнуто («9 - на проверке, 3 - актуальна»):
+        # по 240 хостам список состояний в ячейку не влезает и не читается.
+        from collections import Counter as _Counter
+        _сост = _Counter(_state_human(getattr(x, 'state', '') or '')
+                         for x in items)
+        состояния = ', '.join(f'{n} - {метка}'
+                              for метка, n in _сост.most_common() if метка)
+        детали = getattr(i0, 'detail', '') or ''
+        if состояния:
+            детали = f'{детали} · {состояния}'.strip(' ·')
+        строки.append({
+            'уровень': уровень,
+            'источник': _ИСТОЧНИК.get(сервис, сервис),
+            'дата': getattr(i0, 'date', '') or '',
+            'событие': название,
+            'сайты': ', '.join(sorted(set(хосты))),
+            'кол': len(set(хосты)) or 1,
+            'детали': детали,
+            'ссылка': getattr(i0, 'url', ''),
+            'отдел': _dept_service_issue(i0) if '_dept_service_issue' in globals() else '',
+        })
+
+    строки.sort(key=lambda s: (_УРОВЕНЬ_ПОРЯДОК.get(s['уровень'], 9),
+                               -s['кол'], s['источник'], s['событие']))
+    return строки
+
+
+def _блок_автокликера(ws, autoclick, row: int) -> None:
+    """Итог автокликера - блоком ПОД таблицей: это не событие, а сводка
+    работы (сколько ошибок прокликано), в колонки событий она не ложится."""
+    if not autoclick:
+        return
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=10)
+    c = ws.cell(row=row, column=2, value='Автокликер - перекликивание ошибок')
+    c.font = _font(size=12, bold=True)
+    c.fill = _fill(C.surface)
+    c.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 22
+    row += 1
+
+    заголовки = ('Сервис', 'Проблем', 'Прокликано', 'Проверяются',
+                 'Без кнопки', 'Ошибки')
+    for ci, h in enumerate(заголовки, 3):
+        cell = ws.cell(row=row, column=ci, value=h)
+        cell.font = _font(size=9, bold=True, color=C.text_muted)
+        cell.fill = _fill(C.surface)
+        cell.border = _border()
+        cell.alignment = _align(indent=1)
+    ws.row_dimensions[row].height = 18
+    row += 1
+
+    for стат in (autoclick or {}).get('services') or []:
+        значения = (стат.get('service', ''), стат.get('problems', 0),
+                    стат.get('clicked', 0), стат.get('checking', 0),
+                    стат.get('no_button', 0), стат.get('errors', 0))
+        for ci, v in enumerate(значения, 3):
+            cell = ws.cell(row=row, column=ci, value=v)
+            cell.font = _font(size=9, color=C.text_soft)
+            cell.border = _border(color=C.border_light)
+            cell.alignment = _align(indent=1)
+        ws.row_dimensions[row].height = 15
         row += 1
 
-        if has_priority:
-            # ── Источник с классификацией: группируем по приоритету ──
-            p_groups = defaultdict(list)
-            for n in items:
-                p_groups[n.priority].append(n)
+    примечание = (autoclick or {}).get('note')
+    if примечание:
+        ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=10)
+        c = ws.cell(row=row, column=3, value=примечание)
+        c.font = _font(size=9, italic=True, color=C.text_muted)
+        c.alignment = _align(wrap=True, vertical='top', indent=1)
 
-            for priority in _NOTIF_PRIORITY_ORDER:
-                p_items = p_groups.get(priority, [])
-                if not p_items:
-                    continue
 
-                p_color = _NOTIF_PRIORITY_COLOR[priority]
-                p_bg = _NOTIF_PRIORITY_BG[priority]
-                p_label = _NOTIF_PRIORITY_LABEL[priority]
+def _build_notifications_sheet(wb, notifications, service_issues=None,
+                               autoclick=None):
+    """Лист «Аналитика»: события из внешних сервисов ОДНОЙ таблицей.
 
-                # Подзаголовок приоритета
-                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=8)
-                pc = ws.cell(row=row, column=2)
-                pc.value = f'  {p_label}  ({len(p_items)})'
-                pc.font = _font(size=10, bold=True, color=p_color)
-                pc.fill = _fill(p_bg)
-                pc.alignment = _align(indent=2)
-                ws.row_dimensions[row].height = 20
-                row += 1
+    Раньше это были три листа с семью разными наборами колонок (письма по
+    каждому источнику, ошибки сервисов, автокликер) - на общем листе они
+    склеивались подряд, и колонка «C» в одном блоке значила «Серьёзность», в
+    другом «Оценка», в третьем ничего. Плюс у писем шапка повторялась для
+    каждой серьёзности, из-за чего блок почты выглядел длиннее всего листа.
 
-                # Шапка: одна строка на тему, домены списком + их количество
-                for ci, h in enumerate(['Дата', 'Серьёзность', 'Категория', 'Тема',
-                                        'Сайты', 'Кол-во', 'Отдел'], 2):
-                    cell = ws.cell(row=row, column=ci)
-                    cell.value = h
-                    cell.font = _font(size=9, bold=True, color=C.text_muted)
-                    cell.fill = _fill(C.surface)
-                    cell.alignment = _align()
-                    cell.border = _border()
-                ws.row_dimensions[row].height = 20
-                row += 1
+    Теперь одна шапка, автофильтр и одна строка = одно событие, как на листе
+    «Проблемы». Итог автокликера - не событие, а сводка работы, поэтому он
+    идёт отдельным блоком ПОД таблицей."""
+    notifications = notifications or []
+    service_issues = service_issues or []
+    ws = wb.create_sheet('Аналитика')
+    ws.sheet_view.showGridLines = False
 
-                # Строки - одна на уникальную тему (без учёта доменной зоны),
-                # все домены в колонке «Сайты», их число - в «Кол-во».
-                groups = _group_notifs_by_theme(p_items)
-                for g in sorted(groups, key=lambda x: len(x['domains']), reverse=True):
-                    n0 = g['first']
-                    domains_str = ', '.join(g['domains'])
-                    ws.row_dimensions[row].height = _notif_row_height(domains_str, '')
+    строки = _собрать_события(notifications, service_issues)
+    _есть_критичное = any(s['уровень'] == 'Критично' for s in строки)
+    ws.sheet_properties.tabColor = (
+        C.err if _есть_критичное else C.accent if строки else C.ok)
 
-                    for ci, (val, kw) in enumerate([
-                        (g['date'], {'color': C.text_soft}),
-                        (_NOTIF_PRIORITY_LABEL[priority], {'bold': priority == 'critical', 'color': p_color}),
-                        (_NOTIF_CATEGORY_LABEL.get(n0.category, n0.category), {'color': C.text_soft}),
-                        (g['theme'], {'bold': priority == 'critical', 'color': p_color}),
-                        (domains_str, {'size': 9, 'color': C.text_soft}),
-                        (len(g['domains']), {'size': 10, 'bold': True, 'color': C.text_soft}),
-                        (_dept_notif(n0), {'size': 9, 'color': C.text_soft}),
-                    ], 2):
-                        cell = ws.cell(row=row, column=ci)
-                        cell.value = val
-                        cell.font = _font(**kw)
-                        cell.alignment = _align(
-                            wrap=True, vertical='top',
-                            horizontal='center' if ci == 7 else 'general')
-                        cell.border = _border(color=C.border_light)
-                        if priority == 'critical' and ci in (5, 6, 7):
-                            cell.fill = _fill(p_bg)
+    for col, w in (('A', 3), ('B', 4), ('C', 14), ('D', 22), ('E', 12),
+                   ('F', 48), ('G', 40), ('H', 8), ('I', 52), ('J', 20)):
+        ws.column_dimensions[col].width = w
 
-                    row += 1
+    ws.merge_cells('B2:J2')
+    c = ws['B2']
+    c.value = 'Аналитика - события из сервисов'
+    c.font = _font(size=14, bold=True)
+    ws.row_dimensions[2].height = 24
 
-                row += 1  # пробел между приоритетами
+    ws.merge_cells('B3:J3')
+    c = ws['B3']
+    c.value = ('Письма Яндекс.Вебмастера, Google Search Console, Я.Бизнеса, '
+               '2ГИС и Google плюс проблемы, которые сервисы отдают по API. '
+               'Фильтруйте столбцы: «Уровень» - что критично, «Источник» - '
+               'откуда пришло. Одна строка = одно событие; одинаковые письма '
+               'по разным сайтам сведены в одну строку со списком сайтов.')
+    c.font = _font(size=10, italic=True, color=C.text_soft)
+    c.alignment = _align(wrap=True, vertical='top')
+    ws.row_dimensions[3].height = 42
 
-        elif source_key == 'twogis':
-            # ── 2ГИС: одна строка на отзыв (без группировки), колонка
-            # «Оценка» (★ + качество), превью = только ссылка «Читать». ──
-            for ci, h in enumerate(['Дата', 'Оценка', '', 'Тема', '', 'Ссылка', 'Отдел'], 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = h
-                cell.font = _font(size=9, bold=True, color=C.text_muted)
-                cell.fill = _fill(C.surface)
-                cell.alignment = _align()
-                cell.border = _border()
-            ws.row_dimensions[row].height = 20
-            row += 1
+    if not строки:
+        ws.merge_cells('B5:J5')
+        c = ws['B5']
+        c.value = ('За период проверки событий не найдено. Если ждёте письма - '
+                   'проверьте почту проекта и пароли приложений в настройках '
+                   '(Gmail требует пароль приложения), затем запустите прогон '
+                   'с галочкой «Собрать уведомления из почты».')
+        c.font = _font(size=11, color=C.text_soft)
+        c.alignment = _align(wrap=True, vertical='top')
+        ws.row_dimensions[5].height = 48
+        _блок_автокликера(ws, autoclick, 7)
+        return
 
-            for n in sorted(items, key=lambda x: x.date or '', reverse=True):
-                ws.row_dimensions[row].height = 30
-                rating_txt, rating_color = _review_rating_cell(getattr(n, 'rating', None))
-                review_url = getattr(n, 'review_url', None)
+    hdr = 5
+    headers = (('B', '№'), ('C', 'Уровень'), ('D', 'Источник'), ('E', 'Дата'),
+               ('F', 'Событие'), ('G', 'Сайты'), ('H', 'Кол-во'),
+               ('I', 'Подробности'), ('J', 'Отдел'))
+    for col, title in headers:
+        cell = ws[f'{col}{hdr}']
+        cell.value = title
+        cell.font = _font(size=10, bold=True, color=C.bg_elev)
+        cell.fill = _fill(C.header_navy)
+        cell.border = _border()
+        cell.alignment = _align(indent=1)
+    ws.row_dimensions[hdr].height = 20
 
-                for ci, (val, kw) in enumerate([
-                    (n.date, {'color': C.text_soft}),
-                    (rating_txt, {'bold': True, 'color': rating_color}),
-                    ('', {}),
-                    (n.subject, {'color': C.text}),
-                    ('', {}),
-                    ('', {}),   # ссылка проставляется ниже
-                    (_dept_notif(n), {'size': 9, 'color': C.text_soft}),
-                ], 2):
-                    cell = ws.cell(row=row, column=ci)
-                    cell.value = val
-                    cell.font = _font(**kw)
-                    cell.alignment = _align(wrap=True, vertical='top')
-                    cell.border = _border(color=C.border_light)
+    row = hdr + 1
+    for i, s in enumerate(строки, 1):
+        цвет = _УРОВЕНЬ_ЦВЕТ.get(s['уровень'], C.text_soft)
+        заливка = _УРОВЕНЬ_ФОН.get(s['уровень'])
+        значения = (i, s['уровень'], s['источник'], s['дата'], s['событие'],
+                    s['сайты'], s['кол'], s['детали'], s['отдел'])
+        for ci, (col, _) in enumerate(headers):
+            cell = ws[f'{col}{row}']
+            cell.value = значения[ci]
+            cell.font = _font(size=9, bold=(col == 'C'),
+                              color=цвет if col == 'C' else C.text_soft)
+            cell.alignment = _align(
+                wrap=(col in ('F', 'G', 'I')), vertical='top', indent=1,
+                horizontal='center' if col == 'H' else 'general')
+            cell.border = _border(color=C.border_light)
+            if col == 'C' and заливка:
+                cell.fill = _fill(заливка)
+        if s.get('ссылка'):
+            u = ws[f'I{row}']
+            u.hyperlink = s['ссылка']
+            u.font = _font(size=9, color=C.accent, underline='single')
+        ws.row_dimensions[row].height = _row_height_for(
+            f"{s['событие']} {s['сайты']}", 88)
+        row += 1
 
-                # Колонка «Ссылка» (G = 7): кликабельная «Читать полностью»
-                link_cell = ws.cell(row=row, column=7)
-                if review_url:
-                    link_cell.value = 'Читать полностью'
-                    link_cell.hyperlink = review_url
-                    link_cell.font = _font(size=9, color=C.accent, underline='single')
-                else:
-                    link_cell.value = '-'
-                    link_cell.font = _font(size=9, color=C.text_muted)
-                link_cell.alignment = _align(vertical='top')
-                link_cell.border = _border(color=C.border_light)
+    last = row - 1
+    if last >= hdr + 1:
+        ws.auto_filter.ref = f'B{hdr}:J{last}'
+        ws.freeze_panes = f'B{hdr + 1}'
 
-                row += 1
-
-        else:
-            # ── Источник без классификации: плоский список ──
-            # Шапка
-            for ci, h in enumerate(['Дата', '', '', 'Тема', 'Домены', 'Превью', 'Отдел'], 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = h
-                cell.font = _font(size=9, bold=True, color=C.text_muted)
-                cell.fill = _fill(C.surface)
-                cell.alignment = _align()
-                cell.border = _border()
-            ws.row_dimensions[row].height = 20
-            row += 1
-
-            groups = _group_notifs_by_theme(items)
-            for g in sorted(groups, key=lambda x: x['date'] or '', reverse=True):
-                n0 = g['first']
-                domains_str = ', '.join(g['domains'])
-                theme = g['theme']
-                if g['count'] > 1:
-                    theme = f'{theme}  ×{g["count"]}'
-                ws.row_dimensions[row].height = _notif_row_height(
-                    domains_str, n0.body_preview)
-
-                for ci, (val, kw) in enumerate([
-                    (g['date'], {'color': C.text_soft}),
-                    ('', {}),
-                    ('', {}),
-                    (theme, {'bold': False, 'color': C.text}),
-                    (domains_str, {'size': 9, 'color': C.text_soft}),
-                    ((n0.body_preview or '')[:400], {'size': 9, 'color': C.text_soft}),
-                    (_dept_notif(n0), {'size': 9, 'color': C.text_soft}),
-                ], 2):
-                    cell = ws.cell(row=row, column=ci)
-                    cell.value = val
-                    cell.font = _font(**kw)
-                    cell.alignment = _align(wrap=True, vertical='top')
-                    cell.border = _border(color=C.border_light)
-
-                row += 1
-
-        row += 2  # пробел между секциями
+    _блок_автокликера(ws, autoclick, row + 2)
 
 
 # ── Лист «Ошибки сервисов» (Вебмастер/GSC/Метрика - из API) ─────────
@@ -1615,108 +1617,6 @@ _SVC_SEV_COLOR = {
 }
 _SVC_SEV_ORDER = {'fatal': 0, 'critical': 1, 'possible': 2,
                   'recommendation': 3, 'info': 4}
-
-
-def _build_service_issues_sheet(wb, service_issues):
-    """Лист «Ошибки сервисов» - проблемы сайтов прямо из сервисов (не из почты).
-    Добавляется только если есть данные."""
-    issues = service_issues or []
-    if not issues:
-        return
-
-    ws = wb.create_sheet('Ошибки сервисов')
-    ws.sheet_view.showGridLines = False
-    has_crit = any(getattr(i, 'severity', '') in ('fatal', 'critical') for i in issues)
-    ws.sheet_properties.tabColor = C.err if has_crit else C.accent
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 28   # Сайт
-    ws.column_dimensions['C'].width = 18   # Серьёзность
-    ws.column_dimensions['D'].width = 50   # Проблема
-    ws.column_dimensions['E'].width = 13   # Дата
-    ws.column_dimensions['F'].width = 10   # Открыть
-
-    ws.merge_cells('B2:F2')
-    c = ws['B2']
-    c.value = 'Ошибки сайтов из сервисов'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    ws.merge_cells('B3:F3')
-    c = ws['B3']
-    c.value = ('Проблемы напрямую из Яндекс.Вебмастера / GSC / Метрики (диагностика: '
-               'сайтмапы, дубли, мусорные ссылки, ошибки сервера и индексации). '
-               'Не из почты - из самих сервисов по API.')
-    c.font = _font(size=10, italic=True, color=C.text_soft)
-    c.alignment = _align(wrap=True, vertical='top')
-    ws.row_dimensions[3].height = 30
-
-    from collections import defaultdict
-    by_service = defaultdict(list)
-    for i in issues:
-        by_service[getattr(i, 'service', 'webmaster')].append(i)
-
-    row = 5
-    for svc_key, svc_title in _SVC_SECTION:
-        svc_items = by_service.get(svc_key, [])
-        if not svc_items:
-            continue
-
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
-        sc = ws.cell(row=row, column=2)
-        sc.value = f'{svc_title}  ({len(svc_items)})'
-        sc.font = _font(size=13, bold=True, color=C.accent)
-        sc.fill = _fill(C.accent_soft)
-        sc.alignment = _align(indent=1)
-        ws.row_dimensions[row].height = 24
-        row += 1
-
-        for ci, h in enumerate(['Сайт', 'Серьёзность', 'Проблема', 'Дата', 'Открыть'], 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.value = h
-            cell.font = _font(size=9, bold=True, color=C.text_muted)
-            cell.fill = _fill(C.surface)
-            cell.alignment = _align()
-            cell.border = _border()
-        ws.row_dimensions[row].height = 20
-        row += 1
-
-        for i in sorted(svc_items, key=lambda x: (_SVC_SEV_ORDER.get(
-                getattr(x, 'severity', 'info'), 9), getattr(x, 'host', ''))):
-            sev = getattr(i, 'severity', 'info')
-            sev_color = _SVC_SEV_COLOR.get(sev, C.text_muted)
-            ws.row_dimensions[row].height = 30
-
-            for ci, (val, kw) in enumerate([
-                (getattr(i, 'host', ''), {'size': 10, 'color': C.text}),
-                (_SVC_SEV_LABEL.get(sev, sev),
-                 {'size': 9, 'bold': sev in ('fatal', 'critical'), 'color': sev_color}),
-                (getattr(i, 'title', '') or getattr(i, 'code', ''),
-                 {'size': 10, 'color': C.text_soft}),
-                (getattr(i, 'date', ''), {'size': 9, 'color': C.text_muted}),
-            ], 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.value = val
-                cell.font = _font(**kw)
-                cell.alignment = _align(wrap=True, vertical='top')
-                cell.border = _border(color=C.border_light)
-
-            # «Открыть» - ссылка в панель сервиса
-            link_cell = ws.cell(row=row, column=6)
-            _u = _wm_alive_url(getattr(i, 'url', ''))
-            if _u:
-                link_cell.value = 'открыть'
-                link_cell.hyperlink = _u
-                link_cell.font = _font(size=9, color=C.accent, underline='single')
-            else:
-                link_cell.value = '-'
-                link_cell.font = _font(size=9, color=C.text_muted)
-            link_cell.alignment = _align(horizontal='center')
-            link_cell.border = _border(color=C.border_light)
-
-            row += 1
-
-        row += 2
 
 
 # ── Лист «Индексация» (п.1.7: robots.txt / noindex / canonical) ─────
@@ -1868,7 +1768,7 @@ def _collect_anomaly_rows(wm_metrics, link_profile):
 
 
 def _build_yabusiness_sheet(wb, review_priority=None):
-    """Лист «Я.Бизнес и GMB»: приоритет докупки отзывов (Яндекс + 2ГИС).
+    """Лист «Отзывы»: приоритет докупки отзывов (Яндекс + 2ГИС).
 
     Остальные пункты Я.Бизнеса (поддомен без карточки, карточки без
     поддомена, филиалы вне Сети, незаполненные поля профиля) с листа убраны -
@@ -1881,7 +1781,7 @@ def _build_yabusiness_sheet(wb, review_priority=None):
     if not rp:
         return
 
-    ws = wb.create_sheet('Я.Бизнес и GMB')
+    ws = wb.create_sheet('Отзывы')
     ws.sheet_view.showGridLines = False
     _low = rp.get('low_rating_count', 0) if rp.get('available') else 0
     ws.sheet_properties.tabColor = (
@@ -2317,7 +2217,7 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
 
     # ── Ни один блок не наполнился: лист остаётся с одним заголовком, и по
     # нему не понять, сломалось что-то или просто не настроено. Пишем прямо,
-    # чего не хватает - как на листе «Я.Бизнес и GMB».
+    # чего не хватает - как на листе «Отзывы».
     _пусто = []
     if not has_traffic:
         _пусто.append(('Трафик',
@@ -2545,96 +2445,6 @@ _FILTER_VERDICT = {
 }
 
 
-def _build_autoclick_sheet(wb, autoclick):
-    """Итоги автокликера (перекликивание ошибок в Вебмастере/ГСК) - сводка
-    по сайтам. Добавляется только если автокликер запускался."""
-    if not autoclick:
-        return
-    ws = wb.create_sheet('Автокликер')
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = C.accent
-
-    ws.column_dimensions['A'].width = 3
-    ws.column_dimensions['B'].width = 40   # Сайт
-    ws.column_dimensions['C'].width = 16   # Сервис
-    ws.column_dimensions['D'].width = 12   # Проблем
-    ws.column_dimensions['E'].width = 14   # Прокликано
-    ws.column_dimensions['F'].width = 16   # Проверяются
-    ws.column_dimensions['G'].width = 14   # Без кнопки
-    ws.column_dimensions['H'].width = 12   # Ошибки
-
-    ws.merge_cells('B2:H2')
-    c = ws['B2']
-    c.value = 'Автокликер - перекликивание ошибок'
-    c.font = _font(size=16, bold=True)
-    ws.row_dimensions[2].height = 26
-
-    # Недоступен (нет браузера / облако)
-    if not autoclick.get('available'):
-        ws.merge_cells('B4:H4')
-        c = ws['B4']
-        c.value = autoclick.get('note') or (
-            'Автокликер не запускался: нужен локальный залогиненный Chrome '
-            '(CDP 9222). На облаке недоступен.')
-        c.font = _font(size=11, color=C.text_soft)
-        c.alignment = _align(wrap=True, vertical='top')
-        ws.row_dimensions[4].height = 44
-        return
-
-    sites = autoclick.get('sites') or []
-    _t_prob = sum(s.get('problems', 0) for s in sites)
-    _t_click = sum(s.get('clicked', 0) for s in sites)
-    _t_check = sum(s.get('checking', 0) for s in sites)
-    _t_skip = sum(s.get('no_button', 0) for s in sites)
-
-    ws.merge_cells('B3:H3')
-    c = ws['B3']
-    c.value = (f'Сайтов обработано: {len(sites)}.  Проблем: {_t_prob}.  '
-               f'Прокликано: {_t_click}.  Уже проверяются: {_t_check}.  '
-               f'Без кнопки: {_t_skip}.')
-    c.font = _font(size=11, color=C.text_soft)
-    ws.row_dimensions[3].height = 22
-
-    hdr_row = 5
-    headers = ['Сайт', 'Сервис', 'Проблем', 'Прокликано',
-               'Проверяются', 'Без кнопки', 'Ошибки']
-    for ci, h in enumerate(headers, 2):
-        cell = ws.cell(row=hdr_row, column=ci, value=h)
-        cell.font = _font(size=9, bold=True, color=C.text_muted)
-        cell.fill = _fill(C.surface)
-        cell.alignment = _align(horizontal='center' if ci > 3 else 'left')
-        cell.border = _border()
-    ws.row_dimensions[hdr_row].height = 22
-    ws.freeze_panes = f'B{hdr_row + 1}'
-
-    row = hdr_row + 1
-    for s in sorted(sites, key=lambda x: x.get('clicked', 0), reverse=True):
-        ws.row_dimensions[row].height = 20
-        vals = [
-            (s.get('site', ''), 'left', C.text),
-            (s.get('service', ''), 'center', C.text_soft),
-            (s.get('problems', 0), 'center', C.text_soft),
-            (s.get('clicked', 0), 'center', C.ok if s.get('clicked') else C.text_muted),
-            (s.get('checking', 0), 'center', C.warn if s.get('checking') else C.text_muted),
-            (s.get('no_button', 0), 'center', C.text_muted),
-            (s.get('errors', 0), 'center', C.err if s.get('errors') else C.text_muted),
-        ]
-        for ci, (val, halign, color) in enumerate(vals, 2):
-            cell = ws.cell(row=row, column=ci, value=val)
-            cell.font = _font(size=10, color=color,
-                              bold=(ci == 5 and bool(s.get('clicked'))))
-            cell.alignment = _align(horizontal=halign, indent=1 if halign == 'left' else 0)
-            cell.border = _border(color=C.border_light)
-        row += 1
-
-
-# Листы «Регион и СНГ» и «Заголовки и мета» удалены (04.08.2026): находки
-# (чужой город/телефон/почта, СНГ-чистота, технический регион по гео-тегам,
-# единственность title/description/H1) полностью и читаемо попадают в
-# «Проблемы» через report_priorities.py (_region_findings/_cis_findings/
-# _geo_findings/_meta_unique_findings).
-
-
 # ── Пересборка листов в тематические группы ─────────────────────────
 # Каждый детальный лист строится как раньше (временный), затем переносится
 # СЕКЦИЕЙ в один из 7 групповых листов. Так весь рендер сохраняется без
@@ -2650,9 +2460,9 @@ _SHEET_GROUPS = [
     ('КП', []),                     # находки - в «Проблемы», листы удалены
     ('Формы', []),                 # детальный отчёт форм - отдельный файл
     ('Админка', ['Настройки в админке']),
-    ('Аналитика', [
-        'Уведомления', 'Ошибки сервисов', 'Автокликер',
-    ]),
+    # «Аналитика» - самостоятельный лист (события из сервисов одной
+    # таблицей), сливать в неё больше нечего.
+    ('Аналитика', []),
     ('Контент', ['Уникальность']),
 ]
 
@@ -2707,19 +2517,26 @@ _MOVED_TO_PROBLEMS = {
     'Нагрузка и парсинг', 'Вёрстка', 'Безопасность', 'Изображения', 'Разметка',
 }
 
+# Листы, слитые в «Аналитику» одной таблицей: раздел внутри неё - это уже не
+# секция, а значение колонки «Источник», поэтому ссылку ведём на сам лист.
+_MOVED_TO_ANALYTICS = {'Уведомления', 'Ошибки сервисов', 'Автокликер'}
+
 
 def _sheet_ref(name: str) -> str:
-    """«X» -> ссылка на существующую вкладку для текста «см. лист {ref}»:
-    лист, который _regroup_into_groups сливает в групповой (Ошибки сервисов ->
-    Аналитика) - «Группа», раздел «X»; удалённый лист, находки которого уехали
-    в «Проблемы» (Индексация/Метаданные/…) - «Проблемы», раздел «X». Листы вне
-    группировки (Обзор/Проблемы/Структура страниц/Страницы/Хосты и аномалии/…)
-    возвращаются как есть - «X»."""
+    """«X» -> ссылка на существующую вкладку для текста «см. лист {ref}».
+
+    Удалённый лист, находки которого уехали в «Проблемы» (Индексация,
+    Метаданные, …) - «Проблемы», раздел «X»; слитый в «Аналитику» (Уведомления,
+    Ошибки сервисов, Автокликер) - «Аналитика», раздел «X»; лист, который
+    _regroup_into_groups кладёт в групповой, - «Группа», раздел «X». Листы вне
+    группировки (Обзор/Проблемы/Структура страниц/Страницы/…) - как есть."""
     grp = _old_to_group_map().get(name)
     if grp and grp != name:
         return f'«{grp}», раздел «{name}»'
     if name in _MOVED_TO_PROBLEMS:
         return f'«Проблемы», раздел «{name}»'
+    if name in _MOVED_TO_ANALYTICS:
+        return f'«Аналитика», раздел «{name}»'
     return f'«{name}»'
 
 
@@ -2841,7 +2658,7 @@ def _regroup_into_groups(wb):
     order = (['Обзор', 'План работ', 'Проблемы', 'Структура страниц',
              'Страницы', 'Хосты и аномалии', 'Трафик и траст']
              + [g for g, _ in _SHEET_GROUPS if g in wb.sheetnames]
-             + ['Я.Бизнес и GMB'])
+             + ['Отзывы'])
     ordered = [wb[n] for n in order if n in wb.sheetnames]
     ordered += [ws for ws in wb.worksheets if ws not in ordered]
     wb._sheets = ordered
@@ -3250,7 +3067,7 @@ def build_report(
     link_profile: dict = None,     # lite-профиль ссылок (Вебмастер) - секция на «Трафик и траст»
     wm_metrics: dict = None,       # аномалии Вебмастера - лист «Хосты и аномалии»
     admin_settings: dict = None,   # функции настройки в админке (п.1.21) - лист «Настройки в админке»
-    yabusiness: dict = None,       # Я.Бизнес/GMB (поддомен под свой регион) - лист «Я.Бизнес и GMB»
+    yabusiness: dict = None,       # Я.Бизнес/GMB: находки идут в «Проблемы» (раздел «Я.Бизнес»)
     gsc_pages: dict = None,        # количество страниц в ГСК (индекс/не-индекс/сумма) - секция на «Трафик и траст»
     home_dupes: dict = None,       # дубли главной страницы - лист «Дубли главной»
     traffic: dict = None,          # сравнение трафика день/месяц/год - лист «Трафик и траст»
@@ -3331,7 +3148,7 @@ def build_report(
                       + ux_interactive_findings(console_check)
                       + static_delivery_findings(w3c_check)
                       # Я.Бизнес и отзывы: раньше жили только на листе
-                      # «Я.Бизнес и GMB» и не попадали ни в «Проблемы», ни в
+                      # «Я.Бизнес и GMB» (ныне «Отзывы») и не попадали ни в «Проблемы», ни в
                       # «План работ». Лист пока оставлен ради таблицы
                       # приоритета докупки - в колонки «Проблем» она не
                       # ложится (там строка = страница сайта).
@@ -3635,9 +3452,9 @@ def build_report(
         ('Хосты и аномалии', 'проблемы уровня сайта/хоста целиком (не одной страницы): фатальные проблемы из сервисов и аномалии обхода/ссылок «от себя-прошлого» - обычно самое срочное.'),
         ('Трафик и траст', 'краткая сводка трафика по странам/периодам (визиты, каналы, лиды, конверсия, отказы) + траст проекта (ИКС/DR), lite-профиль беклинков и страницы в ГСК.'),
         ('Админка', 'работа функций настройки в админке: поддомены/категории/товары/тех.страницы + CRUD (создание/правка/скрытие/удаление) с аудитом «было → стало».'),
-        ('Аналитика', 'письма Вебмастера/GSC/Я.Бизнеса/2ГИС/Google, ошибки сервисов (сайтмапы/дубли/мусорные ссылки), прокликивание исправлений.'),
+        ('Аналитика', 'события из сервисов одной таблицей: письма Вебмастера/GSC/Я.Бизнеса/2ГИС/Google и проблемы, которые сервисы отдают по API. Фильтруется по уровню и источнику; итог автокликера - блоком под таблицей.'),
         ('Контент', 'если есть лист - уникальность контента (text.ru); изображения, вёрстка, КП и контакты - все на листе «Проблемы».'),
-        ('Я.Бизнес и GMB', 'если есть лист - каждый поддомен (город) зарегистрирован в Яндекс.Бизнесе под своим регионом; поддомены без организации.'),
+        ('Отзывы', 'если есть лист - приоритет докупки отзывов по городам: рейтинги Яндекса и 2ГИС, сколько отзывов купить. Сами находки по Я.Бизнесу - на листе «Проблемы».'),
     ]
     nav_hdr = nav_row + 1
     for col, title in (('B', 'Лист'), ('C', 'Что там')):
@@ -3796,7 +3613,7 @@ def build_report(
     # ─── Лист «Настройки в админке» - если проверка выполнялась ────────
     _build_admin_settings_sheet(wb, admin_settings)
 
-    # ─── Лист «Я.Бизнес и GMB»: только приоритет докупки отзывов ──────
+    # ─── Лист «Отзывы»: приоритет докупки отзывов по городам ──────────
     # Остальные пункты Я.Бизнеса (нет карточки под город, карточки без
     # поддомена, филиалы вне Сети, незаполненный профиль) - в «Проблемы»
     # через yabusiness_findings, лист их больше не показывает.
@@ -3828,16 +3645,12 @@ def build_report(
     # notifications=None - сбор уведомлений был ВЫКЛЮЧЕН, листа нет.
     # notifications=[] - сбор включён, писем нет: лист с заглушкой
     # («проверено, писем нет» - это результат, а не отсутствие проверки).
-    if notifications is not None:
-        _build_notifications_sheet(wb, notifications)
-
-    # ЛИСТ: «Ошибки сервисов» - находки прямо из сервисов (не из почты),
-    # детали к агрегированным задачам «Разобрать проблемы в сервисах» в
-    # «Плане работ».
-    _build_service_issues_sheet(wb, service_issues)
-
-    # ЛИСТ: «Автокликер» - итоги перекликивания ошибок (если запускался).
-    _build_autoclick_sheet(wb, autoclick)
+    # Три листа («Уведомления», «Ошибки сервисов», «Автокликер») собраны в
+    # один - «Аналитика»: раньше они склеивались подряд с семью разными
+    # наборами колонок, и одна колонка означала в разных блоках разное.
+    if notifications is not None or service_issues:
+        _build_notifications_sheet(wb, notifications or [], service_issues,
+                                   autoclick)
 
     # Фильтрация товаров - теперь секцией на листе «Вёрстка» (см. выше).
 

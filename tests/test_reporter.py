@@ -527,12 +527,11 @@ def test_страницы_хосты_и_аномалии_трафик_созда
         vals = [c.value for row in tr.iter_rows() for c in row if c.value]
         assert 76 in vals and 64 in vals   # реальные visits/direct, не выдумка
 
-        # «Ошибки сервисов» - детальный лист, на который ссылается «План
-        # работ» (Task.where); должен реально собираться и сливаться в
-        # группу «Аналитика», а не оставаться неиспользуемой функцией.
+        # Проблемы из сервисов идут на лист «Аналитика» одной таблицей: раздел
+        # стал значением колонки «Источник», а не отдельной секцией.
         an = wb['Аналитика']
         an_texts = [c.value for row in an.iter_rows() for c in row if c.value]
-        assert any('Ошибки сервисов' in str(t) for t in an_texts)
+        assert any('Вебмастер (API)' in str(t) for t in an_texts)
         assert any('Сайт не загружается' in str(t) for t in an_texts)
 
 
@@ -546,7 +545,7 @@ def test_every_detail_sheet_is_grouped():
     src = (Path(__file__).parent.parent / 'reporter.py').read_text(encoding='utf-8')
     literal_sheets = set(_re.findall(r"create_sheet\('([^']+)'\)", src))
     covered = ({m for _, ms in _SHEET_GROUPS for m in ms}
-               | {'Обзор', 'Структура страниц', 'Я.Бизнес и GMB',
+               | {'Обзор', 'Структура страниц', 'Отзывы', 'Аналитика',
                  'План работ', 'Проблемы', 'Страницы', 'Хосты и аномалии',
                  'Трафик и траст'})
     orph = literal_sheets - covered

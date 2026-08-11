@@ -179,7 +179,7 @@ def _лист_отзывов(rp):
 def test_лист_содержит_только_таблицу_докупки():
     wb = _лист_отзывов({'available': True, 'total_branches': 1,
                         'low_rating_count': 1, 'branches': [_филиал()]})
-    ws = wb['Я.Бизнес и GMB']
+    ws = wb['Отзывы']
     значения = [str(c.value) for row in ws.iter_rows() for c in row if c.value]
     текст = ' '.join(значения)
     assert 'Отзывы: приоритет докупки' in текст
@@ -195,7 +195,7 @@ def test_лист_фильтруется_по_городам():
     wb = _лист_отзывов({'available': True, 'total_branches': 1,
                         'low_rating_count': 0, 'branches': [
                             _филиал(rating=4.9, low_rating=False)]})
-    assert wb['Я.Бизнес и GMB'].auto_filter.ref                # таблица рабочая
+    assert wb['Отзывы'].auto_filter.ref                # таблица рабочая
 
 
 def test_листа_нет_без_проверки_отзывов():
@@ -206,12 +206,12 @@ def test_листа_нет_без_проверки_отзывов():
     wb = Workbook()
     wb.remove(wb.active)
     reporter._build_yabusiness_sheet(wb, None)
-    assert 'Я.Бизнес и GMB' not in wb.sheetnames
+    assert 'Отзывы' not in wb.sheetnames
 
 
 def test_отзывы_не_выполнялись_лист_объясняет_причину():
     wb = _лист_отзывов({'available': False, 'note': 'нет конфига reviews-sm.csv'})
-    значения = [str(c.value) for row in wb['Я.Бизнес и GMB'].iter_rows()
+    значения = [str(c.value) for row in wb['Отзывы'].iter_rows()
                 for c in row if c.value]
     assert any('reviews-sm.csv' in v for v in значения)
 
