@@ -31,14 +31,42 @@ def is_cloud_mode() -> bool:
     return os.environ.get(MODE_ENV, '').strip().lower() == 'cloud'
 
 
+# Поля cookie, которые принимает Playwright в storage_state. Chrome в свежих
+# версиях кладёт в экспорт ещё partitionKey и _crHasCrossSiteAncestor - на них
+# запуск падает с «Protocol error (Storage.setCookies): Invalid cookie fields»,
+# и вся сессия оказывается непригодной. Лишнее отбрасываем.
+_COOKIE_FIELDS = ('name', 'value', 'domain', 'path', 'expires',
+                  'httpOnly', 'secure', 'sameSite')
+_SAME_SITE = ('Strict', 'Lax', 'None')
+
+
+def sanitize_state(state: dict) -> dict:
+    """storage_state → storage_state, пригодный для Playwright."""
+    cookies = []
+    for c in (state or {}).get('cookies') or []:
+        чистая = {k: c[k] for k in _COOKIE_FIELDS if k in c}
+        if not чистая.get('name') or 'value' not in чистая:
+            continue
+        # sameSite строго из трёх значений: Chrome пишет и 'unspecified'/None.
+        if чистая.get('sameSite') not in _SAME_SITE:
+            чистая['sameSite'] = 'Lax'
+        # expires - число; сессионная cookie помечается -1.
+        try:
+            чистая['expires'] = float(чистая.get('expires', -1))
+        except (TypeError, ValueError):
+            чистая['expires'] = -1
+        cookies.append(чистая)
+    return {'cookies': cookies, 'origins': (state or {}).get('origins') or []}
+
+
 def session_file_from_secret(b64: str) -> str:
     """base64-секрет → временный файл storage_state. Возвращает путь.
     Бросает исключение, если секрет не декодируется/не JSON."""
     data = base64.b64decode((b64 or '').strip())
-    json.loads(data)                          # валидация формата
-    f = tempfile.NamedTemporaryFile('wb', suffix='_autoclick_session.json',
-                                    delete=False)
-    f.write(data)
+    state = sanitize_state(json.loads(data))
+    f = tempfile.NamedTemporaryFile('w', suffix='_autoclick_session.json',
+                                    delete=False, encoding='utf-8')
+    json.dump(state, f, ensure_ascii=False)
     f.close()
     return f.name
 
@@ -78,7 +106,17 @@ async def open_browser(p, log=None):
             raise RuntimeError(
                 'нет файла сессии. Экспортируй сессию локально '
                 '(кнопка на вкладке «Автокликеры» или session_export.py) '
-                f'и положи в Streamlit Secrets: {SESSION_SECRET_KEY}')
+                'и вставь строку в «Настройки проекта» → «Сессия браузера»')
+        # Файл мог быть записан не нами (старый экспорт, ручная правка) -
+        # приводим к формату Playwright, иначе new_context падает на первом же
+        # неизвестном поле cookie и сессия целиком считается негодной.
+        try:
+            with open(state, encoding='utf-8') as _f:
+                _чистый = sanitize_state(json.load(_f))
+            with open(state, 'w', encoding='utf-8') as _f:
+                json.dump(_чистый, _f, ensure_ascii=False)
+        except Exception as _e:
+            raise RuntimeError(f'сессия не читается: {_e}') from _e
         browser = await p.chromium.launch(headless=True, args=[
             '--disable-blink-features=AutomationControlled',
             '--no-sandbox', '--disable-dev-shm-usage',
