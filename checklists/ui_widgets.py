@@ -1,6 +1,75 @@
 """Общие мелкие UI-хелперы для страниц проверок (не про шаблоны - см.
 page_templates.py для этого)."""
+import time
+from pathlib import Path
+
 import streamlit as st
+
+
+def _мм_сс(секунд) -> str:
+    с = max(int(секунд or 0), 0)
+    return f'{с // 60}:{с % 60:02d}'
+
+
+def run_started_at(pid_file, log_file=None):
+    """Когда начался ИДУЩИЙ прогон (unix-время) или None.
+
+    Берём время создания pid-файла, а не session_state: прогон живёт в
+    отдельном процессе и виден из любой сессии - секундомер должен работать и
+    после перезагрузки страницы, и у коллеги на другом компьютере."""
+    for f in (pid_file, log_file):
+        try:
+            p = Path(f)
+            if p.is_file():
+                return p.stat().st_mtime
+        except Exception:
+            continue
+    return None
+
+
+def elapsed_caption(pid_file, log_file=None, *, running: bool,
+                    estimate_low=None, estimate_high=None) -> None:
+    """Секундомер прогона: «идёт 4:32» и «заняло 12:07» после завершения.
+
+    Пока прогон идёт, показываем и остаток по прогнозу - иначе непонятно,
+    ждать ещё минуту или полчаса. Когда закончился, сравниваем факт с
+    прогнозом: так видно, насколько оценка врёт, и её можно поправить."""
+    старт = run_started_at(pid_file, log_file)
+    if not старт:
+        return
+    if running:
+        прошло = time.time() - старт
+        текст = f'⏱ идёт **{_мм_сс(прошло)}**'
+        if estimate_high:
+            осталось = estimate_high - прошло
+            if осталось > 0:
+                текст += f' · осталось примерно {_мм_сс(осталось)}'
+            else:
+                текст += ' · дольше прогноза'
+        st.caption(текст)
+        return
+
+    # Завершился: конец - время последней записи лога (pid-файл к тому моменту
+    # уже мог быть удалён).
+    конец = None
+    try:
+        p = Path(log_file) if log_file else None
+        if p and p.is_file():
+            конец = p.stat().st_mtime
+    except Exception:
+        pass
+    if not конец or конец < старт:
+        return
+    заняло = конец - старт
+    текст = f'⏱ заняло **{_мм_сс(заняло)}**'
+    if estimate_low and estimate_high:
+        if заняло < estimate_low:
+            текст += f' (прогноз был {_мм_сс(estimate_low)}–{_мм_сс(estimate_high)} - быстрее)'
+        elif заняло > estimate_high:
+            текст += f' (прогноз был {_мм_сс(estimate_low)}–{_мм_сс(estimate_high)} - дольше)'
+        else:
+            текст += ' (уложился в прогноз)'
+    st.caption(текст)
 
 
 def multiselect_grows_css() -> None:

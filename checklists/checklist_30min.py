@@ -67,6 +67,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 from checklists import page_templates as _tpl
+from checklists import ui_widgets as _ui
 REPORTS_DIR = PROJECT_ROOT / 'reports'
 REPORTS_DIR.mkdir(exist_ok=True)
 
@@ -2430,6 +2431,9 @@ if pid:
             }
             _est_low, _est_high = estimate_run_seconds(
                 _est_pages, _est_cities, _est_checks)
+            # Прогноз кладём в состояние: ниже, у секундомера, он нужен для
+            # остатка времени и сравнения «прогноз против факта».
+            st.session_state['c30_est'] = (_est_low, _est_high)
             st.caption(
                 f'⏱ Примерное время: **{format_estimate(_est_low, _est_high)}** · '
                 f'{_est_pages} страниц, {_est_cities} городов. '
@@ -2611,11 +2615,14 @@ if pid:
     # Завершение определяем по появлению артефакта (отчёт/результат), а не только
     # по живости pid: на Linux дочерний процесс может стать zombie и «жить» в
     # таблице процессов, из-за чего _alive остаётся True и UI зависает на прогрессе.
+    _est = st.session_state.get('c30_est') or (None, None)
     if _alive and not _done:
         with st.container(border=True):
             st.markdown('### ⏳ Идёт проверка')
             st.caption('Можно переключаться на другие вкладки - прогон идёт в фоне '
                        'и не прервётся.')
+            _ui.elapsed_caption(_paths['pid'], _paths['log'], running=True,
+                                estimate_low=_est[0], estimate_high=_est[1])
             _prog, _ptext = 0.0, 'Подготовка…'
             try:
                 _s = json.loads(_paths['status'].read_text(encoding='utf-8'))
@@ -2705,6 +2712,16 @@ if pid:
                 st.warning(f'Найдены проблемы. Проверено {total} страниц за {format_duration(duration)}.')
             else:
                 st.success(f'✓ Все проверки прошли успешно: {total} страниц за {format_duration(duration)}.')
+            # Сверка с прогнозом: видно, врёт оценка или нет.
+            if _est[0] and _est[1]:
+                if duration < _est[0]:
+                    _вердикт = 'быстрее прогноза'
+                elif duration > _est[1]:
+                    _вердикт = 'дольше прогноза'
+                else:
+                    _вердикт = 'в рамках прогноза'
+                st.caption(f'⏱ Прогноз был {format_estimate(_est[0], _est[1])} - '
+                           f'{_вердикт}.')
 
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric('Всего', total)

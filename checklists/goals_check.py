@@ -385,10 +385,12 @@ _sm = _re.findall(r'СТРАНА\s+(\d+)\s*/\s*(\d+)', log_txt)
 _pm = _re.findall(r'ПРОГРЕСС\s+(\d+)\s*/\s*(\d+)', log_txt)
 _goals_hit = len(_re.findall(r'цель:\s', log_txt))
 _forms_now = ('ФОРМЫ:' in log_txt) and ('СТРАНА' not in log_txt)
-# Секундомер прогона (как на «Проверке форм»): сколько времени идёт/заняло.
-# Старт берём из session_state (ставится при запуске); показываем только для
-# СВОЕГО прогона - после перезагрузки страницы отметки нет, тогда «…».
-_gts = st.session_state.get('goals_started_ts') if _own_run else None
+# Секундомер прогона: сколько времени идёт/заняло. Старт берём из pid-файла,
+# а не из session_state: прогон живёт отдельным процессом, и время должно быть
+# видно после перезагрузки страницы и из другой сессии (раньше там был «…»).
+from checklists import ui_widgets as _ui   # noqa: E402
+_gts = (_ui.run_started_at(PID_FILE, LOG_FILE)
+        or (st.session_state.get('goals_started_ts') if _own_run else None))
 if _running:
     _elapsed = int(time.time() - _gts) if _gts else None
     _run_mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'

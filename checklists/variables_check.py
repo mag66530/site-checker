@@ -370,6 +370,9 @@ if _est_cities_kp:
         _re = importlib.reload(_re)
     _lo_kp, _hi_kp = _re.estimate_kp_seconds(_est_cities_kp,
                                              check_site=_check_site, maps=_est_maps)
+    # Прогноз нужен ниже секундомеру: остаток времени и сверка «прогноз/факт».
+    st.session_state['vars_est_lo'] = _lo_kp
+    st.session_state['vars_est_hi'] = _hi_kp
     st.caption(f'⏱ Примерное время: **{_re.format_estimate(_lo_kp, _hi_kp)}** · '
                f'{_est_cities_kp} городов'
                + (f', карт: {_est_maps}' if _est_maps else '') + '.')
@@ -520,6 +523,9 @@ if _alive and not _done:
         st.progress(min(i / max(n, 1), 0.99), text=f'Проверено {i} из {n} поддоменов')
     else:
         st.progress(0.05, text='Готовлю проверку…')
+    _ui.elapsed_caption(PID_FILE, LOG_FILE, running=True,
+                        estimate_low=st.session_state.get('vars_est_lo'),
+                        estimate_high=st.session_state.get('vars_est_hi'))
     with st.expander('Подробный лог', expanded=True):
         st.code('\n'.join(_log.splitlines()[-200:]) or '…', language='text')
     time.sleep(2)
@@ -528,6 +534,9 @@ else:
     if st.session_state.get('vars_started'):
         st.caption(f'Последний запуск: {st.session_state["vars_started"]}')
     if _log.strip():
+        _ui.elapsed_caption(PID_FILE, LOG_FILE, running=False,
+                            estimate_low=st.session_state.get('vars_est_lo'),
+                            estimate_high=st.session_state.get('vars_est_hi'))
         with st.expander('Подробный лог', expanded=False):
             st.code('\n'.join(_log.splitlines()[-200:]), language='text')
     if xlsx.exists():
