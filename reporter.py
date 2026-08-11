@@ -2326,16 +2326,18 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
                           'и номер счётчика в настройках проекта '
                           '(metrika_oauth, metrika_counter).'))
     if not (trust and trust.get('available') and trust.get('hosts')):
+        # trust=None означает, что проверка НЕ ЗАПУСКАЛАСЬ (галочка снята), а не
+        # что не хватает токена. Раньше на оба случая писали «нужен токен» - и
+        # человек шёл искать несуществующую проблему в настройках.
         _пусто.append(('Траст проекта',
                        (trust or {}).get('note')
-                       or 'ИКС не получен. Нужен OAuth-токен Вебмастера '
-                          '(webmaster_oauth) в настройках проекта; DR требует '
-                          'ключ Open PageRank.'))
+                       or 'проверка «Траст проекта» не включена в настройках '
+                          'прогона - ИКС и DR не запрашивались.'))
     if not lp_hosts:
         _пусто.append(('Ссылочный профиль',
                        (link_profile or {}).get('note')
-                       or 'данные Вебмастера не получены. Нужен OAuth-токен '
-                          'Вебмастера со scope webmaster:hostinfo.'))
+                       or 'проверка не включена в настройках прогона либо не '
+                          'задан OAuth-токен Вебмастера.'))
     if not (gsc_pages and gsc_pages.get('available')):
         _пусто.append(('Страницы в ГСК',
                        (gsc_pages or {}).get('note')
