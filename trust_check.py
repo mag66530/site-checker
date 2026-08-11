@@ -43,10 +43,20 @@ def fetch_sqi(project_id, token, proxy_url=None, log=None):
         hid = hh.get('host_id')
         sqi = None
         try:
-            sqi = _get(token, f'/user/{uid}/hosts/{hid}/', proxy_url).get('sqi')
+            # ИКС живёт в /summary/, а НЕ в корне хоста: корень отдаёт только
+            # ascii_host_url, host_display_name, main_mirror, verified - поля
+            # sqi там нет вовсе. Раньше читали корень, и ИКС всегда выходил
+            # пустым: прогон отчитывался «хостов 242», а в отчёте стояли
+            # прочерки.
+            sqi = _get(token, f'/user/{uid}/hosts/{hid}/summary/',
+                       proxy_url).get('sqi')
         except Exception as e:
             _log(f'⚠ ИКС ({host_norm}): {e}')
         out.append({'host': host_norm, 'host_id': hid, 'sqi': sqi})
+    _с_иксом = sum(1 for h in out if h['sqi'] is not None)
+    if out and not _с_иксом:
+        _log('⚠ ИКС: ни у одного хоста нет значения - проверьте права токена '
+             'или подтверждение прав на сайты.')
     return out
 
 

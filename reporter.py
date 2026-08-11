@@ -1938,19 +1938,44 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
     # свою ширину колонкам ссылочного профиля (Ссылок/Доноров) и наоборот,
     # то же самое, что раньше было с трафиком. Теперь у каждой таблицы
     # СВОИ колонки - ширина одной никак не зависит от другой.
-    widths = [16, 9, 13, 10, 13, 10, 10, 8, 12, 10]
+    # Ссылочный профиль нужен уже здесь, для раскладки колонок (сам блок
+    # рисуется ниже).
+    lp_hosts = sorted((link_profile or {}).get('hosts') or [], key=_lp_rank) \
+        if link_profile and link_profile.get('available') else []
+
+    # Зоны раскладываем СЛЕВА НАПРАВО по тем, что реально есть. Раньше
+    # смещения были прибиты намертво (M/Q/X), и при выключенном трафике лист
+    # открывался с пустой левой третью, а таблицы уезжали за край экрана.
+    # Условия ДОЛЖНЫ совпадать с теми, по которым блок реально рисуется ниже:
+    # иначе зона резервируется под блок, которого не будет, и на листе снова
+    # дыра - ровно то, что чинили.
+    _есть_траст = bool(trust and trust.get('available') and trust.get('hosts'))
+    _есть_гск = bool(gsc_pages and gsc_pages.get('available'))
+    _ЗОНЫ = [
+        ('traffic', has_traffic, [16, 9, 13, 10, 13, 10, 10, 8, 12, 10]),
+        ('trust', _есть_траст, [18, 11, 11]),
+        ('lp', bool(lp_hosts), [16, 9, 9, 13, 14, 60]),
+        ('gsc', _есть_гск, [46, 12, 14]),
+    ]
     ws.column_dimensions['A'].width = 3
-    for i, w in enumerate(widths, 2):
-        ws.column_dimensions[get_column_letter(i)].width = w
-    for col in ('L', 'P', 'W'):
-        ws.column_dimensions[col].width = 3
-    for col, w in zip('MNO', (18, 11, 11)):              # Траст
-        ws.column_dimensions[col].width = w
-    for col, w in zip('QRSTUV', (16, 9, 9, 13, 14, 60)):  # Ссылочный профиль
-        ws.column_dimensions[col].width = w
-    for col, w in zip('XYZ', (46, 12, 14)):               # ГСК (длинные подписи)
-        ws.column_dimensions[col].width = w
-    TRUST_COL, LP_COL, GSC_COL = 11, 15, 22  # смещения от B(2): M/Q/X
+    _старт = {}
+    _col = 2                                   # B
+    for имя, есть, ширины in _ЗОНЫ:
+        if not есть:
+            continue
+        _старт[имя] = _col
+        for i, w in enumerate(ширины):
+            ws.column_dimensions[get_column_letter(_col + i)].width = w
+        _col += len(ширины)
+        ws.column_dimensions[get_column_letter(_col)].width = 3   # разделитель
+        _col += 1
+    _последняя = get_column_letter(max(_col - 1, 26))
+
+    # Смещения от B(2) - код блоков ниже считает колонки как «2 + СМЕЩЕНИЕ».
+    # Блок, которого нет, не рисуется вовсе, поэтому его смещение не важно.
+    TRUST_COL = _старт.get('trust', 11) - 2
+    LP_COL = _старт.get('lp', 15) - 2
+    GSC_COL = _старт.get('gsc', 22) - 2
     # Шапка таблицы трафика (при наличии трафика) стоит на row=5, данные - с
     # row=6 (title@2, подзаголовок@3, зазор@4). Боковые блоки (Траст/Ссылочный
     # профиль/ГСК) равняют свою шапку и данные на те же номера строк, чтобы
@@ -1958,7 +1983,7 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
     # другого.
     _SIDE_HDR_ROW, _SIDE_DATA_ROW = 5, 6
 
-    ws.merge_cells('B2:Z2')
+    ws.merge_cells(f'B2:{_последняя}2')
     c = ws['B2']
     c.value = 'Трафик и траст проекта'
     c.font = _font(size=16, bold=True)
@@ -2111,9 +2136,7 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
 
     # ── Ссылочный профиль (lite, Вебмастер) - метрика, не находка. Своя
     # зона колонок (LP_COL) - «Что не так» не зависит от ширины колонок
-    # ни трафика, ни траста.
-    lp_hosts = sorted((link_profile or {}).get('hosts') or [], key=_lp_rank) \
-        if link_profile and link_profile.get('available') else []
+    # ни трафика, ни траста. lp_hosts посчитан выше, при раскладке зон.
     if lp_hosts:
         lp_row = 3
         ws.merge_cells(start_row=lp_row, start_column=2 + LP_COL,
