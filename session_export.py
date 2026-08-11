@@ -74,6 +74,34 @@ def main():
         print('Cookies Яндекса/Google не найдены - ты вошёл в аккаунты?')
         sys.exit(1)
 
+    # Наличие cookies домена ещё не значит, что вход выполнен: Яндекс и Google
+    # ставят технические cookies и незалогиненному. Вход подтверждают ИМЕННО
+    # эти ключи. Без проверки экспорт молча отдавал «половину» сессии (был
+    # живой случай: выгрузились только cookies Google, и автокликер Вебмастера
+    # потом обходил все сайты, разбирая страницу входа, и отчитывался нулями).
+    имена = {c.get('name') for c in cookies}
+    вошёл_ya = bool(имена & {'Session_id', 'sessionid2'})
+    вошёл_goog = bool(имена & {'SID', '__Secure-1PSID'})
+    логин = next((c.get('value') for c in cookies
+                  if c.get('name') == 'yandex_login'), None)
+
+    if not (вошёл_ya and вошёл_goog):
+        print()
+        print('⚠ ВХОД ВЫПОЛНЕН НЕ ВЕЗДЕ:')
+        print(f'   Яндекс (Вебмастер, Я.Бизнес): '
+              f'{"вход есть — " + (логин or "аккаунт не определить") if вошёл_ya else "ВХОДА НЕТ"}')
+        print(f'   Google (Search Console):      '
+              f'{"вход есть" if вошёл_goog else "ВХОДА НЕТ"}')
+        print()
+        print('   Войди в НЕДОСТАЮЩИЙ аккаунт в ЭТОМ ЖЕ окне браузера и '
+              'повтори экспорт,')
+        print('   иначе кликер по этому сервису будет открывать страницу '
+              'входа вместо данных.')
+        if not (вошёл_ya or вошёл_goog):
+            sys.exit(1)      # совсем пустая сессия - файл писать незачем
+        print('   Файл всё равно сохранён - для сервиса, где вход есть.')
+        print()
+
     payload = json.dumps({'cookies': cookies, 'origins': []},
                          ensure_ascii=False).encode('utf-8')
     b64 = base64.b64encode(payload).decode('ascii')
@@ -81,16 +109,18 @@ def main():
     out_file.write_text(b64, encoding='utf-8')
 
     print(f'✓ Сессия выгружена: cookies Яндекса {ya}, Google {goog}')
+    if вошёл_ya:
+        print(f'✓ Аккаунт Яндекса: {логин or "не определить"} - проверь, что '
+              f'это аккаунт нужного проекта')
     print(f'✓ Файл: {out_file}')
     print(f'✓ Размер секрета: {len(b64) // 1024 + 1} КБ')
     print()
     print('ДАЛЬШЕ (один раз, потом только при протухании):')
-    print('  1. Открой настройки приложения на Streamlit Cloud → Secrets.')
-    print(f'  2. Добавь строку:  {secret_key} = "<содержимое файла>"')
+    print('  1. Личный кабинет → «Настройки проекта».')
+    print('  2. Поле «Сессия браузера: Яндекс + Google» - вставь СОДЕРЖИМОЕ '
+          'файла целиком, одной строкой.')
     print('  3. Сохрани - облачные автокликеры заработают.')
-    if a.project:
-        print(f'  (у каждого проекта свой секрет: {SESSION_SECRET_KEY}_smu / '
-              f'_mpe / _imp)')
+    print(f'  (запасной вариант - Streamlit Secrets, ключ {secret_key})')
 
 
 if __name__ == '__main__':

@@ -218,7 +218,44 @@ if not (proj.get('google') and proj.get('yandex')):
                '(checklists/autoclickers.py), иначе непонятно, под каким '
                'аккаунтом логиниться.')
 
+def _session_info(b64: str) -> dict:
+    """Что внутри сессии: выполнен ли вход в Яндекс и в Google и под каким
+    аккаунтом Яндекса. Наличие cookies домена входа не доказывает - оба
+    сервиса ставят технические cookies и незалогиненному, поэтому смотрим
+    именно ключи авторизации."""
+    import base64 as _b64
+    import json as _json
+    try:
+        cookies = _json.loads(_b64.b64decode(''.join(str(b64).split())))\
+            .get('cookies', [])
+    except Exception:
+        return {}
+    имена = {c.get('name') for c in cookies}
+    return {
+        'yandex': bool(имена & {'Session_id', 'sessionid2'}),
+        'google': bool(имена & {'SID', '__Secure-1PSID'}),
+        'login': next((c.get('value') for c in cookies
+                       if c.get('name') == 'yandex_login'), None),
+        'всего': len(cookies),
+    }
+
+
 _cloud_session = _session_secret(pid)
+if _cloud_session:
+    _инфо = _session_info(_cloud_session)
+    if _инфо and not (_инфо['yandex'] and _инфо['google']):
+        st.error(
+            f'⚠ Сессия проекта неполная: вход в Яндекс - '
+            f'**{"есть" if _инфо["yandex"] else "НЕТ"}**, вход в Google - '
+            f'**{"есть" if _инфо["google"] else "НЕТ"}**. '
+            f'Кликер по сервису без входа будет открывать страницу входа '
+            f'вместо данных и отчитается «ошибок нет». Войди в НЕДОСТАЮЩИЙ '
+            f'аккаунт и повтори экспорт (Шаг 1).')
+    elif _инфо:
+        st.caption(f'Сессия проекта: вход в Яндекс ✓ '
+                   f'({_инфо["login"] or "аккаунт не определить"}), '
+                   f'вход в Google ✓ · cookies {_инфо["всего"]}')
+
 if _cdp:
     st.success('Режим: **локальный** - найден залогиненный Chrome (CDP 9222). '
                'Клики пойдут через него, как обычно.')
