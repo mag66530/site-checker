@@ -373,9 +373,9 @@ if _est_cities_kp:
     # Прогноз нужен ниже секундомеру: остаток времени и сверка «прогноз/факт».
     st.session_state['vars_est_lo'] = _lo_kp
     st.session_state['vars_est_hi'] = _hi_kp
-    st.caption(f'⏱ Примерное время: **{_re.format_estimate(_lo_kp, _hi_kp)}** · '
-               f'{_est_cities_kp} городов'
-               + (f', карт: {_est_maps}' if _est_maps else '') + '.')
+    _ui.estimate_badge(_re.format_estimate(_lo_kp, _hi_kp),
+                       f'{_est_cities_kp} городов'
+                       + (f', карт: {_est_maps}' if _est_maps else '') + '.')
 
 st.divider()
 st.subheader('Запуск')

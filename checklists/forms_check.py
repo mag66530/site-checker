@@ -1126,9 +1126,10 @@ if not _alive:
     if not hasattr(_re, 'estimate_forms_seconds'):
         _re = importlib.reload(_re)
     _lo, _hi = _re.estimate_forms_seconds(_est_forms, _est_cities, admin=_est_admin)
-    st.caption(f'⏱ Примерное время: **{_re.format_estimate(_lo, _hi)}** · '
-               f'{_est_forms} форм × {_est_cities} домен(ов). '
-               'Оценка грубая: зависит от скорости сайта и числа проб.')
+    from checklists import ui_widgets as _uiw
+    _uiw.estimate_badge(_re.format_estimate(_lo, _hi),
+                        f'{_est_forms} форм × {_est_cities} домен(ов). '
+                        f'Зависит от скорости сайта и числа проб.')
 
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:

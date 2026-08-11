@@ -221,11 +221,13 @@ if _n_sel:
     except Exception:  # noqa: BLE001
         _est_pages = 10
     _lo_g, _hi_g = _re.estimate_goals_seconds(_est_pages, _n_sel, run_orders=True)
-    _time_hint = (f' ⏱ Примерное время: **{_re.format_estimate(_lo_g, _hi_g)}** '
-                  f'({_est_pages} страниц на сайт + сквозной заказ в начале).')
+    _оценка = (_re.format_estimate(_lo_g, _hi_g),
+               f'{_est_pages} страниц на сайт + сквозной заказ в начале.')
 else:
-    _time_hint = ''
-st.caption(f'Выбрано сайтов: **{_n_sel} / {len(_доступные)}**.{_time_hint}')
+    _оценка = None
+st.caption(f'Выбрано сайтов: **{_n_sel} / {len(_доступные)}**.')
+if _оценка:
+    _ui.estimate_badge(*_оценка)
 
 # Рабочие файлы (лог/PID общего прогона) держим под базовым проектом.
 WORK = ROOT / 'cache' / 'goals' / _base

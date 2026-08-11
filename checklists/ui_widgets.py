@@ -11,6 +11,22 @@ def _мм_сс(секунд) -> str:
     return f'{с // 60}:{с % 60:02d}'
 
 
+def estimate_badge(текст: str, подробности: str = '') -> None:
+    """Прогноз времени - заметной плашкой, а не серым мелким текстом.
+
+    Раньше это был st.caption: строку просто не замечали, и люди запускали
+    часовой прогон, думая, что он на пять минут."""
+    st.markdown(
+        f'<div style="background:#EEF4FF;border-left:4px solid #2563EB;'
+        f'border-radius:6px;padding:10px 14px;margin:6px 0 10px 0">'
+        f'<span style="font-size:15px;font-weight:600;color:#1E3A8A">'
+        f'⏱ Примерное время: {текст}</span>'
+        + (f'<br><span style="font-size:12px;color:#475569">{подробности}</span>'
+           if подробности else '')
+        + '</div>',
+        unsafe_allow_html=True)
+
+
 def run_started_at(pid_file, log_file=None):
     """Когда начался ИДУЩИЙ прогон (unix-время) или None.
 

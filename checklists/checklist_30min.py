@@ -2429,16 +2429,20 @@ if pid:
                     'c30_fetch_notifications', 'c30_fetch_metrika_404',
                 )
             }
+            # Число ХОСТОВ проекта: ссылочный профиль, ИКС и аномалии ходят по
+            # ВСЕМ сайтам, сколько бы городов ни выбрали для страниц. На
+            # проекте с 242 хостами это минуты - без этого прогноз занижался.
+            _est_hosts = stats.get('subdomains_count') or _est_cities
             _est_low, _est_high = estimate_run_seconds(
-                _est_pages, _est_cities, _est_checks)
+                _est_pages, _est_cities, _est_checks, hosts=_est_hosts)
             # Прогноз кладём в состояние: ниже, у секундомера, он нужен для
             # остатка времени и сравнения «прогноз против факта».
             st.session_state['c30_est'] = (_est_low, _est_high)
-            st.caption(
-                f'⏱ Примерное время: **{format_estimate(_est_low, _est_high)}** · '
-                f'{_est_pages} страниц, {_est_cities} городов. '
-                'Оценка грубая: зависит от скорости сайта, прокси и лимитов '
-                'внешних сервисов.')
+            _ui.estimate_badge(
+                format_estimate(_est_low, _est_high),
+                f'{_est_pages} страниц, {_est_cities} городов, '
+                f'{_est_hosts} хостов проекта. Зависит от скорости сайта, '
+                f'прокси и лимитов внешних сервисов.')
         if _go:
             flags = {
                 'check_main': st.session_state.c30_check_main,

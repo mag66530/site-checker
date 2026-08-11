@@ -435,8 +435,9 @@ if _est_urls:
     if not hasattr(_re, 'estimate_pagespeed_seconds'):
         _re = importlib.reload(_re)
     _lo_ps, _hi_ps = _re.estimate_pagespeed_seconds(_est_urls)
-    st.caption(f'⏱ Примерное время: **{_re.format_estimate(_lo_ps, _hi_ps)}** · '
-               f'~{_est_urls} адресов. Зависит от очереди PageSpeed API.')
+    from checklists import ui_widgets as _uiw
+    _uiw.estimate_badge(_re.format_estimate(_lo_ps, _hi_ps),
+                        f'~{_est_urls} адресов. Зависит от очереди PageSpeed API.')
 
 c1, c2 = st.columns([3, 1])
 with c1:
