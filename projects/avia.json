@@ -3,7 +3,7 @@
   "name": "АПС - Авиапромсталь",
   "root_domain": "aviastal.ru",
   "main_url": "https://aviastal.ru/",
-  "sitemap_url": "https://aviastal.ru/sitemap.xml",
+  "sitemap_url": "https://aviastal.ru/sitemap/aviastal.ru/sitemap.xml",
   "subdomains_csv": "catalogs/avia-subdomains.csv",
   "catalog_csv": "catalogs/avia-catalog.csv",
   "categories_csv": null,
