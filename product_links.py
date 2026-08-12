@@ -97,10 +97,11 @@ def _clean_href(href: str, page_url: str, page_host: str) -> str:
 _PRODUCT_PREFIXES = ('product', 'produkt', 'tovar', 'tovary')
 
 
-def _looks_like_product(path: str) -> bool:
+def _looks_like_product(path: str, known_category_paths: set | None = None) -> bool:
     """Похоже на товар: под /catalog/ с 3+ сегментами (СМУ/МПЭ), под товарным
-    префиксом /product/<slug> (SHOPMET) ЛИБО корневой длинный slug с дефисами
-    (ИМП: /list-otsinkovannyj-…-nlmk/), а не /about/."""
+    префиксом /product/<slug> (SHOPMET), числовой id внутри известной категории
+    (АПС: /nerzhaveushii-prokat/krug-nerzhaveushii/19444) ЛИБО корневой длинный
+    slug с дефисами (ИМП: /list-otsinkovannyj-…-nlmk/), а не /about/."""
     segs = [s for s in path.strip('/').split('/') if s]
     if not segs:
         return False
@@ -108,6 +109,15 @@ def _looks_like_product(path: str) -> bool:
         return len(segs) >= 2
     if path.startswith('/catalog/'):
         return len(segs) >= 3
+    # У АПС раздела /catalog нет, категории лежат в корне, а карточка - это
+    # категория плюс числовой id. Требуем, чтобы родитель был ИЗВЕСТНОЙ
+    # категорией проекта: тогда правило не может зацепить чужие адреса - у
+    # остальных проектов последний сегмент товара не бывает голым числом
+    # (СМУ: /catalog/truba-profilnaya/2972110-truba-profilnaya-100kh10-mm/).
+    if len(segs) >= 2 and segs[-1].isdigit() and known_category_paths:
+        родитель = '/' + '/'.join(segs[:-1]) + '/'
+        if родитель in known_category_paths:
+            return True
     if len(segs) == 1:
         s = segs[0]
         return len(s) >= 12 and s.count('-') >= 2
@@ -157,7 +167,7 @@ def extract_product_paths(
     def consider(path: str) -> None:
         if (not path or path in seen
                 or path in known_category_paths or path in known_filter_paths
-                or not _looks_like_product(path)):
+                or not _looks_like_product(path, known_category_paths)):
             return
         seen.add(path)
         out.append(path)
@@ -168,7 +178,7 @@ def extract_product_paths(
         # первая «товарная» ссылка в карточке - это сам товар (а не иконка/счётчик)
         for m in _HREF_RE.finditer(chunk[:4000]):
             path = _clean_href(m.group(1), page_url, page_host)
-            if path and _looks_like_product(path):
+            if path and _looks_like_product(path, known_category_paths):
                 consider(path)
                 break
 
@@ -183,9 +193,18 @@ def extract_product_paths(
             if not path:
                 continue
             первый = path.strip('/').split('/')[0].lower()
+            segs = [s for s in path.strip('/').split('/') if s]
             if первый in _PRODUCT_PREFIXES:
                 consider(path)
             elif path.startswith('/catalog/') and not _is_facet_listing(path, known):
+                consider(path)
+            elif len(segs) >= 2 and segs[-1].isdigit():
+                # Карточка внутри известной категории (АПС: контейнер зовётся
+                # catalog-item - под классы карточек других проектов он не
+                # подходит, поэтому листинг сюда и попадает). Проверку
+                # «родитель - известная категория» делает _looks_like_product
+                # внутри consider: без неё сюда лезли бы пагинация и прочие
+                # адреса, кончающиеся числом.
                 consider(path)
     return out
 
