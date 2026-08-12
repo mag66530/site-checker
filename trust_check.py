@@ -18,7 +18,12 @@ try:
 except ImportError:
     requests = None
 
-OPR_URL = 'https://openpagerank.com/api/v1.0/getPageRank'
+# Open PageRank переехал под Keywords Everywhere: ключ выдают там же, где ключ
+# KE, и он выглядит как «opr_live_…». Новый API - POST с bearer-токеном.
+OPR_URL_KE = 'https://openpagerank.keywordseverywhere.com/v1/domains/bulk'
+# Старый адрес с заголовком API-OPR и ключом из 32 символов. Оставлен для
+# ключей, выданных до переезда: у кого он ещё работает, тому менять нечего.
+OPR_URL_LEGACY = 'https://openpagerank.com/api/v1.0/getPageRank'
 
 
 def fetch_sqi(project_id, token, proxy_url=None, log=None):
@@ -60,28 +65,80 @@ def fetch_sqi(project_id, token, proxy_url=None, log=None):
     return out
 
 
-def fetch_dr(domains, api_key, proxy_url=None, log=None):
-    """DR-ранг (0-100) по доменам через Open PageRank. → {domain: rank|None}.
-    Пусто, если ключа/requests нет."""
-    def _log(m):
-        if log:
-            log(m)
-    if requests is None or not api_key or not domains:
-        return {}
+def _quota_hint(resp):
+    """Остаток квоты из заголовков ответа - его видно только в них. Пусто,
+    если заголовков нет (старый API их не шлёт)."""
+    left = resp.headers.get('X-Domains-Remaining')
+    total = resp.headers.get('X-Domains-Limit')
+    if left is None:
+        return ''
+    return f' (доменов в месяце осталось {left}' + (f' из {total})' if total else ')')
+
+
+def _dr_ke(domains, api_key, proxies, log):
+    """Новый API (Keywords Everywhere): POST c bearer-токеном, до 100 доменов
+    за раз. Ранг лежит в open_page_rank; found=false - домена нет в индексе,
+    это ответ, а не сбой."""
     out = {}
-    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    headers = {'Authorization': f'Bearer {api_key}',
+               'Content-Type': 'application/json'}
+    for i in range(0, len(domains), 100):
+        chunk = domains[i:i + 100]
+        try:
+            r = requests.post(OPR_URL_KE, headers=headers, proxies=proxies,
+                              json={'domains': chunk, 'include_history': False},
+                              timeout=60)
+        except Exception as e:
+            log(f'⚠ Open PageRank: сеть - {e}')
+            continue
+        if r.status_code == 401:
+            log('⚠ Open PageRank: ключ не принят (HTTP 401). Проверьте, что в '
+                'настройках проекта лежит ключ вида «opr_live_…» из кабинета '
+                'Keywords Everywhere.')
+            return out
+        if r.status_code == 429:
+            log('⚠ Open PageRank: исчерпан лимит (HTTP 429) - месячная квота '
+                'доменов или запросы в минуту. DR останется прочерком.')
+            return out
+        if r.status_code >= 400:
+            log(f'⚠ Open PageRank: HTTP {r.status_code}: {r.text[:160]}')
+            continue
+        try:
+            data = r.json() or {}
+        except ValueError:
+            log('⚠ Open PageRank: ответ не разобрался как JSON')
+            continue
+        for row in data.get('results') or []:
+            dom = (row.get('domain') or '').lower()
+            if not row.get('found'):
+                out[dom] = None
+                continue
+            try:
+                out[dom] = float(row.get('open_page_rank'))
+            except (TypeError, ValueError):
+                out[dom] = None
+        for dom in data.get('invalid') or []:
+            out[str(dom).lower()] = None
+        if i == 0:
+            log(f'Open PageRank: ответ получен{_quota_hint(r)}')
+    return out
+
+
+def _dr_legacy(domains, api_key, proxies, log):
+    """Старый API openpagerank.com: GET с заголовком API-OPR."""
+    out = {}
     headers = {'API-OPR': api_key}
     for i in range(0, len(domains), 100):
         chunk = domains[i:i + 100]
         params = [('domains[]', d) for d in chunk]
         try:
-            r = requests.get(OPR_URL, headers=headers, params=params,
+            r = requests.get(OPR_URL_LEGACY, headers=headers, params=params,
                              proxies=proxies, timeout=40)
         except Exception as e:
-            _log(f'⚠ Open PageRank: сеть - {e}')
+            log(f'⚠ Open PageRank: сеть - {e}')
             continue
         if r.status_code >= 400:
-            _log(f'⚠ Open PageRank: HTTP {r.status_code}: {r.text[:120]}')
+            log(f'⚠ Open PageRank: HTTP {r.status_code}: {r.text[:160]}')
             continue
         for row in (r.json() or {}).get('response', []) or []:
             dom = (row.get('domain') or '').lower()
@@ -93,6 +150,30 @@ def fetch_dr(domains, api_key, proxy_url=None, log=None):
                     out[dom] = None
             else:
                 out[dom] = None
+    return out
+
+
+def fetch_dr(domains, api_key, proxy_url=None, log=None):
+    """DR-ранг (0-10) по доменам через Open PageRank. → {domain: rank|None}.
+    Пусто, если ключа/requests нет.
+
+    Ключ «opr_live_…» - новый API под Keywords Everywhere; ключ старого
+    образца (32 символа) - прежний адрес. Если старый ключ там уже не
+    принимают, пробуем его же на новом API: у части аккаунтов ключ перенесли
+    как есть."""
+    def _log(m):
+        if log:
+            log(m)
+    if requests is None or not api_key or not domains:
+        return {}
+    key = str(api_key).strip()
+    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    if key.startswith('opr_'):
+        return _dr_ke(domains, key, proxies, _log)
+    out = _dr_legacy(domains, key, proxies, _log)
+    if not out:
+        _log('Open PageRank: старый адрес молчит - пробую новый API.')
+        out = _dr_ke(domains, key, proxies, _log)
     return out
 
 
