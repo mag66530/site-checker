@@ -53,11 +53,27 @@ def _secret(key: str, default: str = '') -> str:
     return default
 
 
+def _project_setting(pid: str, name: str) -> str:
+    """Значение из настроек проекта (личный кабинет, БД). Пусто, если БД
+    недоступна или настройка не задана - тогда работают секреты ниже."""
+    try:
+        import auth
+        return str(auth.project_setting(pid, name) or '')
+    except Exception:  # noqa: BLE001
+        return ''
+
+
 def _api_key(pid: str) -> str:
-    """Ключ PageSpeed: сперва per-project (pagespeed_api_key_<pid>), затем общий
-    (pagespeed_api_key), затем PAGESPEED_API_KEY из окружения, затем то, что
-    введено в поле на этой сессии."""
-    return (_secret(f'pagespeed_api_key_{pid}') or _secret('pagespeed_api_key')
+    """Ключ PageSpeed. ПОРЯДОК тот же, что у остальных проверок (_secret_pid в
+    чек-листе): настройки проекта из личного кабинета → секрет приложения
+    pagespeed_api_key_<pid> → общий секрет pagespeed_api_key → окружение →
+    то, что вставили в поле на этой сессии.
+
+    Настройки проекта тут раньше не читались вовсе: ключ, сохранённый
+    руководителем на странице «Настройки проекта», страница не видела и
+    честно писала «Ключ не задан» - работал только ручной ввод на сессию."""
+    return (_project_setting(pid, 'pagespeed_api_key')
+            or _secret(f'pagespeed_api_key_{pid}') or _secret('pagespeed_api_key')
             or os.environ.get('PAGESPEED_API_KEY', '')
             or st.session_state.get(f'ps_key_{pid}', '')).strip()
 
@@ -332,12 +348,14 @@ OUT_DIR = OUT_ROOT / pid
 key = _api_key(pid)
 with st.expander('🔑 Ключ PageSpeed API', expanded=not key):
     if key:
-        st.markdown('✅ Ключ задан (из секретов/окружения).')
+        st.markdown('✅ Ключ задан (настройки проекта / секреты / окружение).')
     else:
         st.markdown('❌ Ключ не задан. Без ключа Google даёт очень жёсткий лимит - '
                     'проверка почти наверняка упрётся в ошибку лимита.')
-        st.caption('Постоянный ключ задаётся секретом `pagespeed_api_key` (или '
-                   '`pagespeed_api_key_<проект>`). Получить: Google Cloud Console → '
+        st.caption('Постоянный ключ проще всего завести на странице «Настройки '
+                   'проекта» (поле «Ключ PageSpeed API») - оттуда его видят все '
+                   'в проекте. Либо секретом `pagespeed_api_key` / '
+                   '`pagespeed_api_key_<проект>`. Получить: Google Cloud Console → '
                    'включить «PageSpeed Insights API» → Credentials → API key.')
         _typed = st.text_input('Или вставьте ключ на эту сессию', type='password',
                                key=f'ps_key_input_{pid}')
