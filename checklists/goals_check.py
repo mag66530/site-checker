@@ -21,6 +21,7 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from checklists import page_templates as _tpl
+from checklists import ui_widgets as _ui
 PY = sys.executable
 
 PROJECTS = {
@@ -390,7 +391,9 @@ _forms_now = ('ФОРМЫ:' in log_txt) and ('СТРАНА' not in log_txt)
 # Секундомер прогона: сколько времени идёт/заняло. Старт берём из pid-файла,
 # а не из session_state: прогон живёт отдельным процессом, и время должно быть
 # видно после перезагрузки страницы и из другой сессии (раньше там был «…»).
-from checklists import ui_widgets as _ui   # noqa: E402
+# _ui импортирован в шапке модуля - здесь он нужен НЕ первым: выше по файлу
+# есть estimate_badge, и импорт в этом месте оставлял страницу без _ui ровно
+# до сюда (NameError, как только у прогноза времени появлялись данные).
 _gts = (_ui.run_started_at(PID_FILE, LOG_FILE)
         or (st.session_state.get('goals_started_ts') if _own_run else None))
 if _running:
