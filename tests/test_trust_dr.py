@@ -64,6 +64,28 @@ def test_новый_ключ_идёт_в_новый_api(monkeypatch):
     print('✓ ключ opr_live_… уходит bearer-токеном на новый адрес')
 
 
+def test_поддомены_читаются_из_hosts(monkeypatch):
+    """Запрошенный поддомен сворачивается к регистрируемому домену, а его
+    собственный ранг лежит в hosts[] внутри результата этого домена. Пока
+    читали только results[], DR был лишь у корневого домена."""
+    ответ = _Ответ(данные={'results': [
+        {'domain': 'inmetprom.ru', 'found': True, 'open_page_rank': 1.17,
+         'hosts': [
+             {'host': 'spb.inmetprom.ru', 'found': True, 'open_page_rank': 0.82},
+             {'host': 'kazan.inmetprom.ru', 'found': False},
+         ]},
+    ]})
+    _подменить(monkeypatch, ответ)
+
+    out = tc.fetch_dr(['inmetprom.ru', 'spb.inmetprom.ru',
+                       'kazan.inmetprom.ru'], 'opr_live_x')
+
+    assert out == {'inmetprom.ru': 1.17,
+                   'spb.inmetprom.ru': 0.82,
+                   'kazan.inmetprom.ru': None}
+    print('✓ ранги поддоменов берутся из hosts[]')
+
+
 def test_ключ_не_принят_даёт_понятный_лог(monkeypatch):
     _подменить(monkeypatch, _Ответ(код=401, текст='unauthorized'))
     строки = []

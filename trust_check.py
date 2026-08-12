@@ -6,9 +6,10 @@ trust_check.py - «Проверка показателей и траста пр�
   • Яндекс ИКС (индекс качества сайта) - поле sqi в Вебмастер API v4
     (/user/{uid}/hosts/{host_id}/). Токен webmaster_oauth (тот же, что
     «Ссылочный профиль»). Официальный траст-показатель, надёжно.
-  • DR (Domain Rating-подобный ранг 0-100) - Open PageRank API
-    (openpagerank.com), бесплатный ключ (секрет openpagerank_key). До 100
-    доменов за запрос. Ahrefs free-чекер отпадает - Cloudflare Turnstile
+  • DR (Domain Rating-подобный ранг 0-10) - Open PageRank API, бесплатный ключ
+    (секрет openpagerank_key). До 100 хостов за запрос. Квота считается только
+    по регистрируемым доменам: 242 городских поддомена ИМП - это 15 доменов,
+    поддомены идут бесплатно. Ahrefs free-чекер отпадает - Cloudflare Turnstile
     (капча), headless-скрейп не проходит.
 
 Домены = верифицированные хосты проекта в Вебмастере (как в link_profile).
@@ -75,6 +76,17 @@ def _quota_hint(resp):
     return f' (доменов в месяце осталось {left}' + (f' из {total})' if total else ')')
 
 
+def _rank_of(row):
+    """Ранг из записи результата или поддомена. found=false - домена нет в
+    индексе Open PageRank, это ответ, а не сбой: возвращаем None."""
+    if not row.get('found'):
+        return None
+    try:
+        return float(row.get('open_page_rank'))
+    except (TypeError, ValueError):
+        return None
+
+
 def _read_quota(resp, state):
     """Остаток и размер месячной квоты из заголовков → state. Заголовков может
     не быть (старый API, ошибка шлюза) - тогда просто ничего не трогаем."""
@@ -94,10 +106,10 @@ def _dr_ke(domains, api_key, proxies, log, state):
     за раз. Ранг лежит в open_page_rank; found=false - домена нет в индексе,
     это ответ, а не сбой.
 
-    state - словарь, куда складываем состояние квоты: она считается В ДОМЕНАХ
-    за месяц, а не в запросах, поэтому один прогон крупного проекта способен
-    её выбрать целиком. Прогон от этого не падает, но в отчёте DR у части
-    хостов будет прочерк - и это надо объяснить, иначе выглядит как поломка."""
+    state - словарь, куда складываем состояние квоты. Считается она в
+    РЕГИСТРИРУЕМЫХ доменах за месяц (поддомены бесплатны), так что выбрать её
+    городами одного проекта трудно - но если она всё же кончится, прогон не
+    падает, а в отчёте у части хостов будет прочерк, и это надо объяснить."""
     out = {}
     headers = {'Authorization': f'Bearer {api_key}',
                'Content-Type': 'application/json'}
@@ -130,14 +142,19 @@ def _dr_ke(domains, api_key, proxies, log, state):
             log('⚠ Open PageRank: ответ не разобрался как JSON')
             continue
         for row in data.get('results') or []:
-            dom = (row.get('domain') or '').lower()
-            if not row.get('found'):
-                out[dom] = None
-                continue
-            try:
-                out[dom] = float(row.get('open_page_rank'))
-            except (TypeError, ValueError):
-                out[dom] = None
+            out[(row.get('domain') or '').lower()] = _rank_of(row)
+            # Поддомены приходят НЕ отдельными результатами: запрошенный
+            # spb.inmetprom.ru сворачивается к своему регистрируемому домену,
+            # а его собственный ранг лежит внутри hosts[] этого результата.
+            # Пока мы читали только results[], DR получал один корневой домен
+            # проекта, а 240 городов оставались с прочерком - выглядело как
+            # «работает только .ru».
+            for host in row.get('hosts') or []:
+                имя = _bare(host.get('host') or '')
+                # www.<домен> после _bare совпадает с самим доменом - не даём
+                # ему затереть уже полученный ранг корня.
+                if имя and out.get(имя) is None:
+                    out[имя] = _rank_of(host)
         for dom in data.get('invalid') or []:
             out[str(dom).lower()] = None
         if i == 0:
