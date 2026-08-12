@@ -543,6 +543,9 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             mandatory_hosts=cfg.get('mandatory_hosts'),
             cis_extra_subdomains=int(flags.get('cis_extra', 0)),
             trailing_slash=cfg.get('trailing_slash', True),
+            # Ключа нет - None, и раздел каталога собирается как раньше.
+            # Пустая строка в конфиге (АПС) - раздела у сайта нет, не проверяем.
+            catalog_path=cfg.get('catalog_path'),
             rotation_history=recent,
         )
         append_log(f'Города: {", ".join(s.city for s in plan.selected_subdomains)}')

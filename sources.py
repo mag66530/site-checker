@@ -351,6 +351,7 @@ def build_plan(
     mandatory_hosts: Optional[list[str]] = None,  # домены, всегда в выборке (напр. smg.az)
     cis_extra_subdomains: int = 0,      # сколько доп. СНГ-доменов помимо mandatory_hosts
     trailing_slash: bool = True,        # каноническая форма адресов сайта
+    catalog_path: Optional[str] = None,  # путь раздела каталога; '' - раздела нет
     seed: Optional[int] = None,
     rotation_history: Optional[set[str]] = None,  # pathname'ы проверенные за 7 дней
 ) -> Plan:
@@ -365,6 +366,12 @@ def build_plan(
         и на сайте без слеша (напр. Next.js: /catalog) запрос «/catalog/» уходит
         в редирект на каноническую форму. Раньше это выглядело как «дубль без
         слэша», хотя дубля нет: мы сами ходили по неканоническому адресу.
+    catalog_path - путь раздела каталога. None (по умолчанию) - как было:
+        «/catalog/» или «/catalog» по trailing_slash. Пустая строка - у сайта
+        такого раздела НЕТ, задачу «Каталог» не ставим вовсе: у АПС разделы
+        лежат в корне («/chernyi-prokat»), и запрос «/catalog/» отдавал 404 по
+        каждому городу выборки - находка была ложной, её же и «чинили» бы.
+        Непустая строка - берём как есть (если раздел зовётся иначе).
 
     Если передана rotation_history - pathname'ы из неё получают меньший
     вес (в 3 раза реже попадают в выборку), но не исключаются полностью.
@@ -405,7 +412,8 @@ def build_plan(
             return _pick_random(items, n, rng)
         return weighted_sample(items, n, recent, rng)
 
-    catalog_path = '/catalog/' if trailing_slash else '/catalog'
+    if catalog_path is None:
+        catalog_path = '/catalog/' if trailing_slash else '/catalog'
 
     tasks = []
     for sub in selected:
@@ -426,7 +434,7 @@ def build_plan(
                 url=sub.url, city=sub.city, subdomain=sub.host,
                 type_code='main', type_label=TYPE_LABELS['main'],
             ))
-        if check_catalog:
+        if check_catalog and catalog_path:
             tasks.append(CheckTask(
                 url=f'{base}{catalog_path}', city=sub.city, subdomain=sub.host,
                 type_code='catalog', type_label=TYPE_LABELS['catalog'],

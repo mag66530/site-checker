@@ -111,6 +111,7 @@ def _sample_urls(pid: str, per_type: int, want_products: bool) -> list[tuple[str
         products_per_subdomain=per_type,
         check_products=want_products and bool(sources.products),
         trailing_slash=project.get("trailing_slash", True),
+        catalog_path=project.get("catalog_path"),   # '' - раздела нет (АПС)
         seed=_stable_seed(pid),     # стабильная выборка - для сравнения периодов
     )
     return [(t.url, t.type_code) for t in plan.tasks]

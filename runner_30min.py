@@ -808,6 +808,9 @@ def run_check(pid, params, creds, log, progress):
             mandatory_hosts=cfg.get('mandatory_hosts'),
             cis_extra_subdomains=int(params.get('cis_extra', 0)),
             trailing_slash=cfg.get('trailing_slash', True),
+            # Ключа нет - None, и раздел каталога собирается как раньше.
+            # Пустая строка в конфиге (АПС) - раздела у сайта нет, не проверяем.
+            catalog_path=cfg.get('catalog_path'),
             rotation_history=recent,
         )
         # Свой список URL - добавляем к выборке проекта (тип по адресу).
