@@ -75,10 +75,29 @@ def _quota_hint(resp):
     return f' (доменов в месяце осталось {left}' + (f' из {total})' if total else ')')
 
 
-def _dr_ke(domains, api_key, proxies, log):
+def _read_quota(resp, state):
+    """Остаток и размер месячной квоты из заголовков → state. Заголовков может
+    не быть (старый API, ошибка шлюза) - тогда просто ничего не трогаем."""
+    for ключ, заголовок in (('remaining', 'X-Domains-Remaining'),
+                            ('limit', 'X-Domains-Limit')):
+        сырое = resp.headers.get(заголовок)
+        if сырое is None:
+            continue
+        try:
+            state[ключ] = int(str(сырое).strip())
+        except (TypeError, ValueError):
+            pass
+
+
+def _dr_ke(domains, api_key, proxies, log, state):
     """Новый API (Keywords Everywhere): POST c bearer-токеном, до 100 доменов
     за раз. Ранг лежит в open_page_rank; found=false - домена нет в индексе,
-    это ответ, а не сбой."""
+    это ответ, а не сбой.
+
+    state - словарь, куда складываем состояние квоты: она считается В ДОМЕНАХ
+    за месяц, а не в запросах, поэтому один прогон крупного проекта способен
+    её выбрать целиком. Прогон от этого не падает, но в отчёте DR у части
+    хостов будет прочерк - и это надо объяснить, иначе выглядит как поломка."""
     out = {}
     headers = {'Authorization': f'Bearer {api_key}',
                'Content-Type': 'application/json'}
@@ -91,12 +110,14 @@ def _dr_ke(domains, api_key, proxies, log):
         except Exception as e:
             log(f'⚠ Open PageRank: сеть - {e}')
             continue
+        _read_quota(r, state)
         if r.status_code == 401:
             log('⚠ Open PageRank: ключ не принят (HTTP 401). Проверьте, что в '
                 'настройках проекта лежит ключ вида «opr_live_…» из кабинета '
                 'Keywords Everywhere.')
             return out
         if r.status_code == 429:
+            state['quota_out'] = True
             log('⚠ Open PageRank: исчерпан лимит (HTTP 429) - месячная квота '
                 'доменов или запросы в минуту. DR останется прочерком.')
             return out
@@ -121,6 +142,13 @@ def _dr_ke(domains, api_key, proxies, log):
             out[str(dom).lower()] = None
         if i == 0:
             log(f'Open PageRank: ответ получен{_quota_hint(r)}')
+        # Остаток дошёл до нуля - следующие куски уже не посчитаются, и
+        # честнее сказать об этом сразу, а не молча отдать прочерки.
+        if state.get('remaining') == 0:
+            state['quota_out'] = True
+            log('⚠ Open PageRank: месячная квота доменов исчерпана - '
+                'остальные хосты остались без DR.')
+            return out
     return out
 
 
@@ -153,27 +181,32 @@ def _dr_legacy(domains, api_key, proxies, log):
     return out
 
 
-def fetch_dr(domains, api_key, proxy_url=None, log=None):
+def fetch_dr(domains, api_key, proxy_url=None, log=None, state=None):
     """DR-ранг (0-10) по доменам через Open PageRank. → {domain: rank|None}.
     Пусто, если ключа/requests нет.
 
     Ключ «opr_live_…» - новый API под Keywords Everywhere; ключ старого
     образца (32 символа) - прежний адрес. Если старый ключ там уже не
     принимают, пробуем его же на новом API: у части аккаунтов ключ перенесли
-    как есть."""
+    как есть.
+
+    state - необязательный словарь под состояние квоты (quota_out, remaining,
+    limit); заполняется только новым API, старый таких заголовков не шлёт."""
     def _log(m):
         if log:
             log(m)
+    if state is None:
+        state = {}
     if requests is None or not api_key or not domains:
         return {}
     key = str(api_key).strip()
     proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
     if key.startswith('opr_'):
-        return _dr_ke(domains, key, proxies, _log)
+        return _dr_ke(domains, key, proxies, _log, state)
     out = _dr_legacy(domains, key, proxies, _log)
     if not out:
         _log('Open PageRank: старый адрес молчит - пробую новый API.')
-        out = _dr_ke(domains, key, proxies, _log)
+        out = _dr_ke(domains, key, proxies, _log, state)
     return out
 
 
@@ -203,11 +236,37 @@ def run(project_id, wm_token=None, opr_key=None, proxy_url=None, log=None):
                 'note': 'Верифицированных хостов проекта в Вебмастере нет.'}
     _log(f'Траст: хостов {len(hosts)}, тяну ИКС; '
          + ('DR через Open PageRank' if opr_key else 'DR пропущен (нет ключа)'))
-    dr = fetch_dr([_bare(h['host']) for h in hosts], opr_key, proxy_url, log)
+    quota = {}
+    dr = fetch_dr([_bare(h['host']) for h in hosts], opr_key, proxy_url, log,
+                  state=quota)
     for h in hosts:
         h['dr'] = dr.get(_bare(h['host']))
+    if opr_key:
+        _с_dr = sum(1 for h in hosts if h.get('dr') is not None)
+        _log(f'DR получен у {_с_dr} хостов из {len(hosts)}'
+             + ('' if _с_dr == len(hosts) else
+                ' - остальных нет в индексе Open PageRank либо кончилась квота.'))
     return {
         'available': True, 'hosts': hosts, 'has_dr': bool(opr_key),
+        # Сообщение для отчёта - ТОЛЬКО когда квота кончилась. В остальных
+        # случаях ключа нет вовсе или всё посчиталось, и лишняя плашка на
+        # листе только мешает.
+        'dr_quota_note': _quota_note(quota, hosts) if quota.get('quota_out')
+                         else None,
         'note_paid': 'CheckTrust / Ahrefs / Semrush - платные API, не '
                      'подключены. Ahrefs free-чекер за капчей (Turnstile).',
     }
+
+
+def _quota_note(quota, hosts):
+    """Текст плашки в отчёте: сколько хостов успели получить DR до того, как
+    кончилась месячная квота Open PageRank. Держим коротким - плашка стоит в
+    узкой колонке блока траста (40 знаков в строке), длинный текст раздувает
+    строку на пол-экрана. «У 1 из 12 хостов» вместо «1 хостов из 12» - заодно
+    снимает вопрос со склонением."""
+    посчитано = sum(1 for h in hosts if h.get('dr') is not None)
+    предел = quota.get('limit')
+    хвост = (f' Лимит - {предел} доменов в месяц, обновится 1-го числа.'
+             if предел else ' Лимит обновится в начале месяца.')
+    return (f'Квота Open PageRank исчерпана: DR посчитан у {посчитано} из '
+            f'{len(hosts)} хостов.{хвост}')

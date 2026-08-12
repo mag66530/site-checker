@@ -2134,6 +2134,28 @@ def _build_traffic_overview_sheet(wb, traffic, trust=None, link_profile=None,
             ws.row_dimensions[trust_row].height = 16
             trust_row += 1
 
+        # Квота Open PageRank считается В ДОМЕНАХ за месяц: на большой сети
+        # поддоменов её выбирает один прогон, и дальше DR приходит прочерком.
+        # Без пояснения это читается как поломка проверки, поэтому под
+        # таблицей - плашка. Показываем ТОЛЬКО когда квота реально кончилась:
+        # в обычном прогоне лишний блок на листе не нужен.
+        _quota_note = (trust or {}).get('dr_quota_note')
+        if _quota_note:
+            trust_row += 1                      # зазор от последней строки
+            ws.merge_cells(start_row=trust_row, start_column=2 + TRUST_COL,
+                           end_row=trust_row, end_column=4 + TRUST_COL)
+            c = ws.cell(row=trust_row, column=2 + TRUST_COL,
+                        value=f'⚠ {_quota_note}')
+            c.font = _font(size=9, italic=True, color=C.warn)
+            c.fill = _fill(C.warn_soft)
+            c.alignment = _align(wrap=True, vertical='top')
+            # Ширина зоны траста - сумма её колонок (18 + 11 + 11).
+            for col in range(2 + TRUST_COL, 5 + TRUST_COL):
+                ws.cell(row=trust_row, column=col).border = _border(color=C.warn)
+            ws.row_dimensions[trust_row].height = _row_height_for(
+                _quota_note, 40, min_px=28)
+            trust_row += 1
+
     # ── Ссылочный профиль (lite, Вебмастер) - метрика, не находка. Своя
     # зона колонок (LP_COL) - «Что не так» не зависит от ширины колонок
     # ни трафика, ни траста. lp_hosts посчитан выше, при раскладке зон.
