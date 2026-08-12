@@ -224,7 +224,8 @@ def выполнить_проверку(проект_дир, зоны, orders_pa
 
     with sync_playwright() as pw:
         b = pw.chromium.launch(headless=not show,
-                               args=["--disable-blink-features=AutomationControlled"])
+                               args=["--disable-blink-features=AutomationControlled",
+                                     "--disable-dev-shm-usage"])
         ctx = b.new_context(locale="ru-RU")
         try:
             for z, з_заказы in по_зонам.values():

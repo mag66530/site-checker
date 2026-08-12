@@ -11134,9 +11134,17 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             # ловится хуже → ложное «Нет подтверждения». Большой холст убирает
             # перекрытие. Headless - крупный viewport; видимый браузер - реально
             # развёрнутое окно.
+            # --disable-dev-shm-usage: в контейнере (Streamlit Cloud, Docker)
+            # /dev/shm обычно 64 МБ, а Chromium держит там разделяемую память
+            # вкладок. На длинном прогоне она упирается в потолок: вкладки
+            # начинают падать, память течёт в контейнер, и весь контейнер
+            # уходит за лимит - приложение умирает целиком («Oh no»). С флагом
+            # Chromium пишет во временные файлы на диск. Локально флаг
+            # безвреден: там /dev/shm не при делах.
             _launch_kw = dict(
                 headless=headless,
                 args=["--disable-blink-features=AutomationControlled",
+                      "--disable-dev-shm-usage",
                       "--window-size=1920,1080"]
                 + ([] if headless else ["--start-maximized"]),
             )

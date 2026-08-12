@@ -176,7 +176,8 @@ def выполнить_проверку(страницы, excel_path: str = "log
     log(f"📱 Мобильная вёрстка: проверяю {len(страницы)} страниц(ы) на ширине {_MOBILE_W}px …")
     with sync_playwright() as pw:
         _kw = dict(headless=not show,
-                   args=["--disable-blink-features=AutomationControlled"])
+                   args=["--disable-blink-features=AutomationControlled",
+                         "--disable-dev-shm-usage"])
         _prx = _playwright_proxy_from_env()
         if _prx:
             _kw["proxy"] = _prx
