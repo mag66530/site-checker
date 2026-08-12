@@ -457,6 +457,10 @@ if _est_urls:
     _uiw.estimate_badge(_re.format_estimate(_lo_ps, _hi_ps),
                         f'~{_est_urls} адресов. Зависит от очереди PageSpeed API.')
 
+st.caption('Готовый отчёт уходит в Telegram и на Google Диск - если они '
+           'настроены у проекта (те же настройки, что у чек-листа, форм и '
+           'целей). Не настроены - прогон просто пропустит отправку.')
+
 c1, c2 = st.columns([3, 1])
 with c1:
     if st.button('▶ Запустить проверку скорости', use_container_width=True,
@@ -472,7 +476,17 @@ with c1:
             uf = OUT_DIR / 'urls_input.txt'
             uf.write_text(urls_text, encoding='utf-8')
             args += ['--scope', 'list', '--urls-file', str(uf)]
-        _launch(args, extra_env={'PAGESPEED_API_KEY': key})
+        # Telegram и Google Диск: креды живут в секретах/кабинете, а прогон -
+        # отдельный процесс, поэтому кладём их в окружение (как у форм, целей
+        # и КП). Не настроено - runner_env вернёт пусто, и прогон просто
+        # пропустит отправку.
+        _extra = {'PAGESPEED_API_KEY': key}
+        try:
+            import tg_report
+            _extra.update(tg_report.runner_env(pid, PROJECTS.get(pid, pid)))
+        except Exception as _e:  # noqa: BLE001
+            st.warning(f'Не удалось собрать настройки отправки отчёта: {_e}')
+        _launch(args, extra_env=_extra)
         st.session_state['ps_started'] = datetime.now().strftime('%H:%M:%S')
         st.rerun()
 with c2:
