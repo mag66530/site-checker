@@ -62,6 +62,9 @@ PROJECT_SETTING_FIELDS = [
     ("textru_key", "Ключ Text.ru (антиплагиат)", "password"),
     ("arsenkin_token", "Токен Арсенкина", "password"),
     ("pagespeed_api_key", "Ключ PageSpeed API", "password"),
+    # DR на листе «Траст проекта». Ключ бесплатный (openpagerank.com), выдаётся
+    # сразу после регистрации; без него ИКС приходит, а DR остаётся прочерком.
+    ("openpagerank_key", "Ключ Open PageRank (DR на листе «Траст проекта»)", "password"),
     ("metrika_counter", "Номер счётчика Метрики", "text"),
     ("metrika_oauth", "OAuth-токен Метрики", "password"),
     # Два поля делают одно и то же (Вебмастер-API), исторически. Главное -

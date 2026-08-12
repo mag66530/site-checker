@@ -2580,6 +2580,10 @@ if pid:
                 'google': get_google_accounts_credentials(pid),
                 'google_folder': get_google_folder_credentials(pid),
                 'webmaster_oauth': _wm_token,
+                # DR на листе «Траст проекта» (trust_check.fetch_dr). Без этого
+                # ключа ИКС приходил, а DR всегда стоял прочерком: runner читает
+                # creds['openpagerank_key'], а сюда его никто не клал.
+                'openpagerank_key': _secret_pid('openpagerank_key', pid),
                 'metrika_oauth': _secret_pid('metrika_oauth', pid),
                 'metrika_counter': _secret_pid('metrika_counter', pid),
                 # Сессия для облачного автокликера (base64 storage_state).

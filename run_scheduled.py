@@ -84,6 +84,10 @@ def build_creds(pid: str) -> dict:
         # именно в поле с точным названием.
         'webmaster_oauth': (_env(f'webmaster_oauth_{pid}') or _env(f'yandex_oauth_{pid}')
                             or _env('webmaster_oauth') or _env('yandex_oauth')),
+        # Ключ Open PageRank для DR («Траст проекта»). Общий на все проекты,
+        # но по-проектный вариант поддерживаем - как у остальных ключей.
+        'openpagerank_key': (_env(f'openpagerank_key_{pid}')
+                             or _env('openpagerank_key')),
         # Сохранённая сессия Яндекса для headless-браузера (авто-скачивание
         # выгрузки «Страницы в поиске» → 404 в индексе). Тот же секрет, что у
         # автокликеров.
