@@ -25,35 +25,6 @@ from name_format import build_test_name, cfg_enabled
 _log_write_lock = threading.Lock()
 
 
-def в_контейнере() -> bool:
-    """Приложение крутится в контейнере (Streamlit Cloud), а не на рабочей
-    машине. Признак - каталог /mount/src, куда Streamlit Cloud монтирует
-    репозиторий (виден в его же логах: /mount/src/site-checker/...)."""
-    return os.path.isdir('/mount/src')
-
-
-def параллельных_форм() -> int:
-    """Сколько форм проверяем одновременно. У КАЖДОГО потока свой Chromium
-    (см. _get_pw() в run_test), поэтому число потоков - это прямо число
-    браузеров в памяти.
-
-    Локально их три: на 16 ГБ незаметно, а прогон втрое короче. В контейнере
-    Streamlit Cloud приложение и браузеры делят один небольшой лимит памяти,
-    и три headless-Chromium с холстом 1920x1080 его выбирают - контейнер
-    убивают, приложение падает целиком («Oh no») вместе с фоновым прогоном,
-    у всей команды разом. Поэтому в облаке - строго по одной форме.
-
-    FORMS_MAX_WORKERS - ручное переопределение, если проект переедет на свой
-    сервер, где памяти хватает."""
-    вручную = (os.environ.get('FORMS_MAX_WORKERS') or '').strip()
-    if вручную:
-        try:
-            return max(1, int(вручную))
-        except ValueError:
-            pass
-    return 1 if в_контейнере() else 3
-
-
 def normalize_phone_for_submit(phone: str) -> str:
     """
     Телефон для отправки в форму: только цифры, без скобок и пробелов.
@@ -12350,16 +12321,13 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             _tasks.append(_task)
 
     # Выполняем собранные проверки (сценарии/формы/модалки всех страниц) -
-    # параллельно, каждая в своём браузере (см. _get_pw()). Раньше это
+    # до 3 одновременно, каждая в своём браузере (см. _get_pw()). Раньше это
     # был весь смысл верхнего цикла - строго по одной, друг за другом; при
     # тяжёлых доп-пробах (файлы/XSS/валидация/лимит) на 6 формах это
     # складывалось в разы дольше, чем нужно.
     if _tasks:
-        _workers = min(параллельных_форм(), len(_tasks))
-        _сколько = ('по одной' if _workers == 1
-                    else f'до {_workers} одновременно')
-        print(f"\n🚀 Проверка форм: {len(_tasks)} шт., {_сколько}…")
-        with ThreadPoolExecutor(max_workers=_workers) as _executor:
+        print(f"\n🚀 Проверка форм: {len(_tasks)} шт., до 3 одновременно…")
+        with ThreadPoolExecutor(max_workers=min(3, len(_tasks))) as _executor:
             _futures = [_executor.submit(_t) for _t in _tasks]
             for _f in as_completed(_futures):
                 try:
