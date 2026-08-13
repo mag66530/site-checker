@@ -329,7 +329,11 @@ def _rows_done(xlsx: Path):
         except ValueError:
             i_name = -1
         _skip = ('согласие и политика', 'cookie-уведомление',
-                 'ссылка на политику', 'живочат')
+                 'ссылка на политику', 'живочат',
+                 # Мобильная вёрстка и файл-проба - тоже не формы: раньше их
+                 # строки раздували счётчик выше «всего».
+                 'нет горизонтального скролла', 'тач-размер',
+                 'без поломок', 'проба загрузки файла')
         n = 0
         for r in rows:
             if not r or all(v in (None, '') for v in r):
@@ -1296,14 +1300,22 @@ if _alive and not _done_by_log:
         st.info('▶ Проверку этого проекта запустили в другой сессии (на другом '
                 'компьютере). Здесь виден живой прогресс по логу; секундомер и '
                 'остаток считаются у того, кто запустил.')
-    _ts = st.session_state.get('forms_started_ts') if _own else None
+    # Секундомер: время старта берём из pid-файла прогона, а не из session_state.
+    # Прогон живёт отдельным процессом, и время должно быть видно после
+    # перезагрузки страницы, из другой сессии и после обновления приложения в
+    # облаке (там session_state обнуляется, и таймер пропадал совсем).
+    from checklists import ui_widgets as _uiw_t
+    _ts = _uiw_t.run_started_at(PID_FILE) \
+        or (st.session_state.get('forms_started_ts') if _own else None)
     _elapsed = int(time.time() - _ts) if _ts else None
     _mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
-    # Прогресс по живому логу (обновляется сразу); подстраховка - строки Excel.
+    # Прогресс считаем по живому логу: там ровно одна строка «▶ Форма N» на
+    # форму. Строки Excel - только запасной путь (лог потерялся), потому что в
+    # лист «Логи» кроме форм попадают мобильная вёрстка, файл-проба и прочие
+    # проверки: из-за них счётчик перерастал «всего» и рос дальше («91 из 60»).
     _done = _forms_done_live(_log_txt)
-    _xl = _rows_done(xlsx)
-    if _xl and _xl > _done:
-        _done = _xl
+    if not _done:
+        _done = _rows_done(xlsx) or 0
     _total = (st.session_state.get('forms_expected_total') if _own else 0) \
         or _count_expected(_sel) * (st.session_state.get('forms_cities_n', 1) if _own else 1)
     # Оценка приблизительная (кроме форм в прогон попадают проверки 2.13/2.12,
