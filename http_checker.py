@@ -711,8 +711,12 @@ async def check_one(
             except Exception:
                 css_hidden = ()
         try:
+            # Город задачи (из карты присутствия) нужен проверке «выбор города
+            # в шапке»: на части сайтов переключатель подписан самим городом
+            # («Самара»), а слова «город» в шапке нет.
             content = check_content(a['body_text'], task.type_code,
-                                    css_hidden=css_hidden, url=task.url)
+                                    css_hidden=css_hidden, url=task.url,
+                                    city=getattr(task, 'city', '') or '')
         except Exception:
             content = None
 
