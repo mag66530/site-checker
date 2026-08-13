@@ -32,6 +32,10 @@ def main():
     ap.add_argument('--out', default=None, help='путь JSON-результата')
     args = ap.parse_args()
 
+    # В облаке Chromium доустанавливается в рантайме - см. browser_setup.
+    import browser_setup
+    browser_setup.ensure_for_run(lambda m: print(m, flush=True), 'Я.Бизнес')
+
     b64 = os.environ.get('YABUSINESS_SESSION') if args.from_env else None
     proxy = os.environ.get('YABUSINESS_PROXY') or None
     res = run(args.project, session_b64=b64, proxy_url=proxy, log=print)

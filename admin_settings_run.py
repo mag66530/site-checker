@@ -54,6 +54,11 @@ def main():
                     help='путь JSON-результата (по умолчанию cache/…)')
     args = ap.parse_args()
 
+    # В облаке Chromium доустанавливается в рантайме - см. browser_setup.
+    import browser_setup
+    browser_setup.ensure_for_run(lambda m: print(m, flush=True),
+                                 'Настройки в админке')
+
     proj_dir = BASE / 'forms_tester' / 'projects' / args.project
     if args.from_env:
         try:

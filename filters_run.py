@@ -475,6 +475,11 @@ def run_case(page, case: dict, log) -> dict:
 
 def _launch_and_run(pid: str, cases: list, log) -> list:
     from playwright.sync_api import sync_playwright
+    # В облаке Chromium не предустановлен - доустанавливаем в рантайме, иначе
+    # прогон падает на «Executable doesn't exist … chrome-headless-shell», а в
+    # отчёте это выглядит как «ok 0 из 0», будто фильтров нет.
+    import browser_setup
+    browser_setup.ensure_for_run(log, 'Фильтр-тест')
     _via_driver = bool(os.environ.get('CCR_AGENT_PROXY_ENABLED'))
     results = []
     with sync_playwright() as pw:

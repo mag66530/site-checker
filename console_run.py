@@ -614,6 +614,9 @@ def _noise(text: str) -> bool:
 
 def run(pid: str, urls: list, log) -> dict:
     from playwright.sync_api import sync_playwright
+    # В облаке Chromium доустанавливается в рантайме - см. browser_setup.
+    import browser_setup
+    browser_setup.ensure_for_run(log, 'Ошибки в консоли')
     _via_driver = bool(os.environ.get('CCR_AGENT_PROXY_ENABLED'))
     urls = [u for u in dict.fromkeys(urls) if u][:MAX_PAGES]
     out = {'available': True, 'checked': 0, 'pages': [], 'note': None}
