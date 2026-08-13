@@ -24,6 +24,36 @@ from name_format import build_test_name, cfg_enabled
 # теряли бы строки друг друга (последняя запись побеждает) или портили файл.
 _log_write_lock = threading.Lock()
 
+# Экономные флаги Chromium. Тут ТОЛЬКО то, что не меняет отрисовку страницы и
+# не влияет на вердикты: выключаем фоновые службы самого браузера, а не работу
+# сайта. Каждый поток держит свой Chromium, и в контейнере они делят память с
+# приложением - лишние подсистемы там ни к чему.
+#
+# НАМЕРЕННО НЕ включаем то, что экономит больше всего:
+#   --blink-settings=imagesEnabled=false - картинки меняют высоту блоков, а мы
+#       проверяем мобильную вёрстку (горизонтальный скролл, тач-размеры);
+#   --js-flags=--max-old-space-size=… - тяжёлая страница может упереться в
+#       потолок JS-кучи, и форма «сломается» не по вине сайта;
+#   --renderer-process-limit=1 - вкладки в одном процессе: падение одной
+#       уронит остальные, вердикты станут случайными.
+_ЭКОНОМНЫЕ_ФЛАГИ = [
+    '--disable-gpu',                      # в headless всё равно программный рендер
+    '--disable-extensions',
+    '--disable-background-networking',    # обновления, метрики, домашняя страница
+    '--disable-background-timer-throttling',
+    '--disable-client-side-phishing-detection',
+    '--disable-component-update',
+    '--disable-default-apps',
+    '--disable-sync',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--metrics-recording-only',
+    '--mute-audio',                       # звук страниц нам не нужен
+    # BackForwardCache держит в памяти целые предыдущие страницы - на прогоне
+    # из сотен переходов это чистый балласт: назад мы не ходим.
+    '--disable-features=BackForwardCache,Translate,MediaRouter,OptimizationHints',
+]
+
 # Сколько форм проверяем ОДНОВРЕМЕННО, если явно не задано. У каждого потока
 # свой Chromium (см. _get_pw в run_test), поэтому число потоков - это прямо
 # число браузеров в памяти.
@@ -11210,6 +11240,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 args=["--disable-blink-features=AutomationControlled",
                       "--disable-dev-shm-usage",
                       "--window-size=1920,1080"]
+                + _ЭКОНОМНЫЕ_ФЛАГИ
                 + ([] if headless else ["--start-maximized"]),
             )
             _prx = _playwright_proxy_from_env()
