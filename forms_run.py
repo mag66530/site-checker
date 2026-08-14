@@ -38,7 +38,11 @@ PROJECT_NAMES = {
     'avia': 'АПС - Авиапромсталь',
     'metpromko': 'МПК - Метпромко',
     'shopmet': 'SM - SHOPMET',
+    'mpinew': 'МПИ - новый прод',
 }
+# Список ДОЛЖЕН совпадать с PROJECTS страницы «Проверка форм»: кнопка запуска
+# передаёт сюда --project, и проект, забытый здесь, валит прогон в argparse
+# («invalid choice»). Сторожит tests/test_forms_projects_sync.py.
 
 
 def _имена_заказов(src_config: Path) -> list[str]:

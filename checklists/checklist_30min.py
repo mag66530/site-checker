@@ -2405,6 +2405,32 @@ if pid:
     # (единственное место). Здесь блока больше нет: прогон сам берёт адрес
     # через proxy_config, с учётом use_proxy проекта.
 
+    # ── Вход на закрытый сайт (стенд за паролем nginx) ────────────────
+    # Показываем ТОЛЬКО проектам с basic_auth в карточке. Значения по
+    # умолчанию - из «Настроек проекта»; введённое здесь их перебивает и
+    # действует только на этот запуск (в базу не пишется).
+    # Без этого блока стенд отвечал 401 на каждой странице, и весь отчёт
+    # состоял из ошибок доступа.
+    if (cfg or {}).get('basic_auth'):
+        with st.container(border=True):
+            st.markdown('**Вход на закрытый сайт**')
+            st.caption('Сайт закрыт паролем: без него все страницы ответят '
+                       '«401», и проверять будет нечего.')
+            _sb1, _sb2 = st.columns(2)
+            st.session_state.setdefault(
+                'c30_site_login', _secret_pid('site_basic_login', pid) or '')
+            st.session_state.setdefault(
+                'c30_site_password', _secret_pid('site_basic_password', pid) or '')
+            with _sb1:
+                st.text_input('Логин сайта', key='c30_site_login')
+            with _sb2:
+                st.text_input('Пароль сайта', key='c30_site_password',
+                              type='password')
+            if not (st.session_state.get('c30_site_login', '').strip()
+                    and st.session_state.get('c30_site_password', '')):
+                st.warning('Пока не заполнено - прогон вернёт 401 по всем '
+                           'страницам.')
+
     # БЛОК запуска
     with st.container():
         _paths = _c30_paths(pid)
@@ -2603,8 +2629,13 @@ if pid:
                 'webmaster_oauth': _wm_token,
                 # Вход на закрытый стенд (nginx-пароль). Пусто у обычных
                 # проектов - тогда обход идёт как раньше, без авторизации.
-                'site_basic_login': _secret_pid('site_basic_login', pid),
-                'site_basic_password': _secret_pid('site_basic_password', pid),
+                # Поля на странице (блок «Вход на закрытый сайт») перебивают
+                # настройки проекта: пароль стенда меняют часто, и ждать
+                # сохранения в кабинете ради одного прогона незачем.
+                'site_basic_login': (st.session_state.get('c30_site_login', '').strip()
+                                     or _secret_pid('site_basic_login', pid)),
+                'site_basic_password': (st.session_state.get('c30_site_password', '')
+                                        or _secret_pid('site_basic_password', pid)),
                 # DR на листе «Траст проекта» (trust_check.fetch_dr). Без этого
                 # ключа ИКС приходил, а DR всегда стоял прочерком: runner читает
                 # creds['openpagerank_key'], а сюда его никто не клал.
