@@ -144,6 +144,23 @@ def get_gsc_credentials(project_id):
     return _mail_creds('google', project_id, GSC_GMAIL_CONFIG.get(project_id))
 
 
+def _basic_auth_for(cfg, creds):
+    """Вход по паролю для закрытого сайта (стенд за nginx-паролем) или None.
+
+    Логин/пароль живут в «Настройках проекта» (site_basic_login /
+    site_basic_password) или в секретах приложения - в git и в конфиг проекта
+    они не попадают. Хост берём из самого проекта, чтобы пароль уходил только
+    ему: проверка битых ссылок звонит и на чужие домены."""
+    if not (cfg or {}).get('basic_auth'):
+        return None
+    логин = (creds or {}).get('site_basic_login') or ''
+    пароль = (creds or {}).get('site_basic_password') or ''
+    if not логин:
+        return None
+    return {'host': (cfg.get('root_domain') or '').strip().lower(),
+            'login': логин, 'password': пароль}
+
+
 def get_gsc_sa(project_id):
     """Сервисный аккаунт Google для Search Console API - источник «Google» в
     «404 в индексе» через API (работает на облаке, без браузера).
@@ -599,6 +616,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             check_meta=bool(flags.get('check_meta', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map,
+            basic_auth=_basic_auth_for(cfg, creds),
         ))
 
         finished_ms = int(time.time() * 1000)
@@ -2583,6 +2601,10 @@ if pid:
                 'google': get_google_accounts_credentials(pid),
                 'google_folder': get_google_folder_credentials(pid),
                 'webmaster_oauth': _wm_token,
+                # Вход на закрытый стенд (nginx-пароль). Пусто у обычных
+                # проектов - тогда обход идёт как раньше, без авторизации.
+                'site_basic_login': _secret_pid('site_basic_login', pid),
+                'site_basic_password': _secret_pid('site_basic_password', pid),
                 # DR на листе «Траст проекта» (trust_check.fetch_dr). Без этого
                 # ключа ИКС приходил, а DR всегда стоял прочерком: runner читает
                 # creds['openpagerank_key'], а сюда его никто не клал.

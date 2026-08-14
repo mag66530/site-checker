@@ -1003,6 +1003,57 @@ async def check_one(
     )
 
 
+# ── Вход по паролю (HTTP Basic) для закрытых сайтов ──────────────────
+
+
+def _basic_header(login: str, password: str) -> str:
+    import base64
+    ключ = base64.b64encode(f'{login}:{password}'.encode('utf-8')).decode()
+    return f'Basic {ключ}'
+
+
+class _СессияСПаролем(aiohttp.ClientSession):
+    """ClientSession, которая подставляет Basic-авторизацию ТОЛЬКО своему хосту.
+
+    Так закрытые стенды (напр. новый прод МПИ за nginx-паролем) проверяются
+    целиком: страницы, CSS, картинки, robots. Пароль при этом не утекает
+    наружу - проверка битых ссылок звонит и на чужие домены, а session-level
+    auth в aiohttp ушёл бы вместе с каждым таким запросом.
+    """
+
+    def __init__(self, *a, auth_host: str = '', auth_header: str = '', **kw):
+        super().__init__(*a, **kw)
+        self._auth_host = (auth_host or '').lower()
+        self._auth_header = auth_header or ''
+
+    async def _request(self, method, str_or_url, **kwargs):
+        if self._auth_host and self._auth_header:
+            try:
+                хост = (urlsplit(str(str_or_url)).hostname or '').lower()
+            except Exception:  # noqa: BLE001
+                хост = ''
+            # Поддомены закрытого стенда тоже под паролем.
+            if хост == self._auth_host or хост.endswith('.' + self._auth_host):
+                заголовки = dict(kwargs.get('headers') or {})
+                заголовки.setdefault('Authorization', self._auth_header)
+                kwargs['headers'] = заголовки
+        return await super()._request(method, str_or_url, **kwargs)
+
+
+def _сделать_сессию(headers, connector, basic_auth):
+    """Обычная сессия, а для закрытого сайта - с Basic-заголовком на свой хост.
+
+    basic_auth: {'host': 'new.example.by', 'login': …, 'password': …} или None.
+    """
+    if not basic_auth or not basic_auth.get('login'):
+        return aiohttp.ClientSession(headers=headers, connector=connector)
+    return _СессияСПаролем(
+        headers=headers, connector=connector,
+        auth_host=basic_auth.get('host', ''),
+        auth_header=_basic_header(basic_auth['login'],
+                                  basic_auth.get('password', '')))
+
+
 # ── Параллельный батч с прогрессом ───────────────────────────────────
 
 
@@ -1031,6 +1082,7 @@ async def run_batch(
     is_cancelled: Optional[Callable] = None,
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
+    basic_auth: Optional[dict] = None,
 ) -> list[CheckResult]:
     """
     Прогнать все задачи параллельно с ограничением concurrency.
@@ -1042,6 +1094,11 @@ async def run_batch(
     помечаются как 'cancelled'.
 
     proxy_url - если задан (или есть env HTTP_PROXY), все запросы идут через прокси.
+
+    basic_auth - вход по паролю для закрытого сайта (стенд за nginx-паролем):
+    {'host': 'new.example.by', 'login': …, 'password': …}. Заголовок уходит
+    ТОЛЬКО на этот хост и его поддомены - на чужие адреса (проверка битых
+    ссылок) пароль не попадает.
     """
     # Если прокси не задан явно - берём из переменной окружения
     if proxy_url is None:
@@ -1075,7 +1132,7 @@ async def run_batch(
     links_cache: dict = {}
     links_budget = [2500]
 
-    async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
+    async with _сделать_сессию(headers, connector, basic_auth) as session:
 
         async def get_css_hidden(html, base_url):
             sels = []
