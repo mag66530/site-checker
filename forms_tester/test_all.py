@@ -16,6 +16,11 @@ from playwright.sync_api import sync_playwright
 
 from name_format import build_test_name, cfg_enabled
 
+try:                       # запуск как пакет (forms_tester.test_all)
+    from . import site_auth as _site_auth
+except ImportError:        # запуск из папки движка (sys.path = forms_tester)
+    import site_auth as _site_auth
+
 # Не используем «from config import *»: run_test() перезагружает config с диска (importlib.reload).
 
 # Формы теперь могут проверяться ПАРАЛЛЕЛЬНО (см. run_test(), до 3 одновременно) -
@@ -7629,6 +7634,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
         _rq_proxies = _requests_proxies_from_env()
         if _rq_proxies:
             session.proxies.update(_rq_proxies)
+        # Сайт за паролем: без этого requests получил бы 401 и «форма не найдена».
+        _rq_auth = _site_auth.вход_для_requests()
+        if _rq_auth:
+            session.auth = _rq_auth
 
         try:
             hdr = _browser_headers(url)
@@ -11261,6 +11270,12 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 _ctx_kw["viewport"] = {"width": 1920, "height": 1080}
             else:
                 _ctx_kw["no_viewport"] = True   # берём размер развёрнутого окна
+            # Сайт за паролем (новый прод МПИ): без этого браузер видит только
+            # окно авторизации, и все формы «не найдены».
+            _site_auth.добавить_вход(_ctx_kw)
+            if "http_credentials" in _ctx_kw:
+                print("🔐 Сайт закрыт паролем - вхожу как "
+                      f"{_ctx_kw['http_credentials']['username']}")
             h["context"] = h["browser"].new_context(**_ctx_kw)
             try:
                 h["context"].add_init_script(
@@ -12128,6 +12143,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             _p = _requests_proxies_from_env()
             if _p:
                 _s.proxies.update(_p)
+            # Закрытый паролем стенд иначе всегда отвечал бы 401 «домен мёртв».
+            _a = _site_auth.вход_для_requests()
+            if _a:
+                _s.auth = _a
             _r = _s.get(u, timeout=12, headers=_browser_headers(u),
                         allow_redirects=True)
             return _r.status_code, None

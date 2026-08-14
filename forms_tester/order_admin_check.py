@@ -20,6 +20,11 @@ from pathlib import Path
 # Переиспользуем вход/креды/детектор логина у форм-проверки (тот же Bitrix).
 import admin_check as _ac
 
+try:
+    from . import site_auth as _site_auth
+except ImportError:
+    import site_auth as _site_auth
+
 
 def построить_url_списка(домен: str, размер: int = 100) -> str:
     """URL списка «Заказы» (свежие сверху по умолчанию). SIZEN_1 побольше, чтобы
@@ -226,7 +231,8 @@ def выполнить_проверку(проект_дир, зоны, orders_pa
         b = pw.chromium.launch(headless=not show,
                                args=["--disable-blink-features=AutomationControlled",
                                      "--disable-dev-shm-usage"])
-        ctx = b.new_context(locale="ru-RU")
+        # Пароль сайта (закрытый стенд) - до админки иначе не дойти.
+        ctx = b.new_context(**_site_auth.добавить_вход({"locale": "ru-RU"}))
         try:
             for z, з_заказы in по_зонам.values():
                 домен = z.get("домен") or ""

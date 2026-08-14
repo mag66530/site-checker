@@ -99,6 +99,9 @@ PROJECTS = {
     'avia': {'name': 'АПС - Авиапромсталь', 'domain': 'aviastal.ru'},
     'metpromko': {'name': 'МПК - Метпромко', 'domain': 'metpromko.ru'},
     'shopmet': {'name': 'SM - SHOPMET', 'domain': 'shopmet.ru'},
+    # Стенд закрыт паролем (nginx Basic auth) - логин/пароль вводятся ниже, в
+    # блоке «Вход на закрытый сайт», и уходят движку только через окружение.
+    'mpinew': {'name': 'МПИ - новый прод', 'domain': 'new.metpromintex.by'},
 }
 
 # Проекты-варианты берут справочник городов у «родителя» (свой config.py,
@@ -200,6 +203,31 @@ def _project_has_admin(project: str) -> bool:
         return bool(getattr(m, 'АДМИН_ЗОНЫ', None))
     except Exception:
         return False
+
+
+def _project_closed(project: str) -> bool:
+    """True, если сайт проекта закрыт паролем (nginx Basic auth) - тогда движку
+    нужно передать логин/пароль, иначе браузер увидит только окно входа."""
+    try:
+        from proxy_config import canonical_project_id
+        from sources import load_project_config
+        cfg = load_project_config(canonical_project_id(project)) or {}
+        return bool(cfg.get('basic_auth'))
+    except Exception:
+        return False
+
+
+def _site_login_saved(project: str) -> tuple[str, str]:
+    """Логин/пароль закрытого сайта из «Настроек проекта» (если заведены).
+    Пусто - поля просто останутся незаполненными."""
+    try:
+        from proxy_config import canonical_project_id
+        import auth as _auth
+        pid = canonical_project_id(project)
+        return (_auth.project_setting(pid, 'site_basic_login') or '',
+                _auth.project_setting(pid, 'site_basic_password') or '')
+    except Exception:
+        return '', ''
 
 
 def _count_expected(project: str) -> int:
@@ -966,6 +994,29 @@ _forms_all_selected = (len(_chosen_forms) == len(_all_form_names))
 _forms_none = bool(_all_forms) and len(_chosen_forms) == 0
 
 # ── Запуск ──────────────────────────────────────────────────────────
+# ── Вход на закрытый сайт (стенд за паролем nginx) ──────────────────
+# Показываем только тем проектам, у которых сайт реально закрыт (basic_auth в
+# карточке проекта). Логин/пароль уходят движку через окружение - на диск
+# ничего не пишется.
+_site_env: dict[str, str] = {}
+if _project_closed(pid_key):
+    st.subheader('Вход на закрытый сайт')
+    st.caption('Сайт закрыт паролем: без него браузер увидит только окно '
+               '«Требуется авторизация» и ни одной формы не найдёт. '
+               'Подставлены значения из «Настроек проекта» - их можно заменить.')
+    _sl_saved, _sp_saved = _site_login_saved(pid_key)
+    st.session_state.setdefault(f'fc_site_login_{pid_key}', _sl_saved)
+    st.session_state.setdefault(f'fc_site_pass_{pid_key}', _sp_saved)
+    _sl = st.text_input('Логин сайта', key=f'fc_site_login_{pid_key}')
+    _sp = st.text_input('Пароль сайта', type='password',
+                        key=f'fc_site_pass_{pid_key}')
+    if _sl.strip() and _sp:
+        _site_env = {'SITE_BASIC_LOGIN': _sl.strip(), 'SITE_BASIC_PASSWORD': _sp}
+    else:
+        st.warning('Без логина и пароля прогон по этому сайту смысла не имеет: '
+                   'все страницы ответят «401».')
+    st.divider()
+
 # ── Проверка админки: отдельный блок, как у форм (проверять/не проверять) ──
 # Логин/пароль вводятся здесь и передаются проверке через окружение - на диск
 # ничего не пишется и никуда не отправляется.
@@ -1211,7 +1262,8 @@ with _run_col:
             except Exception:
                 _tg_env = {}
             _launch_background(args, LOG_FILE,
-                               extra_env={**_admin_env, **_mail_env, **_proxy_env, **_tg_env})
+                               extra_env={**_admin_env, **_mail_env, **_proxy_env,
+                                          **_tg_env, **_site_env})
             st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key
