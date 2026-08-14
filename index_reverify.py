@@ -56,8 +56,10 @@ async def _check_all(urls, proxy):
     sem = asyncio.Semaphore(_CONCURRENCY)
     conn = aiohttp.TCPConnector(limit=_CONCURRENCY, ttl_dns_cache=300)
     out = {}
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=conn) as s:
+    # url= первого адреса: все они с одного сайта, а он может быть под паролем.
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=(urls[0] if urls else '')),
+            connector=conn) as s:
         tasks = [(u, asyncio.create_task(_check(s, u, proxy, sem))) for u in urls]
         for u, t in tasks:
             out[u] = await t

@@ -214,8 +214,10 @@ async def _check_all(pairs: list, proxy_url, progress=None) -> dict:
     connector = aiohttp.TCPConnector(limit=_CONCURRENCY, ttl_dns_cache=300)
     results = {}
     total = len(pairs)
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=connector) as session:
+    # url= первого адреса: вход на закрытый сайт, если он под паролем.
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=(pairs[0][1] if pairs else '')),
+            connector=connector) as session:
         tasks = [asyncio.create_task(_check_one(session, u, proxy_url, sem))
                  for _, u in pairs]
         done = 0

@@ -18,7 +18,8 @@ from sources import (
 from history import load_history, save_history, WEEKLY_TTL_MS
 from sitemap import load_product_pathnames
 from product_links import load_product_links
-from http_checker import run_batch
+from http_checker import (run_batch, basic_auth_for as _basic_auth_for,
+                          установить_вход_прогона as _установить_вход)
 from reporter import build_report, make_report_filename
 from telegram_notify import (
     format_summary_message, send_run_notification, send_message,
@@ -767,6 +768,21 @@ def run_check(pid, params, creds, log, progress):
         elif proxy_url:
             log(f'Прокси: включён для {cfg["name"]}')
 
+        # Вход на закрытый сайт (стенд за nginx-паролем). Без него ВЕСЬ обход
+        # получает 401, и отчёт состоит из ошибок доступа. Логин/пароль
+        # приходят из полей страницы или из «Настроек проекта».
+        basic_auth = _basic_auth_for(cfg, creds)
+        # Ставим вход СРАЗУ, до первых запросов: часть проверок (sitemap,
+        # товары) идёт раньше основного обхода.
+        _установить_вход(basic_auth)
+        if cfg.get('basic_auth'):
+            if basic_auth:
+                log(f'Вход на закрытый сайт: как {basic_auth["login"]}')
+            else:
+                log('⚠ Сайт закрыт паролем, но логин/пароль не заданы - '
+                    'страницы ответят 401. Заполни «Вход на закрытый сайт» '
+                    'на странице чек-листа.')
+
         # Карточек товара у проекта может не быть вовсе: у МПИ весь каталог -
         # плоские разделы /catalog/<slug>, товарных страниц в sitemap ноль.
         # Тогда «отфильтровано 0 товаров» - не сбой загрузки, а устройство
@@ -925,7 +941,8 @@ def run_check(pid, params, creds, log, progress):
             check_security=bool(params.get('check_security', True)),
             check_images=bool(params.get('check_images', True)),
             region_ctx=region_ctx,
-            on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
+            on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map,
+            basic_auth=basic_auth))
 
         _sec_bad = sum(1 for r in results
                        if getattr(r, 'has_security_issues', False))

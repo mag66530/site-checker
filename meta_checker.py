@@ -319,8 +319,10 @@ async def check_url_duplicates(urls: list, *, proxy_url=None,
 
     tasks = []
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=connector) as session:
+    # url= первого адреса: вход на закрытый сайт, если он под паролем.
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=(urls[0] if urls else '')),
+            connector=connector) as session:
         seen = set()
         for u in urls:
             for kind, variant in _url_variants(u):
@@ -360,8 +362,10 @@ async def check_test_domains(root_host: str, *, proxy_url=None) -> list:
     out = []
     to = aiohttp.ClientTimeout(total=15)
     connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=300)
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=connector) as session:
+    # url= корня: поддомены закрытого сайта тоже под паролем.
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=f'https://{root}/'),
+            connector=connector) as session:
         async def probe(sub):
             host = f'{sub}.{root}'
             try:

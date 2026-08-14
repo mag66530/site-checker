@@ -66,7 +66,9 @@ async def discover_child_sitemaps(host: str, *, proxy_url=None, log=None) -> lis
     import aiohttp
     from indexing_checker import fetch_robots
 
-    async with aiohttp.ClientSession(headers=_sitemap_headers()) as session:
+    # url= - вход на закрытый сайт (robots.txt и карты там тоже за паролем).
+    async with aiohttp.ClientSession(
+            headers=_sitemap_headers(url=f'https://{host}/')) as session:
         info = await fetch_robots(session, host, proxy_url=proxy_url)
         if not info.sitemaps:
             if log:
@@ -105,7 +107,9 @@ async def sample_urls_from_sitemaps(sitemap_urls: list[str], urls_per_map: int,
     import aiohttp
     rng = rng or random
     out: list[str] = []
-    async with aiohttp.ClientSession(headers=_sitemap_headers()) as session:
+    async with aiohttp.ClientSession(
+            headers=_sitemap_headers(
+                url=(list(sitemap_urls)[0] if sitemap_urls else ''))) as session:
         for u in sitemap_urls:
             try:
                 xml = await _fetch_one(session, u, proxy_url=proxy_url)

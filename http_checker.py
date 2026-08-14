@@ -62,18 +62,24 @@ DEFAULT_USER_AGENT = (
 )
 
 
-def make_browser_headers(user_agent: str = DEFAULT_USER_AGENT) -> dict:
+def make_browser_headers(user_agent: str = DEFAULT_USER_AGENT,
+                         url: str = '') -> dict:
     """
     Реалистичный набор HTTP-заголовков, имитирующий настоящий Chrome.
-    
+
     Многие anti-bot защиты (включая Cloudflare и SiteSecure) детектируют ботов
     по отсутствию или нестандартному порядку этих заголовков. Реальный Chrome
     шлёт их именно в таком составе и порядке.
-    
+
     Sec-Fetch-* заголовки появились в Chrome 76 (2019) - отсутствие их сразу
     выдаёт «голый» HTTP-клиент.
+
+    url - адрес, для которого собираем заголовки. Передавайте его: если сайт
+    проекта закрыт паролем (см. установить_вход_прогона), к заголовкам
+    добавится Authorization - и только для этого домена, чужим не уйдёт.
+    Без url поведение прежнее.
     """
-    return {
+    return {**(заголовок_входа(url) if url else {}),
         'User-Agent': user_agent,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -1054,6 +1060,65 @@ def _сделать_сессию(headers, connector, basic_auth):
                                   basic_auth.get('password', '')))
 
 
+def basic_auth_for(cfg, creds):
+    """Вход по паролю для закрытого сайта или None - из карточки проекта и
+    доступов прогона.
+
+    Логин/пароль живут в «Настройках проекта» (site_basic_login /
+    site_basic_password), в секретах приложения или в поле на странице
+    прогона - в git и в конфиг проекта они не попадают. Хост берём из самого
+    проекта, чтобы пароль уходил только ему: проверка битых ссылок звонит и на
+    чужие домены.
+    """
+    if not (cfg or {}).get('basic_auth'):
+        return None
+    логин = (creds or {}).get('site_basic_login') or ''
+    пароль = (creds or {}).get('site_basic_password') or ''
+    if not логин:
+        return None
+    return {'host': (cfg.get('root_domain') or '').strip().lower(),
+            'login': логин, 'password': пароль}
+
+
+# Вход, действующий на ВЕСЬ текущий прогон. Нужен потому, что чек-лист, кроме
+# основного обхода, дёргает десяток отдельных проверок (robots, sitemap, 404,
+# дубли главной, поиск, нагрузка) - каждая ходит своим клиентом, и тащить
+# логин с паролем через все их сигнатуры пришлось бы руками. Глобальная
+# переменная тут безопасна: прогон - отдельный процесс на ОДИН проект.
+_ВХОД_ПРОГОНА: dict = {}
+
+
+def установить_вход_прогона(basic_auth) -> None:
+    """Запомнить вход на закрытый сайт на весь прогон (None - забыть)."""
+    global _ВХОД_ПРОГОНА
+    if not basic_auth or not basic_auth.get('login'):
+        _ВХОД_ПРОГОНА = {}
+        return
+    _ВХОД_ПРОГОНА = {
+        'host': (basic_auth.get('host') or '').strip().lower(),
+        'header': _basic_header(basic_auth['login'],
+                                basic_auth.get('password', '')),
+    }
+
+
+def заголовок_входа(url: str) -> dict:
+    """{'Authorization': …} если этот адрес - закрытый сайт прогона, иначе {}.
+
+    Хост сверяем строго (сам домен и его поддомены): пароль не должен уезжать
+    на чужие адреса, куда проверки тоже ходят.
+    """
+    if not _ВХОД_ПРОГОНА or not url:
+        return {}
+    try:
+        хост = (urlsplit(str(url)).hostname or '').lower()
+    except Exception:  # noqa: BLE001
+        return {}
+    свой = _ВХОД_ПРОГОНА['host']
+    if хост and (хост == свой or хост.endswith('.' + свой)):
+        return {'Authorization': _ВХОД_ПРОГОНА['header']}
+    return {}
+
+
 # ── Параллельный батч с прогрессом ───────────────────────────────────
 
 
@@ -1110,6 +1175,11 @@ async def run_batch(
     total = len(tasks)
 
     headers = make_browser_headers(user_agent)
+    # Вход на закрытый сайт запоминаем на весь прогон: отдельные проверки
+    # чек-листа (robots, 404, дубли главной, поиск, нагрузка) ходят своими
+    # клиентами и берут заголовки через make_browser_headers - так пароль
+    # достаётся и им, без правки каждой сигнатуры.
+    установить_вход_прогона(basic_auth)
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
 
     # Кэш разобранных стилей (общий на весь батч - шаблонный CSS повторяется

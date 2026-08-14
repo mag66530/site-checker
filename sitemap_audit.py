@@ -100,7 +100,9 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
     sm_paths = set()          # нормализованные пути всех URL из sitemap
     seen, queue = set(), [root_url]
     try:
-        async with aiohttp.ClientSession(headers=_sitemap_headers()) as session:
+        # url= - вход на закрытый сайт (там и sitemap за паролем).
+        async with aiohttp.ClientSession(
+                headers=_sitemap_headers(url=root_url)) as session:
             while queue:
                 if out['files'] >= MAX_SITEMAPS or out['total'] >= MAX_ENTRIES:
                     out['truncated'] = True
@@ -227,7 +229,8 @@ async def audit_html_sitemap(host: str, *, proxy_url=None) -> dict:
     out = {'url': None, 'status': None, 'blocked': None,
            'junk_links': [], 'error': None}
     try:
-        async with aiohttp.ClientSession(headers=_sitemap_headers()) as session:
+        async with aiohttp.ClientSession(
+                headers=_sitemap_headers(url=f'https://{host}/')) as session:
             html = None
             for path in ('/sitemap/', '/sitemap.html'):
                 u = f'https://{host}{path}'

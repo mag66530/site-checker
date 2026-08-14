@@ -254,7 +254,15 @@ async def collect_product_links(
     total = len(category_paths)
     done = 0
 
+    # Вход на закрытый сайт (стенд за паролем) - иначе обход категорий соберёт
+    # только 401 и «товаров не найдено».
+    try:
+        from http_checker import заголовок_входа
+        _вход = заголовок_входа(base + '/')
+    except Exception:  # noqa: BLE001
+        _вход = {}
     headers = {
+        **_вход,
         'User-Agent': user_agent,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',

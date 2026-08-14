@@ -719,7 +719,8 @@ async def check_paths_against_robots(host: str, paths: list, *,
            'error': None}
     try:
         async with aiohttp.ClientSession(
-                headers=make_browser_headers()) as session:
+                # url= - вход на закрытый сайт: robots.txt там тоже за паролем.
+                headers=make_browser_headers(url=f'https://{host}/')) as session:
             info = await fetch_robots(session, host, proxy_url=proxy_url)
             out['robots_status'] = info.status
             out['sitemaps'] = info.sitemaps

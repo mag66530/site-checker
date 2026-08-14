@@ -226,8 +226,12 @@ async def run_stress_check(*, parse_urls, load_pages, dup_samples, baselines,
             log(m)
     out = {'available': True, 'concurrency': concurrency}
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=connector) as session:
+    # url= первого адреса: вход на закрытый сайт, иначе вся «нагрузка» свелась
+    # бы к мгновенным 401 и выглядела бы подозрительно быстрой.
+    _первый = (list(parse_urls) or list(load_pages) or [''])[0]
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=_первый),
+            connector=connector) as session:
         _log(f'Нагрузка/парсинг: обход парсингом до {len(parse_urls)} страниц…')
         parsing = await probe_parsing(session, parse_urls, proxy_url)
         out['parsing'] = parsing

@@ -194,7 +194,9 @@ async def check_home_dupes(root_domain: str, proxy_url=None, log=None) -> dict:
     connector = aiohttp.TCPConnector(limit=8, ssl=False, ttl_dns_cache=300)
     try:
         from http_checker import make_browser_headers
-        headers = make_browser_headers()
+        # url= даёт вход на закрытый сайт (если он под паролем) - иначе все
+        # варианты адреса главной ответили бы 401 и «дублей» было бы поровну.
+        headers = make_browser_headers(url=f'https://{root_domain}/')
     except Exception:
         headers = {'User-Agent': 'Mozilla/5.0'}
 

@@ -90,8 +90,10 @@ async def check_search(category_url: str, filter_url: str = None,
     cat_path = (sp.path or '/').rstrip('/') + '/'
     from http_checker import make_browser_headers
     connector = aiohttp.TCPConnector(limit=2, ttl_dns_cache=300)
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=connector) as session:
+    # url= категории: вход на закрытый сайт, если он под паролем.
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=category_url),
+            connector=connector) as session:
         name = await _name_from_h1(session, category_url, proxy_url)
         if not name:
             out['error'] = 'у категории нет H1 - нечего искать'
