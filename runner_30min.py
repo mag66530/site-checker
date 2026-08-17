@@ -979,6 +979,28 @@ def run_check(pid, params, creds, log, progress):
                 if _n_ac:
                     log(f'❌ robots.txt: закрыто .css/.js файлов {_n_ac} '
                         f'из {_idx_summary.get("assets_checked", 0)}')
+                # Гигиена самого файла robots.txt (доп. чек-лист)
+                _rf = _idx_summary.get('robots_file') or {}
+                if _rf:
+                    log(f'robots.txt: {_rf.get("size_bytes", 0) // 1024} КБ, '
+                        f'Content-Type {_rf.get("content_type") or "не указан"}, '
+                        f'Clean-Param {len(_rf.get("clean_params") or [])}')
+                    if _rf.get('too_big'):
+                        log('❌ robots.txt тяжелее 500 КБ - за пределом робот '
+                            'файл не читает')
+                    if _rf.get('looks_html'):
+                        log('❌ robots.txt: вместо текста отдаётся HTML-страница')
+                    if _rf.get('bom'):
+                        log('❌ robots.txt: BOM в начале файла - первая '
+                            'директива не читается')
+                    if not _rf.get('utf8_ok', True):
+                        log('❌ robots.txt: файл не в кодировке UTF-8')
+                    if _rf.get('commented'):
+                        log(f'⚠ robots.txt: закомментировано директив '
+                            f'{len(_rf["commented"])} - правила не работают')
+                    if not _rf.get('clean_params'):
+                        log('⚠ robots.txt: нет Clean-Param - дубли по '
+                            'GET-параметрам для Яндекса не убраны')
                 # ЧПУ и формат адресов - по тем же путям, без запросов.
                 from indexing_checker import check_url_format
                 _uf = check_url_format(_all_paths)
@@ -1021,6 +1043,22 @@ def run_check(pid, params, creds, log, progress):
                 if _n_miss:
                     log(f'❌ Sitemap: не хватает {_n_miss} категорий/фильтров/'
                         f'услуг из выгрузки')
+                for _fi in (_audit.get('format_issues') or [])[:3]:
+                    log(f'❌ Формат карты сайта: {_fi.get("why")} '
+                        f'({_fi.get("url")})')
+                for _ei in (_audit.get('encoding_issues') or [])[:3]:
+                    log(f'❌ Кодировка карты сайта: {_ei.get("why")} '
+                        f'({_ei.get("url")})')
+                _pr = _audit.get('url_probe') or {}
+                if _pr.get('checked'):
+                    log(f'Прозвон адресов карты: проверено {_pr["checked"]} из '
+                        f'{_pr.get("sample_of", 0)}, не 200 - '
+                        f'{len(_pr.get("bad_status") or [])}, noindex - '
+                        f'{len(_pr.get("noindex") or [])}'
+                        + (f', не пустили {_pr["blocked"]}'
+                           if _pr.get('blocked') else '')
+                        + (f', не доехали {len(_pr["unreachable"])}'
+                           if _pr.get('unreachable') else ''))
             except Exception as _e:
                 log(f'⚠ Sitemap-аудит: {_e}')
             # HTML-карта сайта (доп. чек-лист)

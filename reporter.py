@@ -3337,8 +3337,24 @@ def build_report(
                     + (_idx_mc.get('services') or []))
     _idx_hm_junk = (((indexing_summary or {}).get('html_sitemap') or {})
                     .get('junk_links') or [])
+    # Гигиена файла robots.txt и прозвон адресов карты (доп. чек-лист).
+    _idx_rf = (indexing_summary or {}).get('robots_file') or {}
+    _idx_rf_bad = bool(_idx_rf.get('too_big') or _idx_rf.get('looks_html')
+                       or _idx_rf.get('bom')
+                       or not _idx_rf.get('utf8_ok', True))
+    _idx_rf_comm = _idx_rf.get('commented') or []
+    _idx_probe = (((indexing_summary or {}).get('sitemap_audit') or {})
+                  .get('url_probe') or {})
+    _idx_sm_bad = _idx_probe.get('bad_status') or []
+    _idx_sm_noidx = _idx_probe.get('noindex') or []
+    _idx_sm_fmt = ((((indexing_summary or {}).get('sitemap_audit') or {})
+                    .get('format_issues') or [])
+                   + (((indexing_summary or {}).get('sitemap_audit') or {})
+                      .get('encoding_issues') or []))
     if (indexing_bad_pages or indexing_sitemap_conflicts
-            or _idx_blanket or _idx_assets or _idx_missing or _idx_hm_junk):
+            or _idx_blanket or _idx_assets or _idx_missing or _idx_hm_junk
+            or _idx_rf_bad or _idx_rf_comm or _idx_sm_bad or _idx_sm_noidx
+            or _idx_sm_fmt):
         _idx_bits = []
         if indexing_bad_pages:
             _idx_bits.append(f'расхождения с robots.txt на {len(indexing_bad_pages)} '
@@ -3355,6 +3371,27 @@ def build_report(
                              f'(категории/фильтры/услуги) нет в sitemap')
         if _idx_hm_junk:
             _idx_bits.append(f'{len(_idx_hm_junk)} служебных ссылок в HTML-карте')
+        if _idx_rf_bad:
+            _idx_rf_что = []
+            if _idx_rf.get('too_big'):
+                _idx_rf_что.append(f'вес {(_idx_rf.get("size_bytes") or 0) // 1024} КБ')
+            if _idx_rf.get('looks_html'):
+                _idx_rf_что.append('отдаётся HTML вместо текста')
+            if _idx_rf.get('bom'):
+                _idx_rf_что.append('BOM в начале')
+            if not _idx_rf.get('utf8_ok', True):
+                _idx_rf_что.append('кодировка не UTF-8')
+            _idx_bits.append('сам файл robots.txt: ' + ', '.join(_idx_rf_что))
+        if _idx_rf_comm:
+            _idx_bits.append(f'{len(_idx_rf_comm)} директив robots.txt '
+                             f'закомментированы')
+        if _idx_sm_fmt:
+            _idx_bits.append('формат/кодировка карты сайта нарушены')
+        if _idx_sm_bad:
+            _idx_bits.append(f'{len(_idx_sm_bad)} из {_idx_probe.get("checked", 0)} '
+                             f'проверенных адресов карты отвечают не 200')
+        if _idx_sm_noidx:
+            _idx_bits.append(f'{len(_idx_sm_noidx)} адресов карты закрыты noindex')
         summary_text += ('\nИндексация: ' + ', '.join(_idx_bits)
                          + ' - см. «Проблемы» и «План работ».')
     if meta_bad_pages or meta_dup_groups:

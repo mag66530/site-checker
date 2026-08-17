@@ -1697,6 +1697,55 @@ def indexing_site_findings(indexing_summary: Optional[dict]) -> list:
                            'свой CSS/JS закрыт в robots.txt - Google не отрендерит страницу',
                            url=a.get('url', ''), detail=f'правило: {a.get("rule", "")}'))
 
+    # ── Гигиена файла robots.txt: вес, формат, кодировка, Clean-Param ──
+    rf = s.get('robots_file') or {}
+    if rf:
+        _url_robots = _idx_url(s, '/robots.txt')
+        if rf.get('too_big'):
+            _kb = (rf.get('size_bytes') or 0) // 1024
+            out.append(Finding(
+                'Ошибка', 'Индексация',
+                'robots.txt тяжелее 500 КБ - дальше предела робот файл не читает',
+                url=_url_robots,
+                detail=f'{_kb} КБ, предел {(rf.get("limit_bytes") or 0) // 1024} КБ'))
+        if rf.get('looks_html'):
+            out.append(Finding(
+                'Ошибка', 'Индексация',
+                'вместо robots.txt отдаётся HTML-страница - правил у сайта нет',
+                url=_url_robots,
+                detail=f'Content-Type: {rf.get("content_type") or "не указан"}'))
+        elif rf.get('content_type') and rf['content_type'] != 'text/plain':
+            out.append(Finding(
+                'Предупреждение', 'Индексация',
+                'robots.txt отдаётся не как текст (ожидается text/plain)',
+                url=_url_robots, detail=f'Content-Type: {rf["content_type"]}'))
+        if not rf.get('utf8_ok', True):
+            out.append(Finding(
+                'Ошибка', 'Индексация',
+                'robots.txt не в кодировке UTF-8 - часть правил робот прочтёт неверно',
+                url=_url_robots))
+        if rf.get('bom'):
+            out.append(Finding(
+                'Ошибка', 'Индексация',
+                'robots.txt начинается с BOM - первая директива не читается',
+                url=_url_robots,
+                detail='сохранить файл как «UTF-8 без BOM»: с BOM первая строка '
+                       'склеивается с невидимым символом, и группа правил '
+                       'пропадает целиком'))
+        for c in rf.get('commented') or []:
+            out.append(Finding(
+                'Предупреждение', 'Индексация',
+                'директива в robots.txt закомментирована через # - правило не работает',
+                url=_url_robots,
+                detail=f'строка {c.get("line")}: {c.get("text", "")}'))
+        if not rf.get('clean_params'):
+            out.append(Finding(
+                'Предупреждение', 'Индексация',
+                'в robots.txt нет Clean-Param - дубли по GET-параметрам не убраны для Яндекса',
+                url=_url_robots,
+                detail='Clean-Param убирает из индекса копии страниц с метками '
+                       '(utm_source, from, sort и подобными)'))
+
     for f in (s.get('directive_check') or {}).get('findings') or []:
         out.append(Finding('Предупреждение', 'Индексация',
                            'страница держится только на robots.txt (отвечает 200 без noindex)',
@@ -1732,6 +1781,43 @@ def indexing_site_findings(indexing_summary: Optional[dict]) -> list:
         out.append(Finding('Предупреждение', 'Индексация',
                            f'битый/некорректный URL в sitemap: {b.get("why", "")}',
                            url=b.get('url', '')))
+
+    # ── Формат и кодировка файлов карты сайта ──
+    for f in aud.get('format_issues') or []:
+        out.append(Finding('Ошибка', 'Индексация',
+                           f'карта сайта не в формате .xml/.txt: {f.get("why", "")}',
+                           url=f.get('url', '')))
+    for f in aud.get('encoding_issues') or []:
+        # Заявленная не-UTF-8 кодировка при читаемых байтах - мягче: файл
+        # разобрать можно, но робот пойдёт по декларации.
+        _why = f.get('why', '')
+        _level = 'Предупреждение' if 'заявлена' in _why else 'Ошибка'
+        out.append(Finding(_level, 'Индексация',
+                           f'кодировка карты сайта: {_why}',
+                           url=f.get('url', '')))
+
+    # ── Адреса ИЗ карты: код ответа и noindex ──
+    _pr = aud.get('url_probe') or {}
+    for b in _pr.get('bad_status') or []:
+        out.append(Finding(
+            'Ошибка', 'Индексация',
+            f'адрес из карты сайта отвечает не 200: {b.get("status")}',
+            url=b.get('url', ''),
+            detail='в карте сайта должны быть только страницы, отдающие 200 - '
+                   'редиректы и ошибки тратят лимит обхода'))
+    for n in _pr.get('noindex') or []:
+        out.append(Finding(
+            'Ошибка', 'Индексация',
+            'адрес из карты сайта закрыт noindex - карта и страница спорят',
+            url=n.get('url', ''), detail=n.get('signal', '')))
+    for u in _pr.get('unreachable') or []:
+        # Не доехали МЫ (таймаут/обрыв) - это ограничение проверки, а не
+        # находка по сайту: в задачи клиенту такое не ставим.
+        out.append(Finding(
+            'Предупреждение', 'Индексация',
+            'адрес из карты сайта не удалось проверить - нет ответа',
+            url=u.get('url', ''),
+            detail=f'{u.get("why", "")} (две попытки) - открыть адрес вручную'))
 
     for fs in aud.get('file_stats') or []:
         urls_n, bytes_n = fs.get('urls', 0), fs.get('bytes', 0)
@@ -1834,6 +1920,72 @@ def extra_site_tasks(*, indexing_summary: dict = None,
             volume=len(junk), owner='SEO',
             why='Робот тратит лимит обхода на мусорные копии страниц.',
             where='Лист «Индексация»'))
+
+    _rf = (indexing_summary or {}).get('robots_file') or {}
+    _rf_beda = []
+    if _rf.get('too_big'):
+        _rf_beda.append(f'вес {(_rf.get("size_bytes") or 0) // 1024} КБ '
+                        f'(предел 500 КБ)')
+    if _rf.get('looks_html'):
+        _rf_beda.append('вместо текста отдаётся HTML-страница')
+    if not _rf.get('utf8_ok', True):
+        _rf_beda.append('кодировка не UTF-8')
+    if _rf.get('bom'):
+        _rf_beda.append('BOM в начале файла')
+    if _rf.get('commented'):
+        _rf_beda.append(f'закомментированных директив: {len(_rf["commented"])}')
+    if _rf_beda:
+        tasks.append(Task(
+            priority=1, task_group='robots_file_hygiene',
+            title='Починить сам файл robots.txt',
+            what='; '.join(_rf_beda), volume=len(_rf_beda),
+            owner='SEO + разработка',
+            why='Робот читает файл целиком и буквально: битая кодировка, BOM или '
+                'HTML вместо текста обнуляют все правила сразу.',
+            where='Лист «Проблемы», раздел «Индексация»'))
+
+    if _rf and not _rf.get('clean_params'):
+        tasks.append(Task(
+            priority=3, task_group='robots_clean_param',
+            title='Прописать Clean-Param в robots.txt',
+            what='директивы Clean-Param нет ни для одной группы', volume=1,
+            owner='SEO',
+            why='Без неё Яндекс держит в индексе копии страниц с метками '
+                '(utm_source, from, sort) как отдельные адреса.',
+            where='Лист «Проблемы», раздел «Индексация»'))
+
+    _aud = (indexing_summary or {}).get('sitemap_audit') or {}
+    _sm_fmt = (_aud.get('format_issues') or []) + (_aud.get('encoding_issues') or [])
+    if _sm_fmt:
+        tasks.append(Task(
+            priority=1, task_group='sitemap_format',
+            title='Починить формат и кодировку карты сайта',
+            what='; '.join(sorted({f.get('why', '') for f in _sm_fmt}))[:300],
+            volume=len(_sm_fmt), owner='Разработка',
+            why='Карта не в .xml/.txt или не в UTF-8 - робот не прочитает её вовсе.',
+            where='Лист «Проблемы», раздел «Индексация»'))
+
+    _probe = _aud.get('url_probe') or {}
+    if _probe.get('bad_status'):
+        tasks.append(Task(
+            priority=2, task_group='sitemap_bad_status',
+            title='Убрать из карты сайта адреса, не отдающие 200',
+            what=f'{len(_probe["bad_status"])} из {_probe.get("checked", 0)} '
+                 f'проверенных адресов отвечают не 200',
+            volume=len(_probe['bad_status']), owner='Разработка',
+            why='Редиректы и ошибки в карте тратят лимит обхода и мешают роботу '
+                'найти живые страницы.',
+            where='Лист «Проблемы», раздел «Индексация»'))
+    if _probe.get('noindex'):
+        tasks.append(Task(
+            priority=2, task_group='sitemap_noindex',
+            title='Развести карту сайта и noindex',
+            what=f'{len(_probe["noindex"])} из {_probe.get("checked", 0)} '
+                 f'проверенных адресов закрыты noindex',
+            volume=len(_probe['noindex']), owner='SEO',
+            why='Карта говорит «в индекс», страница - «не индексировать»: либо '
+                'убрать адрес из карты, либо снять noindex.',
+            where='Лист «Проблемы», раздел «Индексация»'))
 
     sm_conflicts = (indexing_summary or {}).get('disallowed') or []
     if sm_conflicts:

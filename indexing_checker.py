@@ -53,10 +53,74 @@ class RobotsInfo:
     groups: dict = field(default_factory=dict)
     sitemaps: list = field(default_factory=list)
     error: Optional[str] = None
+    # ── гигиена самого файла (доп. чек-лист) ──
+    size_bytes: int = 0                   # вес файла
+    content_type: str = ''                # Content-Type ответа
+    bom: bool = False                     # UTF-8 BOM в начале файла
+    utf8_ok: bool = True                  # байты читаются как UTF-8
+    looks_html: bool = False              # вместо текста отдали HTML-страницу
+    clean_params: list = field(default_factory=list)   # значения Clean-Param
+    commented: list = field(default_factory=list)      # закомментированные директивы
 
     @property
     def ok(self) -> bool:
         return self.fetched and self.status == 200
+
+
+# Предел, после которого Google перестаёт читать robots.txt (500 КиБ).
+ROBOTS_MAX_BYTES = 500 * 1024
+
+# Директивы, которые имеет смысл искать закомментированными: пропущенный «#»
+# перед строкой выключает правило целиком, а выглядит файл рабочим.
+_ROBOTS_DIRECTIVES = ('user-agent', 'disallow', 'allow', 'sitemap',
+                      'clean-param', 'host', 'crawl-delay')
+_RE_COMMENTED_DIRECTIVE = re.compile(
+    r'^\s*#+\s*(' + '|'.join(_ROBOTS_DIRECTIVES) + r')\s*:\s*(\S.*)?$', re.I)
+
+
+def find_commented_directives(text: str, limit: int = 10) -> list:
+    """Строки robots.txt, где директива целиком закомментирована через «#».
+
+    Разбор правил комментарии срезает (так велит стандарт), поэтому такая
+    строка не видна ни нам, ни роботу - файл выглядит рабочим, а правила нет.
+    Намеренно это или нет, снаружи не понять, поэтому находка мягкая.
+    → [{'line': номер, 'text': строка}]. ЧИСТАЯ функция - есть юнит-тест.
+    """
+    out = []
+    for n, raw in enumerate((text or '').splitlines(), 1):
+        if _RE_COMMENTED_DIRECTIVE.match(raw):
+            out.append({'line': n, 'text': raw.strip()[:200]})
+            if len(out) >= limit:
+                break
+    return out
+
+
+def analyze_robots_file(data: bytes, content_type: str = '') -> dict:
+    """Гигиена файла robots.txt по сырому ответу: вес, формат, кодировка.
+
+    → {'size_bytes', 'too_big', 'content_type', 'looks_html', 'bom',
+       'utf8_ok', 'text'}. ЧИСТАЯ функция - есть юнит-тест.
+
+    BOM важен не только «для галочки»: с ним первая строка становится
+    «\\ufeffUser-agent», ключ директивы не распознаётся, и ПЕРВАЯ группа
+    правил теряется целиком. Поэтому текст отдаём уже без BOM.
+    """
+    data = data or b''
+    bom = data.startswith(b'\xef\xbb\xbf')
+    body = data[3:] if bom else data
+    try:
+        text = body.decode('utf-8')
+        utf8_ok = True
+    except UnicodeDecodeError:
+        text = body.decode('utf-8', errors='replace')
+        utf8_ok = False
+    ct = (content_type or '').split(';')[0].strip().lower()
+    # HTML вместо текста: типовой случай - сайт отдаёт на /robots.txt свою
+    # страницу с кодом 200, и роботы читают её как пустой файл.
+    looks_html = bool(re.match(r'\s*(<!doctype html|<html)', text, re.I))
+    return {'size_bytes': len(data), 'too_big': len(data) > ROBOTS_MAX_BYTES,
+            'content_type': ct, 'looks_html': looks_html, 'bom': bom,
+            'utf8_ok': utf8_ok, 'text': text}
 
 
 def _pattern_to_regex(pattern: str):
@@ -71,8 +135,13 @@ def _pattern_to_regex(pattern: str):
 
 
 def parse_robots(text: str, host: str = '') -> RobotsInfo:
-    """Разобрать текст robots.txt: группы правил по агентам + Sitemap."""
+    """Разобрать текст robots.txt: группы правил по агентам + Sitemap.
+
+    Заодно собираем Clean-Param (директива Яндекса против дублей по
+    GET-параметрам) и строки, где директива закомментирована.
+    """
     info = RobotsInfo(host=host, fetched=True, status=200)
+    info.commented = find_commented_directives(text)
     groups: dict = {}
     current_agents: list = []
     last_was_agent = False
@@ -97,6 +166,12 @@ def parse_robots(text: str, host: str = '') -> RobotsInfo:
         if key == 'sitemap':
             if val:
                 info.sitemaps.append(val)
+            continue
+        if key == 'clean-param':
+            # Директива Яндекса: «Clean-param: utm_source&utm_medium /catalog/».
+            # Действует независимо от группы, поэтому просто копим значения.
+            if val:
+                info.clean_params.append(val)
             continue
         if key in ('allow', 'disallow'):
             if not current_agents:
@@ -170,9 +245,17 @@ async def fetch_robots(session, host: str, *, proxy_url=None,
             if status != 200:
                 return RobotsInfo(host=host, status=status, fetched=True)
             data = await r.read()
-            text = data.decode('utf-8', errors='replace')
-            info = parse_robots(text, host)
+            ct = r.headers.get('Content-Type', '')
+            # Гигиена файла (вес/формат/кодировка) - до разбора правил: текст
+            # для разбора берём уже без BOM, иначе теряется первая группа.
+            f = analyze_robots_file(data, ct)
+            info = parse_robots(f['text'], host)
             info.status = status
+            info.size_bytes = f['size_bytes']
+            info.content_type = f['content_type']
+            info.bom = f['bom']
+            info.utf8_ok = f['utf8_ok']
+            info.looks_html = f['looks_html']
             return info
     except Exception as e:
         return RobotsInfo(host=host, fetched=False, error=str(e))
@@ -701,12 +784,17 @@ async def check_paths_against_robots(host: str, paths: list, *,
        • .css/.js главной страницы не закрыты Disallow - Google требует
          доступ к ресурсам для рендеринга, закрытые = баг.
 
+       • гигиена самого файла: вес не больше 500 КБ, отдаётся как текст
+         (а не HTML-страница), кодировка UTF-8 без BOM, директивы не
+         закомментированы, прописан Clean-Param против дублей по
+         GET-параметрам - см. robots_file.
+
     Возвращает {'host', 'robots_status', 'sitemaps', 'checked',
                 'disallowed': [...], 'directive_check': {'checked', 'findings'},
                 'junk_open': [...],
                 'sitemap_checks': {...}, 'blanket_disallow': [...],
                 'ua_groups': {...}, 'assets_checked': int,
-                'assets_closed': [...], 'error'}."""
+                'assets_closed': [...], 'robots_file': {...}, 'error'}."""
     import aiohttp
     from http_checker import make_browser_headers
     out = {'host': host, 'robots_status': None, 'sitemaps': [],
@@ -716,6 +804,7 @@ async def check_paths_against_robots(host: str, paths: list, *,
            'advisory_open': [], 'pagination': None,
            'required_pages': [], 'otgruzki': None, 'news_dates': None,
            'directive_check': {'checked': 0, 'findings': []},
+           'robots_file': None,
            'error': None}
     try:
         async with aiohttp.ClientSession(
@@ -727,6 +816,19 @@ async def check_paths_against_robots(host: str, paths: list, *,
             if not info.ok:
                 out['error'] = info.error or f'robots.txt: HTTP {info.status}'
                 return out
+
+            # ── 0. Гигиена самого файла (доп. чек-лист) ──
+            out['robots_file'] = {
+                'size_bytes': info.size_bytes,
+                'too_big': info.size_bytes > ROBOTS_MAX_BYTES,
+                'limit_bytes': ROBOTS_MAX_BYTES,
+                'content_type': info.content_type,
+                'looks_html': info.looks_html,
+                'bom': info.bom,
+                'utf8_ok': info.utf8_ok,
+                'clean_params': list(info.clean_params),
+                'commented': list(info.commented),
+            }
 
             # ── 0а. «Disallow: /» - сайт закрыт целиком (доп. чек-лист) ──
             # Буквальное правило: даже если частично перекрыто Allow,

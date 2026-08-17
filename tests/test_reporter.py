@@ -321,6 +321,80 @@ def test_indexing_site_findings_попадают_в_проблемы_и_план
     print('✓ Индексация: сайт-уровневые находки в «Проблемах» без дублей в «Плане работ»')
 
 
+def test_гигиена_robots_и_карты_доходит_до_листов_отчёта():
+    """Доп. чек-лист: вес/формат/кодировка/закомментированные директивы/
+    Clean-Param у robots.txt и формат/кодировка/код ответа/noindex у карты
+    сайта - должны быть видны и в «Проблемах», и в «Плане работ», и строкой
+    в «Обзоре»."""
+    results = [make_result(url='https://stalmetural.ru/', type_label='Главная')]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва',
+                          host='stalmetural.ru')]
+    indexing_summary = {
+        'host': 'stalmetural.ru',
+        'robots_file': {
+            'size_bytes': 600 * 1024, 'too_big': True,
+            'limit_bytes': 500 * 1024, 'content_type': 'text/plain',
+            'looks_html': False, 'bom': True, 'utf8_ok': True,
+            'clean_params': [],
+            'commented': [{'line': 3, 'text': '# Disallow: /bitrix/'}]},
+        'sitemap_audit': {
+            'format_issues': [],
+            'encoding_issues': [{'url': 'https://stalmetural.ru/sitemap.xml',
+                                 'why': 'файл не читается как UTF-8'}],
+            'url_probe': {
+                'checked': 200, 'sample_of': 10627, 'blocked': 0,
+                'bad_status': [{'url': 'https://stalmetural.ru/old/',
+                                'status': 301}],
+                'noindex': [{'url': 'https://stalmetural.ru/hidden/',
+                             'signal': 'meta robots: noindex'}]}},
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            indexing_summary=indexing_summary,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+
+        prob = ' '.join(
+            str(c) for row in wb['Проблемы'].iter_rows(values_only=True)
+            for c in row if c)
+        assert 'тяжелее 500 КБ' in prob
+        assert 'BOM' in prob
+        assert 'закомментирована' in prob
+        assert 'Clean-Param' in prob
+        assert 'не читается как UTF-8' in prob
+        assert 'отвечает не 200' in prob
+        assert 'закрыт noindex' in prob
+        # адреса конкретных страниц, а не только самого файла
+        assert 'https://stalmetural.ru/old/' in prob
+        assert 'https://stalmetural.ru/hidden/' in prob
+        assert 'https://stalmetural.ru/robots.txt' in prob
+
+        задачи = [row[2] for row in wb['План работ'].iter_rows(values_only=True)
+                  if row and row[2]]
+        assert 'Починить сам файл robots.txt' in задачи
+        assert 'Прописать Clean-Param в robots.txt' in задачи
+        assert 'Убрать из карты сайта адреса, не отдающие 200' in задачи
+        assert 'Развести карту сайта и noindex' in задачи
+        assert 'Починить формат и кодировку карты сайта' in задачи
+        # по одной сводной задаче на тему, а не по строке на находку
+        assert задачи.count('Починить сам файл robots.txt') == 1
+
+        обзор = ' '.join(
+            str(c) for row in wb['Обзор'].iter_rows(values_only=True)
+            for c in row if c)
+        assert 'сам файл robots.txt' in обзор
+        assert 'закомментированы' in обзор
+        assert 'адресов карты отвечают не 200' in обзор
+        assert 'закрыты noindex' in обзор
+    print('✓ Гигиена robots.txt и карты сайта: «Проблемы», «План работ», «Обзор»')
+
+
 def test_redirect_chain_in_path_column():
     """Цепочка редиректов корректно отображается в «Откуда перешли»."""
     chain = [
