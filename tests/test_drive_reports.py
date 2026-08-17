@@ -128,6 +128,78 @@ def test_запрет_публичных_ссылок_не_ломает_выкл
     assert "403" in res["share_error"]
 
 
+def test_q_escape_апостроф_не_ломает_запрос():
+    # без экранирования кавычка закрывала строку запроса и поиск падал/врал
+    assert drive_reports._q_escape("Отчёты 'МПЭ'") == r"Отчёты \'МПЭ\'"
+    assert drive_reports._q_escape("2026") == "2026"
+
+
+def _поиск(monkeypatch, файлы, статус=200):
+    """Подменяем files.list заданным ответом; возвращаем список запросов."""
+    запросы = []
+
+    def get(url, **kw):
+        запросы.append(kw.get("params") or {})
+        return _Ответ(статус, {"files": файлы}, "не видно")
+
+    monkeypatch.setattr(drive_reports.requests, "get", get)
+    return запросы
+
+
+def test_find_child_берёт_самую_старую_из_дублей(monkeypatch):
+    """Дубли уже могли завестись прошлыми прогонами - все новые прогоны должны
+    сходиться в изначальную папку, а не в последний дубль."""
+    запросы = _поиск(monkeypatch, [
+        {"id": "старая", "name": "2026", "mimeType": drive_reports._FOLDER_MIME,
+         "createdTime": "2026-01-01T00:00:00Z"},
+        {"id": "дубль", "name": "2026", "mimeType": drive_reports._FOLDER_MIME,
+         "createdTime": "2026-08-17T00:00:00Z"},
+    ])
+    assert drive_reports._find_child("tok", "корень", "2026", folder=True,
+                                    drive_id=None, proxy_url=None) == "старая"
+    # порядок задаём запросом, а не надеждой на порядок ответа
+    assert запросы[0]["orderBy"] == "createdTime"
+
+
+def test_find_child_ярлык_на_папку_ведёт_в_саму_папку(monkeypatch):
+    _поиск(monkeypatch, [{
+        "id": "ярлык", "name": "2026",
+        "mimeType": drive_reports._SHORTCUT_MIME,
+        "createdTime": "2026-01-01T00:00:00Z",
+        "shortcutDetails": {"targetId": "настоящая",
+                            "targetMimeType": drive_reports._FOLDER_MIME},
+    }])
+    assert drive_reports._find_child("tok", "корень", "2026", folder=True,
+                                    drive_id=None, proxy_url=None) == "настоящая"
+
+
+def test_невидимая_папка_даёт_ошибку_а_не_дубль(tmp_path, monkeypatch):
+    """Корень бага МПЭ: узкий доступ к Диску - files.get отвечает 404, а
+    files.list по той же папке отвечает 200 и пустым списком. Писать Диск
+    разрешает, поэтому прогон молча заводил свою «2026» рядом с существующей."""
+    созданные = []
+
+    def get(url, **kw):
+        if url.startswith(f"{drive_reports._FILES}/"):
+            return _Ответ(404, {}, "File not found")
+        return _Ответ(200, {"files": []})       # «в папке пусто» - но это ложь
+
+    def post(url, **kw):
+        созданные.append((kw.get("json") or {}).get("name"))
+        return _Ответ(200, {"id": "новая"})
+
+    monkeypatch.setattr(drive_reports.requests, "get", get)
+    monkeypatch.setattr(drive_reports.requests, "post", post)
+    f = tmp_path / "отчёт.xlsx"
+    f.write_bytes(b"PK\x03\x04")
+    res = drive_reports.upload_report(str(f), project_name="МПЭ",
+                                      oauth_token="tok", root_id="папка-мпэ",
+                                      run_type="Чек-лист")
+    assert res["ok"] is False
+    assert "переподключите" in res["error"].lower()
+    assert созданные == []          # ни одной папки вслепую не создано
+
+
 def test_upload_report_без_файла_не_падает():
     res = drive_reports.upload_report(
         "нет-такого-файла.xlsx", project_name="X", sa_info={"a": 1},

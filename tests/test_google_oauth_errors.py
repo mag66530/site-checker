@@ -46,7 +46,7 @@ def test_чужая_пара_ключей(monkeypatch):
 def test_успех_возвращает_токены(monkeypatch):
     _подмена(monkeypatch, 200, {
         "access_token": "at", "refresh_token": "rt",
-        "scope": "https://www.googleapis.com/auth/drive.file openid"})
+        "scope": "https://www.googleapis.com/auth/drive openid"})
     monkeypatch.setattr(google_oauth.requests, "get",
                         lambda *a, **k: _Ответ(200, {"email": "x@y.ru"}))
     res = google_oauth.exchange_code("cid", "sec", "code", "https://app")
@@ -63,3 +63,16 @@ def test_флажок_доступа_к_диску_сняли(monkeypatch):
     with pytest.raises(RuntimeError) as e:
         google_oauth.exchange_code("cid", "sec", "code", "https://app")
     assert "доступ к Google Диску не выдан" in str(e.value)
+
+
+def test_узкий_доступ_только_к_своим_файлам_не_принимаем(monkeypatch):
+    """drive.file выглядит как «доступ к Диску есть», но папки, созданные
+    человеком, для приложения не существуют - и рядом плодятся дубли."""
+    _подмена(monkeypatch, 200, {
+        "access_token": "at", "refresh_token": "rt",
+        "scope": "https://www.googleapis.com/auth/drive.file openid"})
+    monkeypatch.setattr(google_oauth.requests, "get",
+                        lambda *a, **k: _Ответ(200, {"email": "x@y.ru"}))
+    with pytest.raises(RuntimeError) as e:
+        google_oauth.exchange_code("cid", "sec", "code", "https://app")
+    assert "не выдан полностью" in str(e.value)

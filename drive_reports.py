@@ -36,6 +36,7 @@ import requests
 _UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
 _FILES = "https://www.googleapis.com/drive/v3/files"
 _FOLDER_MIME = "application/vnd.google-apps.folder"
+_SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
 _XLSX_MIME = ("application/vnd.openxmlformats-officedocument"
               ".spreadsheetml.sheet")
 # Записываем файлы - readonly-скоупов (как в kp_sheets) здесь мало.
@@ -130,14 +131,33 @@ def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _q_escape(name: str) -> str:
+    """Экранирование имени для параметра q Drive API: апостроф закрывает строку
+    запроса, обратный слэш - экранирующий символ.
+    ЧИСТАЯ функция - проверяется юнит-тестом."""
+    return str(name).replace("\\", "\\\\").replace("'", "\\'")
+
+
 def _find_child(token: str, parent_id: str, name: str, *, folder: bool,
                 drive_id: str | None, proxy_url: str | None) -> Optional[str]:
-    """ID дочернего элемента по имени ('' - нет). Ищем только в этом родителе."""
-    q = (f"'{parent_id}' in parents and name = '{name}' and trashed = false")
+    """ID дочернего элемента по имени (None - нет). Ищем только в этом родителе.
+
+    Если одноимённых несколько (Диск это разрешает, и дубли уже могли завестись
+    прошлыми прогонами) - берём САМУЮ СТАРУЮ. Так все прогоны сходятся в ту
+    папку, что была раньше, а не растят новую ветку от последнего дубля.
+
+    Ярлык (shortcut) на папку считаем папкой: в готовой структуре проекта год
+    вполне может быть ярлыком на папку с другого диска.
+    """
+    q = (f"'{_q_escape(parent_id)}' in parents "
+         f"and name = '{_q_escape(name)}' and trashed = false")
     if folder:
-        q += f" and mimeType = '{_FOLDER_MIME}'"
+        q += (f" and (mimeType = '{_FOLDER_MIME}' "
+              f"or mimeType = '{_SHORTCUT_MIME}')")
     params = {
-        "q": q, "fields": "files(id,name)", "pageSize": 10,
+        "q": q,
+        "fields": "files(id,name,mimeType,createdTime,shortcutDetails)",
+        "pageSize": 100, "orderBy": "createdTime",
         "supportsAllDrives": "true", "includeItemsFromAllDrives": "true",
     }
     if drive_id:
@@ -147,7 +167,37 @@ def _find_child(token: str, parent_id: str, name: str, *, folder: bool,
     if r.status_code != 200:
         raise RuntimeError(f"Drive files.list: HTTP {r.status_code} {r.text[:180]}")
     files = (r.json() or {}).get("files") or []
-    return files[0]["id"] if files else None
+    for f in files:
+        if f.get("mimeType") != _SHORTCUT_MIME:
+            return f["id"]
+        цель = f.get("shortcutDetails") or {}
+        if цель.get("targetMimeType") == _FOLDER_MIME and цель.get("targetId"):
+            return цель["targetId"]      # пишем в саму папку, не в ярлык
+    return None
+
+
+def _visible(token: str, file_id: str, *, proxy_url: str | None) -> tuple[bool, str]:
+    """Виден ли объект этому токену. → (да/нет, текст причины).
+
+    Нужна ОТДЕЛЬНАЯ проверка, потому что «не вижу» и «нет такого» на Диске
+    выглядят одинаково: files.list по невидимому родителю отвечает 200 и пустым
+    списком. Раньше из-за этого чекер молча заводил дубль папки вместо ошибки.
+    """
+    r = requests.get(f"{_FILES}/{file_id}",
+                     params={"fields": "id,name", "supportsAllDrives": "true"},
+                     headers=_headers(token), proxies=_proxies(proxy_url),
+                     timeout=30)
+    if r.status_code == 200:
+        return True, ""
+    if r.status_code == 404:
+        return False, (
+            "папка не видна аккаунту, от имени которого пишутся отчёты. Обычно "
+            "это узкий доступ к Диску: подключение выдано только на файлы "
+            "самого приложения, а созданное вручную для него не существует - "
+            "поэтому рядом с вашими папками появлялись дубли. Переподключите "
+            "аккаунт проекта в настройках Диска, отметив в окне Google все "
+            "флажки доступа.")
+    return False, f"HTTP {r.status_code} {r.text[:180]}"
 
 
 def _proxies(proxy_url: str | None):
@@ -170,7 +220,17 @@ def _create_folder(token: str, parent_id: str, name: str, *,
 def ensure_path(token: str, root_id: str, parts: list[str], *,
                 drive_id: str | None = None,
                 proxy_url: str | None = None) -> str:
-    """Пройти/создать цепочку папок от root_id. → ID последней папки."""
+    """Пройти/создать цепочку папок от root_id. → ID последней папки.
+
+    Сначала убеждаемся, что САМ корень виден. Создавать вслепую нельзя: Диск
+    разрешает положить папку в родителя по ID, даже если прочитать этого
+    родителя мы не можем, - и тогда каждый прогон пристраивал свою «2026»
+    рядом с существующей, не видя её. Лучше честная ошибка в логе.
+    """
+    if root_id and root_id != "root":
+        ок, причина = _visible(token, root_id, proxy_url=proxy_url)
+        if not ок:
+            raise RuntimeError(причина)
     cur = root_id
     for name in parts:
         found = _find_child(token, cur, name, folder=True, drive_id=drive_id,
@@ -393,6 +453,13 @@ def check_write_as_user(access_token: str, root_id: str = "root", *,
     if not access_token:
         return {"ok": False, "kind": "", "name": "",
                 "error": "аккаунт проекта не подключён (нет токена доступа)"}
+    # Сначала «а видно ли папку», и только потом «а можно ли писать»: писать в
+    # невидимую папку Диск разрешает, поэтому одна проба записи говорила «всё
+    # хорошо» там, где прогон потом плодил дубли папок.
+    if root_id and root_id != "root":
+        видно, причина = _visible(access_token, root_id, proxy_url=proxy_url)
+        if not видно:
+            return {"ok": False, "kind": "", "name": "", "error": причина}
     ошибка = _пробная_запись(access_token, root_id, proxy_url=proxy_url)
     if ошибка:
         подсказка = ""

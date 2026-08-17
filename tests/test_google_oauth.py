@@ -14,7 +14,19 @@ def test_auth_url_несёт_проект_и_offline_доступ():
     assert q["access_type"] == ["offline"]
     assert q["prompt"] == ["consent"]
     assert q["redirect_uri"] == ["https://site-checker.streamlit.app"]
-    assert "drive.file" in q["scope"][0]
+    # весь Диск: с drive.file не видно папок, созданных вручную
+    assert google_oauth.DRIVE_SCOPE in q["scope"][0].split()
+
+
+def test_полный_доступ_к_диску_не_путает_drive_file():
+    """Проверка «drive in scope» пропускала узкий доступ: подстрока «…/drive»
+    есть и в «…/drive.file». Именно из-за него плодились дубли папок."""
+    assert google_oauth.полный_доступ_к_диску(
+        "https://www.googleapis.com/auth/drive openid") is True
+    assert google_oauth.полный_доступ_к_диску(
+        "https://www.googleapis.com/auth/drive.file openid") is False
+    assert google_oauth.полный_доступ_к_диску("openid email") is False
+    assert google_oauth.полный_доступ_к_диску("") is False
 
 
 def test_project_from_state():
