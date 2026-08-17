@@ -1003,7 +1003,8 @@ def run_check(pid, params, creds, log, progress):
                             'GET-параметрам для Яндекса не убраны')
                 # ЧПУ и формат адресов - по тем же путям, без запросов.
                 from indexing_checker import check_url_format
-                _uf = check_url_format(_all_paths)
+                _uf = check_url_format(_all_paths,
+                                       root_domain=cfg.get('root_domain', ''))
                 _idx_summary['url_format'] = _uf
                 if _uf.get('total_bad'):
                     log(f'⚠ Формат адресов: плохих URL {_uf["total_bad"]} '
@@ -1205,12 +1206,32 @@ def run_check(pid, params, creds, log, progress):
         if _chk_meta:
             try:
                 from meta_checker import (find_duplicates, check_url_duplicates,
-                                          check_test_domains)
+                                          check_test_domains,
+                                          check_short_path_duplicates,
+                                          check_product_cross_category)
                 _dups = find_duplicates(results)
                 _probe_urls = [r.url for r in results
                                if r.is_ok and r.type_code in ('main', 'catalog')]
                 _url_dups = asyncio.run(check_url_duplicates(
                     _probe_urls, proxy_url=proxy_url))
+                # Дубли по структуре адреса (доп. чек-лист, раздел 2):
+                # «тот же слаг без раздела» - по категориям и фильтрам выборки,
+                # «товар в чужой категории» - по карточкам выборки.
+                _deep_urls = [r.url for r in results
+                              if r.is_ok and r.type_code in ('category',
+                                                             'filter', 'product')]
+                _short_dups = asyncio.run(check_short_path_duplicates(
+                    _deep_urls, proxy_url=proxy_url))
+                _prod_urls = [r.url for r in results
+                              if r.is_ok and r.type_code == 'product']
+                _prod_dups = asyncio.run(check_product_cross_category(
+                    _prod_urls, list(src.categories or []),
+                    proxy_url=proxy_url))
+                if _short_dups:
+                    log(f'❌ Дубли без раздела: {len(_short_dups)} '
+                        f'(тот же заголовок по короткому адресу)')
+                if _prod_dups:
+                    log(f'❌ Товар доступен в чужой категории: {len(_prod_dups)}')
                 # Тестовые домены (test./dev./stage.…) корневого домена.
                 _tdoms = asyncio.run(check_test_domains(
                     _main.host, proxy_url=proxy_url)) if _main else []
@@ -1221,6 +1242,8 @@ def run_check(pid, params, creds, log, progress):
                         f'({", ".join(t["host"] for t in _tdoms if t["state"] == "indexable")})')
                 _meta_summary = {'duplicates': _dups, 'url_duplicates': _url_dups,
                                  'test_domains': _tdoms,
+                                 'short_path_duplicates': _short_dups,
+                                 'product_cross_category': _prod_dups,
                                  'probed_urls': len(_probe_urls)}
                 _m_pages_bad = sum(1 for r in results
                                    if getattr(r, 'has_meta_issues', False)

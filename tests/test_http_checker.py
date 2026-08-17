@@ -73,8 +73,11 @@ from http_checker import check_content_links
 
 
 class _FakeResp:
-    def __init__(self, status):
+    def __init__(self, status, headers=None):
         self.status = status
+        # Location нужен: прозвон обходит редиректы САМ (allow_redirects=False),
+        # иначе 301 не отличить от прямого ответа.
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -103,27 +106,33 @@ class _FakeSession:
 
 def test_check_content_links_flags_only_internal_404():
     """Проверяется ВСЯ страница (чек-лист «нет битых ссылок на странице»):
-    шапка/подвал тоже звонятся; внешние и служебные href - нет."""
+    шапка/подвал тоже звонятся. Внешние ссылки теперь тоже прозваниваются, но
+    идут ОТДЕЛЬНЫМИ списками (ext_*) и судятся мягче - чужой антибот отвечает
+    403/429 живой странице. Служебные href (#, mailto:) не звоним."""
     html = (
         '<header><a href="/in-header/">h</a></header>'      # шапка - тоже звоним
         '<main>'
         '<a href="/ok/">ok</a>'
         '<a href="/dead/">dead</a>'
-        '<a href="https://other.com/ext/">внешний</a>'      # внешний - не звоним
+        '<a href="https://other.com/ext/">внешний</a>'
         '<a href="#x">a</a><a href="mailto:a@b.ru">m</a>'
         '</main>'
     )
     base = 'https://shop.ru/about/'
     codes = {'https://shop.ru/ok/': 200, 'https://shop.ru/dead/': 404,
-             'https://shop.ru/in-header/': 404}
+             'https://shop.ru/in-header/': 404, 'https://other.com/ext/': 200}
     sess = _FakeSession(head_codes=codes, get_codes=codes)
     res = asyncio.run(check_content_links(sess, html, base))
     assert res is not None
     assert {b['url'] for b in res['broken']} == {
         'https://shop.ru/dead/', 'https://shop.ru/in-header/'}
     assert res['checked'] == 3                    # header + /ok/ + /dead/
+    # внешняя - в своём счётчике, во внутренние списки не попала
+    assert res['ext_checked'] == 1
+    assert all('other.com' not in b['url'] for b in res['broken'])
     asked = {u for _, u in sess.calls}
-    assert 'https://other.com/ext/' not in asked            # внешний не звонили
+    assert 'mailto:a@b.ru' not in asked
+    assert 'https://shop.ru/about/#x' not in asked
 
 
 def test_check_content_links_run_cache_dedup():

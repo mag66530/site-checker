@@ -350,14 +350,23 @@ def _contacts_problem_text(r):
 
 
 def _broken_links_text(r):
-    """Битые ссылки (404/410) в контенте страницы - краткий текст для отчёта."""
+    """Битые ссылки страницы - краткий текст для отчёта. Считаем и те, что
+    ведут в ошибку через редирект: они лежат отдельным видом (чтобы в
+    «Проблемах» не двоиться), но в этой строке важен сам факт - ссылка
+    приводит покупателя на ошибку."""
     bl = getattr(r, 'broken_links', None)
-    if not bl or not bl.get('broken'):
+    if not bl:
         return ''
-    items = bl['broken']
+    items = list(bl.get('broken') or [])
+    сквозь = [{'code': b.get('final_code'), 'url': b.get('url')}
+              for b in bl.get('redirect_to_error') or []]
+    items += сквозь
+    if not items:
+        return ''
     ex = '; '.join(f'{b["code"]} {b["url"]}' for b in items[:3])
     more = f' и ещё {len(items) - 3}' if len(items) > 3 else ''
-    return f'битые ссылки ({len(items)}): ' + ex + more
+    хвост = (f' (из них через редирект: {len(сквозь)})' if сквозь else '')
+    return f'битые ссылки ({len(items)}){хвост}: ' + ex + more
 
 
 # Человеческие формулировки багов для «Что чинить» / «Что не так». Иначе из

@@ -321,6 +321,85 @@ def test_indexing_site_findings_попадают_в_проблемы_и_план
     print('✓ Индексация: сайт-уровневые находки в «Проблемах» без дублей в «Плане работ»')
 
 
+def test_ссылки_и_дубли_адресов_доходят_до_листов_отчёта():
+    """Раздел 2 доп. чек-листа: ссылки (битые/редиректы/на себя) и дубли
+    адресов (короткий адрес, товар в чужой категории) должны быть видны в
+    «Проблемах» отдельными строками своих разделов и собраться в задачи."""
+    results = [make_result(
+        url='https://stalmetural.ru/catalog/truba/',
+        broken_links={
+            'checked': 12,
+            'broken': [{'url': 'https://stalmetural.ru/gone/', 'code': 404}],
+            'redirect_to_error': [
+                {'url': 'https://stalmetural.ru/old/', 'code': 301,
+                 'to': 'https://stalmetural.ru/gone/', 'final_code': 404}],
+            'redirects': [
+                {'url': 'https://stalmetural.ru/moved/', 'code': 301,
+                 'to': 'https://stalmetural.ru/new/', 'hops': 1, 'loop': False}],
+            'self_links': ['/catalog/truba/'],
+            'ext_checked': 3,
+            'ext_redirects': [{'url': 'https://vendor.com/a/', 'code': 302,
+                               'to': 'https://vendor.com/b/'}],
+            'ext_broken': [{'url': 'https://vendor.com/gone/', 'code': 404}],
+        })]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва',
+                          host='stalmetural.ru')]
+    meta_summary = {
+        'duplicates': {'same_city': [], 'cross_city': []},
+        'url_duplicates': [],
+        'test_domains': [],
+        'short_path_duplicates': [
+            {'canonical': 'https://stalmetural.ru/catalog/truba/profil/',
+             'variant': 'https://stalmetural.ru/profil/',
+             'title': 'Профильная труба'}],
+        'product_cross_category': [
+            {'canonical': 'https://stalmetural.ru/catalog/truba/t-1/',
+             'variant': 'https://stalmetural.ru/catalog/list/t-1/',
+             'title': 'Труба 20 мм'}],
+        'probed_urls': 2,
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            meta_summary=meta_summary,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        строки = [row for row in wb['Проблемы'].iter_rows(values_only=True)
+                  if row and any(row)]
+        текст = ' '.join(str(c) for row in строки for c in row if c)
+
+        # Ссылки
+        assert 'Ссылки' in текст
+        assert 'несуществующую страницу (404)' in текст
+        assert 'а он - на ошибку' in текст
+        assert 'ведёт на редирект 301' in текст
+        assert 'сама на себя' in текст
+        assert 'внешняя ссылка' in текст
+        assert 'https://vendor.com/gone/' in текст
+        # Дубли адресов - в своём разделе
+        assert 'Дубли и редиректы' in текст
+        assert 'короткому адресу без раздела' in текст
+        assert 'чужой категории' in текст
+
+        задачи = [row[2] for row in wb['План работ'].iter_rows(values_only=True)
+                  if row and row[2]]
+        assert 'Починить битые ссылки на страницах' in задачи
+        assert 'Убрать ссылки, ведущие через редирект в ошибку' in задачи
+        assert 'Проставить в ссылках конечные адреса' in задачи
+        assert 'Убрать ссылки страницы на саму себя' in задачи
+        assert 'Убрать дубли по короткому адресу без раздела' in задачи
+        assert 'Оставить у товара один адрес' in задачи
+        # общих «разобраться» быть не должно: у каждой находки своё правило
+        assert 'Разобраться со ссылками на страницах' not in задачи
+        assert 'Разобраться с дублями адресов' not in задачи
+    print('✓ Ссылки и дубли адресов: «Проблемы» + «План работ»')
+
+
 def test_гигиена_robots_и_карты_доходит_до_листов_отчёта():
     """Доп. чек-лист: вес/формат/кодировка/закомментированные директивы/
     Clean-Param у robots.txt и формат/кодировка/код ответа/noindex у карты

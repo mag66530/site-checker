@@ -300,14 +300,44 @@ def _find_meta_robots(html: str):
     return None, False
 
 
-def _find_canonicals(html: str) -> list:
-    """href ВСЕХ rel=canonical на странице (валидно - ровно один)."""
+_RE_HEAD_END = re.compile(r'</head\s*>', re.I)
+
+
+def find_canonicals_ex(html: str) -> list:
+    """[{'href', 'in_head'}] по ВСЕМ rel=canonical страницы.
+
+    in_head: тег стоит до </head>. Канониклы в <body> браузер и робот
+    игнорируют - тег обязан быть в <head>. Если </head> в разметке нет вовсе,
+    судить не берёмся и считаем, что тег на месте (in_head=True): иначе на
+    битой вёрстке получалось бы обвинение на пустом месте.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    head = html[:200_000]
+    m_end = _RE_HEAD_END.search(head)
+    граница = m_end.start() if m_end else None
     out = []
-    for m in _CANONICAL_RE.finditer(html[:200_000]):
+    for m in _CANONICAL_RE.finditer(head):
         hm = _HREF_RE.search(m.group(0))
         if hm and hm.group(1).strip():
-            out.append(hm.group(1).strip())
+            out.append({'href': hm.group(1).strip(),
+                        'in_head': True if граница is None
+                        else m.start() < граница})
     return out
+
+
+def _find_canonicals(html: str) -> list:
+    """href ВСЕХ rel=canonical на странице (валидно - ровно один)."""
+    return [c['href'] for c in find_canonicals_ex(html)]
+
+
+def is_relative_url(href: str) -> bool:
+    """Адрес относительный (без схемы и без «//host»). Google требует в
+    canonical АБСОЛЮТНЫЙ адрес: относительный он разрешает от текущей
+    страницы, и на дублях-зеркалах это даёт разные каноникл-цели.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    s = (href or '').strip()
+    if not s:
+        return False
+    return not (urlsplit(s).scheme or s.startswith('//'))
 
 
 def _internal_link_profile(html: str, url: str) -> tuple:
@@ -427,6 +457,7 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         'x_robots': None, 'x_robots_noindex': False,
         'canonical': None, 'canonical_count': 0,
         'canonical_self': None, 'canonical_disallowed': False,
+        'canonical_relative': False, 'canonical_outside_head': False,
         'hreflang_count': 0, 'ext_nofollow': [],
         'issues': [], 'warnings': [],
     }
@@ -462,7 +493,8 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
     #    ровно один тег; указывает на себя; не на чужой хост; не на URL,
     #    закрытый в robots. Отсутствие тега - предупреждение.
     if html:
-        canons = _find_canonicals(html)
+        canons_ex = find_canonicals_ex(html)
+        canons = [c['href'] for c in canons_ex]
         out['canonical'] = canons[0] if canons else None
         out['canonical_count'] = len(canons)
         if not canons:
@@ -472,14 +504,29 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                 issues.append('несколько rel="canonical" на странице - '
                               'поисковики игнорируют такой сигнал')
             canon = canons[0]
+            # Тег обязан стоять в <head>: в <body> его игнорируют.
+            if not canons_ex[0]['in_head']:
+                out['canonical_outside_head'] = True
+                issues.append('rel="canonical" стоит вне <head> - '
+                              'поисковики такой тег игнорируют')
+            # Относительный адрес в canonical: Google требует абсолютный.
+            out['canonical_relative'] = is_relative_url(canon)
+            if out['canonical_relative']:
+                issues.append('в rel="canonical" относительный адрес, а не '
+                              'полный - нужен абсолютный с доменом')
+            # Сравнение «на себя» - по АБСОЛЮТНОМУ адресу: относительный
+            # canonical иначе никогда не совпадал с URL страницы, и находка
+            # «canonical ведёт на другой URL» выписывалась зря.
             try:
-                self_ref = _norm_url(canon) == _norm_url(url)
+                from urllib.parse import urljoin
+                canon_abs = urljoin(url, canon)
+                self_ref = _norm_url(canon_abs) == _norm_url(url)
             except Exception:
-                self_ref = None
+                canon_abs, self_ref = canon, None
             out['canonical_self'] = self_ref
             if self_ref is False:
                 _page_host = (urlsplit(url).netloc or '').lower().removeprefix('www.')
-                _can_host = (urlsplit(canon).netloc or '').lower().removeprefix('www.')
+                _can_host = (urlsplit(canon_abs).netloc or '').lower().removeprefix('www.')
                 if _can_host and _can_host != _page_host:
                     # Канонизация на другой домен/поддомен: страница города
                     # отдаёт свой вес чужому хосту - выпадает из поиска.
@@ -488,7 +535,7 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                     # Каноникл на закрытый robots'ом URL - канонизируем
                     # «в никуда» (robots того же хоста).
                     if robots is not None and robots.ok:
-                        c_dis, _c_rule, _ = robots_verdict(robots, canon)
+                        c_dis, _c_rule, _ = robots_verdict(robots, canon_abs)
                         if c_dis:
                             out['canonical_disallowed'] = True
                             issues.append('расхождение с robots.txt: canonical '
@@ -1162,19 +1209,38 @@ _RE_SLUG_JUNK = re.compile(r'[^a-z0-9\-_./]')
 
 _MAX_BAD_PATHS = 500  # потолок адресов одного типа (каждый - строка «Проблем»)
 
+# Предел длины адреса: 2048 - общепринятая граница (исторический потолок
+# адресной строки), дальше адрес рискует обрезаться в чужих системах.
+MAX_URL_LEN = 2048
 
-def check_url_format(paths: list) -> dict:
+# Схема внутри пути: «/https://site.ru/…» или «/http:/site.ru/…» (второй вид
+# получается, когда шаблон склеил адрес и потерял слэш).
+_RE_SCHEME_IN_PATH = re.compile(r'(?:^|/)https?:?/', re.I)
+
+# Виды находок формата адреса. ОДИН список: по нему и обнуляются счётчики, и
+# считается total_bad - иначе новый вид молча не попадал бы в итог (и в отчёт).
+URL_FORMAT_KINDS = ('domain_twice', 'too_long', 'non_sef', 'cyrillic',
+                    'uppercase', 'underscore', 'junk_chars')
+
+
+def check_url_format(paths: list, root_domain: str = '') -> dict:
     """ЧПУ и формат адресов. paths - пути каталога и тех. страниц
     ('/catalog/truba/…'). Запросов не делает - чистая валидация строк.
 
-    Находки:
+    root_domain - домен проекта; нужен, чтобы поймать домен внутри пути.
+
+    Находки (адрес попадает РОВНО в один вид - первый подошедший):
+      • domain_twice - домен или схема внутри пути (/site.ru/catalog/,
+        /https://site.ru/…) - типовой след ошибки в шаблоне ссылок;
+      • too_long - адрес длиннее 2048 символов;
       • non_sef  - технический адрес (query ?ID=…, index.php и т.п.) - не ЧПУ;
       • cyrillic - кириллица в пути (включая %-энкод и punycode xn--);
       • uppercase - ЗАГЛАВНЫЕ буквы (риск дублей /Catalog/ vs /catalog/);
       • underscore - подчёркивания (чек-лист требует дефисы);
       • junk_chars - прочие символы (пробелы и спецсимволы)."""
-    out = {'checked': 0, 'non_sef': [], 'cyrillic': [], 'uppercase': [],
-           'underscore': [], 'junk_chars': []}
+    out = {'checked': 0, 'domain_twice': [], 'too_long': [], 'non_sef': [],
+           'cyrillic': [], 'uppercase': [], 'underscore': [], 'junk_chars': []}
+    корень = (root_domain or '').strip().lower().removeprefix('www.')
 
     def _add(kind, p):
         # Держим адреса целиком (до потолка), а не 10 примеров: в «Проблемах»
@@ -1185,14 +1251,23 @@ def check_url_format(paths: list) -> dict:
             out[kind].append(p)
         out[kind + '_n'] += 1
 
-    for kind in ('non_sef', 'cyrillic', 'uppercase', 'underscore',
-                 'junk_chars'):
+    for kind in URL_FORMAT_KINDS:
         out[kind + '_n'] = 0
     for p in paths or []:
         if not p or p == '/':
             continue
         out['checked'] += 1
         low = p.lower()
+        # Домен внутри пути: схема (/https://…) либо сам домен проекта вторым
+        # разом. Проверяем ПЕРВЫМ: такой адрес кривой целиком, остальные виды
+        # для него уже не важны.
+        if _RE_SCHEME_IN_PATH.search(low) or (корень and корень in low):
+            _add('domain_twice', p)
+            continue
+        # Длина: считаем по пути, для полного адреса добавляем домен и https://
+        if len(p) + len(корень) + 8 > MAX_URL_LEN:
+            _add('too_long', p)
+            continue
         # Не-ЧПУ: значимая часть адреса в query или скриптовое расширение.
         if ('?' in p or '.php' in low.split('?')[0]
                 or '.asp' in low.split('?')[0]):
@@ -1213,7 +1288,5 @@ def check_url_format(paths: list) -> dict:
             continue
         if _RE_SLUG_JUNK.search(path):
             _add('junk_chars', p)
-    out['total_bad'] = sum(out[k + '_n'] for k in
-                           ('non_sef', 'cyrillic', 'uppercase', 'underscore',
-                            'junk_chars'))
+    out['total_bad'] = sum(out[k + '_n'] for k in URL_FORMAT_KINDS)
     return out

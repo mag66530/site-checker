@@ -28,6 +28,13 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+# Разделы листа «Проблемы» (колонка «Раздел»). Отдельными именами - те, что
+# используются в нескольких местах: раздел один, а сборщиков находок много, и
+# опечатка развела бы их по двум разным «разделам» в отчёте.
+SEC_DUPES = 'Дубли и редиректы'
+SEC_LINKS = 'Ссылки'
+
+
 @dataclass
 class Finding:
     """Одна находка на одной странице - строка листа «Проблемы»."""
@@ -598,6 +605,67 @@ def _markup_findings(markup: Optional[dict], *, city, page_type, url) -> list:
     return out
 
 
+def _link_findings(bl, *, city='', page_type='', url='') -> list:
+    """Находки по ссылкам страницы (раздел «Ссылки»): битые, редиректы,
+    редиректы в ошибку, ссылки страницы на саму себя.
+
+    Битые ссылки раньше показывались только текстом в колонке листа
+    «Структура страниц» - отдельными строками с уровнем и разделом они не
+    выводились вовсе, и отфильтровать их было нельзя.
+    """
+    if not bl:
+        return []
+    out = []
+    for b in bl.get('broken') or []:
+        out.append(Finding('Ошибка', SEC_LINKS,
+                           f'ссылка ведёт на несуществующую страницу ({b.get("code")})',
+                           city, page_type, b.get('url', ''),
+                           detail=f'страница со ссылкой: {url}'))
+    for b in bl.get('redirect_to_error') or []:
+        out.append(Finding(
+            'Ошибка', SEC_LINKS,
+            f'ссылка ведёт на редирект, а он - на ошибку '
+            f'({b.get("code")} → {b.get("final_code")})',
+            city, page_type, b.get('url', ''),
+            detail=f'в итоге: {b.get("to", "")} · страница со ссылкой: {url}'))
+    for b in bl.get('redirects') or []:
+        # Редирект, который кончается ошибкой, уже показан выше - не двоим.
+        if any(b.get('url') == e.get('url')
+               for e in bl.get('redirect_to_error') or []):
+            continue
+        _цикл = ' (цепочка замкнулась)' if b.get('loop') else ''
+        _шаги = (f' · переходов: {b["hops"]}' if (b.get('hops') or 0) > 1 else '')
+        out.append(Finding(
+            'Предупреждение', SEC_LINKS,
+            f'внутренняя ссылка ведёт на редирект {b.get("code")}{_цикл}',
+            city, page_type, b.get('url', ''),
+            detail=f'ведёт на: {b.get("to") or "не указано"}{_шаги} · '
+                   f'страница со ссылкой: {url}',
+            fix_note='Поставить в ссылке сразу конечный адрес - лишний переход '
+                     'тратит лимит обхода и замедляет страницу.'))
+    for b in bl.get('ext_broken') or []:
+        out.append(Finding('Предупреждение', SEC_LINKS,
+                           f'внешняя ссылка ведёт на несуществующую страницу '
+                           f'({b.get("code")})',
+                           city, page_type, b.get('url', ''),
+                           detail=f'страница со ссылкой: {url}'))
+    for b in bl.get('ext_redirects') or []:
+        out.append(Finding('Предупреждение', SEC_LINKS,
+                           f'внешняя ссылка ведёт на редирект {b.get("code")}',
+                           city, page_type, b.get('url', ''),
+                           detail=f'ведёт на: {b.get("to") or "не указано"} · '
+                                  f'страница со ссылкой: {url}'))
+    for h in bl.get('self_links') or []:
+        out.append(Finding('Предупреждение', SEC_LINKS,
+                           'страница ссылается сама на себя',
+                           city, page_type, url,
+                           detail=f'ссылка в разметке: {h}',
+                           fix_note='Убрать ссылку или сделать её текстом: '
+                                    'ссылка на текущую страницу ничего не '
+                                    'даёт ни покупателю, ни роботу.'))
+    return out
+
+
 def collect_findings(results, *, console_check: dict = None,
                      index_404_check: dict = None,
                      metrika_reports: list = None,
@@ -623,6 +691,8 @@ def collect_findings(results, *, console_check: dict = None,
                                     url=url))
         out.extend(_markup_findings(r.markup, city=city, page_type=page_type,
                                     url=url))
+        out.extend(_link_findings(getattr(r, 'broken_links', None),
+                                 city=city, page_type=page_type, url=url))
         out.extend(_from_issue_dict(r.security, section='Безопасность',
                                     city=city, page_type=page_type, url=url))
         out.extend(_images_findings(r.images, city=city, page_type=page_type,
@@ -809,12 +879,40 @@ _RULES = [
     ('Метаданные', 'совпадает с другим городом', 3, 'SEO', 'meta_dup_cross_city',
      'Проверить межгородские совпадения title/description/H1',
      'Само по себе не санкция, но стоит проверить наличие ключа и города в тексте.'),
-    ('Метаданные', 'зеркало адреса', 2, 'Разработка', 'meta_url_mirror',
+    (SEC_LINKS, 'несуществующую страницу', 1, 'Разработка', 'links_broken',
+     'Починить битые ссылки на страницах',
+     'Ссылка в никуда: покупатель попадает на 404, робот тратит лимит обхода.'),
+    (SEC_LINKS, 'а он - на ошибку', 1, 'Разработка', 'links_redirect_error',
+     'Убрать ссылки, ведущие через редирект в ошибку',
+     'Хуже обычного битого адреса: путь выглядит рабочим, а кончается ошибкой.'),
+    (SEC_LINKS, 'ведёт на редирект', 2, 'Разработка', 'links_redirect',
+     'Проставить в ссылках конечные адреса',
+     'Каждый лишний переход тратит лимит обхода и замедляет открытие страницы.'),
+    (SEC_LINKS, 'сама на себя', 3, 'Разработка', 'links_self',
+     'Убрать ссылки страницы на саму себя',
+     'Такая ссылка не ведёт никуда и не передаёт вес - только мешает навигации.'),
+    (SEC_LINKS, '', 2, 'Разработка', 'links_generic',
+     'Разобраться со ссылками на страницах',
+     'Ссылка должна вести на живой адрес сразу, без переходов.'),
+
+    # Дубли адресов - в своём разделе (раньше лежали под «Метаданными»).
+    (SEC_DUPES, 'зеркало адреса', 2, 'Разработка', 'meta_url_mirror',
      'Склеить зеркала адреса редиректом/canonical',
      'Одна страница доступна по нескольким адресам - поиск делит вес между ними.'),
-    ('Метаданные', 'тестовый поддомен', 1, 'Разработка', 'meta_test_domain',
+    (SEC_DUPES, 'тестовый поддомен', 1, 'Разработка', 'meta_test_domain',
      'Закрыть тестовый поддомен от индексации',
      'Открытый тестовый поддомен - полный дубль сайта в индексе.'),
+    (SEC_DUPES, 'без раздела', 1, 'Разработка', 'dup_short_path',
+     'Убрать дубли по короткому адресу без раздела',
+     'Одна и та же страница открывается и внутри раздела, и в корне - поиск '
+     'видит два адреса с одинаковым содержимым.'),
+    (SEC_DUPES, 'чужой категории', 1, 'Разработка', 'dup_product_category',
+     'Оставить у товара один адрес',
+     'Карточка, доступная из нескольких категорий, плодит дубли и размывает '
+     'вес между адресами.'),
+    (SEC_DUPES, '', 2, 'Разработка', 'dupes_generic',
+     'Разобраться с дублями адресов',
+     'Одна страница по нескольким адресам - поиск делит между ними вес.'),
     ('Метаданные', '', 2, 'SEO', 'meta_generic',
      'Проверить метаданные страницы',
      'Title/description/H1 напрямую влияют на клики из поиска.'),
@@ -1066,6 +1164,9 @@ def metadata_site_findings(meta_summary: Optional[dict]) -> list:
                 p.get('city', ''), p.get('type_label', ''), p.get('url', ''),
                 detail=g.get('value', '')))
 
+    # Дубли адресов - свой раздел «Дубли и редиректы»: под «Метаданными» они
+    # лежали по истории (проверка живёт в meta_checker), а читается это как
+    # чужая тема - зеркала адресов не имеют отношения к title/description.
     for d in s.get('url_duplicates') or []:
         if d.get('problem') == 'duplicate':
             level, problem = 'Ошибка', 'зеркало адреса отвечает 200 без редиректа - дубль страницы'
@@ -1073,16 +1174,45 @@ def metadata_site_findings(meta_summary: Optional[dict]) -> list:
             level, problem = 'Предупреждение', 'зеркало адреса редиректит временно (302/303/307), а не 301'
         else:
             continue
-        out.append(Finding(level, 'Метаданные', problem, url=d.get('variant', ''),
+        out.append(Finding(level, SEC_DUPES, problem, url=d.get('variant', ''),
                            detail=f'канонический адрес: {d.get("canonical", "")}'))
 
     for t in s.get('test_domains') or []:
         if t.get('state') != 'indexable':
             continue
         out.append(Finding(
-            'Ошибка', 'Метаданные',
+            'Ошибка', SEC_DUPES,
             'тестовый поддомен открыт для индексации - дубль всего сайта',
             url=f'https://{t.get("host", "")}/'))
+
+    # Дубль, прикрытый canonical на основной адрес, - замечание, а не ошибка:
+    # в индекс он не попадёт, но адрес всё равно живой и доступен покупателю.
+    def _уровень_дубля(d):
+        return ('Предупреждение', ' · дубль прикрыт canonical на основной адрес') \
+            if d.get('canonical_ok') else ('Ошибка', '')
+
+    # Тот же слаг без раздела: /catalog/truba/profil/ и /profil/ - одна страница.
+    for d in s.get('short_path_duplicates') or []:
+        _lvl, _прикрыт = _уровень_дубля(d)
+        out.append(Finding(
+            _lvl, SEC_DUPES,
+            'страница доступна и по короткому адресу без раздела - дубль',
+            url=d.get('variant', ''),
+            detail=f'полный адрес: {d.get("canonical", "")} · '
+                   f'заголовок совпал: «{d.get("title", "")}»{_прикрыт}',
+            fix_note='Оставить один адрес, со второго - 301 на него.'))
+
+    # Один товар - один адрес: карточка открывается и в чужой категории.
+    for d in s.get('product_cross_category') or []:
+        _lvl, _прикрыт = _уровень_дубля(d)
+        out.append(Finding(
+            _lvl, SEC_DUPES,
+            'товар открывается в чужой категории - карточка доступна по двум адресам',
+            url=d.get('variant', ''),
+            detail=f'исходный адрес: {d.get("canonical", "")} · '
+                   f'заголовок совпал: «{d.get("title", "")}»{_прикрыт}',
+            fix_note='Привязать товар к одному адресу; лишние - 301 на основной '
+                     'или отдавать 404.'))
 
     return out
 
@@ -1261,6 +1391,12 @@ def w3c_findings(w3c_check: Optional[dict]) -> list:
 
 
 _URL_FORMAT_KINDS = (
+    ('domain_twice', 'домен указан в адресе дважды',
+     'Починить шаблон ссылок: в путь попал домен или схема (https://). '
+     'Старый адрес - 301 на правильный'),
+    ('too_long', 'адрес длиннее 2048 символов',
+     'Сократить адрес: за пределом 2048 символов он обрезается в чужих '
+     'системах и не индексируется'),
     ('non_sef', 'адрес не ЧПУ (технический: ?ID=, .php, .asp)',
      'Перевести адреса на ЧПУ и закрыть технические от индексации'),
     ('cyrillic', 'кириллица в адресе',

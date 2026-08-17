@@ -534,44 +534,98 @@ def _looks_minified(text) -> Optional[bool]:
 # ── «Ссылки реально открываются» (404) ──────────────────────────────
 
 
-async def _link_status(session, url, timeout_ms, proxy_url):
-    """Код ответа ссылки (после редиректов). HEAD дёшево; если сервер не любит
-    HEAD (405/501/5xx) - перепроверяем GET. None - не удалось определить
-    (таймаут/сеть): такое НЕ считаем битым (это не «нет страницы»)."""
-    to = aiohttp.ClientTimeout(total=min(timeout_ms, 20000) / 1000)
+MAX_LINK_HOPS = 5        # сколько шагов цепочки редиректов проходим руками
+
+
+async def _one_hop(session, url, to, proxy_url):
+    """Один запрос БЕЗ следования редиректу: (код, Location).
+    HEAD дёшево; если сервер не любит HEAD (405/501/5xx) - перепроверяем GET."""
     try:
-        async with session.head(url, timeout=to, allow_redirects=True,
+        async with session.head(url, timeout=to, allow_redirects=False,
                                 proxy=proxy_url) as r:
-            # 2xx/3xx и даже 401/403 - ссылка ведёт на существующую страницу
-            # (доступ/метод - не «битость»). 404/410 - явно битая.
+            # 2xx/3xx и даже 401/403 - страница существует (доступ/метод - не
+            # «битость»). 404/410 - явно битая. 405/501/5xx - HEAD не приняли.
             if r.status < 405 or r.status in (410,):
-                return r.status
+                return r.status, r.headers.get('Location')
     except Exception:
         pass
     try:
-        async with session.get(url, timeout=to, allow_redirects=True,
+        async with session.get(url, timeout=to, allow_redirects=False,
                                proxy=proxy_url) as r:
-            return r.status
+            return r.status, r.headers.get('Location')
     except Exception:
-        return None
+        return None, None
+
+
+async def _link_probe(session, url, timeout_ms, proxy_url):
+    """Прозвон ссылки с РУЧНЫМ обходом цепочки редиректов.
+
+    Раньше запрос шёл с allow_redirects=True, и редирект не был виден вовсе -
+    оставался только финальный код. Между «ссылка ведёт прямо на страницу» и
+    «ссылка ведёт на 301, а тот на 404» разница принципиальная: второе правят
+    в вёрстке, поэтому цепочку проходим сами.
+
+    → {'code': первый код, 'location': куда ведёт первый редирект,
+       'final_code': код в конце цепочки, 'final_url': адрес в конце,
+       'hops': сколько редиректов, 'loop': цепочка замкнулась}.
+    None в кодах - не дозвонились (таймаут/сеть): битым такое НЕ считаем."""
+    from urllib.parse import urljoin
+    to = aiohttp.ClientTimeout(total=min(timeout_ms, 20000) / 1000)
+    код, location = await _one_hop(session, url, to, proxy_url)
+    out = {'code': код, 'location': None, 'final_code': код,
+           'final_url': url, 'hops': 0, 'loop': False}
+    if код is None or not (300 <= код < 400):
+        return out
+    out['location'] = urljoin(url, location) if location else None
+    текущий, посещённые = url, {url}
+    while код is not None and 300 <= код < 400 and out['hops'] < MAX_LINK_HOPS:
+        if not location:
+            break                        # 3xx без Location - идти некуда
+        следующий = urljoin(текущий, location)
+        out['hops'] += 1
+        if следующий in посещённые:
+            out['loop'] = True
+            out['final_code'], out['final_url'] = код, следующий
+            return out
+        посещённые.add(следующий)
+        текущий = следующий
+        код, location = await _one_hop(session, текущий, to, proxy_url)
+    out['final_code'], out['final_url'] = код, текущий
+    return out
+
+
+async def _link_status(session, url, timeout_ms, proxy_url):
+    """Код ответа ссылки ПОСЛЕ редиректов - как было раньше. Оставлено для
+    кода, которому нужен только финальный код."""
+    r = await _link_probe(session, url, timeout_ms, proxy_url)
+    return r['final_code']
 
 
 async def check_content_links(session, html, base_url, *, proxy_url=None,
-                              timeout_ms=20000, limit=120,
+                              timeout_ms=20000, limit=120, ext_limit=10,
                               link_cache: dict = None,
                               budget: list = None):
-    """Проверить, что ссылки СТРАНИЦЫ реально открываются (не 404).
-    Чек-лист «нет битых ссылок на странице»: ВСЯ страница (текст + блоки +
-    шапка/подвал/листинг), не только контентная зона.
+    """Ссылки СТРАНИЦЫ: открываются ли, не ведут ли на редирект, нет ли ссылок
+    на саму себя. Чек-лист «нет битых ссылок на странице»: ВСЯ страница
+    (текст + блоки + шапка/подвал/листинг), не только контентная зона.
 
-    Только ВНУТРЕННИЕ ссылки (тот же сайт): внешние часто блокируют ботов и
-    дают ложные «битые». Битой считаем ТОЛЬКО явный 404/410 (страницы нет);
-    таймаут/сеть/5xx/403 не считаем (это не «нет страницы» и оно флаки).
+    Битой считаем ТОЛЬКО явный 404/410 (страницы нет); таймаут/сеть/5xx/403
+    не считаем - это не «нет страницы» и оно флаки.
 
-    link_cache - общий кеш кодов на весь прогон (шапка/подвал/меню одинаковы
-    на всех страницах - каждую уникальную ссылку звоним ОДИН раз за прогон).
+    Внутренние и ВНЕШНИЕ ссылки разведены: у внешних свой лимит (ext_limit) и
+    свои списки в ответе. Причина - чужой антибот отвечает 403/429 живой
+    странице, поэтому внешние нельзя судить теми же мерками.
+
+    link_cache - общий кеш результатов на весь прогон (шапка/подвал/меню
+    одинаковы на всех страницах - каждую уникальную ссылку звоним ОДИН раз).
     budget - [остаток] общий лимит новых прозвонов на прогон.
-    Возвращает {'checked', 'broken':[{'url','code'}]} или None (нечего звонить)."""
+
+    → {'checked', 'broken': [{'url','code'}],
+       'redirects': [{'url','code','to','hops','loop'}],
+       'redirect_to_error': [{'url','code','to','final_code'}],
+       'self_links': [href],
+       'ext_checked', 'ext_redirects': [...], 'ext_broken': [...]}
+      либо None (звонить нечего)."""
     from content_checker import extract_content_links
     from urllib.parse import urljoin, urlparse
     if not html:
@@ -583,37 +637,88 @@ async def check_content_links(session, html, base_url, *, proxy_url=None,
         return h[4:] if h.startswith('www.') else h
 
     base_host = _host(urlparse(base_url).netloc)
+    base_key = base_url.split('#')[0].rstrip('/')
+    главная_ли = (urlparse(base_url).path or '/').strip('/') == ''
     todo, seen = [], set()
+    внешние, внешние_seen = [], set()
+    self_links = []
     for h in extract_content_links(html, limit=limit * 4, include_chrome=True):
         absu = urljoin(base_url, h)
         pu = urlparse(absu)
-        if pu.scheme not in ('http', 'https') or _host(pu.netloc) != base_host:
-            continue                       # только http(s) и только свой сайт
+        if pu.scheme not in ('http', 'https'):
+            continue
         key = absu.split('#')[0]
+        if _host(pu.netloc) != base_host:
+            # Внешние - свой список и свой лимит: звоним щадяще и трактуем
+            # мягко (антибот чужого сайта отвечает 403/429 живой странице).
+            if key not in внешние_seen and len(внешние) < ext_limit:
+                внешние_seen.add(key)
+                внешние.append(key)
+            continue
+        # Ссылка страницы на саму себя. «#» и «#anchor» не считаем: это
+        # закладка внутри страницы, а не ссылка на неё.
+        # На ГЛАВНОЙ не считаем вовсе: там ссылка на «/» - это логотип в шапке,
+        # так сделан любой сайт. Находка была бы на каждой главной и только
+        # отвлекала бы от настоящих. На внутренних страницах логотип ведёт на
+        # «/», то есть ссылкой на себя не является, и правило работает как надо.
+        if (not главная_ли and key.rstrip('/') == base_key and '#' not in h):
+            if len(self_links) < 10:
+                self_links.append(h.strip())
         if key in seen:
             continue
         seen.add(key)
         todo.append(key)
         if len(todo) >= limit:
             break
-    if not todo:
+    if not todo and not внешние:
         return None
 
     # Звоним только НОВЫЕ ссылки (нет в кеше прогона), в пределах бюджета.
-    new = [u for u in todo if u not in link_cache]
+    new = [u for u in todo + внешние if u not in link_cache]
     if budget is not None:
         new = new[:max(budget[0], 0)]
         budget[0] -= len(new)
     if new:
-        codes = await asyncio.gather(
-            *[_link_status(session, u, timeout_ms, proxy_url) for u in new],
+        ответы = await asyncio.gather(
+            *[_link_probe(session, u, timeout_ms, proxy_url) for u in new],
             return_exceptions=True)
-        for u, code in zip(new, codes):
-            link_cache[u] = None if isinstance(code, Exception) else code
-    checked = [u for u in todo if u in link_cache]
-    broken = [{'url': u, 'code': link_cache[u]}
-              for u in checked if link_cache[u] in (404, 410)]
-    return {'checked': len(checked), 'broken': broken}
+        for u, r in zip(new, ответы):
+            link_cache[u] = None if isinstance(r, Exception) else r
+    checked = [u for u in todo if link_cache.get(u)]
+    checked_ext = [u for u in внешние if link_cache.get(u)]
+
+    def _r(u):
+        return link_cache[u]
+
+    # Битая - ссылка, которая ведёт на 404/410 НАПРЯМУЮ. Случай «301, а за ним
+    # 404» держим отдельным видом (redirect_to_error): иначе одна ссылка давала
+    # бы сразу две находки, и в отчёте нельзя было бы понять, что править -
+    # адрес в вёрстке или сам редирект.
+    broken = [{'url': u, 'code': _r(u)['final_code']}
+              for u in checked
+              if not _r(u)['hops'] and _r(u)['final_code'] in (404, 410)]
+    # Внутренняя ссылка ведёт на редирект: правится в вёрстке - надо сразу
+    # ставить конечный адрес, чтобы робот и покупатель не шли лишний шаг.
+    redirects = [{'url': u, 'code': _r(u)['code'], 'to': _r(u)['location'],
+                  'hops': _r(u)['hops'], 'loop': _r(u)['loop']}
+                 for u in checked if _r(u)['code'] in (301, 302, 303, 307, 308)]
+    # Редирект, приводящий к ошибке - хуже обычного редиректа.
+    redirect_to_error = [
+        {'url': u, 'code': _r(u)['code'], 'to': _r(u)['final_url'],
+         'final_code': _r(u)['final_code']}
+        for u in checked
+        if _r(u)['hops'] and _r(u)['final_code'] in (403, 404, 410)]
+    ext_redirects = [{'url': u, 'code': _r(u)['code'], 'to': _r(u)['location']}
+                     for u in checked_ext
+                     if _r(u)['code'] in (301, 302, 303, 307, 308)]
+    ext_broken = [{'url': u, 'code': _r(u)['final_code']}
+                  for u in checked_ext
+                  if not _r(u)['hops'] and _r(u)['final_code'] in (404, 410)]
+    return {'checked': len(checked), 'broken': broken,
+            'redirects': redirects, 'redirect_to_error': redirect_to_error,
+            'self_links': self_links,
+            'ext_checked': len(checked_ext), 'ext_redirects': ext_redirects,
+            'ext_broken': ext_broken}
 
 
 # ── Проверка с ретраями ─────────────────────────────────────────────
