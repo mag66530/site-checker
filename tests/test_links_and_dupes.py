@@ -185,6 +185,84 @@ def test_внешние_ссылки_отдельно():
     assert all('vendor.com' not in b['url'] for b in res['redirects'])
 
 
+def test_403_отдельным_мягким_видом():
+    """403 - не «битая»: страница существует, закрыт доступ. Но и не норма:
+    свой сайт не должен закрывать страницу, на которую сам ссылается."""
+    html = ('<html><body><a href="/secret/">внутр</a>'
+            '<a href="https://vendor.com/secret/">внешн</a></body></html>')
+    карта = {'https://a.ru/secret/': _Ответ(403),
+             'https://vendor.com/secret/': _Ответ(403)}
+    res, _ = _разобрать(html=html, карта=карта)
+    assert [b['url'] for b in res['forbidden']] == ['https://a.ru/secret/']
+    assert [b['url'] for b in res['ext_forbidden']] == \
+        ['https://vendor.com/secret/']
+    # в «битые» 403 по-прежнему не попадает
+    assert res['broken'] == [] and res['ext_broken'] == []
+    находки = _link_findings(res, url='https://a.ru/page/')
+    assert len(находки) == 2
+    assert all(f.level == 'Предупреждение' for f in находки)
+    assert all('закрытую страницу (403)' in f.problem for f in находки)
+    for f in находки:
+        assert classify(f)['task_group'] == 'links_forbidden'
+
+
+def test_403_после_редиректа_не_двоится():
+    """301 → 403 уже показан как «редирект в ошибку» - второй находки быть
+    не должно."""
+    html = '<html><body><a href="/old/">через редирект</a></body></html>'
+    карта = {'https://a.ru/old/': _Ответ(301, {'Location': '/secret/'}),
+             'https://a.ru/secret/': _Ответ(403)}
+    res, _ = _разобрать(html=html, карта=карта)
+    assert res['forbidden'] == []
+    assert [b['url'] for b in res['redirect_to_error']] == ['https://a.ru/old/']
+
+
+def test_внешних_не_больше_бюджета_на_прогон():
+    """Внешние 403/429 - обычно антибот, поэтому их лимит на ВЕСЬ прогон
+    маленький: чем больше проверим, тем больше шума."""
+    html1 = '<html><body>' + ''.join(
+        f'<a href="https://v{i}.com/">в{i}</a>' for i in range(8)
+    ) + '</body></html>'
+    # на второй странице есть и внутренняя ссылка - иначе звонить стало бы
+    # нечего вовсе и функция вернула бы None
+    html2 = '<html><body><a href="/ok/">своя</a>' + ''.join(
+        f'<a href="https://w{i}.com/">w{i}</a>' for i in range(8)
+    ) + '</body></html>'
+    кеш, бюджет = {}, [5]
+    s = _Сессия({})
+    r1 = asyncio.run(hc.check_content_links(
+        s, html1, 'https://a.ru/1/', link_cache=кеш, ext_budget=бюджет))
+    r2 = asyncio.run(hc.check_content_links(
+        s, html2, 'https://a.ru/2/', link_cache=кеш, ext_budget=бюджет))
+    assert r1['ext_checked'] == 5        # первая страница выбрала весь лимит
+    assert бюджет[0] == 0
+    assert r2['ext_checked'] == 0        # второй уже ничего не досталось
+    assert r2['checked'] == 1            # внутренние при этом проверяются
+    чужие = {u for _m, u in s.вызовы if '.com' in u}
+    assert len(чужие) == 5
+
+
+def test_страница_только_с_внешними_при_исчерпанном_лимите():
+    """Звонить нечего - штатный None, а не пустой отчёт."""
+    html = '<html><body><a href="https://v1.com/">в</a></body></html>'
+    res = asyncio.run(hc.check_content_links(
+        _Сессия({}), html, 'https://a.ru/1/', link_cache={}, ext_budget=[0]))
+    assert res is None
+
+
+def test_уже_проверенные_внешние_не_тратят_бюджет():
+    """Подвальные ссылки одни и те же на всех страницах - они лежат в кеше
+    прогона и лимит съедать не должны, иначе он кончится на второй странице."""
+    html = '<html><body><a href="https://v1.com/">в</a></body></html>'
+    кеш, бюджет = {}, [2]
+    s = _Сессия({})
+    for _ in range(3):
+        asyncio.run(hc.check_content_links(
+            s, html, 'https://a.ru/x/', link_cache=кеш, ext_budget=бюджет))
+    assert бюджет[0] == 1               # потрачена ровно одна ссылка
+    assert len([u for _m, u in s.вызовы if 'v1.com' in u]) == 1
+
+
 def test_лимит_внешних_ссылок():
     html = '<html><body>' + ''.join(
         f'<a href="https://vendor{i}.com/">в{i}</a>' for i in range(20)

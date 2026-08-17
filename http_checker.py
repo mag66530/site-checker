@@ -535,6 +535,7 @@ def _looks_minified(text) -> Optional[bool]:
 
 
 MAX_LINK_HOPS = 5        # сколько шагов цепочки редиректов проходим руками
+EXT_LINKS_PER_RUN = 20   # внешних ссылок на весь прогон (см. check_content_links)
 
 
 async def _one_hop(session, url, to, proxy_url):
@@ -604,7 +605,8 @@ async def _link_status(session, url, timeout_ms, proxy_url):
 async def check_content_links(session, html, base_url, *, proxy_url=None,
                               timeout_ms=20000, limit=120, ext_limit=10,
                               link_cache: dict = None,
-                              budget: list = None):
+                              budget: list = None,
+                              ext_budget: list = None):
     """Ссылки СТРАНИЦЫ: открываются ли, не ведут ли на редирект, нет ли ссылок
     на саму себя. Чек-лист «нет битых ссылок на странице»: ВСЯ страница
     (текст + блоки + шапка/подвал/листинг), не только контентная зона.
@@ -616,15 +618,22 @@ async def check_content_links(session, html, base_url, *, proxy_url=None,
     свои списки в ответе. Причина - чужой антибот отвечает 403/429 живой
     странице, поэтому внешние нельзя судить теми же мерками.
 
+    403 - НЕ «битая ссылка» (страница существует, закрыт доступ), но и не норма:
+    держим отдельным, мягким видом. У внешних 403 к тому же чаще всего означает
+    антибот, а не закрытую страницу - поэтому внешних звоним не больше
+    ext_budget на весь прогон, чтобы не растить шум.
+
     link_cache - общий кеш результатов на весь прогон (шапка/подвал/меню
     одинаковы на всех страницах - каждую уникальную ссылку звоним ОДИН раз).
     budget - [остаток] общий лимит новых прозвонов на прогон.
+    ext_budget - [остаток] лимит ВНЕШНИХ ссылок на прогон (отдельно от budget).
 
-    → {'checked', 'broken': [{'url','code'}],
+    → {'checked', 'broken': [{'url','code'}], 'forbidden': [{'url','code'}],
        'redirects': [{'url','code','to','hops','loop'}],
        'redirect_to_error': [{'url','code','to','final_code'}],
        'self_links': [href],
-       'ext_checked', 'ext_redirects': [...], 'ext_broken': [...]}
+       'ext_checked', 'ext_redirects': [...], 'ext_broken': [...],
+       'ext_forbidden': [...]}
       либо None (звонить нечего)."""
     from content_checker import extract_content_links
     from urllib.parse import urljoin, urlparse
@@ -670,6 +679,19 @@ async def check_content_links(session, html, base_url, *, proxy_url=None,
         todo.append(key)
         if len(todo) >= limit:
             break
+    # Внешние: свой лимит на ВЕСЬ прогон. Их 403/429 - чаще антибот, чем
+    # закрытая страница, поэтому звоним мало и осознанно. Уже проверенные
+    # (в кеше) бюджет не тратят - подвальные ссылки одни на всех страницах.
+    if ext_budget is not None:
+        _новых_внешних = [u for u in внешние if u not in link_cache]
+        _можно = max(ext_budget[0], 0)
+        if len(_новых_внешних) > _можно:
+            _разрешено = set(_новых_внешних[:_можно])
+            внешние = [u for u in внешние
+                       if u in link_cache or u in _разрешено]
+            _новых_внешних = _новых_внешних[:_можно]
+        ext_budget[0] -= len(_новых_внешних)
+
     if not todo and not внешние:
         return None
 
@@ -697,6 +719,12 @@ async def check_content_links(session, html, base_url, *, proxy_url=None,
     broken = [{'url': u, 'code': _r(u)['final_code']}
               for u in checked
               if not _r(u)['hops'] and _r(u)['final_code'] in (404, 410)]
+    # 403 - страница есть, но доступ закрыт: свой сайт не должен так отвечать
+    # на страницу, на которую сам ссылается. Мягко: это бывает и от защиты от
+    # ботов на своём же WAF/прокси, а не только от кривых прав.
+    forbidden = [{'url': u, 'code': _r(u)['final_code']}
+                 for u in checked
+                 if not _r(u)['hops'] and _r(u)['final_code'] == 403]
     # Внутренняя ссылка ведёт на редирект: правится в вёрстке - надо сразу
     # ставить конечный адрес, чтобы робот и покупатель не шли лишний шаг.
     redirects = [{'url': u, 'code': _r(u)['code'], 'to': _r(u)['location'],
@@ -714,11 +742,14 @@ async def check_content_links(session, html, base_url, *, proxy_url=None,
     ext_broken = [{'url': u, 'code': _r(u)['final_code']}
                   for u in checked_ext
                   if not _r(u)['hops'] and _r(u)['final_code'] in (404, 410)]
-    return {'checked': len(checked), 'broken': broken,
+    ext_forbidden = [{'url': u, 'code': _r(u)['final_code']}
+                     for u in checked_ext
+                     if not _r(u)['hops'] and _r(u)['final_code'] == 403]
+    return {'checked': len(checked), 'broken': broken, 'forbidden': forbidden,
             'redirects': redirects, 'redirect_to_error': redirect_to_error,
             'self_links': self_links,
             'ext_checked': len(checked_ext), 'ext_redirects': ext_redirects,
-            'ext_broken': ext_broken}
+            'ext_broken': ext_broken, 'ext_forbidden': ext_forbidden}
 
 
 # ── Проверка с ретраями ─────────────────────────────────────────────
@@ -773,6 +804,7 @@ async def check_one(
     get_image_infos: Optional[Callable] = None,
     links_cache: Optional[dict] = None,   # общий кеш прозвона ссылок (прогон)
     links_budget: Optional[list] = None,  # [остаток] лимит новых прозвонов
+    ext_links_budget: Optional[list] = None,  # [остаток] лимит ВНЕШНИХ ссылок
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
@@ -909,7 +941,8 @@ async def check_one(
             broken_links = await check_content_links(
                 session, a['body_text'], a['final_url'] or task.url,
                 proxy_url=proxy_url, timeout_ms=timeout_ms,
-                link_cache=links_cache, budget=links_budget)
+                link_cache=links_cache, budget=links_budget,
+                ext_budget=ext_links_budget)
         except Exception:
             broken_links = None
 
@@ -1306,6 +1339,10 @@ async def run_batch(
     # прозвонов на прогон, чтобы прогон не разползался по времени.
     links_cache: dict = {}
     links_budget = [2500]
+    # ВНЕШНИЕ ссылки - отдельный, маленький лимит на прогон. Их 403/429 обычно
+    # означает антибот чужого сайта, а не закрытую страницу, поэтому смысла
+    # звонить их сотнями нет: чем больше проверим, тем больше шума.
+    ext_links_budget = [EXT_LINKS_PER_RUN]
 
     async with _сделать_сессию(headers, connector, basic_auth) as session:
 
@@ -1386,6 +1423,7 @@ async def run_batch(
                     get_css_infos=get_css_infos if check_layout else None,
                     get_image_infos=get_image_infos if check_images else None,
                     links_cache=links_cache, links_budget=links_budget,
+                    ext_links_budget=ext_links_budget,
                 )
                 done_count += 1
                 if on_progress:
