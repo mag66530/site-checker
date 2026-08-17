@@ -930,6 +930,16 @@ def run_check(pid, params, creds, log, progress):
 
         _chk_idx = bool(params.get('check_indexing', True))
         _chk_meta = bool(params.get('check_meta', True))
+        # Указатель путей каталога для проверки меню - собираем ОДИН раз на
+        # прогон (на странице пересобирать 12 тысяч путей ни к чему).
+        try:
+            from layout_checker import menu_category_index
+            _menu_cat_index = menu_category_index(
+                list(src.categories or []) + list(src.filters or []))
+        except Exception as _e:  # noqa: BLE001
+            _menu_cat_index = None
+            log(f'⚠ Меню: указатель категорий не собран ({_e}) - '
+                f'проверка пойдёт по признаку «/catalog»')
         results = asyncio.run(run_batch(
             plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
             retry_delay_ms=2500, check_text=bool(params.get('check_text', True)),
@@ -943,7 +953,11 @@ def run_check(pid, params, creds, log, progress):
             check_images=bool(params.get('check_images', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map,
-            basic_auth=basic_auth))
+            basic_auth=basic_auth,
+            # Пути категорий проекта: по ним проверяем «в меню есть ссылка на
+            # каталог». Раньше искали строку «/catalog», и проектам без такого
+            # раздела (у АПС категории в корне) выписывалось ложное замечание.
+            menu_category_paths=_menu_cat_index))
 
         _sec_bad = sum(1 for r in results
                        if getattr(r, 'has_security_issues', False))

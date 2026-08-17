@@ -805,6 +805,9 @@ async def check_one(
     links_cache: Optional[dict] = None,   # общий кеш прозвона ссылок (прогон)
     links_budget: Optional[list] = None,  # [остаток] лимит новых прозвонов
     ext_links_budget: Optional[list] = None,  # [остаток] лимит ВНЕШНИХ ссылок
+    # Пути категорий проекта (+ их разделы) для проверки «в меню есть ссылка на
+    # каталог»: у части проектов раздела /catalog нет, см. layout_checker.
+    menu_category_paths: Optional[set] = None,
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
@@ -987,7 +990,8 @@ async def check_one(
                 _css_infos = await get_css_infos(
                     a['body_text'], a['final_url'] or task.url)
             layout = _check_layout(a['body_text'], _css_infos,
-                                   base_url=a['final_url'] or task.url)
+                                   base_url=a['final_url'] or task.url,
+                                   menu_category_paths=menu_category_paths)
         except Exception:
             layout = None
         # ТЗ 2.2/2.3: переходы из меню шапки (тех. страницы + каталог).
@@ -1286,6 +1290,9 @@ async def run_batch(
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
     basic_auth: Optional[dict] = None,
+    # Пути категорий проекта для проверки меню (layout_checker.
+    # menu_category_index). Не передано - работает прежний признак «/catalog».
+    menu_category_paths: Optional[set] = None,
 ) -> list[CheckResult]:
     """
     Прогнать все задачи параллельно с ограничением concurrency.
@@ -1424,6 +1431,7 @@ async def run_batch(
                     get_image_infos=get_image_infos if check_images else None,
                     links_cache=links_cache, links_budget=links_budget,
                     ext_links_budget=ext_links_budget,
+                    menu_category_paths=menu_category_paths,
                 )
                 done_count += 1
                 if on_progress:
