@@ -228,12 +228,13 @@ def _gdrive_refresh(project_id: str) -> str:
 
 def _кто_запустил() -> str:
     """«Имя Фамилия» текущего пользователя ('' - не определён). Подпись к
-    отчёту: у руководителя в чате смешиваются свои и чужие прогоны."""
+    отчёту: у руководителя в чате смешиваются свои и чужие прогоны.
+
+    Определение одно на все прогоны (tg_report.кто_запустил): подпись должна
+    выглядеть одинаково и у чек-листа, и у форм/целей/КП/скорости."""
     try:
-        import auth
-        u = auth.current_user() or {}
-        имя = " ".join(x for x in (u.get("first_name"), u.get("last_name")) if x)
-        return имя or str(u.get("email") or "")
+        import tg_report
+        return tg_report.кто_запустил()
     except Exception:  # noqa: BLE001
         return ""
 

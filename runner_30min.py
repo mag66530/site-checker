@@ -2189,8 +2189,10 @@ def run_check(pid, params, creds, log, progress):
                                     + (_index_404 or {}).get('total_soft', 0)))
                 # Кто запустил: у руководителя в чате лежат и свои, и чужие
                 # прогоны по проекту - без подписи не разобрать, чей отчёт.
-                if creds.get('started_by'):
-                    summary_text += f'\n\n👤 Запустил: {creds["started_by"]}'
+                # Формат подписи один на все прогоны - см. telegram_notify.
+                from telegram_notify import with_started_by
+                summary_text = with_started_by(summary_text,
+                                               creds.get('started_by'))
                 # Диск: <Проект>/<Год>/Сайт чекер/<Месяц>/<Дата>/Чек-лист/.
                 # Ссылку кладём в сообщение - файл всё равно уходит вложением,
                 # поэтому неудача выкладки прогон не ломает (пишем в лог).

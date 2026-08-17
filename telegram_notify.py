@@ -483,6 +483,22 @@ def send_run_notification(
     return {'sent': sent, 'failed': failed, 'errors': errors}
 
 
+SIGN_PREFIX = '👤 Запустил: '
+
+
+def with_started_by(summary_text: str, кто: Optional[str]) -> str:
+    """Дописать подпись «кто запустил» в конец сводки.
+
+    Пусто - текст не меняем. Подпись уже есть (чек-лист ставит её сам) -
+    второй раз не добавляем: сообщение уходит и в чат сотрудника, и
+    руководителю, и две подписи подряд выглядели бы как ошибка.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    кто = (кто or '').strip()
+    if not кто or SIGN_PREFIX in (summary_text or ''):
+        return summary_text
+    return f'{summary_text}\n\n{SIGN_PREFIX}{кто}'
+
+
 def send_report_from_env(
     project_name: str,
     summary_text: str,
@@ -499,7 +515,11 @@ def send_report_from_env(
     Переменные окружения:
       TG_BOT_TOKEN   - токен бота (telegram_bot_token);
       TG_RECIPIENTS  - chat_id получателей через запятую/пробел/точку с запятой;
-      TG_PROXY       - (необяз.) прокси для api.telegram.org.
+      TG_PROXY       - (необяз.) прокси для api.telegram.org;
+      TG_STARTED_BY  - (необяз.) кто запустил прогон: дописываем подписью в
+                       конец сообщения. Здесь, а не в каждом прогоне: через
+                       эту функцию отчёт шлют все фоновые проверки (формы,
+                       цели, КП, скорость), и подпись у них одинаковая.
 
     Если токен или получатели не заданы - тихо ничего не делаем (возвращаем
     skipped=True), чтобы прогон без настроенного Telegram не падал.
@@ -512,6 +532,8 @@ def send_report_from_env(
             log('info', 'Telegram не настроен (нет TG_BOT_TOKEN / TG_RECIPIENTS) - отчёт не отправляю.')
         return {'sent': 0, 'failed': 0, 'skipped': True}
     proxy = (os.environ.get('TG_PROXY') or '').strip() or None
+    summary_text = with_started_by(summary_text,
+                                   os.environ.get('TG_STARTED_BY'))
     return send_run_notification(
         bot_token=token, recipients=recipients,
         project_name=project_name, summary_text=summary_text,

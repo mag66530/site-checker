@@ -57,6 +57,22 @@ def _настройка(project_id: str, name: str) -> str:
     return _secret(f'{name}_{project_id}') or _secret(name)
 
 
+def кто_запустил() -> str:
+    """«Имя Фамилия» текущего пользователя ('' - не определён).
+
+    Подпись к отчёту: у руководителя в чате смешиваются свои и чужие прогоны -
+    без имени не разобрать, чей отчёт пришёл. Одно определение на все прогоны
+    (чек-лист, формы, цели, КП, скорость), чтобы подпись выглядела одинаково.
+    """
+    try:
+        import auth
+        u = auth.current_user() or {}
+        имя = ' '.join(x for x in (u.get('first_name'), u.get('last_name')) if x)
+        return имя or str(u.get('email') or '')
+    except Exception:  # noqa: BLE001
+        return ''
+
+
 def _получатели(project_id: str) -> str:
     """chat_id получателей: тот, кто запустил (привязка в кабинете) + подписанные
     на проект руководители; иначе - старый список из секретов."""
@@ -127,4 +143,10 @@ def runner_env(project_id: str, project_name: str = '') -> dict:
         proxy = _secret('proxy_url')
         if proxy:
             env['TG_PROXY'] = proxy
+        # Кто запустил - подпись в конце сообщения. Читает
+        # telegram_notify.send_report_from_env, то есть подпись появляется
+        # сразу у всех фоновых прогонов (формы, цели, КП, скорость).
+        кто = кто_запустил()
+        if кто:
+            env['TG_STARTED_BY'] = кто
     return env
