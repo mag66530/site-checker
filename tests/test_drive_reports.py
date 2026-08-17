@@ -29,18 +29,38 @@ def test_folder_id_принимает_и_ссылку_и_голый_id():
     assert drive_reports.folder_id("") == ""
 
 
+def test_day_folder_name_отдельная_папка_на_каждый_день():
+    assert drive_reports.day_folder_name(datetime(2026, 8, 5, 14, 30)) == \
+        "05.08.2026"
+    # разные дни одного месяца → РАЗНЫЕ папки (иначе весь месяц в одной)
+    assert drive_reports.day_folder_name(datetime(2026, 8, 17)) != \
+        drive_reports.day_folder_name(datetime(2026, 8, 18))
+
+
 def test_folder_parts_общий_диск_и_свой_диск():
     dt = datetime(2026, 8, 5)
     # общий диск: несколько проектов рядом → папка проекта нужна
     assert drive_reports.folder_parts("SHOPMET", dt, "Проверка форм") == [
-        "SHOPMET", "2026", "08 - август", "Проверка форм"]
+        "SHOPMET", "2026", "Сайт чекер", "08 - август", "05.08.2026",
+        "Проверка форм"]
     # диск самого проекта → лишний уровень с именем проекта не нужен
     assert drive_reports.folder_parts("SHOPMET", dt, "Чек-лист",
                                       свой_диск=True) == [
-        "2026", "08 - август", "Чек-лист"]
+        "2026", "Сайт чекер", "08 - август", "05.08.2026", "Чек-лист"]
     # вид прогона не задан - папку не создаём
     assert drive_reports.folder_parts("X", dt, "", свой_диск=True) == [
-        "2026", "08 - август"]
+        "2026", "Сайт чекер", "08 - август", "05.08.2026"]
+
+
+def test_folder_parts_новый_день_даёт_новую_папку():
+    """Баг, из-за которого всё сваливалось в «08 - август»: у прогонов разных
+    дней цепочка папок была одна и та же."""
+    a = drive_reports.folder_parts("X", datetime(2026, 8, 17, 10, 0),
+                                   "Чек-лист", свой_диск=True)
+    b = drive_reports.folder_parts("X", datetime(2026, 8, 18, 10, 0),
+                                   "Чек-лист", свой_диск=True)
+    assert a != b
+    assert a[:-2] == b[:-2]     # год/чекер/месяц общие, различие - в дате
 
 
 def test_report_file_name_с_датой():

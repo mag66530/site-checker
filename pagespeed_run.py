@@ -276,7 +276,7 @@ def _отправить_отчёт(xlsx_path, xlsx_name, project_name, agg, delt
         import telegram_notify as tn
         текст = _сводка_для_telegram(project_name, agg, deltas, prev_ts,
                                      top_recs)
-        # Диск: <Проект>/<Год>/<Месяц>/Скорость страниц/<файл>.
+        # Диск: <Проект>/<Год>/Сайт чекер/<Месяц>/<Дата>/Скорость страниц/<файл>.
         if xlsx_path.is_file():
             try:
                 import drive_reports

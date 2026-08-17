@@ -251,7 +251,7 @@ def main() -> int:
             import telegram_notify as tn
             import datetime as _dt
             текст = _сводка_для_telegram(base, результаты)
-            # Отчёт на Google Диск: <Год>/<Месяц>/Проверка целей/<файл>.
+            # Диск: <Год>/Сайт чекер/<Месяц>/<Дата>/Проверка целей/<файл>.
             if out.is_file():
                 try:
                     import drive_reports

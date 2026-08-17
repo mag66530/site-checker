@@ -92,7 +92,8 @@ PROJECT_SETTING_FIELDS = [
     ("mail_google_login", "Gmail проекта (письма Google Search Console)", "text"),
     ("mail_google_password", "Пароль приложения Gmail (IMAP)", "password"),
     # Google Диск для отчётов о прогонах: у каждого проекта может быть СВОЙ
-    # диск/папка. Внутри инструмент сам заводит <Проект>/<Год>/<Месяц>/.
+    # диск/папка. Внутри инструмент сам заводит
+    # <Проект>/<Год>/Сайт чекер/<Месяц>/<Дата>/<Вид прогона>/.
     ("gdrive_shared_drive_id", "ID общего диска Google (отчёты проекта)", "text"),
     ("gdrive_folder_id", "ID папки Google (если вместо диска - готовая папка)", "text"),
     # Ключи OAuth-приложения Google. Технически они общие для всех проектов, но
@@ -1078,7 +1079,8 @@ def project_settings_page() -> None:
             if res.get("ok"):
                 _где = f"{res.get('kind') or 'Диск'} «{res.get('name') or ''}»".strip()
                 st.success(f"✅ {_где} доступен на запись - отчёты будут "
-                           f"складываться сюда: год / месяц / вид проверки.")
+                           f"складываться сюда: год / Сайт чекер / месяц / "
+                           f"дата / вид проверки.")
                 if _drive_id and _drive_id != (cur.get("gdrive_folder_id") or
                                                cur.get("gdrive_shared_drive_id")):
                     st.info("Не забудьте нажать «💾 Сохранить ключи» - "
