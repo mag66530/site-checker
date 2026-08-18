@@ -1,0 +1,21 @@
+{
+  "_comment": "МПК (metpromko.ru) - Magento + Amasty Shop By. Фильтр это НЕ чекбокс, а ССЫЛКА a.amshopby-attr: клик уводит на SEO-адрес вида <категория>/d-76-mm, два фильтра склеиваются двойным дефисом (<категория>/d-76-mm--marka-aisi-304). Кнопки «Показать» нет - применение = переход по ссылке, поэтому apply=null. Карточка товара - div.item-wrapper (та же разметка, что у сборщика товаров). Сайт режет прямое подключение с серверного IP, но с обычным UA открывается; через прокси проекта отдаёт 401 - фильтр-тест ходит напрямую. Селекторы по живой разметке 18.08.2026.",
+  "cases": [
+    {
+      "name": "Заглушка нержавеющая - по диаметру",
+      "category": "https://metpromko.ru/santeharmatura/zaglushka/zaglushka-nerzhavejuschaja",
+      "card": ".item-wrapper",
+      "filter": "a.amshopby-attr",
+      "apply": null,
+      "wait_ms": 4000
+    },
+    {
+      "name": "Арматура - по параметру",
+      "category": "https://metpromko.ru/metalloprokat/armatura",
+      "card": ".item-wrapper",
+      "filter": "a.amshopby-attr",
+      "apply": null,
+      "wait_ms": 4000
+    }
+  ]
+}
