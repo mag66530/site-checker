@@ -90,6 +90,8 @@ PROJECTS = {
              'yandex': 'aviastalru@yandex.ru', 'domain': 'aviastal.ru'},
     'mpk': {'name': 'МПК - Метпромко', 'google': '', 'yandex': '',
             'domain': 'metpromko.ru'},
+    'mtt': {'name': 'МТТ - Меттранстерминал', 'google': '', 'yandex': '',
+            'domain': 'met-trans.ru'},
 }
 
 
