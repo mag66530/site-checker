@@ -202,6 +202,62 @@ def render_proxy_toggle(pid: str | None) -> str | None:
     return addr if on else None
 
 
+def site_closed(pid: str | None) -> bool:
+    """Сайт проекта закрыт паролем (basic_auth в projects/<pid>.json)?"""
+    if not pid:
+        return False
+    try:
+        from proxy_config import canonical_project_id
+        from sources import load_project_config
+        cfg = load_project_config(canonical_project_id(pid)) or {}
+        return bool(cfg.get("basic_auth"))
+    except Exception:
+        return False
+
+
+def site_login_saved(pid: str | None) -> tuple[str, str]:
+    """Логин/пароль закрытого сайта из «Настроек проекта» (или пустая пара)."""
+    if not pid:
+        return "", ""
+    try:
+        import auth as _auth
+        from proxy_config import canonical_project_id
+        p = canonical_project_id(pid)
+        return (_auth.project_setting(p, "site_basic_login") or "",
+                _auth.project_setting(p, "site_basic_password") or "")
+    except Exception:
+        return "", ""
+
+
+def render_site_login(pid: str | None, key_prefix: str = "sl") -> dict:
+    """Блок «Вход на закрытый сайт» для страницы прогона.
+
+    Рисуется ТОЛЬКО у проектов с basic_auth (стенд за паролем nginx - МПИ
+    новый прод). Возвращает окружение для подпроцесса:
+    {'SITE_BASIC_LOGIN': …, 'SITE_BASIC_PASSWORD': …} - те же имена, что читают
+    движок форм (forms_tester/site_auth.py) и движок целей
+    (goals_tester._basic_auth_from_env). Пустой словарь - блока нет или поля
+    не заполнены. На диск ничего не пишется: пароль живёт в сессии браузера и
+    в окружении прогона."""
+    if not site_closed(pid):
+        return {}
+    st.subheader("Вход на закрытый сайт")
+    st.caption("Сайт закрыт паролем: без него браузер увидит только окно "
+               "«Требуется авторизация» - ни одной цели поймать не выйдет. "
+               "Подставлены значения из «Настроек проекта», их можно заменить.")
+    _l_saved, _p_saved = site_login_saved(pid)
+    k_login, k_pass = f"{key_prefix}_login_{pid}", f"{key_prefix}_pass_{pid}"
+    st.session_state.setdefault(k_login, _l_saved)
+    st.session_state.setdefault(k_pass, _p_saved)
+    login = st.text_input("Логин сайта", key=k_login)
+    password = st.text_input("Пароль сайта", type="password", key=k_pass)
+    if login.strip() and password:
+        return {"SITE_BASIC_LOGIN": login.strip(), "SITE_BASIC_PASSWORD": password}
+    st.warning("Без логина и пароля прогон по этому сайту смысла не имеет: "
+               "все страницы ответят «401».")
+    return {}
+
+
 def render_access_check(pid: str, default_url: str = "",
                         known_proxy: str | None = None) -> None:
     """Проверка доступа к сайту для страницы «Настройки проекта».

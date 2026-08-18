@@ -30,6 +30,9 @@ PROJECTS = {
     'mpe': 'МПЭ - Мепэн',
     'sm': 'SM - SHOPMET',
     'avia': 'АПС - Авиапромсталь',
+    # Стенд закрыт паролем: логин/пароль спрашиваем блоком «Вход на закрытый
+    # сайт» ниже и передаём движку через окружение.
+    'mpinew': 'МПИ - новый прод',
 }
 
 # Внутри проекта - выбор страны/сайта; значение = код каталога goals-<pid>.json.
@@ -313,6 +316,12 @@ if not _alive:
 import auth
 _goals_proxy = auth.fill_proxy_slot(_base)
 
+# Вход на закрытый паролем стенд (МПИ новый прод). Блок сам решает, показываться
+# ли: рисуется только проектам с basic_auth в карточке. Пароль уходит движку
+# через окружение прогона - на диск не пишется.
+import site_access as _sa
+_site_env = _sa.render_site_login(_base, key_prefix='gc_site')
+
 c1, c2 = st.columns([3, 1])
 with c1:
     if st.button('▶ Запустить проверку целей', use_container_width=True,
@@ -333,6 +342,9 @@ with c1:
         # inmetprom.ru режут зарубежный IP сервера - «РФ не отвечает»).
         if _goals_proxy:
             env['GOALS_PROXY'] = _goals_proxy
+        # Вход на закрытый сайт: и браузеру целей (http_credentials), и догрузке
+        # JS того же домена (см. goals_tester._basic_auth_from_env).
+        env.update(_site_env)
         # Telegram: креды берём из секретов (те же, что у еженедельной проверки) и
         # кладём в окружение прогона - goals_run сам отправит сводный отчёт в чат.
         try:

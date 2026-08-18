@@ -490,6 +490,109 @@ def _план_мпэ_для_домена(домен: str) -> dict:
     }
 
 
+# МПИ - новый прод (new.metpromintex.by). Цели-клики, которые дёргают НАШИ
+# безопасные действия: контакты в шапке/подвале/на товаре ловит
+# GENERIC_CLICK_SELECTORS (tel/mailto/wa/tg), «Да, верно» - закрытие модалки
+# города. Остальные 90+ js-целей автодействия не имеют: заявки не шлём, а
+# кнопки блоков («в корзину», теги, «также смотрят») на стенде ещё меняются -
+# они получат серый статус «Нет автодействия» и зелёный «reachGoal в коде»,
+# а не ложное красное «НЕ сработала».
+_MPINEW_ОЖИДАЕМЫЕ = [
+    'click_yes_confirm',
+    'tel-shapka-gorod', 'klik-v-shapke-po-elektronnoy-pochte',
+    'klik-na-tg-v-shapke', 'klik-v-shapke-na-whatsapp',
+    'klik-na-telefon-v-podvale', 'klik-na-pochtu-v-podvale',
+    'klik-na-tg-v-podvale', 'klik-na-whatsapp-v-podvale',
+    'klik-na-telefon-v-tovare', 'klik-na-elektronnuyu-pochtu-v-tovare',
+    'klik-na-tg-v-tovare', 'klik-na-whatsapp-v-tovare',
+]
+
+# Карточка товара и категория стенда - те же, что разведаны для «Проверки форм»
+# (forms_tester/projects/mpinew/config.py). Держим в одном месте: сменится товар
+# на стенде - правится здесь и там.
+_MPINEW_ТОВАР = ('/product/691590/plsbm-100-mm-8-mm-1-d-8-m-10hsnd-1561-tu-5-d-961-11500-92')
+_MPINEW_ЛИСТИНГ = '/catalog/sortovoy-prokat'
+
+
+def _план_mpinew(домен: str) -> dict:
+    """План обхода МПИ - новый прод (стенд new.metpromintex.by, проект «mpinew»).
+
+    Сайт - SPA (React + Tailwind), закрыт nginx-паролем: вход движок берёт из
+    SITE_BASIC_LOGIN / SITE_BASIC_PASSWORD (см. _basic_auth_from_env).
+
+    Особенности стенда (разведаны живьём 14.08.2026 при настройке форм):
+      * первый клик на любой странице перехватывает попап «Ваш город Минск?» -
+        снимаем его СРОЧНЫМ кликом «Да, верно» (заодно цель click_yes_confirm);
+      * снизу висит плашка cookie - жмём «Принять», иначе она перекрывает подвал;
+      * заявки НЕ отправляем: формные цели зелёные по «reachGoal в коде», а
+        сами формы проверяет страница «Проверка форм» (13 форм стенда).
+
+    Адреса разделов: главная, каталог, листинг и товар известны точно (по
+    конфигу форм). Поиск - «/search?query=…» (имя параметра видно в названии
+    цели «Оставить заявку на поисковой выдаче (search?query)»). Корзина - /cart.
+    """
+    d = (домен or 'https://new.metpromintex.by').rstrip('/')
+    # Модалку города надо снять ДО всего остального - иначе её оверлей съедает
+    # каждый первый клик страницы.
+    _город = ('!button:has-text("Да, верно"), button:has-text("Да, верно") '
+              '>> visible=true')
+    _cookie = 'button:has-text("Принять") >> visible=true'
+    return {
+        'страницы': [
+            ('Главная', d + '/',
+             [_город, _cookie,
+              # Шапка: каталог, поиск, сравнение, избранное, мои подборки.
+              'header button:has-text("Каталог"), header a:has-text("Каталог")',
+              'header a[href*="compare"], header a[href*="sravnenie"]',
+              'header a[href*="favorit"], header a[href*="izbran"]',
+              'header a[href*="selection"], header a[href*="podbork"]',
+              # Блоки главной: теги, «Смотреть ещё», «Также смотрят».
+              'a:has-text("Смотреть ещё"), a:has-text("Смотреть еще"), '
+              'button:has-text("Смотреть ещё"), button:has-text("Смотреть еще")',
+              # Формы главной ТОЛЬКО открываем - заявки не шлём.
+              {'цель_модалка': 'button:has-text("Перезвоните мне")'},
+              {'цель_модалка': 'button:has-text("Оформить заявку")'},
+              {'цель_модалка': 'button:has-text("Получить предложение")'},
+              {'цель_модалка': 'button:has-text("Нужна консультация")'},
+              {'цель_модалка': 'button:has-text("Задать вопрос")'},
+              {'цель_модалка': 'button:has-text("Оставить отзыв")'},
+              {'цель_модалка': 'button:has-text("Обратиться к руководителю")'},
+              {'цель_модалка': 'button:has-text("Стать партн")'},
+              {'цель_модалка': 'button:has-text("Не нашли")'}]),
+            ('Каталог', d + '/catalog', [_город, _cookie]),
+            ('Листинг', d + _MPINEW_ЛИСТИНГ,
+             [_город, _cookie,
+              'button:has-text("В корзину"), a:has-text("В корзину")',
+              'button:has-text("Сохранить подборку")',
+              {'цель_модалка': 'button:has-text("Не нашли")'}]),
+            ('Товар', d + _MPINEW_ТОВАР,
+             [_город, _cookie,
+              'button:has-text("В корзину"), a:has-text("В корзину")',
+              {'цель_модалка': 'button:has-text("Купить в 1 клик")'},
+              {'цель_модалка': 'button:has-text("Задать вопрос")'},
+              {'цель_модалка': 'button:has-text("Оставить отзыв")'},
+              {'цель_модалка': 'button:has-text("Нужна консультация")'}]),
+            # Корзина открывается ПОСЛЕ товара - к этому моменту в ней есть позиция
+            # (кнопку «В корзину» нажали выше), иначе блок «Скачать КП»/«Поделиться»
+            # на пустой корзине не рисуется.
+            ('Корзина', d + '/cart',
+             [_город, _cookie,
+              'button:has-text("Скачать"), a:has-text("Скачать")',
+              'button:has-text("Скопировать ссылку"), button:has-text("Поделиться")']),
+            ('Поиск', d + '/search?query=%D1%82%D1%80%D1%83%D0%B1%D0%B0',
+             [_город, _cookie]),
+            ('Контакты', d + '/contacts', [_город, _cookie]),
+            ('Страница 404', d + '/nesuschestvuyushaya-404-xyz', []),
+        ],
+        'ожидаемые': list(_MPINEW_ОЖИДАЕМЫЕ),
+        # Формы стенда проверяет своя страница «Проверка форм» (13 форм), а
+        # сквозной заказ здесь не гоняется (url-целей у проекта нет) - значит
+        # строки «Проверяется формами» не заглушки, а рабочая подсказка, и
+        # прятать их нельзя: это 36 из 105 js-целей проекта.
+        'формы_не_гоняем': True,
+    }
+
+
 def _план_shopmet() -> dict:
     """План обхода SHOPMET (проект «sm»).
 
@@ -621,6 +724,8 @@ def _план_страна(pid: str, домен: str) -> dict:
         return _план_shopmet()
     if base == 'avia':
         return _план_avia_для_домена(домен)
+    if base == 'mpinew':
+        return _план_mpinew(домен)
     return _план_для_домена(домен)
 
 
@@ -788,6 +893,19 @@ def _proxy_from_env():
     return conf
 
 
+def _basic_auth_from_env():
+    """Вход на закрытый паролем сайт (nginx Basic auth) - {username, password}
+    или None. Креды кладёт страница «Проверка целей» в SITE_BASIC_LOGIN /
+    SITE_BASIC_PASSWORD - ТЕ ЖЕ имена, что у движка форм
+    (forms_tester/site_auth.py): пароль заводится в одном месте на все прогоны.
+    В git пароль не хранится. ЧИСТАЯ функция - есть юнит-тест."""
+    login = (os.environ.get('SITE_BASIC_LOGIN') or '').strip()
+    password = os.environ.get('SITE_BASIC_PASSWORD') or ''
+    if not login:
+        return None
+    return {'username': login, 'password': password}
+
+
 def выполнить_прогон(pid: str, headless: bool = True, log=print, stop=None) -> dict:
     """Открывает страницы, кликает, слушает Метрику. Возвращает
     {'fired': set(id), 'страницы': [{'название','url','код','счётчик','визит'}]}."""
@@ -828,9 +946,15 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
                 _seen_js.add(u)
                 _to_fetch.append(u)
 
+            # Закрытый паролем стенд отдаёт 401 и на JS - иначе привязок
+            # reachGoal не собрать. Пароль шлём ТОЛЬКО на свой домен: список
+            # _to_fetch уже отфильтрован по base_host выше.
+            _ba = _basic_auth_from_env()
+            _ba_pair = (_ba['username'], _ba['password']) if _ba else None
+
             def _fetch_js(u):
                 try:
-                    return _rq.get(u, timeout=6,
+                    return _rq.get(u, timeout=6, auth=_ba_pair,
                                    headers={'User-Agent': 'Mozilla/5.0'},
                                    verify=os.environ.get('REQUESTS_CA_BUNDLE', True)).text
                 except Exception:
@@ -868,8 +992,14 @@ def выполнить_прогон(pid: str, headless: bool = True, log=print, 
         # снимают такую блокировку.
         _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+        # Стенд за nginx-паролем (МПИ новый прод): без http_credentials браузер
+        # получит 401 на КАЖДОЙ странице и прогон вернёт пустоту.
+        _basic = _basic_auth_from_env()
+        if _basic:
+            log(f'Вход на закрытый сайт: логин {_basic["username"]}')
         ctx = b.new_context(locale='ru-RU', viewport={'width': 1440, 'height': 900},
                             ignore_https_errors=_via_driver, user_agent=_UA,
+                            http_credentials=_basic,
                             extra_http_headers={
                                 'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
                                 'Accept': ('text/html,application/xhtml+xml,'
@@ -1471,6 +1601,10 @@ def _классифицировать(pid: str, каталог: dict, прого
     url_map = _url_цели_проверка(каталог, страницы, _формные_url(pid))
     _план = ACTIONS.get(pid) or _план_страна(pid, каталог.get('домен', ''))
     ожидаемые = {i.lower() for i in _план.get('ожидаемые', [])}
+    # Формы этого проекта проверяет ОТДЕЛЬНАЯ страница, а не прогон целей
+    # (см. goals_run.БЕЗ_ЗАКАЗА). Влияет на то, прятать ли строки
+    # «Проверяется формами» - подробности у _скрыть ниже.
+    _формы_отдельно = bool(_план.get('формы_не_гоняем'))
     # нет_на_сайте: список ИЛИ словарь {id: пояснение}. Приводим к словарю.
     _ннс_raw = _план.get('нет_на_сайте', [])
     if isinstance(_ннс_raw, dict):
@@ -1951,6 +2085,13 @@ def _классифицировать(pid: str, каталог: dict, прого
         if r['статус'] == 'Нет в коде сайта' and r['номер'] in _ожидаемые_номера:
             return False
         if r['статус'] == 'Проверяется формами' and r['номер'] in _форменные_номера:
+            return False
+        # «Проверяется формами» прячем как заглушку потому, что формы гоняются
+        # САМИ внутри проверки целей. Для проектов, где план это отключает
+        # («формы_не_гоняем» - МПИ новый прод: url-целей нет, формы проверяет
+        # своя страница), премиса неверна: подсказка «запустите Проверку форм»
+        # там по делу, а скрытие унесло бы из отчёта 36 формных js-целей.
+        if r['статус'] == 'Проверяется формами' and _формы_отдельно:
             return False
         return True
 
