@@ -4,6 +4,14 @@ schema_checker.py - микроразметка Schema.org и OpenGraph (пунк
 ТЗ 3.5.1 - OpenGraph на основных типах страниц: og:url, og:title,
 og:description, og:image, og:type. Отсутствие поля = баг.
 
+Проверяем не только наличие тега, но и ПРИГОДНОСТЬ значения (check_og):
+  • значение пустое - тег есть, а толку нет (типовая поломка шаблона: тег
+    в вёрстке стоит, переменная не подставилась) = баг;
+  • og:url - абсолютный адрес и ведёт на эту же страницу;
+  • og:image - абсолютный адрес, не data: (соцсети такое не покажут);
+  • og:description - не длиннее 300 символов (обрежется в анонсе);
+  • og:type - из известных значений OpenGraph.
+
 ТЗ 3.5.2 - Schema.org. Формат: microdata (itemtype/itemprop) - основной,
 JSON-LD - допустим, но «по обстоятельствам»: тип найден ТОЛЬКО в JSON-LD =
 предупреждение, нет нигде = баг. Требования по типам страниц:
@@ -36,6 +44,22 @@ from typing import Optional
 
 _RE_OG = re.compile(
     r'<meta\b[^>]*property\s*=\s*["\']og:(\w+)["\'][^>]*>', re.I)
+_RE_OG_TAG = re.compile(r'<meta\b[^>]*>', re.I)
+_RE_OG_PROP = re.compile(r'property\s*=\s*["\']og:(\w+)["\']', re.I)
+_RE_OG_CONTENT = re.compile(r'content\s*=\s*["\']([^"\']*)["\']', re.I)
+
+# Длина og:description по чек-листу.
+OG_DESC_MAX = 300
+
+# Допустимые значения og:type. Список Open Graph: базовые + пространства имён
+# (article, book, profile, video.*, music.*). Незнакомое значение - не ошибка
+# (стандарт разрешает свои типы), но повод посмотреть глазами.
+OG_TYPES = {
+    'website', 'article', 'book', 'profile', 'product', 'product.group',
+    'product.item', 'video.movie', 'video.episode', 'video.tv_show',
+    'video.other', 'music.song', 'music.album', 'music.playlist',
+    'music.radio_station',
+}
 _RE_ITEMTYPE = re.compile(
     r'itemtype\s*=\s*["\']https?://schema\.org/(\w+)', re.I)
 _RE_ITEMPROP = re.compile(r'itemprop\s*=\s*["\'](\w+)["\']', re.I)
@@ -54,6 +78,92 @@ _IMAGE_TYPES = {'ImageObject', 'ImageGallery'}
 
 # На каких типах страниц что ОБЯЗАТЕЛЬНО (баг) и что ЖЕЛАТЕЛЬНО (предупр.)
 _SEO_TYPES = ('main', 'catalog', 'category', 'filter', 'product')
+
+
+def parse_og(html: str) -> dict:
+    """{свойство: значение} по OpenGraph-тегам страницы.
+
+    Читаем ИМЕННО значение (content), а не только факт наличия тега: пустой
+    «<meta property="og:title" content="">» раньше засчитывался как
+    заполненный, а на шаблонных сайтах это типовая ситуация - тег в шаблоне
+    есть, переменная не подставилась.
+
+    Повторные теги: берём ПЕРВОЕ непустое значение (og:image часто дублируют
+    для разных размеров). ЧИСТАЯ функция - есть юнит-тест.
+    """
+    out: dict = {}
+    for tag in _RE_OG_TAG.findall(html or ''):
+        mp = _RE_OG_PROP.search(tag)
+        if not mp:
+            continue
+        prop = mp.group(1).lower()
+        mc = _RE_OG_CONTENT.search(tag)
+        val = (mc.group(1) if mc else '').strip()
+        if prop not in out or (not out[prop] and val):
+            out[prop] = val
+    return out
+
+
+def _abs_url(v: str) -> bool:
+    """Адрес абсолютный (со схемой или «//host»)."""
+    s = (v or '').strip()
+    return bool(s) and (s.startswith('//') or bool(re.match(r'[a-z][a-z0-9+.\-]*:', s, re.I)))
+
+
+def check_og(og: dict, page_url: str = '') -> tuple:
+    """Проверка ЗНАЧЕНИЙ OpenGraph. → (issues, warnings).
+
+    Раньше проверялось только наличие пяти тегов. Здесь - что они пригодны:
+    непустые, адреса абсолютные, og:url ведёт на эту же страницу, описание не
+    длиннее 300 символов, тип из известных.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    issues, warnings = [], []
+    og = og or {}
+
+    # Пустое значение при наличии тега - тег бесполезен. Отсутствие тега
+    # ловится отдельно (og_missing), чтобы не выписывать две находки разом.
+    for f in OG_REQUIRED:
+        if f in og and not og[f]:
+            issues.append(f'OpenGraph-тег og:{f} пустой - значение не подставилось')
+
+    url_v = og.get('url') or ''
+    if url_v:
+        if not _abs_url(url_v):
+            issues.append('og:url - относительный адрес, нужен полный '
+                          '(со схемой и доменом)')
+        elif page_url:
+            def _norm(u):
+                from urllib.parse import urlsplit
+                sp = urlsplit(u if _abs_url(u) else 'https://' + u.lstrip('/'))
+                host = (sp.netloc or '').lower().removeprefix('www.')
+                return host + (sp.path or '/').rstrip('/')
+            try:
+                if _norm(url_v) != _norm(page_url):
+                    warnings.append('og:url ведёт не на эту страницу - в анонсе '
+                                    'соцсети покажут другой адрес')
+            except Exception:      # noqa: BLE001
+                pass
+
+    img = og.get('image') or ''
+    if img:
+        if img.lower().startswith('data:'):
+            issues.append('og:image встроен как data: - соцсети такую картинку '
+                          'не покажут, нужна ссылка на файл')
+        elif not _abs_url(img):
+            issues.append('og:image - относительный адрес, нужен полный '
+                          '(со схемой и доменом)')
+
+    desc = og.get('description') or ''
+    if desc and len(desc) > OG_DESC_MAX:
+        warnings.append(f'og:description длиннее {OG_DESC_MAX} символов - '
+                        f'в анонсе он обрежется')
+
+    typ = (og.get('type') or '').strip().lower()
+    if typ and typ not in OG_TYPES:
+        warnings.append(f'og:type - незнакомое значение «{typ}»: обычно это '
+                        f'website, article или product')
+
+    return issues, warnings
 
 
 def _jsonld_types(html: str) -> set:
@@ -302,17 +412,21 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
     if type_code not in _SEO_TYPES and not is_contacts:
         return None
 
-    og_found = {m.group(1).lower() for m in _RE_OG.finditer(html)}
+    og = parse_og(html)
+    og_found = set(og)
     micro = {m.group(1) for m in _RE_ITEMTYPE.finditer(html)}
     ld = _jsonld_types(html)
     props = {m.group(1).lower() for m in _RE_ITEMPROP.finditer(html)}
 
     issues, warnings = [], []
 
-    # ── 3.5.1 OpenGraph: все 5 полей ──
+    # ── 3.5.1 OpenGraph: все 5 полей + пригодность значений ──
     og_missing = [f for f in OG_REQUIRED if f not in og_found]
     for f in og_missing:
         issues.append(f'нет OpenGraph-тега og:{f}')
+    _og_i, _og_w = check_og(og, url)
+    issues.extend(_og_i)
+    warnings.extend(_og_w)
 
     def _have(type_set):
         """(в microdata?, в json-ld?) хотя бы один тип из набора."""
@@ -382,6 +496,7 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
 
     return {
         'og_missing': og_missing,
+        'og': og,
         'micro_types': sorted(micro),
         'ld_types': sorted(ld),
         'field_details': f_details,
