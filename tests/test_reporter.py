@@ -321,6 +321,63 @@ def test_indexing_site_findings_попадают_в_проблемы_и_план
     print('✓ Индексация: сайт-уровневые находки в «Проблемах» без дублей в «Плане работ»')
 
 
+def test_негодные_opengraph_доходят_до_листов_отчёта():
+    """OG-теги на месте, но значения непригодны: пустое, относительный адрес,
+    data:-картинка, длинное описание, чужой тип. Всё это должно быть видно
+    строками в «Проблемах» и собраться в задачи «Плана работ»."""
+    from schema_checker import check_markup
+    html = ('<html><head>'
+            '<meta property="og:url" content="/catalog/truba/">'
+            '<meta property="og:title" content="">'
+            '<meta property="og:description" content="' + 'а' * 320 + '">'
+            '<meta property="og:image" content="data:image/png;base64,iVBOR">'
+            '<meta property="og:type" content="страница">'
+            '</head><body></body></html>')
+    markup = check_markup(html, 'category', 'https://stalmetural.ru/catalog/truba/')
+    results = [make_result(url='https://stalmetural.ru/catalog/truba/',
+                           type_label='Категория', markup=markup)]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва',
+                          host='stalmetural.ru')]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out)
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        prob = ' '.join(
+            str(c) for row in wb['Проблемы'].iter_rows(values_only=True)
+            for c in row if c)
+        assert 'og:title пустой' in prob
+        assert 'og:url - относительный адрес' in prob
+        assert 'og:image встроен как data:' in prob
+        assert 'og:description длиннее 300' in prob
+        assert 'og:type - незнакомое значение' in prob
+        assert 'Разметка' in prob
+
+        задачи = [row[2] for row in wb['План работ'].iter_rows(values_only=True)
+                  if row and row[2]]
+        assert 'Заполнить пустые OpenGraph-теги' in задачи
+        assert 'Поправить og:url' in задачи
+        assert 'Поправить картинку анонса (og:image)' in задачи
+        assert 'Сократить og:description' in задачи
+        assert 'Проверить og:type' in задачи
+        # У КАЖДОЙ находки по OG - своя задача, не общая «проверить
+        # микроразметку». (Сама общая задача на листе быть может: на этой
+        # странице нет ещё и Schema.org-разметки, вот она и появляется.)
+        from report_priorities import classify, _markup_findings
+        og_находки = [f for f in _markup_findings(
+            markup, city='Москва', page_type='Категория',
+            url='https://stalmetural.ru/catalog/truba/')
+            if 'og:' in f.problem]
+        assert len(og_находки) == 5
+        assert all(classify(f)['task_group'] != 'schema_generic'
+                   for f in og_находки)
+    print('✓ OpenGraph: негодные значения в «Проблемах» и «Плане работ»')
+
+
 def test_ссылки_и_дубли_адресов_доходят_до_листов_отчёта():
     """Раздел 2 доп. чек-листа: ссылки (битые/редиректы/на себя) и дубли
     адресов (короткий адрес, товар в чужой категории) должны быть видны в
