@@ -34,7 +34,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).parent
 WORK_ROOT = ROOT / 'cache' / 'variables'
 
-from proxy_config import project_use_proxy, resolve_proxy
+from proxy_config import project_use_proxy, resolve_proxy, env_use_proxy
 
 def _имена_проектов() -> dict:
     """id → название из projects/*.json. Раньше список был прибит гвоздями, и
@@ -931,7 +931,23 @@ def main() -> int:
     # напрямую из CLI без env - падаем на единый механизм (proxy_config.py: БД
     # личного кабинета → proxy_url_<pid> → proxy_url → HTTP_PROXY).
     proxy = (os.environ.get('proxy_url') or '').strip() or None
-    if project_use_proxy(a.project):
+    _выбор = env_use_proxy()
+    if _выбор is False:
+        # Галочка «Прокси» на странице выключена - это осознанное решение на
+        # ЭТОТ прогон, оно сильнее use_proxy проекта. Раньше выключение
+        # только не клало адрес в env, а прогон доставал его сам, и проект с
+        # use_proxy=true всё равно шёл через прокси.
+        if proxy or project_use_proxy(a.project):
+            _stamp('Прокси выключен галочкой на странице - страницы качаем '
+                   'напрямую.')
+        proxy = None
+    elif _выбор is True:
+        if not proxy:
+            proxy = resolve_proxy(a.project)
+        if not proxy:
+            _stamp('⚠️ Прокси включён галочкой, но адрес не найден (ни в env, '
+                   'ни в личном кабинете/секретах) - качаем напрямую.')
+    elif project_use_proxy(a.project):
         if not proxy:
             proxy = resolve_proxy(a.project)
         if not proxy:

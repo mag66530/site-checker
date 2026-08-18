@@ -124,6 +124,18 @@ def probe_site(url: str, proxy: str | None = None, timeout: int = 12) -> dict:
                 "snippet": "", "error": f"{kind} ({e})"}
 
 
+def proxy_choice(pid: str | None):
+    """Решение по чек-боксу «Прокси» для проекта: True / False / None
+    (чек-бокс на этой странице не рисовался - решения нет).
+
+    Нужно отдельно от АДРЕСА: адрес прогон умеет находить сам, поэтому
+    «страница вернула None» значило лишь «адрес не передали», и выключенная
+    галочка ничего не выключала у проектов с use_proxy=true."""
+    if not pid:
+        return None
+    return st.session_state.get(f"proxy_toggle_{pid}")
+
+
 def render_proxy_toggle(pid: str | None) -> str | None:
     """Чек-бокс «Прокси» + ОДНА строка с текущим IP (см. докстринг модуля).
 

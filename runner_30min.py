@@ -762,12 +762,22 @@ def run_check(pid, params, creds, log, progress):
         # proxy_url_<pid> → proxy_url → HTTP_PROXY, с уважением к use_proxy.
         # creds['proxy_url'] - доп. фоллбэк для обратной совместимости: тем
         # вызывающим, что посчитали адрес сами и передали готовым.
-        proxy_url = (proxy_for_project(pid) or creds.get('proxy_url')) \
-            if cfg.get('use_proxy') else None
-        if cfg.get('use_proxy') and not proxy_url:
-            log(f'⚠ Прокси нужен для {cfg["name"]}, но не настроен')
-        elif proxy_url:
-            log(f'Прокси: включён для {cfg["name"]}')
+        # Галочка «Прокси» на странице - решение на ЭТОТ прогон, оно сильнее
+        # use_proxy проекта. Раньше выключение галочки только не передавало
+        # адрес, а прогон доставал его сам: у проекта с use_proxy=true прокси
+        # оставался включённым (на АПС это давало 4xx, хотя локально сайт
+        # открывается напрямую).
+        _выбор = creds.get('use_proxy_choice')
+        if _выбор is False:
+            proxy_url = None
+            log('Прокси выключен галочкой на странице - идём напрямую.')
+        else:
+            proxy_url = (proxy_for_project(pid) or creds.get('proxy_url')) \
+                if (cfg.get('use_proxy') or _выбор is True) else None
+            if (cfg.get('use_proxy') or _выбор is True) and not proxy_url:
+                log(f'⚠ Прокси нужен для {cfg["name"]}, но не настроен')
+            elif proxy_url:
+                log(f'Прокси: включён для {cfg["name"]}')
 
         # Вход на закрытый сайт (стенд за nginx-паролем). Без него ВЕСЬ обход
         # получает 401, и отчёт состоит из ошибок доступа. Логин/пароль

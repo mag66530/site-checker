@@ -84,6 +84,53 @@ def _db_proxy(pid: str):
         return None
 
 
+# Явное решение пользователя на ЭТОТ прогон: чек-бокс «Прокси» в сайдбаре.
+# Кладётся страницей в окружение фонового процесса.
+#
+# Зачем отдельная переменная, а не «нет адреса - значит выключено»: адрес
+# прогон умеет находить сам (БД/секреты), поэтому «страница не положила
+# proxy_url» читалось как «адрес не передали», и прогон брал его сам. У
+# проекта с use_proxy=true выключенная галочка не выключала ничего - прогон
+# всё равно шёл через прокси (поймано на АПС: локально сайт открывается, а
+# через прокси отдаёт 401, и прогон КП падал с 4xx).
+USE_PROXY_ENV = 'USE_PROXY'
+
+
+def proxy_env(effective_proxy: str | None) -> dict:
+    """Env для фонового прогона по решению галочки на странице.
+
+    effective_proxy - то, что вернул чек-бокс «Прокси» (адрес, если включён,
+    иначе None). Кладём И адрес, И само решение: без явного «выключено»
+    прогон достаёт адрес сам и галочка ничего не выключает.
+
+    При выключенной галочке ГАСИМ и системные HTTP_PROXY/HTTPS_PROXY: requests
+    по умолчанию читает их сам (trust_env=True) и идёт через прокси, даже если
+    мы явно передали «без прокси». На машине разработчика такие переменные
+    обычно выставлены - и прогон «без прокси» всё равно шёл через него.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    if effective_proxy:
+        return {'proxy_url': effective_proxy, USE_PROXY_ENV: '1'}
+    return {USE_PROXY_ENV: '0', 'proxy_url': '',
+            'HTTP_PROXY': '', 'HTTPS_PROXY': '',
+            'http_proxy': '', 'https_proxy': '',
+            # NO_PROXY=* - для библиотек, которые смотрят на наличие
+            # переменной, а не на её пустоту.
+            'NO_PROXY': '*', 'no_proxy': '*'}
+
+
+def env_use_proxy():
+    """Решение по галочке из окружения: True / False / None (не задано).
+    ЧИСТАЯ функция - есть юнит-тест."""
+    v = (os.environ.get(USE_PROXY_ENV) or '').strip().lower()
+    if not v:
+        return None
+    if v in ('0', 'false', 'no', 'off'):
+        return False
+    if v in ('1', 'true', 'yes', 'on'):
+        return True
+    return None
+
+
 def project_use_proxy(pid: str) -> bool:
     """use_proxy проекта из projects/<pid>.json. False - если pid пуст,
     файла нет или JSON битый (безопасный дефолт: без прокси, как у проекта,
@@ -114,11 +161,20 @@ def resolve_proxy(pid: str = "") -> str | None:
 
 
 def proxy_for_project(pid: str) -> str | None:
-    """Итоговый прокси для фонового прогона проекта: None, если use_proxy=
-    false у проекта (главный выключатель - приоритет над любым настроенным
-    адресом), иначе resolve_proxy(pid). Это то, что должны звать
-    runner_30min.py/run_scheduled.py/variables_run.py/collect_products.py и
-    т.п. вместо своих копий этой логики."""
-    if not project_use_proxy(pid):
+    """Итоговый прокси для фонового прогона проекта.
+
+    Порядок решений:
+      1. галочка «Прокси» на странице, если она передана в окружении
+         (USE_PROXY=0/1) - у неё ПРИОРИТЕТ: человек выключил её осознанно,
+         именно чтобы прогнать без прокси;
+      2. иначе use_proxy проекта из projects/<pid>.json;
+      3. адрес - resolve_proxy(pid).
+
+    Это то, что должны звать runner_30min.py/run_scheduled.py/
+    variables_run.py/collect_products.py и т.п. вместо своих копий логики."""
+    выбор = env_use_proxy()
+    if выбор is False:
+        return None
+    if выбор is None and not project_use_proxy(pid):
         return None
     return resolve_proxy(pid)

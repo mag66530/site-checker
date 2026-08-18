@@ -2664,6 +2664,10 @@ if pid:
                          or _secret_pid('yandex_oauth', pid))
             creds = {
                 'proxy_url': _c30_effective_proxy,
+                # Решение галочки «Прокси» (вкл/выкл/не рисовалась). Без него
+                # выключение галочки не отключало прокси: адрес прогон
+                # находит сам, и use_proxy проекта побеждал.
+                'use_proxy_choice': __import__('site_access').proxy_choice(pid),
                 'tg_token': _secret('telegram_bot_token'),
                 'tg_recipients': get_telegram_recipients(pid),
                 # Кто запустил - руководителю, который следит за всеми

@@ -454,9 +454,10 @@ with _c1:
             LOG_FILE.write_text('', encoding='utf-8')
             # Прокидываем в фоновый процесс: прокси + ссылку на КП-таблицу +
             # JSON сервисного аккаунта (для приватных таблиц) - из секретов.
-            _env = {}
-            if _effective_proxy:
-                _env['proxy_url'] = _effective_proxy
+            # Адрес И решение галочки: без явного «выключено» прогон достаёт
+            # прокси сам, и выключение галочки ничего не выключало.
+            from proxy_config import proxy_env
+            _env = dict(proxy_env(_effective_proxy))
             try:
                 if _kp_url:
                     _env[f'kp_sheet_url_{pid_key}'] = _kp_url
