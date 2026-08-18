@@ -61,25 +61,31 @@ def test_свой_путь_берётся_как_есть():
     print('✓ свой путь раздела уважается')
 
 
-def test_у_апс_раздела_нет_а_у_остальных_есть():
-    """Сверяем с реальными конфигами: правка адресная."""
-    assert load_project_config('avia').get('catalog_path') == ''
-    for pid in ('imp', 'mpe', 'mpi', 'mpk', 'sm', 'smu'):
+def test_раздела_нет_у_апс_и_мпк_а_у_остальных_есть():
+    """Сверяем с реальными конфигами: правка адресная.
+
+    МПК добавлен 18.08.2026 - у него разделы тоже в корне
+    (/asbestovye-materialy), а /catalog отдаёт 302 на главную (проверено
+    живьём), то есть задача «Каталог» ловила бы редирект вместо страницы."""
+    for pid in ('avia', 'mpk'):
+        assert load_project_config(pid).get('catalog_path') == '', pid
+    for pid in ('imp', 'mpe', 'mpi', 'sm', 'smu'):
         cfg = load_project_config(pid)
         assert 'catalog_path' not in cfg, f'{pid}: ключ не должен был появиться'
-    print('✓ ключ стоит только у АПС')
+    print('✓ ключ стоит только у АПС и МПК')
 
 
-def test_каталог_апс_действительно_не_под_catalog():
-    """Причина правки, а не вкусовщина: в каталоге АПС нет ни одного адреса
-    под /catalog - в отличие от остальных проектов."""
+def test_каталоги_апс_и_мпк_действительно_не_под_catalog():
+    """Причина правки, а не вкусовщина: в каталогах этих проектов нет ни одного
+    адреса под /catalog - в отличие от остальных проектов."""
     import csv
 
-    cfg = load_project_config('avia')
-    путь = КОРЕНЬ / cfg['catalog_csv']
-    with путь.open(encoding='utf-8') as f:
-        адреса = [r['url'] for r in csv.DictReader(f)]
+    for pid in ('avia', 'mpk'):
+        cfg = load_project_config(pid)
+        путь = КОРЕНЬ / cfg['catalog_csv']
+        with путь.open(encoding='utf-8') as f:
+            адреса = [r['url'] for r in csv.DictReader(f)]
 
-    assert адреса, 'каталог АПС пуст'
-    assert not [u for u in адреса if '/catalog/' in u]
-    print(f'✓ ни один из {len(адреса)} адресов АПС не лежит под /catalog')
+        assert адреса, f'каталог {pid} пуст'
+        assert not [u for u in адреса if '/catalog/' in u], pid
+        print(f'✓ ни один из {len(адреса)} адресов {pid} не лежит под /catalog')

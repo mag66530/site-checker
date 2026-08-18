@@ -56,8 +56,11 @@ _HREF_RE = re.compile(r'<a\b[^>]*?href\s*=\s*["\']([^"\'#]+)["\']', re.IGNORECAS
 # Контейнеры карточек товара у наших проектов (СМУ / МПЭ / ИМП). Карточку
 # узнаём по классу-контейнеру и берём ссылку ИЗ НЕЁ - так ловим и ИМП, где
 # карточка ведёт на КОРНЕВОЙ адрес товара (/slug/), а не под /catalog/.
+# item-wrapper - карточка листинга у МПК (Magento: div.item-wrapper с
+# itemtype=schema.org/Product, внутри a.product-image и .product-name).
 _CARD_SPLIT_RE = re.compile(
-    r'\b(?:catalog-product-card-item|card-product|card-item|listing-card)\b'
+    r'\b(?:catalog-product-card-item|card-product|card-item|listing-card'
+    r'|item-wrapper)\b'
 )
 # Ассеты/статика - не товар.
 _ASSET_RE = re.compile(
@@ -120,6 +123,12 @@ def _looks_like_product(path: str, known_category_paths: set | None = None) -> b
             return True
     if len(segs) == 1:
         s = segs[0]
+        # МПК: артикульный адрес карточки - /prod-asbkr001 (короткий, один
+        # дефис), под общее правило «длинный slug с дефисами» не подходит.
+        # Категорией такой адрес быть не может: у товаров Метпромко это
+        # служебный префикс каталога.
+        if s.lower().startswith('prod-') and len(s) > 5:
+            return True
         return len(s) >= 12 and s.count('-') >= 2
     return False
 
