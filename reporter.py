@@ -26,6 +26,7 @@ from report_priorities import (
     stress_check_findings, ps_filters_findings,
     service_issues_findings, w3c_findings,
     url_format_findings, robots_hygiene_findings, content_sections_findings,
+    ssl_findings,
     static_delivery_findings, ux_interactive_findings, interlinking_note,
     yabusiness_findings, review_priority_findings,
 )
@@ -3113,6 +3114,7 @@ def build_report(
     console_check: dict = None,    # ошибки JS в консоли (п.1.14) - лист «Ошибки JavaScript»
     calltracking_check: dict = None,  # браузерная проверка замены рекл. номера - находки в «Проблемы»
     w3c_check: dict = None,        # валидация W3C + скорость (п.1.16) - лист «Валидация и скорость»
+    ssl_check: dict = None,        # SSL-сертификаты хостов - находки в «Проблемы», раздел «Безопасность»
     p404_check: dict = None,       # страница 404 (п.1.18) - лист «Страница 404»
     ps_filters: dict = None,       # фильтры ПС (п.1.19) - лист «Фильтры ПС»
     search_check: dict = None,     # поиск находит категории - секция «Вёрстки»
@@ -3220,6 +3222,7 @@ def build_report(
                 + ps_filters_findings(ps_filters)
                 + service_issues_findings(service_issues)
                 + w3c_findings(w3c_check)
+                + ssl_findings(ssl_check)
                 # Тоже бывшие секции «Технички»: ЧПУ-адреса (строка на адрес),
                 # гигиена robots.txt и разделы «Отгрузки»/новости. Как и
                 # прочие сайт-уровневые - только в «Проблемы», в «План работ»

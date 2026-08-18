@@ -964,6 +964,31 @@ def run_check(pid, params, creds, log, progress):
         if _sec_bad:
             log(f'Заголовки безопасности: страниц с ошибками {_sec_bad}')
 
+        # ── SSL-сертификат (чек-лист) ──
+        # Сертификат один на хост - проверяем ПО ХОСТАМ прогона, не по
+        # страницам. Идёт под той же галочкой, что заголовки безопасности.
+        _ssl_check = None
+        if params.get('check_security', True):
+            try:
+                from ssl_checker import check_ssl
+                _хосты = list(dict.fromkeys(
+                    s.host for s in (plan.selected_subdomains or []) if s.host))
+                _ssl_check = {'hosts': [check_ssl(h) for h in _хосты]}
+                for _h in _ssl_check['hosts']:
+                    if _h.get('error'):
+                        log(f'⚠ SSL {_h["host"]}: не проверить ({_h["error"]})')
+                        continue
+                    for _t in _h.get('issues') or []:
+                        log(f'❌ SSL {_h["host"]}: {_t}')
+                    for _t in _h.get('warnings') or []:
+                        log(f'⚠ SSL {_h["host"]}: {_t}')
+                    if not (_h.get('issues') or _h.get('warnings')):
+                        log(f'SSL {_h["host"]}: в порядке'
+                            + (f', до истечения {_h["days_left"]} дн.'
+                               if _h.get('days_left') is not None else ''))
+            except Exception as _e:  # noqa: BLE001
+                log(f'⚠ SSL-сертификат: {_e}')
+
         # ── Индексация (п.1.7): кросс-проверка sitemap ↔ robots.txt ──
         # Все известные пути каталога (категории/фильтры/товары) прогоняем
         # через robots главного домена: путь в sitemap = «хочу в индекс»,
@@ -2117,7 +2142,8 @@ def run_check(pid, params, creds, log, progress):
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,
             calltracking_check=_calltracking_check,
-            w3c_check=_w3c_check, p404_check=_p404_check,
+            w3c_check=_w3c_check, ssl_check=_ssl_check,
+            p404_check=_p404_check,
             ps_filters=_ps_filters, search_check=_search_check,
             index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile,

@@ -12,10 +12,10 @@ http_checker.py - асинхронная проверка URL'ов.
   Если задана переменная окружения HTTP_PROXY (или передан proxy_url),
   все запросы идут через неё. Без прокси приложение работает локально как раньше.
 
-Оценка скорости (Google Core Web Vitals):
-  < 2.5с  → fast      (ОК)
-  2.5-4с  → normal    (ОК)
-  4-8с    → slow      (Медленно)
+Оценка скорости ответа документа (по чек-листу):
+  < 1с    → fast      (ОК)
+  1-2.5с  → normal    (предупреждение, не ошибка)
+  2.5-8с  → slow      (Медленно)
   > 8с    → very_slow (Долгий ответ сервера)
 """
 import asyncio
@@ -45,6 +45,13 @@ class STATUS:
     TIMEOUT = 'timeout'
     NETWORK = 'network_error'
     CANCELLED = 'cancelled'
+
+
+# Пороги скорости ответа документа (чек-лист). Держим константами: их читает
+# и оценка страницы, и вывод находок в отчёт - разъехаться не должны.
+SPEED_FAST_MS = 1000        # быстрее - норма
+SPEED_WARN_MS = 2500        # до этого - предупреждение, дальше - ошибка
+SPEED_VERY_SLOW_MS = 8000   # дальше - «долгий ответ сервера», критично
 
 
 class SPEED:
@@ -99,14 +106,21 @@ def make_browser_headers(user_agent: str = DEFAULT_USER_AGENT,
 
 
 def rate_speed(elapsed_ms: Optional[int]) -> Optional[str]:
-    """Оценить скорость по времени ответа."""
+    """Оценить скорость по времени ответа документа.
+
+    Пороги по чек-листу (строже Core Web Vitals, которые были раньше):
+      < 1с    → fast      норма
+      1-2.5с  → normal    предупреждение, но не ошибка
+      2.5-8с  → slow      медленно, чинить
+      > 8с    → very_slow долгий ответ сервера (критично, отдельный вердикт)
+    """
     if elapsed_ms is None:
         return None
-    if elapsed_ms < 2500:
+    if elapsed_ms < SPEED_FAST_MS:
         return SPEED.FAST
-    if elapsed_ms < 4000:
+    if elapsed_ms < SPEED_WARN_MS:
         return SPEED.NORMAL
-    if elapsed_ms < 8000:
+    if elapsed_ms < SPEED_VERY_SLOW_MS:
         return SPEED.SLOW
     return SPEED.VERY_SLOW
 

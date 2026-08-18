@@ -53,11 +53,12 @@ def test_should_retry():
 
 
 def test_rate_speed():
-    assert rate_speed(1000) == SPEED.FAST
-    assert rate_speed(2499) == SPEED.FAST
-    assert rate_speed(2500) == SPEED.NORMAL
-    assert rate_speed(3999) == SPEED.NORMAL
-    assert rate_speed(4000) == SPEED.SLOW
+    """Пороги по чек-листу: до 1с норма, до 2.5с предупреждение, дальше чинить.
+    Раньше были мягче (fast до 2.5с) - подробнее в test_speed_and_ssl.py."""
+    assert rate_speed(999) == SPEED.FAST
+    assert rate_speed(1000) == SPEED.NORMAL
+    assert rate_speed(2499) == SPEED.NORMAL
+    assert rate_speed(2500) == SPEED.SLOW
     assert rate_speed(7999) == SPEED.SLOW
     assert rate_speed(8000) == SPEED.VERY_SLOW
     assert rate_speed(20000) == SPEED.VERY_SLOW
