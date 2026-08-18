@@ -352,6 +352,15 @@ _FIELD_RULES = {
                     'rec': [('превью', ('thumbnailUrl',)),
                             ('описание', ('description',))]},
     'FAQPage': {'req': [('вопросы-ответы', ('mainEntity',))], 'rec': []},
+    # Отзывы: без автора и оценки поиск звёзды не покажет, без даты - не
+    # поймёт свежесть. Текст отзыва желателен.
+    'Review': {'req': [('автор', ('author',)),
+                       ('оценка', ('reviewRating', 'ratingValue'))],
+               'rec': [('дата', ('datePublished', 'dateCreated')),
+                       ('текст отзыва', ('reviewBody', 'description'))]},
+    'AggregateRating': {'req': [('оценка', ('ratingValue',)),
+                                ('число отзывов', ('reviewCount', 'ratingCount'))],
+                        'rec': []},
 }
 
 # Видео на странице: свой <video> или встроенный плеер видеохостинга.
@@ -364,6 +373,122 @@ _RE_FAQ_CONTENT = re.compile(
     r'class\s*=\s*["\'][^"\']*\bfaq\b'
     r'|часто\s+задаваемые\s+вопросы|вопрос[\s-]*ответ|вопросы\s+и\s+ответы',
     re.I)
+
+
+# ── Отзывы на карточке товара (чек-лист) ────────────────────────────
+# Блок отзывов на товаре нужен и покупателю, и сниппету (звёзды в выдаче).
+# Проверяем три вещи: блок есть, он размечен, и разметка правдоподобна.
+#
+# Про «правдоподобие». Отзывы на таких сайтах генерируются, и это нормально -
+# но сгенерированные наспех видно сразу: одна дата у всех, один автор, у всех
+# пятёрки. Такую разметку поисковики наказывают ручными мерами, то есть это
+# вредит клиенту. Проверяем именно ЭТО, а не «насколько похоже на Фламп».
+
+_RE_REVIEW_TEXT_BLOCK = re.compile(
+    r'отзывы\s+(?:клиентов|покупателей|наших|о\s)', re.I)
+_REVIEW_MIN = 3          # меньше отзывов - о разбросе судить нельзя
+_REVIEW_SHORT = 25       # короче - отзыв «ни о чём», символов
+
+
+def _prop_str(props: dict, *names) -> str:
+    """Первое непустое строковое значение свойства объекта."""
+    for n in names:
+        for v in (props or {}).get(n) or []:
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+            if isinstance(v, dict):
+                # вложенный объект: Person → name, Rating → ratingValue
+                for k in ('name', 'ratingValue', 'value'):
+                    for vv in v.get('props', {}).get(k, []) if 'props' in v \
+                            else ([v.get(k)] if v.get(k) else []):
+                        if isinstance(vv, str) and vv.strip():
+                            return vv.strip()
+    return ''
+
+
+def collect_reviews(objs: list) -> list:
+    """Объекты Review → [{'author', 'rating', 'date', 'body'}].
+    ЧИСТАЯ функция - есть юнит-тест."""
+    out = []
+    for o in objs or []:
+        if (o.get('type') or '') != 'Review':
+            continue
+        p = o.get('props') or {}
+        out.append({
+            'author': _prop_str(p, 'author'),
+            'rating': _prop_str(p, 'reviewRating', 'ratingValue'),
+            'date': _prop_str(p, 'datePublished', 'dateCreated')[:10],
+            'body': _prop_str(p, 'reviewBody', 'description'),
+        })
+    return out
+
+
+def check_reviews_plausible(reviews: list) -> list:
+    """Признаки наспех сгенерированных отзывов. → список предупреждений.
+
+    Судим только когда отзывов достаточно (_REVIEW_MIN): на двух отзывах
+    «одинаковая дата» ничего не значит.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    out = []
+    n = len(reviews or [])
+    if n < _REVIEW_MIN:
+        return out
+
+    даты = [r.get('date') for r in reviews if r.get('date')]
+    if not даты:
+        out.append('у отзывов не проставлены даты - поиск не покажет их '
+                   'свежесть')
+    elif len(set(даты)) == 1 and len(даты) == n:
+        out.append('все отзывы с одной датой - выглядит как разовая '
+                   'генерация, поисковики за такое наказывают')
+
+    авторы = [r.get('author') for r in reviews if r.get('author')]
+    if not авторы:
+        out.append('у отзывов не указаны авторы - разметка неполная и '
+                   'недостоверная')
+    elif len(set(авторы)) == 1 and len(авторы) == n:
+        out.append('все отзывы от одного автора')
+
+    оценки = [r.get('rating') for r in reviews if r.get('rating')]
+    if оценки and len(set(оценки)) == 1 and len(оценки) == n and n >= 5:
+        out.append(f'у всех отзывов одинаковая оценка ({оценки[0]}) - '
+                   f'разброс выглядит естественнее')
+
+    короткие = sum(1 for r in reviews
+                   if len((r.get('body') or '').strip()) < _REVIEW_SHORT)
+    if короткие == n:
+        out.append('тексты отзывов слишком короткие - пользы покупателю нет')
+    return out
+
+
+def check_product_reviews(html: str, objs: list) -> tuple:
+    """Отзывы на карточке товара: есть ли блок, размечен ли, правдоподобен ли.
+    → (issues, warnings)."""
+    issues, warnings = [], []
+    reviews = collect_reviews(objs)
+    есть_агрегат = any((o.get('type') or '') == 'AggregateRating'
+                       for o in objs or [])
+    текстовый_блок = bool(_RE_REVIEW_TEXT_BLOCK.search(html or ''))
+
+    if not reviews and not есть_агрегат:
+        if текстовый_блок:
+            warnings.append('блок отзывов на товаре не размечен '
+                            '(schema.org/Review) - звёзды в сниппете не появятся')
+        else:
+            warnings.append('на карточке товара нет блока отзывов')
+        return issues, warnings
+
+    if есть_агрегат and not reviews:
+        # Звёзды в сниппете есть, а отзывов, из которых они складываются, нет.
+        # Google прямо считает это накруткой рейтинга и снимает сниппет.
+        warnings.append('на товаре есть сводная оценка (AggregateRating), но '
+                        'нет самих отзывов (Review) - поиск считает это '
+                        'накруткой звёзд')
+    if reviews and not есть_агрегат:
+        warnings.append('у отзывов нет сводной оценки '
+                        '(schema.org/AggregateRating)')
+    warnings.extend(check_reviews_plausible(reviews))
+    return issues, warnings
 
 
 def _validate_fields(html: str):
@@ -469,6 +594,12 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
         if 'price' not in props and not (micro | ld) & _PRICE_TYPES:
             warnings.append('цена не размечена (Offer/PriceSpecification) - '
                             'норма для «цены по запросу»')
+        # ── Отзывы на карточке: блок, разметка, правдоподобие ──
+        _rv_i, _rv_w = check_product_reviews(
+            html, list(_walk_objects(_microdata_objects(html)))
+            + list(_walk_objects(_jsonld_objects(html))))
+        issues.extend(_rv_i)
+        warnings.extend(_rv_w)
 
     # ── Условные типы: требуем разметку, только когда сам контент есть ──
     # Видео на странице (свой <video> / встроенный плеер) → VideoObject.
