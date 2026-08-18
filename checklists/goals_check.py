@@ -33,6 +33,7 @@ PROJECTS = {
     # Стенд закрыт паролем: логин/пароль спрашиваем блоком «Вход на закрытый
     # сайт» ниже и передаём движку через окружение.
     'mpinew': 'МПИ - новый прод',
+    'mpk': 'МПК - Метпромко',
 }
 
 # Внутри проекта - выбор страны/сайта; значение = код каталога goals-<pid>.json.
@@ -75,6 +76,19 @@ PROJECTS = {
         ('avia-kg', 'Кыргызстан · aviastal.kg'),
         ('avia-kz', 'Казахстан · aviastal.kz'),
         ('avia-rb', 'Беларусь · aviastal.by'),
+    ],
+    # МПК - свой счётчик на каждый доменный сайт. У пяти страновых счётчиков
+    # заведены ТОЛЬКО автоцели Метрики (клики по телефону/почте/мессенджерам,
+    # отправка формы) - проверять извне там нечего, поэтому по умолчанию они
+    # сняты (см. _есть_проверяемые), но выбрать их можно.
+    'mpk': [
+        ('mpk',    'Россия · metpromko.ru'),
+        ('mpk-kz', 'Казахстан · metpromko.kz'),
+        ('mpk-rb', 'Беларусь · metpromko.by'),
+        ('mpk-kg', 'Кыргызстан · metpromko.kg'),
+        ('mpk-uz', 'Узбекистан · metpromko.uz'),
+        ('mpk-az', 'Азербайджан · metpromko.az'),
+        ('mpk-am', 'Армения · metpromko.am'),
     ],
 }
 
@@ -145,6 +159,25 @@ _tpl.render_panel(
 _варианты = СТРАНЫ.get(_base, [(_base, PROJECTS[_base])])
 
 
+def _метрика_токен(pid: str) -> str:
+    """OAuth-токен Метрики проекта: «Настройки проекта» (БД) → секрет
+    metrika_oauth_<pid> → общий metrika_oauth. Тот же порядок, что у чек-листа."""
+    try:
+        import auth as _a
+        v = _a.project_setting(pid, 'metrika_oauth')
+        if v:
+            return v
+    except Exception:
+        pass
+    for key in (f'metrika_oauth_{pid}', 'metrika_oauth'):
+        try:
+            if hasattr(st, 'secrets') and key in st.secrets:
+                return st.secrets[key]
+        except Exception:
+            pass
+    return ''
+
+
 def _load_cat(pid):
     f = ROOT / 'catalogs' / f'goals-{pid}.json'
     if f.is_file():
@@ -166,6 +199,19 @@ def _домен_ок(pid):
     return bool(c and (c.get('домен') or '').strip())
 
 
+def _есть_проверяемые(pid) -> bool:
+    """Есть ли у сайта цели, которые вообще можно проверить снаружи (js/url).
+
+    У части страновых счётчиков (напр. МПК .by/.kg/.uz/.az/.am) заведены ТОЛЬКО
+    автоцели Метрики - клики по телефону/почте/мессенджерам, отправка формы.
+    Их Яндекс считает сам на сервере, отдельного сигнала в трафике нет, и лист
+    отчёта по такому сайту вышел бы пустым. Поэтому по умолчанию такие сайты
+    не отмечаем - выбрать вручную по-прежнему можно."""
+    c = _cats.get(pid) or {}
+    return any(str(g.get('тип', '')).startswith(('js', 'url'))
+               for g in c.get('цели', []))
+
+
 # ── Выбор сайтов/стран галочками (как на «Проверке форм») ────────────
 st.subheader('Сайты / страны')
 st.caption('По умолчанию отмечены все доступные. Проверка пройдёт по каждому '
@@ -181,7 +227,7 @@ def _ck(pid):
 if st.session_state.get('gc_last_base') != _base:
     st.session_state['gc_last_base'] = _base
     for p, _ in _варианты:
-        st.session_state[_ck(p)] = _домен_ок(p)
+        st.session_state[_ck(p)] = _домен_ок(p) and _есть_проверяемые(p)
 
 _доступные = [p for p, _ in _варианты if _домен_ок(p)]
 _all_on = all(st.session_state.get(_ck(p), False) for p in _доступные)
@@ -199,7 +245,18 @@ with _left:
         _ok = _домен_ок(p)
         c = _cats.get(p)
         _n = len(c.get('цели', [])) if c else 0
-        _lbl = f'{label}  ·  целей {_n}' + ('' if _ok else '  ·  домен уточняется')
+        # Показываем не только «сколько целей всего», но и сколько из них
+        # реально проверяемых: сайт с одними автоцелями иначе выглядит
+        # полноценным, а лист отчёта по нему выйдет пустым.
+        _n_ок = sum(1 for g in (c or {}).get('цели', [])
+                    if str(g.get('тип', '')).startswith(('js', 'url')))
+        _lbl = f'{label}  ·  целей {_n}'
+        if _ok and not _n_ок:
+            _lbl += '  ·  только автоцели Метрики - проверять нечего'
+        elif _ok and _n_ок < _n:
+            _lbl += f' (проверяемых {_n_ок})'
+        if not _ok:
+            _lbl += '  ·  домен уточняется'
         if st.checkbox(_lbl, key=_ck(p), disabled=not _ok) and _ok:
             _selected.append(p)
 _n_sel = len(_selected)
@@ -345,6 +402,12 @@ with c1:
         # Вход на закрытый сайт: и браузеру целей (http_credentials), и догрузке
         # JS того же домена (см. goals_tester._basic_auth_from_env).
         env.update(_site_env)
+        # Токен Метрики: прогон перечитывает цели ЖИВЬЁМ из API (management/v1),
+        # а не из снапшота каталога. Берём его там же, где остальные проверки -
+        # «Настройки проекта» → секрет metrika_oauth_<pid> → общий metrika_oauth.
+        _mt_token = _метрика_токен(_base)
+        if _mt_token:
+            env['METRIKA_OAUTH'] = _mt_token
         # Telegram: креды берём из секретов (те же, что у еженедельной проверки) и
         # кладём в окружение прогона - goals_run сам отправит сводный отчёт в чат.
         try:
