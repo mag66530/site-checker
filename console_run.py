@@ -48,6 +48,23 @@ WAIT_MS = 2500           # ждать после загрузки (асинхр�
 # Сетка ширин для замера адаптивности: десктоп / планшет (≈zoom 187% на
 # 1440) / мобильный. Мелкий шрифт меряем только на мобильной ширине.
 VIEWPORT_GRID = (1440, 768, 390)
+
+# Пороги читаемости шрифта (чек-лист: ПК ~16px основной текст, ~24px h1-h2,
+# 18-22px h3-h6; мобильные - минимум 14px). Берём с допуском в 1-2px: «~16»
+# на боевых сайтах сплошь и рядом 15px, и жёсткий порог дал бы находку почти
+# везде, не отличая аккуратную вёрстку от мелкого шрифта.
+# 768 - сенсорная ширина, и шрифт там обычно уже «мобильный»: проверено на
+# СМУ, где при сужении текст переходит с 16px на 14px. С порогом ПК это дало
+# бы 500+ находок на страницу на ровном месте, поэтому здесь порог мобильный.
+FONT_MIN = {
+    1440: {'body': 15, 'h12': 22, 'h36': 16},
+    768:  {'body': 14, 'h12': 20, 'h36': 15},
+    390:  {'body': 14, 'h12': 18, 'h36': 14},
+}
+# Доля мелкого текста, с которой это уже проблема шаблона, а не отдельная
+# подпись мелким шрифтом (сноски, копирайт).
+FONT_SMALL_SHARE = 0.2
+FONT_SMALL_MIN = 3
 MOBILE_W = 390
 MENU_PROBE_PAGES = 3     # бургер-меню сквозное - пробуем на первых страницах
 
@@ -482,7 +499,7 @@ def _form_close_probe(page):
 # Замер мобильной вёрстки: мелкий шрифт (<14px) у видимых текстовых
 # элементов + горизонтальный overflow (контент шире экрана).
 _MOBILE_JS = """
-(checkFont) => {
+({checkFont, minBody, minH12, minH36}) => {
   const vw = document.documentElement.clientWidth;
   const overflow = Math.max(
       0, document.documentElement.scrollWidth - vw);
@@ -520,7 +537,9 @@ _MOBILE_JS = """
       if (touchTotal > 1500) break;
     }
   }
-  if (checkFont) {
+  // Шрифт меряем на ЛЮБОЙ ширине: пороги разные (моб. 14px, ПК 15px для
+  // основного текста), для заголовков - свои. checkFont теперь означает
+  // «мерить тач-таргеты» (они имеют смысл только на сенсорных ширинах).
   const els = document.querySelectorAll('p, li, td, th, a, span, button');
   let i = 0;
   for (const el of els) {
@@ -535,12 +554,54 @@ _MOBILE_JS = """
     if (st.display === 'none' || st.visibility === 'hidden') continue;
     const fs = parseFloat(st.fontSize) || 0;
     total++;
-    if (fs && fs < 14) {
+    if (fs && fs < minBody) {
       small++;
       if (smallEx.length < 3)
         smallEx.push(el.textContent.trim().slice(0, 40) + ' - ' + fs + 'px');
     }
   }
+  // Заголовки: h1-h2 крупнее h3-h6, пороги приходят параметром.
+  let headTotal = 0, headSmall = 0;
+  const headEx = [];
+  for (const el of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') continue;
+    const txt = (el.textContent || '').trim();
+    if (txt.length < 3) continue;
+    const fs = parseFloat(st.fontSize) || 0;
+    if (!fs) continue;
+    const need = (el.tagName === 'H1' || el.tagName === 'H2')
+        ? minH12 : minH36;
+    headTotal++;
+    if (fs < need) {
+      headSmall++;
+      if (headEx.length < 3)
+        headEx.push(el.tagName.toLowerCase() + ' «' + txt.slice(0, 30)
+                    + '» - ' + fs + 'px (нужно от ' + need + ')');
+    }
+  }
+  // Меню доступно на этой ширине: видимая навигация ИЛИ кнопка-бургер.
+  // Без этого «адаптивные элементы работают на разных разрешениях» не
+  // проверить: на планшете меню часто прячут и забывают дать бургер.
+  let menuVisible = false;
+  const vis = el => {
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden'
+        || parseFloat(st.opacity || '1') < 0.05) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1;
+  };
+  for (const el of document.querySelectorAll(
+      'header a, nav a, [class*="menu"] a, [class*="nav"] a')) {
+    if (vis(el)) { menuVisible = true; break; }
+  }
+  let burger = false;
+  if (!menuVisible) {
+    for (const el of document.querySelectorAll(
+        'button, [class*="burger"], [class*="hamburger"], [class*="menu-toggle"],'
+        + ' [class*="menu__toggle"], [aria-label*="меню" i], [aria-label*="menu" i]')) {
+      if (vis(el)) { burger = true; break; }
+    }
   }
   const wide = [];
   for (const el of document.querySelectorAll('table, pre, img, iframe')) {
@@ -587,9 +648,69 @@ _MOBILE_JS = """
   return {overflow: Math.round(overflow), total, small,
           small_examples: smallEx, wide, overlaps,
           touch_total: touchTotal, touch_small: touchSmall,
-          touch_examples: touchEx};
+          touch_examples: touchEx,
+          head_total: headTotal, head_small: headSmall, head_examples: headEx,
+          menu_visible: menuVisible, menu_burger: burger};
 }
 """
+
+# ── Навигация с клавиатуры (доступность) ────────────────────────────
+# Жмём Tab и смотрим, куда попадает фокус и ВИДЕН ли он. Человек без мыши
+# ходит по сайту так; если фокус невидим, он не понимает, где находится.
+# Судим мягко: фокус может рисоваться и рамкой, и тенью, и сменой фона.
+
+KEYBOARD_STEPS = 12          # столько раз жмём Tab
+
+_FOCUS_JS = """
+() => {
+  const el = document.activeElement;
+  if (!el || el === document.body || el === document.documentElement)
+    return null;
+  const st = getComputedStyle(el);
+  const r = el.getBoundingClientRect();
+  const outline = st.outlineStyle !== 'none'
+      && parseFloat(st.outlineWidth || '0') > 0;
+  const shadow = (st.boxShadow || 'none') !== 'none';
+  return {
+    tag: el.tagName.toLowerCase(),
+    name: (el.textContent || el.getAttribute('aria-label') || '')
+        .trim().slice(0, 30),
+    interactive: ['a', 'button', 'input', 'select', 'textarea'].includes(
+        el.tagName.toLowerCase()) || el.hasAttribute('tabindex'),
+    visible: r.width > 1 && r.height > 1,
+    focus_seen: outline || shadow,
+  };
+}
+"""
+
+
+def _keyboard_probe(page) -> dict:
+    """Tab-обход: доходит ли фокус до интерактивных элементов и виден ли он.
+    → {'steps', 'interactive', 'no_focus_style', 'examples'} или None."""
+    try:
+        page.evaluate("() => { try { document.activeElement.blur(); } "
+                      "catch (e) {} }")
+        шагов = 0
+        интерактивных = 0
+        без_фокуса = 0
+        примеры = []
+        for _ in range(KEYBOARD_STEPS):
+            page.keyboard.press('Tab')
+            info = page.evaluate(_FOCUS_JS)
+            if not info:
+                continue
+            шагов += 1
+            if info.get('interactive'):
+                интерактивных += 1
+            if not info.get('focus_seen'):
+                без_фокуса += 1
+                if len(примеры) < 3:
+                    примеры.append(f'{info.get("tag")} «{info.get("name")}»')
+        return {'steps': шагов, 'interactive': интерактивных,
+                'no_focus_style': без_фокуса, 'examples': примеры}
+    except Exception:      # noqa: BLE001
+        return None
+
 
 # Шумные сторонние ошибки, которые НЕ вина сайта (аналитика/виджеты/CORS
 # сторонних доменов) - не считаем ошибкой сайта.
@@ -674,6 +795,10 @@ def run(pid: str, urls: list, log) -> dict:
                 a11y = page.evaluate(_A11Y_JS)
             except Exception:
                 a11y = None
+            # Клавиатура - на десктопной ширине, до ресайзов. Только первые
+            # страницы: шаблон сквозной, гонять Tab на каждой ни к чему.
+            if a11y is not None and i <= MENU_PROBE_PAGES:
+                a11y['keyboard'] = _keyboard_probe(page)
             # Адаптивность: страница уже загружена - меняем ширину окна по
             # сетке 1440/768/390 и замеряем на каждой (без повторных визитов).
             mobile = None
@@ -682,7 +807,12 @@ def run(pid: str, urls: list, log) -> dict:
                 for _w in VIEWPORT_GRID:
                     page.set_viewport_size({'width': _w, 'height': 900})
                     page.wait_for_timeout(500)      # reflow
-                    vps[str(_w)] = page.evaluate(_MOBILE_JS, _w == MOBILE_W)
+                    _f = FONT_MIN.get(_w) or FONT_MIN[390]
+                    vps[str(_w)] = page.evaluate(_MOBILE_JS, {
+                        # тач-таргеты меряем на сенсорных ширинах (моб. и планшет)
+                        'checkFont': _w <= 768,
+                        'minBody': _f['body'], 'minH12': _f['h12'],
+                        'minH36': _f['h36']})
                 mobile = dict(vps.get(str(MOBILE_W)) or {})
                 mobile['viewports'] = vps
                 # Бургер-проба (клик вне закрывает меню) - в самом конце:
