@@ -426,6 +426,42 @@ def цель_из_метрики(g: dict) -> dict:
     }
 
 
+def _счётчик_про_этот_сайт(counter, token: str, домен: str,
+                           proxy_url: str | None = None):
+    """Принадлежит ли счётчик ЭТОМУ сайту: True / False / None (не выяснили).
+
+    Страховка перед перезаписью каталога: номер счётчика лежит в снимке и мог
+    устареть (сайт переехал, счётчик пересоздали). Если по номеру ответит чужой
+    сайт, мы бы молча заменили цели проекта чужими. Сверяем хост сайта счётчика
+    (и его зеркал) с доменом каталога; None - если API не ответил, тогда решает
+    вызывающий (мы в таком случае обновление НЕ блокируем)."""
+    хост = re.sub(r'^https?://', '', (домен or '')).strip('/').lower()
+    if not хост or not counter or not token:
+        return None
+    try:
+        import requests
+        r = requests.get(
+            f'https://api-metrika.yandex.net/management/v1/counter/{counter}',
+            headers={'Authorization': f'OAuth {token}'},
+            params={'field': 'site,mirrors2'},
+            proxies={'http': proxy_url, 'https': proxy_url} if proxy_url else None,
+            timeout=30)
+        if r.status_code != 200:
+            return None
+        c = (r.json() or {}).get('counter', {}) or {}
+    except Exception:  # noqa: BLE001
+        return None
+    сайты = [c.get('site') or '']
+    сайты += (c.get('site2') or {}).get('mirrors2') or []
+    сайты = [re.sub(r'^https?://', '', str(s)).strip('/').lower().replace('www.', '')
+             for s in сайты if s]
+    if not сайты:
+        return None
+    гол = хост.replace('www.', '')
+    return any(s == гол or s.endswith('.' + гол) or гол.endswith('.' + s)
+               for s in сайты)
+
+
 def каталог_из_метрики(pid: str, token: str, counter=None, проект: str = '',
                        домен: str = '', proxy_url: str | None = None,
                        log=None) -> tuple[bool, str]:
@@ -444,6 +480,12 @@ def каталог_из_метрики(pid: str, token: str, counter=None, пр�
     if not counter:
         return False, 'не задан счётчик Метрики'
 
+    # Страховка: счётчик из снимка мог устареть - не подменяем цели чужими.
+    _свой = _счётчик_про_этот_сайт(counter, token, домен, proxy_url)
+    if _свой is False:
+        return False, (f'счётчик {counter} принадлежит другому сайту - каталог '
+                       f'не трогаю, проверьте номер счётчика проекта')
+
     import metrika_api
     goals = metrika_api.counter_goals(counter, token, proxy_url=proxy_url)
     if goals is None:
@@ -458,6 +500,25 @@ def каталог_из_метрики(pid: str, token: str, counter=None, пр�
         'источник': 'API Метрики (management/v1/goals)',
         'цели': [цель_из_метрики(g) for g in goals],
     }
+    # РУЧНЫЕ пометки старого каталога переносим по номеру цели. Из API их не
+    # вывести, а потеря меняет вердикт:
+    #   • тип 'jivo' (СМУ, АПС) - события чата шлёт оператор, проверяются только
+    #     вручную; из API такая цель приходит обычным action и стала бы «js»,
+    #     то есть красным «не сработала» в каждом прогоне;
+    #   • флаг 'форма' (SHOPMET) - цель-конструктор Метрики: своего reachGoal у
+    #     неё нет, засчитывается по факту отправки формы.
+    _ручные = {str(g.get('номер')): g for g in (старый.get('цели') or [])}
+    _перенесено = 0
+    for g in каталог['цели']:
+        s = _ручные.get(g['номер'])
+        if not s:
+            continue
+        if s.get('тип') == 'jivo':
+            g['тип'] = 'jivo'
+            _перенесено += 1
+        if s.get('форма'):
+            g['форма'] = True
+            _перенесено += 1
     # Ранее исключённые цели переносим как есть: решение «эту не проверяем»
     # принято человеком и не должно теряться при каждом обновлении из API.
     исключены = старый.get('исключены') or []
@@ -474,6 +535,8 @@ def каталог_из_метрики(pid: str, token: str, counter=None, пр�
     url = sum(1 for g in каталог['цели'] if g['тип'].startswith('url'))
     сообщение = (f'{len(каталог["цели"])} целей (js {js}, url {url}, '
                  f'авто {len(каталог["цели"]) - js - url})')
+    if _перенесено:
+        сообщение += f'; ручных пометок перенесено: {_перенесено}'
     if log:
         log(f'Цели {pid}: обновлены из API Метрики - {сообщение}')
     return True, сообщение
