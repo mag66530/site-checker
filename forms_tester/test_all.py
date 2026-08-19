@@ -5586,6 +5586,34 @@ def _label_has_policy_link(locator) -> bool:
 
 def _click_checkbox_via_label_or_js(box, page):
     """Ставит галочку на input; не кликает по label, если внутри ссылка (иначе откроется политика)."""
+    # Уже отмечен - НЕ ТРОГАЕМ. Клик по label такую галочку СНИМЕТ, и форма
+    # перестанет отправляться. Часть вызовов сюда приходит без проверки
+    # (обязательные чекбоксы), а на сайтах бывает предустановленное согласие -
+    # без этой строки правка ниже ломала бы им отправку.
+    try:
+        if box.is_checked():
+            return
+    except Exception:
+        pass
+    # СНАЧАЛА клик по своей подписи (label вокруг input). Так делает человек, и
+    # только так обновляется состояние у форм на React: там input управляемый
+    # (opacity:0 внутри label), и программное checked=true форма не видит -
+    # валидация продолжает требовать согласие. Поймано на met-trans.am: все
+    # шесть форм упирались в «Необходимо принять согласие на обработку». Если
+    # внутри label ссылка на политику - не кликаем, иначе уйдём на её страницу.
+    try:
+        if box.evaluate(
+            """el => {
+            const lab = el.closest('label');
+            if (!lab) return false;
+            if (lab.querySelector('a[href]')) return false;
+            lab.click();
+            return true;
+        }"""
+        ) and box.is_checked():
+            return
+    except Exception:
+        pass
     try:
         box.scroll_into_view_if_needed()
         box.check(force=True, timeout=8000)
@@ -11558,7 +11586,31 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                                 _on_resp = None
                         try:
                             _to = 6000 if _необяз else 15000
-                            page.locator(css_norm).first.click(timeout=_to)
+                            try:
+                                page.locator(css_norm).first.click(timeout=_to)
+                            except Exception as _e_обычный:  # noqa: BLE001
+                                # Кнопка есть и ВИДИМА, но обычный клик не проходит:
+                                # её перекрывает ДЕКОР (у МТТ поверх кнопки
+                                # «Отправить заявку» лежит div.triangle__item) или
+                                # она вне вьюпорта из-за липкой вёрстки, и
+                                # scroll_into_view не помогает. Тогда кликаем из
+                                # самой страницы - для посетителя это тот же клик
+                                # по той же кнопке.
+                                #
+                                # ТОЛЬКО для видимого элемента: если он скрыт
+                                # (нет вовсе, display:none, спрятан за модалкой -
+                                # напр. попап города поверх страницы), клик из
+                                # кода нажал бы то, что посетителю недоступно, и
+                                # прогон пошёл бы по невозможному пути. В этом
+                                # случае ведём себя как раньше - роняем шаг.
+                                _эл = page.locator(css_norm).first
+                                if not _эл.count() or not _эл.evaluate(
+                                        'el => el.offsetParent !== null'):
+                                    raise
+                                _эл.evaluate('el => el.click()')
+                                print(f'   ↪ Шаг {i + 1}: обычный клик не прошёл '
+                                      f'({type(_e_обычный).__name__}), кликнул из '
+                                      f'страницы (кнопку перекрывает вёрстка)')
                             # Запомнить последний успешный клик: если следующий шаг
                             # «форма» не найдёт форму (AJAX-попап не долетел - сайт
                             # иногда сбрасывает соединение), обработчик формы
