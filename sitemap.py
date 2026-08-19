@@ -236,6 +236,11 @@ async def load_product_pathnames(
     known_cats = set(known_category_paths or [])
     known_filters = set(known_filter_paths or [])
 
+    # steelborg.ru: товарные страницы живут под /product/<категория>/<товар>/,
+    # ОТДЕЛЬНО от /catalog/ (там только категории) - для остальных проектов
+    # префикс не меняем.
+    product_prefix = '/product/' if project.get('id') == 'stb' else '/catalog/'
+
     products = []
     for p in all_paths:
         # Исключаем известные категории и фильтры
@@ -246,7 +251,7 @@ async def load_product_pathnames(
         # /filter/ в пути - явный фильтр
         if '/filter/' in p:
             continue
-        if not p.startswith('/catalog/'):
+        if not p.startswith(product_prefix):
             continue
 
         # Минимум 3 сегмента: /catalog/<категория>/<товар>/
