@@ -59,11 +59,11 @@ def test_капча_это_предупреждение_а_не_крест():
             < паттерны.index('ошибк'))
 
 
-def test_конфиг_армении_помнит_про_капчу():
+def test_конфиг_мтт_помнит_про_капчу():
     """Чтобы через месяц не начать чинить «неработающие формы» заново."""
     from pathlib import Path
     p = (Path(__file__).parent.parent / 'forms_tester' / 'projects'
-         / 'mtt_am' / 'config.py')
+         / 'mtt' / 'config.py')
     текст = p.read_text(encoding='utf-8')
     assert 'SmartCaptcha' in текст
-    assert 'вручную формы' in текст.lower() or 'вручную' in текст
+    assert 'вручную' in текст.lower()
