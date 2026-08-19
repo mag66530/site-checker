@@ -94,6 +94,62 @@ def test_обновление_переживает_недоступный_api(mo
     assert ok is False and 'API' in msg
 
 
+def test_ручные_пометки_переживают_обновление(monkeypatch, tmp_path):
+    """Тип «jivo» (СМУ/АПС) и флаг «форма» (SHOPMET) из API не выводятся, а
+    теряются - меняют вердикт: чат стал бы обычной js-целью и краснел бы каждый
+    прогон, а цель-конструктор Метрики требовала бы reachGoal, которого нет."""
+    import metrika_api
+    каталоги = tmp_path / 'catalogs'
+    каталоги.mkdir()
+    monkeypatch.setattr(G, 'CATALOGS', каталоги)
+    monkeypatch.setattr(G, '_счётчик_про_этот_сайт', lambda *a, **k: None)
+    (каталоги / 'goals-test.json').write_text(json.dumps({
+        'проект': 'Тест', 'счётчик': 1, 'домен': 'https://x.ru', 'цели': [
+            {'номер': '10', 'название': 'Чат', 'условие': '', 'тип': 'jivo',
+             'идентификаторы': ['jivo_chat'], 'содержит': False, 'url_часть': ''},
+            {'номер': '20', 'название': 'Отправка формы', 'условие': 'форма',
+             'тип': 'auto', 'идентификаторы': [], 'содержит': False,
+             'url_часть': '', 'форма': True}]}, ensure_ascii=False),
+        encoding='utf-8')
+    monkeypatch.setattr(metrika_api, 'counter_goals', lambda *a, **k: [
+        {'id': 10, 'name': 'Чат', 'type': 'action',
+         'conditions': [{'type': 'exact', 'url': 'jivo_chat'}]},
+        {'id': 20, 'name': 'Отправка формы', 'type': 'form', 'conditions': []},
+    ])
+
+    ok, msg = G.каталог_из_метрики('test', 'токен')
+    assert ok, msg
+    цели = {g['номер']: g for g in json.loads(
+        (каталоги / 'goals-test.json').read_text(encoding='utf-8'))['цели']}
+    assert цели['10']['тип'] == 'jivo'      # не стал обычной js-целью
+    assert цели['20'].get('форма') is True
+    assert 'ручных пометок' in msg
+
+
+def test_чужой_счётчик_не_подменяет_каталог(monkeypatch, tmp_path):
+    """Номер счётчика лежит в снимке и мог устареть. Если по нему отвечает другой
+    сайт - каталог не трогаем, иначе цели проекта молча заменятся чужими."""
+    import metrika_api
+    каталоги = tmp_path / 'catalogs'
+    каталоги.mkdir()
+    monkeypatch.setattr(G, 'CATALOGS', каталоги)
+    (каталоги / 'goals-test.json').write_text(json.dumps({
+        'проект': 'Тест', 'счётчик': 1, 'домен': 'https://x.ru',
+        'цели': [{'номер': '1', 'название': 'Своя', 'условие': '', 'тип': 'js',
+                  'идентификаторы': ['a'], 'содержит': False, 'url_часть': ''}]},
+        ensure_ascii=False), encoding='utf-8')
+    monkeypatch.setattr(G, '_счётчик_про_этот_сайт', lambda *a, **k: False)
+    monkeypatch.setattr(metrika_api, 'counter_goals',
+                        lambda *a, **k: [{'id': 99, 'name': 'Чужая',
+                                          'type': 'action', 'conditions': []}])
+
+    ok, msg = G.каталог_из_метрики('test', 'токен')
+    assert ok is False and 'другому сайту' in msg
+    цели = json.loads((каталоги / 'goals-test.json').read_text(
+        encoding='utf-8'))['цели']
+    assert [g['название'] for g in цели] == ['Своя']
+
+
 def test_исключённые_цели_переживают_обновление(monkeypatch, tmp_path):
     """Решение «эту цель не проверяем» принято человеком (у МПИ так убраны две
     старые цели) и не должно возвращаться при каждом обновлении из API."""

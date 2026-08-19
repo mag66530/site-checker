@@ -10,7 +10,7 @@
   "mandatory_city": "Москва",
   "catalog_path": "",
   "trailing_slash": false,
-  "has_filters": false,
+  "has_filters": true,
   "use_proxy": false,
   "kp_sheet_url": "https://docs.google.com/spreadsheets/d/1gwmIDbblsQymBS-qHvPkS-cGqDO1g85zMDyVxmioBaE/edit?gid=1693940328#gid=1693940328"
 }

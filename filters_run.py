@@ -17,7 +17,9 @@ catalogs/filters-<pid>.json:
           "filter": ".filter-block input[type=checkbox]",  // что кликнуть
           "apply":  ".filter-submit",         // кнопка «Показать» (null = AJAX)
           "wait_ms": 2500,                     // ждать после применения
-          "total":  ".found-count"             // опц.: элемент «найдено N товаров»
+          "total":  ".found-count",            // опц.: элемент «найдено N товаров»
+          "открыть": ".param-button",          // опц.: клик ПЕРЕД поиском значений
+          "open_wait_ms": 1000                 //       (параметры в выпадашке)
         }
       ]
     }
@@ -260,9 +262,16 @@ def _clicked_label(page, idx, filt) -> str:
         return ''
 
 
-def _apply_filter(page, idx, filt, apply_sel, wait_ms, pre_apply_ms):
+def _apply_filter(page, idx, filt, apply_sel, wait_ms, pre_apply_ms,
+                  apply_js: bool = False):
     """Кликнуть значение фильтра #idx и применить (кнопка/AJAX). Возвращает
-    HTTP-код навигации после применения (или None). Ошибки не бросает."""
+    HTTP-код навигации после применения (или None). Ошибки не бросает.
+
+    apply_js - жать кнопку применения из САМОЙ страницы (el.click()). Нужно
+    там, где значения живут в выпадающем попапе (МТТ): попап накрывает кнопку
+    «Подобрать», обычный клик по координатам попадает в него, при этом
+    исключения нет - клик «успешен», а фильтр не применяется, и проверка
+    писала честное, но неверное «не удалось применить»."""
     try:
         _click(page.locator(filt).nth(idx))
     except Exception:
@@ -288,7 +297,10 @@ def _apply_filter(page, idx, filt, apply_sel, wait_ms, pre_apply_ms):
     if apply_sel and page.locator(apply_sel).count():
         try:
             with page.expect_navigation(timeout=wait_ms + 4000):
-                _click(page.locator(apply_sel).first)
+                if apply_js:
+                    page.locator(apply_sel).first.evaluate('el => el.click()')
+                else:
+                    _click(page.locator(apply_sel).first)
         except Exception:
             pass
     else:
@@ -374,6 +386,17 @@ def run_case(page, case: dict, log) -> dict:
     base_ids = _card_ids(page, used_sel)
     total_before = _read_total(page, total_sel)
 
+    # 2.5. Параметры за выпадающим списком (МТТ: «Подбор по параметрам» -
+    # каждый параметр это кнопка, значения появляются в попапе только после
+    # клика по ней). Без этого клика значений фильтра на странице просто нет и
+    # проверка честно писала бы «селектор фильтра не найден».
+    _открыть = case.get('открыть') or case.get('open')
+    if _открыть:
+        _ош = _click(page.locator(_открыть).first)
+        page.wait_for_timeout(int(case.get('open_wait_ms') or 1000))
+        if _ош:
+            log(f'      ⚠ не удалось открыть параметры фильтра ({_открыть}): {_ош}')
+
     # 3. Фильтр есть?
     try:
         _n_filt = page.locator(filt).count()
@@ -417,6 +440,10 @@ def run_case(page, case: dict, log) -> dict:
                             f'при повторном открытии')
                     break
                 page.wait_for_timeout(1500)
+                # Попап параметров после перезагрузки снова закрыт - открываем.
+                if _открыть:
+                    _click(page.locator(_открыть).first)
+                    page.wait_for_timeout(int(case.get('open_wait_ms') or 1000))
             except Exception:
                 break
         _tries = attempt + 1
@@ -424,7 +451,10 @@ def run_case(page, case: dict, log) -> dict:
         if _lbl:
             _clicked.append(_lbl)
         _url_before = page.url
-        nav_code = _apply_filter(page, idx, filt, apply_sel, wait_ms, _pre)
+        # Значения за попапом («открыть») - кнопку применения жмём из страницы:
+        # попап накрывает её, и обычный клик молча уходит в попап.
+        nav_code = _apply_filter(page, idx, filt, apply_sel, wait_ms, _pre,
+                                 apply_js=bool(_открыть))
         if nav_code and nav_code >= 400:
             _hint = ' – отфильтрованной страницы нет (404)' if nav_code == 404 else ''
             last = ('http_error', f'после применения фильтра HTTP {nav_code}{_hint}')
