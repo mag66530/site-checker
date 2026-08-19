@@ -1500,8 +1500,21 @@ def run_check(pid, params, creds, log, progress):
         # подкатегории, фильтровать нечего) и НЕ карточки товаров.
         _filters_test = None
         if params.get('check_filter_fn'):
+            # У части проектов фильтр живёт НЕ на разделе, а на странице
+            # типоразмеров (у нас это тип «товар»): МТТ - раздел там просто
+            # список подразделов, карточек и фильтра на нём нет, и все категории
+            # уходили в «не листинг товаров - пропущено». Откуда брать страницы,
+            # решает ключ «проверять_на» в catalogs/filters-<pid>.json.
+            try:
+                import filters_run as _fr
+                _где = _fr.страницы_проверки(pid)
+            except Exception:  # noqa: BLE001
+                _где = 'категории'
+            _тип = 'product' if _где == 'товары' else 'category'
             _cat_urls = [r.url for r in results if r.is_ok
-                         and r.type_code == 'category']
+                         and r.type_code == _тип]
+            log(f'Фильтр-тест: страницы для проверки - {_где} '
+                f'({len(_cat_urls)} шт.)')
             _filters_test = _run_filters_test(pid, params, log,
                                               category_urls=_cat_urls)
 

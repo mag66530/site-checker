@@ -93,6 +93,25 @@ def _config_path(pid: str) -> Path:
     return CATALOGS / f'filters-{pid}.json'
 
 
+def страницы_проверки(pid: str) -> str:
+    """Где у проекта живёт фильтр: 'категории' (по умолчанию) или 'товары'.
+
+    У МТТ фильтр стоит НЕ на разделах, а на странице типоразмеров (её мы в
+    прогоне зовём товаром): раздел там - просто список подразделов, карточек и
+    фильтра на нём нет. Прогон подставлял в фильтр-тест категории, все они
+    честно уходили в «не листинг товаров - пропущено», и проверка не делала
+    ничего. Ключ «проверять_на» в catalogs/filters-<pid>.json это чинит."""
+    p = _config_path(pid)
+    if not p.exists():
+        return 'категории'
+    try:
+        data = json.loads(p.read_text(encoding='utf-8'))
+    except Exception:
+        return 'категории'
+    v = str(data.get('проверять_на') or data.get('check_on') or '').strip().lower()
+    return 'товары' if v in ('товары', 'товар', 'products', 'product') else 'категории'
+
+
 def load_cases(pid: str) -> list:
     p = _config_path(pid)
     if not p.exists():
@@ -593,17 +612,14 @@ def _expand_cases_for_categories(cases: list, categories: list) -> list:
         if not url or url in seen:
             continue
         seen.add(url)
-        out.append({
-            'name': _cat_name(url),
-            'category': url,
-            'card': tpl.get('card'),
-            'filter': tpl.get('filter'),
-            'apply': tpl.get('apply'),
-            'total': tpl.get('total'),
-            'pre_apply_ms': tpl.get('pre_apply_ms'),
-            'wait_ms': tpl.get('wait_ms'),
-            '_auto': True,     # авто-категория прогона (не из конфига)
-        })
+        # Копируем ВСЕ настройки шаблона, а не перечисленные поимённо: раньше
+        # список ключей был жёстким, и новый «открыть» (параметры за выпадашкой
+        # у МТТ) в авто-кейсы не попадал - попап не открывался, и каждая
+        # страница прогона уходила в «селектор фильтра не найден».
+        кейс = {k: v for k, v in tpl.items() if k not in ('name', 'category')}
+        кейс.update({'name': _cat_name(url), 'category': url,
+                     '_auto': True})     # авто-страница прогона (не из конфига)
+        out.append(кейс)
         if len(out) >= MAX_CATEGORIES:
             break
     return out
