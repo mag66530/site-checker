@@ -24,7 +24,10 @@ from metrika_404 import Report404, Page404
 API_URL = 'https://api-metrika.yandex.net/stat/v1/data'
 COUNTERS_URL = 'https://api-metrika.yandex.net/management/v1/counters'
 
-# Основной счётчик проекта (для совместимости / fallback).
+# Основной счётчик проекта - ЗАПАСНОЙ вариант для проектов, заведённых до
+# «Настроек проекта». Новым проектам сюда ничего не дописываем: счётчики
+# задаются в кабинете полем metrika_counter (можно несколько через запятую -
+# см. _parse_counters), иначе поменять их без правки кода и деплоя нельзя.
 COUNTER_IDS = {
     'mpe': '99551890',
     'smu': '15630172',

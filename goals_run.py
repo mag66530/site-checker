@@ -19,6 +19,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 
+# Проекты, которым сквозной заказ (корзина → оформление) перед целями не нужен.
+# Заказ гоняется РАДИ url-целей («заказ оформлен» / «спасибо»): у МПИ нового
+# прода таких целей нет вовсе - все 128 целей Метрики либо js (reachGoal), либо
+# автоцели. Плюс формы стенда пока отвечают ошибкой, так что заказ только съел
+# бы 3-5 минут прогона и насыпал тестовых заявок. С --with-forms (осознанный
+# полный прогон форм) правило не действует.
+БЕЗ_ЗАКАЗА = {'mpinew'}
+
 
 def _forms_uses_proxy(base: str) -> bool:
     """У проекта форм включён прокси? Такие сайты (напр. ИМП/inmetprom.ru,
@@ -52,9 +60,15 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
     cache/forms/<base>/fired_goals.json - отчёт целей их подхватит."""
     import re
     import json
+    import goals_tester as gt
+    # У части проектов id в «Проверке целей» и в форм-тестере РАЗНЫЕ: цели знают
+    # проект как «sm», а конфиг форм лежит под «shopmet». Без перевода запуск
+    # падал на разборе аргументов («--project sm» форм-тестер не знает), и цели
+    # отправки форм оставались непроверенными.
+    forms_pid = gt._форм_проект(base)
     _что = 'заказ (корзина → оформление)' if only_orders else 'все формы'
-    _stamp(f'ФОРМЫ: запускаю прогон ({_что}) для «{base}» (Москва) - поймать цели')
-    args = [sys.executable, 'forms_run.py', '--project', base, '--no-admin',
+    _stamp(f'ФОРМЫ: запускаю прогон ({_что}) для «{forms_pid}» (Москва) - поймать цели')
+    args = [sys.executable, 'forms_run.py', '--project', forms_pid, '--no-admin',
             '--check-goals']       # цели ловим ЗДЕСЬ (в «Проверке целей»)
     if only_orders:
         args.append('--only-orders')
@@ -62,11 +76,16 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
         args.append('--show-browser')
     _pat1 = re.compile(r'зафиксирована цель [«"]([\w\-.]+)[»"]')
     _pat2 = re.compile(r'Сработала цель:\s*([\w\-.]+)')
+    # События, которые Метрика фиксирует САМА при отправке формы (page-url=
+    # form://). На них держатся цели-конструкторы («Отправка формы») - в коде
+    # сайта у них ничего нет. Форм-движок печатает строку с именем формы.
+    _patf = re.compile(r'Метрика зафиксировала форма(?: на форме [«"]([^»"]+)[»"])?')
     # URL, до которых дошёл прогон форм (переходы + итоговый URL сценария): по ним
     # «Проверка целей» подтверждает url-цели (оформленный заказ / «спасибо»).
     _patu = re.compile(r'(?:URL сценария:|переход →)\s*(https?://\S+)')
     fired: set = set()
     urls: set = set()
+    формы_метрики: set = set()      # формы, чью отправку Метрика зафиксировала
     # Прокси форм-подпроцессу: у «Проверки целей» есть свой прокси прогона
     # (GOALS_PROXY, ставит goals_check из блока «Доступ к сайту»). Форм-движок
     # читает FORMS_PROXY, а не GOALS_PROXY - поэтому для проектов, где формам
@@ -74,7 +93,7 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
     # заказ-сценарий 403-ится, не доходит до /cart/ и корзинные url-цели красные.
     _env = os.environ.copy()
     _gp = (os.environ.get('GOALS_PROXY') or '').strip()
-    if _gp and not _env.get('FORMS_PROXY') and _forms_uses_proxy(base):
+    if _gp and not _env.get('FORMS_PROXY') and _forms_uses_proxy(forms_pid):
         _env['FORMS_PROXY'] = _gp
         _stamp(f'ФОРМЫ: прокси прогона проброшен форм-движку ({_gp.split("@")[-1]})')
     try:
@@ -89,15 +108,21 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
                 fired.add(m.group(1))
             for m in _patu.finditer(line):
                 urls.add(m.group(1).rstrip('.,;'))
+            for m in _patf.finditer(line):
+                формы_метрики.add((m.group(1) or '').strip() or 'без имени')
         proc.wait(timeout=1800)
-        d = ROOT / 'cache' / 'forms' / base
+        # Складываем туда же, откуда отчёт целей их читает (_форм_проект).
+        d = ROOT / 'cache' / 'forms' / forms_pid
         d.mkdir(parents=True, exist_ok=True)
         (d / 'fired_goals.json').write_text(
             json.dumps(sorted(fired), ensure_ascii=False), encoding='utf-8')
         (d / 'fired_urls.json').write_text(
             json.dumps(sorted(urls), ensure_ascii=False), encoding='utf-8')
+        (d / 'metrika_forms.json').write_text(
+            json.dumps(sorted(формы_метрики), ensure_ascii=False), encoding='utf-8')
         _stamp(f'ФОРМЫ: готово (код {proc.returncode}); поймано целей форм: '
-               f'{len(fired)}, URL прогона: {len(urls)}')
+               f'{len(fired)}, URL прогона: {len(urls)}, '
+               f'отправок, зафиксированных Метрикой: {len(формы_метрики)}')
     except Exception as e:  # noqa: BLE001
         _stamp(f'ФОРМЫ: не удалось прогнать ({e}) - продолжаю без них')
 
@@ -105,20 +130,32 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
 _МЕТКИ = {'': 'РФ', 'uz': 'УЗ', 'az': 'АЗ', 'az2': 'АЗ-перевод', 'am': 'АМ',
           'kg': 'КГ', 'kz': 'КЗ', 'rb': 'РБ'}
 
-_ИМЕНА = {'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром', 'mpe': 'МПЭ - Мепэн'}
+_ИМЕНА = {'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром',
+          'mpe': 'МПЭ - Мепэн', 'sm': 'SM - SHOPMET',
+          'mpinew': 'МПИ - новый прод', 'mpk': 'МПК - Метпромко',
+          'mtt': 'МТТ - Меттранстерминал'}
 
 _СТРАНЫ = {'': 'Россия', 'uz': 'Узбекистан', 'az': 'Азербайджан',
            'az2': 'Азербайджан (перевод)', 'am': 'Армения', 'kg': 'Кыргызстан',
            'kz': 'Казахстан', 'rb': 'Беларусь'}
 
+# Проекты БЕЗ деления на страны суффиксом id (smu-rb → РБ). У МПИ нового прода
+# страна зашита в самом проекте: один стенд, Беларусь/Минск. Без этой карты
+# лист отчёта и подпись в Telegram называли бы его «РФ / Россия».
+_СВОЯ_СТРАНА = {'mpinew': ('РБ', 'Беларусь')}
+
 
 def _метка(pid: str) -> str:
+    if pid in _СВОЯ_СТРАНА:
+        return _СВОЯ_СТРАНА[pid][0]
     suf = pid.split('-', 1)[1] if '-' in pid else ''
     return _МЕТКИ.get(suf, suf.upper() or 'РФ')
 
 
 def _страна(pid: str) -> str:
     """Полное название страны сайта (для подписи «Проверено: …» в Telegram)."""
+    if pid in _СВОЯ_СТРАНА:
+        return _СВОЯ_СТРАНА[pid][1]
     suf = pid.split('-', 1)[1] if '-' in pid else ''
     return _СТРАНЫ.get(suf, suf.upper() or 'Россия')
 
@@ -200,6 +237,10 @@ def main() -> int:
         for b in bases:
             if stop and stop():
                 break
+            if b in БЕЗ_ЗАКАЗА and not a.with_forms:
+                _stamp(f'ФОРМЫ: сквозной заказ для «{b}» пропущен - '
+                       f'url-целей у проекта нет, подтверждать заказом нечего')
+                continue
             _прогнать_формы(b, a.show_browser, only_orders=not a.with_forms)
 
     результаты = []
@@ -208,6 +249,16 @@ def main() -> int:
         if stop and stop():
             _stamp('⛔ Остановлено')
             break
+        # Цели читаем ЖИВЬЁМ из API Метрики по токену проекта (страница кладёт
+        # его в окружение). Каталог в репозитории - снапшот на случай, когда
+        # токена/сети нет: тогда идём по нему, как раньше.
+        _mt = (os.environ.get('METRIKA_OAUTH') or '').strip()
+        if _mt:
+            _ok, _msg = gt.каталог_из_метрики(
+                pid, _mt, proxy_url=(os.environ.get('GOALS_PROXY') or '').strip() or None)
+            _stamp(f'Цели {pid}: {"из API Метрики - " + _msg if _ok else "API не дал целей (" + _msg + ") - беру снапшот каталога"}')
+        else:
+            _stamp(f'Цели {pid}: токен Метрики не передан - беру снапшот каталога')
         каталог = gt.загрузить_каталог(pid)
         if not каталог:
             _stamp(f'✗ Нет каталога целей catalogs/goals-{pid}.json')
@@ -233,6 +284,17 @@ def main() -> int:
             import telegram_notify as tn
             import datetime as _dt
             текст = _сводка_для_telegram(base, результаты)
+            # Диск: <Год>/Сайт чекер/<Месяц>/<Дата>/Проверка целей/<файл>.
+            if out.is_file():
+                try:
+                    import drive_reports
+                    _d = drive_reports.upload_from_env(
+                        str(out), 'Проверка целей', log=_stamp)
+                    if _d.get('link'):
+                        текст += (f'\n\n📁 <a href="{_d["link"]}">Отчёт на '
+                                  f'Google Диске</a>')
+                except Exception as _e:  # noqa: BLE001
+                    _stamp(f'⚠ Google Диск: {_e}')
             _дата = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5))).strftime('%d.%m.%Y')
             res = tn.send_report_from_env(
                 project_name=_ИМЕНА.get(base, base.upper()),

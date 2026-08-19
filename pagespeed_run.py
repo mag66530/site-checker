@@ -111,6 +111,7 @@ def _sample_urls(pid: str, per_type: int, want_products: bool) -> list[tuple[str
         products_per_subdomain=per_type,
         check_products=want_products and bool(sources.products),
         trailing_slash=project.get("trailing_slash", True),
+        catalog_path=project.get("catalog_path"),   # '' - раздела нет (АПС)
         seed=_stable_seed(pid),     # стабильная выборка - для сравнения периодов
     )
     return [(t.url, t.type_code) for t in plan.tasks]
@@ -192,8 +193,110 @@ def run(args) -> int:
     _write_last_run(out, pid, project_name, provider.name, run_ts, prev_ts,
                     results, cur_agg, deltas, top_recs, xlsx_name)
 
+    _отправить_отчёт(xlsx_path, xlsx_name, project_name, cur_agg, deltas,
+                     prev_ts, top_recs, _log)
+
     _log("✅ ГОТОВО")
     return 0
+
+
+def _балл(v) -> str:
+    return '—' if v is None else str(int(round(v)))
+
+
+def _дельта(v) -> str:
+    """Δ к прошлому снятию: со знаком, стрелкой и «=» на нуле."""
+    if v is None:
+        return ''
+    d = int(round(v))
+    if d > 0:
+        return f' (▲ +{d})'
+    if d < 0:
+        return f' (▼ {d})'
+    return ' (=)'
+
+
+def _сводка_для_telegram(project_name, agg, deltas, prev_ts, top_recs) -> str:
+    """Короткая сводка прогона скорости для сообщения в Telegram.
+
+    Главное - средний балл desktop/mobile и куда он сдвинулся с прошлого
+    снятия; ниже разбивка по типам страниц и три самые частые рекомендации.
+    Подробности - в приложенном xlsx."""
+    import telegram_notify as tn
+    import pagespeed_checker as PC
+    import pagespeed_history as PH
+
+    o = (agg or {}).get('overall', {})
+    do = (deltas or {}).get('overall', {})
+    части = [
+        f'⚡ <b>Скорость страниц - {tn.escape_html(project_name)}</b>',
+        (f'Проверено страниц: {o.get("count", 0)}\n'
+         f'Компьютер: <b>{_балл(o.get("desktop_avg"))}</b>'
+         f'{_дельта(do.get("desktop"))}\n'
+         f'Телефон: <b>{_балл(o.get("mobile_avg"))}</b>'
+         f'{_дельта(do.get("mobile"))}'),
+    ]
+    части.append('Сравнение с прошлым снятием: ' + PH.fmt_ts(prev_ts)
+                 if prev_ts else 'Первый прогон - сравнивать не с чем.')
+
+    строки = []
+    by_type = (agg or {}).get('by_type', {})
+    d_by = (deltas or {}).get('by_type', {})
+    порядок = ([tc for tc in PC.TYPE_ORDER if tc in by_type]
+               + [tc for tc in by_type if tc not in PC.TYPE_ORDER])
+    for tc in порядок:
+        b = by_type[tc]
+        d = d_by.get(tc, {})
+        строки.append(
+            f'• {tn.escape_html(PC.TYPE_LABELS.get(tc, tc))} '
+            f'({b.get("count", 0)}): комп. {_балл(b.get("desktop_avg"))}'
+            f'{_дельта(d.get("desktop"))}, тел. {_балл(b.get("mobile_avg"))}'
+            f'{_дельта(d.get("mobile"))}')
+    if строки:
+        части.append('<b>По типам страниц</b>\n' + '\n'.join(строки))
+
+    if top_recs:
+        рек = '\n'.join(
+            f'• {tn.escape_html(str(r.get("title", "")))} '
+            f'({r.get("pages", 0)} стр.)' for r in top_recs[:3])
+        части.append('<b>Чаще всего мешает</b>\n' + рек)
+
+    части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')
+    return '\n\n'.join(части)
+
+
+def _отправить_отчёт(xlsx_path, xlsx_name, project_name, agg, deltas,
+                     prev_ts, top_recs, _log) -> None:
+    """Отчёт на Google Диск и в Telegram - как у форм, целей и КП.
+
+    Креды кладёт страница в окружение (tg_report.runner_env). Ничего не
+    настроено - тихо пропускаем: прогон уже отработал, отчёт лежит на диске,
+    ронять его из-за недоставленного сообщения незачем."""
+    try:
+        import telegram_notify as tn
+        текст = _сводка_для_telegram(project_name, agg, deltas, prev_ts,
+                                     top_recs)
+        # Диск: <Проект>/<Год>/Сайт чекер/<Месяц>/<Дата>/Скорость страниц/<файл>.
+        if xlsx_path.is_file():
+            try:
+                import drive_reports
+                _d = drive_reports.upload_from_env(
+                    str(xlsx_path), 'Скорость страниц', log=_log)
+                if _d.get('link'):
+                    текст += (f'\n\n📁 <a href="{_d["link"]}">Отчёт на '
+                              f'Google Диске</a>')
+            except Exception as e:  # noqa: BLE001
+                _log(f'⚠ Google Диск: {e}')
+        res = tn.send_report_from_env(
+            project_name=project_name, summary_text=текст,
+            report_file=xlsx_path if xlsx_path.is_file() else None,
+            report_filename=xlsx_name,
+            log=lambda lvl, msg: _log(msg))
+        if not res.get('skipped'):
+            _log(f'✓ Telegram: отправлено {res.get("sent", 0)}, '
+                 f'не доставлено {res.get("failed", 0)}')
+    except Exception as e:  # noqa: BLE001
+        _log(f'⚠ Отправка отчёта не удалась ({e}) - отчёт всё равно готов.')
 
 
 def _write_last_run(out, pid, project_name, provider_name, run_ts, prev_ts,

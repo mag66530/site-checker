@@ -18,7 +18,8 @@ from sources import (
 from history import load_history, save_history, WEEKLY_TTL_MS
 from sitemap import load_product_pathnames
 from product_links import load_product_links
-from http_checker import run_batch
+from http_checker import (run_batch, basic_auth_for as _basic_auth_for,
+                          установить_вход_прогона as _установить_вход)
 from reporter import build_report, make_report_filename
 from telegram_notify import (
     format_summary_message, send_run_notification, send_message,
@@ -691,6 +692,60 @@ def _run_review_priority(pid, proxy_url, log):
                 'note': f'результат отзывов не прочитан: {e}'}
 
 
+def _выложить_на_диск(report_path, cfg, creds, proxy_url, log) -> dict:
+    """Отчёт → Google Диск:
+    <Диск>/<Проект>/<Год>/Сайт чекер/<Месяц>/<Дата>/Чек-лист/<файл>.
+    Все уровни заводятся сами. Возвращает {'link', 'path'} или {} - выкладка
+    вспомогательная, при любой проблеме прогон продолжается (файл всё равно
+    уходит в Telegram вложением), причина пишется в лог."""
+    if not report_path:
+        return {}
+    import drive_reports as _dr
+    # В настройку могли вставить ссылку на папку целиком - берём из неё ID.
+    root_id = _dr.folder_id(creds.get('gdrive_folder_id')
+                            or creds.get('gdrive_root_id')
+                            or creds.get('gdrive_shared_drive_id') or '')
+    # Личный аккаунт проекта (обычный gmail): пишем ОТ ЕГО ИМЕНИ - у сервисного
+    # аккаунта нет своего места на Диске, в личный Диск он писать не может.
+    _refresh = creds.get('gdrive_refresh_token') or ''
+    if not root_id and not _refresh:
+        log('Google Диск: не задан общий диск (gdrive_shared_drive_id) и не '
+            'подключён аккаунт проекта - выкладка пропущена.')
+        return {}
+    try:
+        import drive_reports
+        from kp_sheets import service_account_info
+        _oauth = None
+        if _refresh:
+            import google_oauth
+            _oauth = google_oauth.access_token(
+                creds.get('google_oauth_client_id') or '',
+                creds.get('google_oauth_client_secret') or '',
+                _refresh, proxy_url=proxy_url)
+        sa = None if _oauth else service_account_info()
+        _имя_проекта = cfg.get('name') or cfg.get('id') or 'Проект'
+        _когда = datetime.now()
+        res = drive_reports.upload_report(
+            str(report_path), project_name=_имя_проекта,
+            sa_info=sa, root_id=root_id, oauth_token=_oauth,
+            drive_id=(creds.get('gdrive_shared_drive_id') or None) if not _oauth else None,
+            run_type='Чек-лист', when=_когда,
+            file_name=drive_reports.report_file_name('Чек-лист', _имя_проекта,
+                                                     _когда),
+            proxy_url=proxy_url)
+    except Exception as e:  # noqa: BLE001
+        log(f'⚠ Google Диск: выкладка не выполнена ({e})')
+        return {}
+    if not res.get('ok'):
+        log(f'⚠ Google Диск: {res.get("error")}')
+        return {}
+    log(f'✓ Google Диск: отчёт в «{res["path"]}» - {res["link"]}')
+    if res.get('share_error'):
+        log(f'⚠ Google Диск: доступ по ссылке не открылся ({res["share_error"]}) '
+            f'- файл увидит только владелец Диска.')
+    return res
+
+
 def run_check(pid, params, creds, log, progress):
     """Выполнить прогон. log(msg), progress(frac, text) - колбэки.
     Возвращает dict с results / report_path / started_at / finished_at / error."""
@@ -707,12 +762,37 @@ def run_check(pid, params, creds, log, progress):
         # proxy_url_<pid> → proxy_url → HTTP_PROXY, с уважением к use_proxy.
         # creds['proxy_url'] - доп. фоллбэк для обратной совместимости: тем
         # вызывающим, что посчитали адрес сами и передали готовым.
-        proxy_url = (proxy_for_project(pid) or creds.get('proxy_url')) \
-            if cfg.get('use_proxy') else None
-        if cfg.get('use_proxy') and not proxy_url:
-            log(f'⚠ Прокси нужен для {cfg["name"]}, но не настроен')
-        elif proxy_url:
-            log(f'Прокси: включён для {cfg["name"]}')
+        # Галочка «Прокси» на странице - решение на ЭТОТ прогон, оно сильнее
+        # use_proxy проекта. Раньше выключение галочки только не передавало
+        # адрес, а прогон доставал его сам: у проекта с use_proxy=true прокси
+        # оставался включённым (на АПС это давало 4xx, хотя локально сайт
+        # открывается напрямую).
+        _выбор = creds.get('use_proxy_choice')
+        if _выбор is False:
+            proxy_url = None
+            log('Прокси выключен галочкой на странице - идём напрямую.')
+        else:
+            proxy_url = (proxy_for_project(pid) or creds.get('proxy_url')) \
+                if (cfg.get('use_proxy') or _выбор is True) else None
+            if (cfg.get('use_proxy') or _выбор is True) and not proxy_url:
+                log(f'⚠ Прокси нужен для {cfg["name"]}, но не настроен')
+            elif proxy_url:
+                log(f'Прокси: включён для {cfg["name"]}')
+
+        # Вход на закрытый сайт (стенд за nginx-паролем). Без него ВЕСЬ обход
+        # получает 401, и отчёт состоит из ошибок доступа. Логин/пароль
+        # приходят из полей страницы или из «Настроек проекта».
+        basic_auth = _basic_auth_for(cfg, creds)
+        # Ставим вход СРАЗУ, до первых запросов: часть проверок (sitemap,
+        # товары) идёт раньше основного обхода.
+        _установить_вход(basic_auth)
+        if cfg.get('basic_auth'):
+            if basic_auth:
+                log(f'Вход на закрытый сайт: как {basic_auth["login"]}')
+            else:
+                log('⚠ Сайт закрыт паролем, но логин/пароль не заданы - '
+                    'страницы ответят 401. Заполни «Вход на закрытый сайт» '
+                    'на странице чек-листа.')
 
         # Карточек товара у проекта может не быть вовсе: у МПИ весь каталог -
         # плоские разделы /catalog/<slug>, товарных страниц в sitemap ноль.
@@ -755,6 +835,9 @@ def run_check(pid, params, creds, log, progress):
             mandatory_hosts=cfg.get('mandatory_hosts'),
             cis_extra_subdomains=int(params.get('cis_extra', 0)),
             trailing_slash=cfg.get('trailing_slash', True),
+            # Ключа нет - None, и раздел каталога собирается как раньше.
+            # Пустая строка в конфиге (АПС) - раздела у сайта нет, не проверяем.
+            catalog_path=cfg.get('catalog_path'),
             rotation_history=recent,
         )
         # Свой список URL - добавляем к выборке проекта (тип по адресу).
@@ -783,7 +866,8 @@ def run_check(pid, params, creds, log, progress):
                     int(_sm_sample.get('urls_per_map', 5)),
                     proxy_url=proxy_url, log=lambda lvl, msg: log(msg)))
                 if _sampled:
-                    extra = build_custom_tasks_typed(_sampled, src)
+                    extra = build_custom_tasks_typed(_sampled, src,
+                                                     source='Карта сайта')
                     plan.tasks.extend(extra)
                     log(f'Карты сайта (сэмпл): добавлено {len(extra)} URL '
                         f'из {len(_sm_sample["groups"])} видов карт')
@@ -798,7 +882,8 @@ def run_check(pid, params, creds, log, progress):
         if _main and _tech_paths:
             _tech_urls = [f'https://{_main.host}{p}' for p in _tech_paths]
             try:
-                _tt = build_custom_tasks_typed(_tech_urls, src)
+                _tt = build_custom_tasks_typed(_tech_urls, src,
+                                               source='Тех. страницы')
                 for _t in _tt:
                     _p = urlparse(_t.url).path.rstrip('/')
                     if _p.endswith('/specials'):
@@ -855,6 +940,16 @@ def run_check(pid, params, creds, log, progress):
 
         _chk_idx = bool(params.get('check_indexing', True))
         _chk_meta = bool(params.get('check_meta', True))
+        # Указатель путей каталога для проверки меню - собираем ОДИН раз на
+        # прогон (на странице пересобирать 12 тысяч путей ни к чему).
+        try:
+            from layout_checker import menu_category_index
+            _menu_cat_index = menu_category_index(
+                list(src.categories or []) + list(src.filters or []))
+        except Exception as _e:  # noqa: BLE001
+            _menu_cat_index = None
+            log(f'⚠ Меню: указатель категорий не собран ({_e}) - '
+                f'проверка пойдёт по признаку «/catalog»')
         results = asyncio.run(run_batch(
             plan.tasks, concurrency=6, timeout_ms=120000, max_attempts=3,
             retry_delay_ms=2500, check_text=bool(params.get('check_text', True)),
@@ -867,12 +962,42 @@ def run_check(pid, params, creds, log, progress):
             check_security=bool(params.get('check_security', True)),
             check_images=bool(params.get('check_images', True)),
             region_ctx=region_ctx,
-            on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map))
+            on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map,
+            basic_auth=basic_auth,
+            # Пути категорий проекта: по ним проверяем «в меню есть ссылка на
+            # каталог». Раньше искали строку «/catalog», и проектам без такого
+            # раздела (у АПС категории в корне) выписывалось ложное замечание.
+            menu_category_paths=_menu_cat_index))
 
         _sec_bad = sum(1 for r in results
                        if getattr(r, 'has_security_issues', False))
         if _sec_bad:
             log(f'Заголовки безопасности: страниц с ошибками {_sec_bad}')
+
+        # ── SSL-сертификат (чек-лист) ──
+        # Сертификат один на хост - проверяем ПО ХОСТАМ прогона, не по
+        # страницам. Идёт под той же галочкой, что заголовки безопасности.
+        _ssl_check = None
+        if params.get('check_security', True):
+            try:
+                from ssl_checker import check_ssl
+                _хосты = list(dict.fromkeys(
+                    s.host for s in (plan.selected_subdomains or []) if s.host))
+                _ssl_check = {'hosts': [check_ssl(h) for h in _хосты]}
+                for _h in _ssl_check['hosts']:
+                    if _h.get('error'):
+                        log(f'⚠ SSL {_h["host"]}: не проверить ({_h["error"]})')
+                        continue
+                    for _t in _h.get('issues') or []:
+                        log(f'❌ SSL {_h["host"]}: {_t}')
+                    for _t in _h.get('warnings') or []:
+                        log(f'⚠ SSL {_h["host"]}: {_t}')
+                    if not (_h.get('issues') or _h.get('warnings')):
+                        log(f'SSL {_h["host"]}: в порядке'
+                            + (f', до истечения {_h["days_left"]} дн.'
+                               if _h.get('days_left') is not None else ''))
+            except Exception as _e:  # noqa: BLE001
+                log(f'⚠ SSL-сертификат: {_e}')
 
         # ── Индексация (п.1.7): кросс-проверка sitemap ↔ robots.txt ──
         # Все известные пути каталога (категории/фильтры/товары) прогоняем
@@ -903,9 +1028,32 @@ def run_check(pid, params, creds, log, progress):
                 if _n_ac:
                     log(f'❌ robots.txt: закрыто .css/.js файлов {_n_ac} '
                         f'из {_idx_summary.get("assets_checked", 0)}')
+                # Гигиена самого файла robots.txt (доп. чек-лист)
+                _rf = _idx_summary.get('robots_file') or {}
+                if _rf:
+                    log(f'robots.txt: {_rf.get("size_bytes", 0) // 1024} КБ, '
+                        f'Content-Type {_rf.get("content_type") or "не указан"}, '
+                        f'Clean-Param {len(_rf.get("clean_params") or [])}')
+                    if _rf.get('too_big'):
+                        log('❌ robots.txt тяжелее 500 КБ - за пределом робот '
+                            'файл не читает')
+                    if _rf.get('looks_html'):
+                        log('❌ robots.txt: вместо текста отдаётся HTML-страница')
+                    if _rf.get('bom'):
+                        log('❌ robots.txt: BOM в начале файла - первая '
+                            'директива не читается')
+                    if not _rf.get('utf8_ok', True):
+                        log('❌ robots.txt: файл не в кодировке UTF-8')
+                    if _rf.get('commented'):
+                        log(f'⚠ robots.txt: закомментировано директив '
+                            f'{len(_rf["commented"])} - правила не работают')
+                    if not _rf.get('clean_params'):
+                        log('⚠ robots.txt: нет Clean-Param - дубли по '
+                            'GET-параметрам для Яндекса не убраны')
                 # ЧПУ и формат адресов - по тем же путям, без запросов.
                 from indexing_checker import check_url_format
-                _uf = check_url_format(_all_paths)
+                _uf = check_url_format(_all_paths,
+                                       root_domain=cfg.get('root_domain', ''))
                 _idx_summary['url_format'] = _uf
                 if _uf.get('total_bad'):
                     log(f'⚠ Формат адресов: плохих URL {_uf["total_bad"]} '
@@ -945,6 +1093,22 @@ def run_check(pid, params, creds, log, progress):
                 if _n_miss:
                     log(f'❌ Sitemap: не хватает {_n_miss} категорий/фильтров/'
                         f'услуг из выгрузки')
+                for _fi in (_audit.get('format_issues') or [])[:3]:
+                    log(f'❌ Формат карты сайта: {_fi.get("why")} '
+                        f'({_fi.get("url")})')
+                for _ei in (_audit.get('encoding_issues') or [])[:3]:
+                    log(f'❌ Кодировка карты сайта: {_ei.get("why")} '
+                        f'({_ei.get("url")})')
+                _pr = _audit.get('url_probe') or {}
+                if _pr.get('checked'):
+                    log(f'Прозвон адресов карты: проверено {_pr["checked"]} из '
+                        f'{_pr.get("sample_of", 0)}, не 200 - '
+                        f'{len(_pr.get("bad_status") or [])}, noindex - '
+                        f'{len(_pr.get("noindex") or [])}'
+                        + (f', не пустили {_pr["blocked"]}'
+                           if _pr.get('blocked') else '')
+                        + (f', не доехали {len(_pr["unreachable"])}'
+                           if _pr.get('unreachable') else ''))
             except Exception as _e:
                 log(f'⚠ Sitemap-аудит: {_e}')
             # HTML-карта сайта (доп. чек-лист)
@@ -952,7 +1116,13 @@ def run_check(pid, params, creds, log, progress):
                 _hm = asyncio.run(audit_html_sitemap(
                     _main.host, proxy_url=proxy_url))
                 _idx_summary['html_sitemap'] = _hm
-                if _hm.get('status') != 200:
+                if _hm.get('blocked'):
+                    # 403/429/503 - нас не пустили; про наличие карты это
+                    # ничего не говорит.
+                    log(f'⚠ HTML-карту сайта проверить не удалось: сайт '
+                        f'ответил HTTP {_hm["blocked"]} (защита от ботов '
+                        f'или лимит запросов)')
+                elif _hm.get('status') != 200:
                     log(f'⚠ HTML-карта сайта не найдена '
                         f'(HTTP {_hm.get("status")})')
                 elif _hm.get('junk_links'):
@@ -1085,12 +1255,32 @@ def run_check(pid, params, creds, log, progress):
         if _chk_meta:
             try:
                 from meta_checker import (find_duplicates, check_url_duplicates,
-                                          check_test_domains)
+                                          check_test_domains,
+                                          check_short_path_duplicates,
+                                          check_product_cross_category)
                 _dups = find_duplicates(results)
                 _probe_urls = [r.url for r in results
                                if r.is_ok and r.type_code in ('main', 'catalog')]
                 _url_dups = asyncio.run(check_url_duplicates(
                     _probe_urls, proxy_url=proxy_url))
+                # Дубли по структуре адреса (доп. чек-лист, раздел 2):
+                # «тот же слаг без раздела» - по категориям и фильтрам выборки,
+                # «товар в чужой категории» - по карточкам выборки.
+                _deep_urls = [r.url for r in results
+                              if r.is_ok and r.type_code in ('category',
+                                                             'filter', 'product')]
+                _short_dups = asyncio.run(check_short_path_duplicates(
+                    _deep_urls, proxy_url=proxy_url))
+                _prod_urls = [r.url for r in results
+                              if r.is_ok and r.type_code == 'product']
+                _prod_dups = asyncio.run(check_product_cross_category(
+                    _prod_urls, list(src.categories or []),
+                    proxy_url=proxy_url))
+                if _short_dups:
+                    log(f'❌ Дубли без раздела: {len(_short_dups)} '
+                        f'(тот же заголовок по короткому адресу)')
+                if _prod_dups:
+                    log(f'❌ Товар доступен в чужой категории: {len(_prod_dups)}')
                 # Тестовые домены (test./dev./stage.…) корневого домена.
                 _tdoms = asyncio.run(check_test_domains(
                     _main.host, proxy_url=proxy_url)) if _main else []
@@ -1101,6 +1291,8 @@ def run_check(pid, params, creds, log, progress):
                         f'({", ".join(t["host"] for t in _tdoms if t["state"] == "indexable")})')
                 _meta_summary = {'duplicates': _dups, 'url_duplicates': _url_dups,
                                  'test_domains': _tdoms,
+                                 'short_path_duplicates': _short_dups,
+                                 'product_cross_category': _prod_dups,
                                  'probed_urls': len(_probe_urls)}
                 _m_pages_bad = sum(1 for r in results
                                    if getattr(r, 'has_meta_issues', False)
@@ -1960,7 +2152,8 @@ def run_check(pid, params, creds, log, progress):
             indexing_summary=_idx_summary, meta_summary=_meta_summary,
             filters_test=_filters_test, console_check=_console_check,
             calltracking_check=_calltracking_check,
-            w3c_check=_w3c_check, p404_check=_p404_check,
+            w3c_check=_w3c_check, ssl_check=_ssl_check,
+            p404_check=_p404_check,
             ps_filters=_ps_filters, search_check=_search_check,
             index_404_check=_index_404,
             stress_check=_stress_check, link_profile=_link_profile,
@@ -1980,7 +2173,8 @@ def run_check(pid, params, creds, log, progress):
             log(f'Критических находок: {crit.total} '
                 f'(падений доступности: {len(crit.availability)})')
 
-        # Telegram (полный отчёт - почта/метрика уже собраны выше)
+        # Telegram (полный отчёт - почта/метрика уже собраны выше).
+        # Перед отправкой отчёт уезжает на Google Диск (см. _выложить_на_диск).
         tg_token = creds.get('tg_token')
         tg_recipients = creds.get('tg_recipients') or []
         if tg_token and tg_recipients:
@@ -2043,6 +2237,19 @@ def run_check(pid, params, creds, log, progress):
                         if getattr(r, 'has_markup_issues', False)),
                     index_404_dead=((_index_404 or {}).get('total_dead', 0)
                                     + (_index_404 or {}).get('total_soft', 0)))
+                # Кто запустил: у руководителя в чате лежат и свои, и чужие
+                # прогоны по проекту - без подписи не разобрать, чей отчёт.
+                # Формат подписи один на все прогоны - см. telegram_notify.
+                from telegram_notify import with_started_by
+                summary_text = with_started_by(summary_text,
+                                               creds.get('started_by'))
+                # Диск: <Проект>/<Год>/Сайт чекер/<Месяц>/<Дата>/Чек-лист/.
+                # Ссылку кладём в сообщение - файл всё равно уходит вложением,
+                # поэтому неудача выкладки прогон не ломает (пишем в лог).
+                _drive = _выложить_на_диск(report_path, cfg, creds, proxy_url, log)
+                if _drive.get("link"):
+                    summary_text += (f'\n\n📁 <a href="{_drive["link"]}">Отчёт на '
+                                     f'Google Диске</a> · {_drive.get("path", "")}')
                 tg_result = send_run_notification(
                     bot_token=tg_token, recipients=tg_recipients,
                     project_name=cfg['name'], summary_text=summary_text,

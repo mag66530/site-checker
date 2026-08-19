@@ -284,7 +284,11 @@ def test_norm_host_strips_www_and_scheme():
 
 @pytest.mark.parametrize('proj', ['smu', 'imp', 'mpe'])
 def test_kp_csv_loads(proj):
-    kp = load_kp(proj)
+    # refresh=False ОБЯЗАТЕЛЬНО: по умолчанию load_kp идёт в Google-таблицу и
+    # ПЕРЕЗАПИСЫВАЕТ catalogs/<проект>-kp.csv. Из-за этого обычный прогон тестов
+    # менял данные в репозитории (в git появлялись «чужие» правки КП), да ещё и
+    # требовал сети. Тест читает готовый снапшот - это и есть его предмет.
+    kp = load_kp(proj, refresh=False)
     if not kp:
         pytest.skip(f'{proj}-kp.csv ещё не сгенерирован')
     # У каждой записи есть домен и хотя бы город

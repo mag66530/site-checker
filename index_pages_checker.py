@@ -214,8 +214,10 @@ async def _check_all(pairs: list, proxy_url, progress=None) -> dict:
     connector = aiohttp.TCPConnector(limit=_CONCURRENCY, ttl_dns_cache=300)
     results = {}
     total = len(pairs)
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=connector) as session:
+    # url= первого адреса: вход на закрытый сайт, если он под паролем.
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=(pairs[0][1] if pairs else '')),
+            connector=connector) as session:
         tasks = [asyncio.create_task(_check_one(session, u, proxy_url, sem))
                  for _, u in pairs]
         done = 0
@@ -308,9 +310,11 @@ def check_index_404(project_id: str, token: str, proxy_url: Optional[str] = None
 
 
 def _resolve_token(pid: str) -> Optional[str]:
-    return (os.environ.get(f'yandex_oauth_{pid}')
-            or os.environ.get(f'webmaster_oauth_{pid}')
-            or os.environ.get('yandex_oauth') or os.environ.get('webmaster_oauth'))
+    # webmaster_oauth впереди: у проекта бывают заполнены оба поля, и токен с
+    # нужными правами кладут в поле с точным названием (см. checklist_30min).
+    return (os.environ.get(f'webmaster_oauth_{pid}')
+            or os.environ.get(f'yandex_oauth_{pid}')
+            or os.environ.get('webmaster_oauth') or os.environ.get('yandex_oauth'))
 
 
 def _main():

@@ -15,6 +15,11 @@ import os
 import re
 from datetime import datetime
 
+try:
+    from . import site_auth as _site_auth
+except ImportError:
+    import site_auth as _site_auth
+
 
 def _playwright_proxy_from_env():
     """Прокси для Playwright из env FORMS_PROXY (http://user:pass@host:port) или
@@ -174,13 +179,15 @@ def выполнить_проверку(города, excel_path: str = "log_for
     есть_c = 0
     with sync_playwright() as pw:
         _kw = dict(headless=not show,
-                   args=["--disable-blink-features=AutomationControlled"])
+                   args=["--disable-blink-features=AutomationControlled",
+                         "--disable-dev-shm-usage"])
         _prx = _playwright_proxy_from_env()
         if _prx:
             _kw["proxy"] = _prx
         b = pw.chromium.launch(**_kw)
         # ВАЖНО: свежий контекст без cookie = «новый пользователь» → плашка покажется.
-        ctx = b.new_context(locale="ru-RU")
+        # Пароль сайта (если он закрыт) - иначе вместо главной откроется 401.
+        ctx = b.new_context(**_site_auth.добавить_вход({"locale": "ru-RU"}))
         try:
             for city, url in города:
                 page = ctx.new_page()

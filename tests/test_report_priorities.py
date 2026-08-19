@@ -8,8 +8,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from http_checker import CheckResult
 from content_checker import BlockResult, ContentResult
+from text_checker import TextIssue
 from report_priorities import (
     Finding, collect_findings, classify, group_into_tasks, extra_site_tasks,
+    indexing_site_findings, metadata_site_findings,
+    home_dupes_findings, arsenkin_findings, page404_findings,
+    stress_check_findings, ps_filters_findings,
+    service_issues_findings, w3c_findings,
 )
 
 
@@ -36,6 +41,36 @@ def test_недоступная_страница_даёт_находку_дос�
 def test_рабочая_страница_без_доп_проверок_ничего_не_даёт():
     r = _result()
     assert collect_findings([r]) == []
+
+
+def test_seo_text_warnings_попадают_в_проблемы():
+    """r.seo_text раньше не читался в collect_findings вообще - находки
+    были видны только на листе «Метаданные», в «Проблемы» не попадали."""
+    r = _result(seo_text={'warnings': [
+        'в SEO-тексте нет таблицы (caption+thead) - по чек-листу желательна']})
+    out = collect_findings([r])
+    assert len(out) == 1
+    assert out[0].section == 'Метаданные' and out[0].level == 'Предупреждение'
+    assert 'нет таблицы' in out[0].problem
+
+
+def test_битые_тексты_дают_находку_на_каждую_переменную():
+    """Раньше text_issues были только на отдельном листе «Битые тексты»,
+    в collect_findings не итемизировались вообще."""
+    issues = [
+        TextIssue(pattern='{{...}}', match='{{city}}',
+                 context='Купить трубу в {{city}} с доставкой'),
+        TextIssue(pattern='%переменная%', match='%price%',
+                 context='Цена от %price% рублей'),
+    ]
+    r = _result(text_issues=issues, has_text_issues=True)
+    out = collect_findings([r])
+    assert len(out) == 2
+    assert all(f.section == 'Битые тексты' and f.level == 'Ошибка' for f in out)
+    assert '{{city}}' in out[0].problem
+    assert '{{...}}' in out[0].detail
+    assert 'Купить трубу' in out[0].detail
+    assert '%price%' in out[1].problem
 
 
 def test_indexing_issues_and_warnings_разносятся_по_уровню():
@@ -122,6 +157,24 @@ def test_meta_unique_findings_заголовки_и_мета():
     assert out[0].problem == ('внутри H1 вложенные теги/стили - H1 должен '
                               'быть чистым текстом: Купить трубу <b>стальную</b>')
     assert out[0].detail == 'H1: теги внутри'
+
+
+def test_markup_findings_сохраняет_field_details():
+    """Разметка (OG/Schema.org): field_details («Offer/цена: 21 из 60») -
+    раньше отдельная колонка на удалённом листе «Разметка», при переносе в
+    generic-обработчик терялась бы; _markup_findings кладёт её в detail."""
+    r = _result(markup={
+        'issues': ['в разметке Product: нет поля «предложение/цена»'],
+        'warnings': ['в разметке Organization: нет поля «логотип»'],
+        'field_details': ['Offer/цена: 21 из 60', 'Organization/логотип: 11 из 11'],
+    })
+    out = collect_findings([r])
+    assert len(out) == 2
+    for f in out:
+        assert f.section == 'Разметка'
+        assert 'Offer/цена: 21 из 60' in f.detail
+        assert 'Organization/логотип: 11 из 11' in f.detail
+    assert {f.level for f in out} == {'Ошибка', 'Предупреждение'}
 
 
 def test_cis_findings_снг_домены():
@@ -441,18 +494,36 @@ def test_extra_site_tasks_wm_anomaly_группируется_по_метрик�
     assert tasks[0].priority == 1
 
 
+class _Issue:
+    def __init__(self, host, severity):
+        self.host = host
+        self.severity = severity
+
+
 def test_extra_site_tasks_fatal_service_issues():
-    class _Issue:
-        def __init__(self, host, severity):
-            self.host = host
-            self.severity = severity
+    """fatal и critical - РАЗНЫЕ задачи (не всё в одну кучу)."""
     tasks = extra_site_tasks(service_issues=[
         _Issue('aktau.example.kz', 'fatal'),
         _Issue('example.ru', 'critical'),
     ])
-    assert len(tasks) == 1
-    assert tasks[0].task_group == 'wm_fatal'
-    assert tasks[0].volume == 1
+    assert len(tasks) == 2
+    fatal = next(t for t in tasks if t.task_group == 'wm_fatal')
+    critical = next(t for t in tasks if t.task_group == 'wm_service_critical')
+    assert fatal.volume == 1
+    assert critical.volume == 1
+    assert critical.priority == 1
+
+
+def test_extra_site_tasks_service_issues_possible_recommendation():
+    tasks = extra_site_tasks(service_issues=[
+        _Issue('a.ru', 'possible'), _Issue('a.ru', 'recommendation'),
+        _Issue('b.ru', 'info'),   # info - не проблема, задачи не будет
+    ])
+    assert len(tasks) == 2
+    groups = {t.task_group: t for t in tasks}
+    assert groups['wm_service_possible'].priority == 2
+    assert groups['wm_service_recommendation'].priority == 3
+    assert 'wm_service_info' not in groups
 
 
 def test_extra_site_tasks_пусто_если_ничего_не_передано():
@@ -560,3 +631,327 @@ def test_extra_site_tasks_html_sitemap_junk():
     assert len(tasks) == 1
     assert tasks[0].task_group == 'html_sitemap_junk'
     assert tasks[0].priority == 3
+
+
+# ── indexing_site_findings (сайт-уровневые находки индексации в «Проблемы») ──
+
+def test_indexing_site_findings_disallowed_даёт_полный_url():
+    out = indexing_site_findings({
+        'host': 'a.ru',
+        'disallowed': [{'path': '/catalog/x/', 'rule': 'Disallow: /catalog/'}]})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert out[0].section == 'Индексация'
+    assert out[0].url == 'https://a.ru/catalog/x/'
+    assert 'Disallow: /catalog/' in out[0].detail
+
+
+def test_indexing_site_findings_missing_catalog_по_каждому_пути():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_audit': {
+        'missing_catalog': {'categories': ['/catalog/a/', '/catalog/b/'],
+                            'filters': ['/catalog/a/filter/x/'], 'services': []}}})
+    assert len(out) == 3
+    assert all(f.level == 'Ошибка' and f.section == 'Индексация' for f in out)
+    assert {f.url for f in out} == {
+        'https://a.ru/catalog/a/', 'https://a.ru/catalog/b/',
+        'https://a.ru/catalog/a/filter/x/'}
+
+
+def test_indexing_site_findings_file_stats_лимиты():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_audit': {'file_stats': [
+        {'url': 'https://a.ru/sitemap-1.xml', 'urls': 60000, 'bytes': 1000},
+        {'url': 'https://a.ru/sitemap-2.xml', 'urls': 11000, 'bytes': 1000},
+        {'url': 'https://a.ru/sitemap-3.xml', 'urls': 100, 'bytes': 1000},
+    ]}})
+    assert len(out) == 2   # 3-й файл в норме, находки нет
+    protocol, recommended = out[0], out[1]
+    assert protocol.level == 'Ошибка' and 'протокола' in protocol.problem
+    assert recommended.level == 'Предупреждение' and 'рекомендуемого' in recommended.problem
+
+
+def test_indexing_site_findings_lastmod_отсутствует_везде():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_audit': {
+        'total': 100, 'with_lastmod': 0, 'with_changefreq': 0, 'with_priority': 100}})
+    assert len(out) == 1
+    assert 'lastmod' in out[0].problem and 'changefreq' in out[0].problem
+    assert 'priority' not in out[0].problem
+
+
+def test_indexing_site_findings_required_pages_только_не_найденные():
+    out = indexing_site_findings({'host': 'a.ru', 'required_pages': [
+        {'label': 'Политика конфиденциальности', 'found': '/policy/'},
+        {'label': 'Доставка', 'found': None},
+    ]})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert 'Доставка' in out[0].problem
+
+
+def test_indexing_site_findings_sitemap_checks_нет_директивы():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_checks': {'has_directive': False}})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert 'Sitemap' in out[0].problem
+
+
+def test_indexing_site_findings_sitemap_checks_директива_не_открывается():
+    out = indexing_site_findings({'host': 'a.ru', 'sitemap_checks': {
+        'has_directive': True, 'matches_project': True,
+        'directives': [{'url': 'https://a.ru/sitemap.xml', 'status': 404}]}})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert out[0].url == 'https://a.ru/sitemap.xml'
+
+
+def test_indexing_site_findings_wm_sitemaps_пусто_или_с_ошибками():
+    out_empty = indexing_site_findings({'host': 'a.ru', 'wm_sitemaps': {'sitemaps': []}})
+    assert len(out_empty) == 1
+    out_err = indexing_site_findings({'host': 'a.ru', 'wm_sitemaps': {'sitemaps': [
+        {'url': 'https://a.ru/sitemap.xml', 'errors': 3}]}})
+    assert len(out_err) == 1
+    assert '3' in out_err[0].problem
+
+
+def test_indexing_site_findings_пусто_если_ничего_не_передано():
+    assert indexing_site_findings(None) == []
+    assert indexing_site_findings({}) == []
+
+
+def test_indexing_site_findings_не_дублируется_в_план_работ():
+    """extra_site_tasks (агрегат в «Плане работ») и indexing_site_findings
+    (постатейно в «Проблемы») читают одни и те же данные независимо -
+    сборка build_report должна их не путать (проверяем на уровне модуля:
+    оба возвращают непустой список для одного и того же indexing_summary,
+    но это осознанно два разных места вывода, не одно и то же)."""
+    summary = {'host': 'a.ru', 'disallowed': [{'path': '/x/', 'rule': 'r'}]}
+    findings = indexing_site_findings(summary)
+    tasks = extra_site_tasks(indexing_summary=summary)
+    assert len(findings) == 1
+    assert len(tasks) == 1
+    assert tasks[0].where == 'Лист «Индексация»'
+
+
+# ── metadata_site_findings (дубли метаданных/URL/тестовые домены) ────────
+
+def test_metadata_site_findings_same_city_по_каждой_странице():
+    out = metadata_site_findings({'duplicates': {'same_city': [{
+        'field': 'title', 'value': 'Металлопрокат', 'scope': 'a.ru',
+        'pages': [
+            {'city': 'Москва', 'url': 'https://a.ru/x/', 'type_label': 'Категория'},
+            {'city': 'Москва', 'url': 'https://a.ru/y/', 'type_label': 'Категория'},
+        ]}]}})
+    assert len(out) == 2
+    assert all(f.level == 'Ошибка' and f.section == 'Метаданные' for f in out)
+    assert all('дубль title внутри города' in f.problem for f in out)
+    assert {f.url for f in out} == {'https://a.ru/x/', 'https://a.ru/y/'}
+
+
+def test_metadata_site_findings_cross_city_предупреждение():
+    out = metadata_site_findings({'duplicates': {'cross_city': [{
+        'field': 'h1', 'value': 'Тройник ПНД', 'scope': None,
+        'pages': [{'city': 'Казань', 'url': 'https://kzn.a.ru/z/', 'type_label': 'Товар'}]}]}})
+    assert len(out) == 1
+    assert out[0].level == 'Предупреждение'
+    assert 'совпадает с другим городом' in out[0].problem
+
+
+def test_metadata_site_findings_url_duplicates_уровень_по_problem():
+    out = metadata_site_findings({'url_duplicates': [
+        {'canonical': 'https://a.ru/', 'variant': 'http://a.ru/', 'kind': 'http',
+         'code': 200, 'problem': 'duplicate'},
+        {'canonical': 'https://a.ru/', 'variant': 'https://a.ru//', 'kind': 'slash',
+         'code': 302, 'problem': 'not_301'},
+    ]})
+    assert len(out) == 2
+    dup, temp = out
+    assert dup.level == 'Ошибка' and dup.url == 'http://a.ru/'
+    assert temp.level == 'Предупреждение' and temp.url == 'https://a.ru//'
+
+
+def test_metadata_site_findings_test_domain_только_indexable():
+    out = metadata_site_findings({'test_domains': [
+        {'host': 'test.a.ru', 'code': 200, 'state': 'indexable'},
+        {'host': 'dev.a.ru', 'code': 200, 'state': 'closed'},
+    ]})
+    assert len(out) == 1
+    assert out[0].url == 'https://test.a.ru/'
+    assert out[0].level == 'Ошибка'
+
+
+def test_metadata_site_findings_пусто_если_ничего_не_передано():
+    assert metadata_site_findings(None) == []
+    assert metadata_site_findings({}) == []
+
+
+def test_metadata_site_findings_группируется_в_план_работ():
+    """В отличие от indexing_site_findings, дубли метаданных не имеют
+    отдельной агрегации в extra_site_tasks - должны идти через
+    group_into_tasks() как обычные находки (одна задача на task_group,
+    не по одной на каждую страницу)."""
+    findings = metadata_site_findings({'duplicates': {'same_city': [{
+        'field': 'title', 'value': 'X', 'scope': 'a.ru',
+        'pages': [
+            {'city': 'Москва', 'url': 'https://a.ru/1/', 'type_label': 'Категория'},
+            {'city': 'Москва', 'url': 'https://a.ru/2/', 'type_label': 'Категория'},
+            {'city': 'Москва', 'url': 'https://a.ru/3/', 'type_label': 'Категория'},
+        ]}]}})
+    tasks = group_into_tasks(findings)
+    assert len(tasks) == 1
+    assert tasks[0].volume == 3
+    assert tasks[0].priority == 1
+
+
+# ── home_dupes_findings / arsenkin_findings / page404_findings ──────────
+
+def test_home_dupes_findings_только_verdict_duplicate():
+    out = home_dupes_findings({'home': 'https://a.ru/', 'dupes': 1, 'variants': [
+        {'url': 'https://a.ru/?dubli=1', 'status': 200,
+         'note': '200 - дубль', 'verdict': 'duplicate'},
+        {'url': 'https://a.ru/', 'status': 200,
+         'note': '200 - это главная', 'verdict': 'main'},
+        {'url': 'https://www.a.ru/', 'status': 301,
+         'note': '301 → главная', 'verdict': 'redirect'},
+    ]})
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка'
+    assert out[0].url == 'https://a.ru/?dubli=1'
+
+
+def test_home_dupes_findings_пусто_без_дублей():
+    assert home_dupes_findings(None) == []
+    assert home_dupes_findings({'variants': [
+        {'url': 'https://a.ru/', 'status': 200, 'verdict': 'main'}]}) == []
+
+
+def test_arsenkin_findings_только_не_проверенных_движков():
+    out = arsenkin_findings({'available': True, 'engines': {'yandex': True, 'google': False},
+                             'rows': [
+        {'url': 'https://a.ru/x/', 'yandex': False, 'google': False},
+        {'url': 'https://a.ru/y/', 'yandex': True, 'google': False},
+    ]})
+    # google выключен в engines - не считается, даже если False
+    assert len(out) == 1
+    assert out[0].url == 'https://a.ru/x/'
+    assert 'Яндекс' in out[0].problem
+    assert 'Google' not in out[0].problem
+
+
+def test_arsenkin_findings_недоступен_даёт_пусто():
+    assert arsenkin_findings({'available': False, 'rows': [{'url': 'x', 'yandex': False}]}) == []
+    assert arsenkin_findings(None) == []
+
+
+def test_page404_findings_issues_и_warnings():
+    out = page404_findings({'hosts': [
+        {'city': 'Москва', 'host': 'a.ru', 'status': 200,
+         'issues': ['soft-404: код 200 вместо 404'],
+         'warnings': ['редирект вместо 404']},
+        {'city': 'Казань', 'host': 'kzn.a.ru', 'status': 404},  # чисто, без issues/warnings
+    ]})
+    assert len(out) == 2
+    assert out[0].level == 'Ошибка' and out[0].section == 'Страница 404'
+    assert out[0].url == 'https://a.ru/'
+    assert out[1].level == 'Предупреждение'
+
+
+def test_page404_findings_пусто_если_ничего_не_передано():
+    assert page404_findings(None) == []
+    assert page404_findings({'hosts': []}) == []
+
+
+# ── stress_check_findings / ps_filters_findings ──────────────────────────
+
+def test_stress_check_findings_banned_и_5xx():
+    out = stress_check_findings({'available': True,
+        'parsing': {'banned': {'code': 403, 'after': 50, 'url': 'https://a.ru/x/'},
+                    'server_errors': [{'code': 500, 'url': 'https://a.ru/y/'}],
+                    'network_errors': ['e1', 'e2']},
+        'load': {'pages': [
+            {'url': 'https://a.ru/z/', 'server_5xx': 2, 'network_errors': 0, 'sent': 10},
+            {'url': 'https://a.ru/w/', 'degraded': True},
+            {'url': 'https://a.ru/ok/'},
+        ]},
+        'duplicates': {'server_errors': [{'code': 500, 'kind': 'двойной слэш', 'url': 'https://a.ru/d/'}]},
+    })
+    problems = {f.problem for f in out}
+    assert any('бота за парсера' in p for p in problems)
+    assert any('быстром обходе' in p for p in problems)
+    assert sum(1 for f in out if 'обрывы связи' in f.problem) == 1
+    assert any('параллельной нагрузкой' in p for p in problems)
+    assert any('замедляется' in p for p in problems)
+    assert any('кривом дубле' in p for p in problems)
+    assert len(out) == 6   # banned + 5xx + net + load-5xx + degraded + dup-5xx
+
+
+def test_stress_check_findings_недоступен_даёт_пусто():
+    assert stress_check_findings({'available': False}) == []
+    assert stress_check_findings(None) == []
+
+
+def test_ps_filters_findings_фильтрует_не_санкции():
+    """SITE_ERROR (доступность) - не настоящая санкция, real_sanc её не
+    считает; THREAT/MALWARE-подобные коды - считает."""
+    out = ps_filters_findings({
+        'yandex': [
+            {'host': 'a.ru', 'code': 'SITE_ERROR', 'title': 'Сайт недоступен', 'date': '2026-08-01'},
+            {'host': 'b.ru', 'code': 'MALWARE_DETECTED', 'title': 'Вредоносный код', 'date': '2026-08-02'},
+        ],
+        'gsc_hits': [{'date': '2026-08-03', 'subject': 'Обнаружены проблемы безопасности'}],
+    })
+    assert len(out) == 2   # SITE_ERROR отфильтрован, MALWARE + gsc_hit остались
+    assert all(f.section == 'Фильтры ПС' and f.level == 'Ошибка' for f in out)
+    assert any('Вредоносный код' in f.problem for f in out)
+    assert any('ручных мер' in f.problem for f in out)
+
+
+def test_ps_filters_findings_пусто_если_ничего_не_передано():
+    assert ps_filters_findings(None) == []
+    assert ps_filters_findings({}) == []
+
+
+# ── service_issues_findings / w3c_findings ────────────────────────────────
+
+def test_service_issues_findings_info_пропускается():
+    from webmaster_api import ServiceIssue
+    issues = [
+        ServiceIssue(project_id='t', service='webmaster', host='a.ru',
+                    severity='fatal', code='SITE_ERROR', title='Сайт не открывается',
+                    date='2026-08-01'),
+        ServiceIssue(project_id='t', service='webmaster', host='b.ru',
+                    severity='info', code='TIP', title='Совет', date='2026-08-01'),
+    ]
+    out = service_issues_findings(issues)
+    assert len(out) == 1
+    assert out[0].level == 'Ошибка' and out[0].section == 'Ошибки сервисов'
+    assert out[0].url == 'https://a.ru/'
+
+
+def test_service_issues_findings_severity_уровни():
+    from webmaster_api import ServiceIssue
+    make = lambda sev: ServiceIssue(project_id='t', service='webmaster', host='a.ru',
+                                    severity=sev, code='X', title='X', date='')
+    out = service_issues_findings([make('critical'), make('possible'),
+                                   make('recommendation')])
+    assert [f.level for f in out] == ['Ошибка', 'Предупреждение', 'Предупреждение']
+
+
+def test_service_issues_findings_пусто_если_ничего_не_передано():
+    assert service_issues_findings(None) == []
+    assert service_issues_findings([]) == []
+
+
+def test_w3c_findings_одна_находка_на_страницу():
+    out = w3c_findings({'pages': [
+        {'url': 'https://a.ru/1/', 'html': {'errors': 3}, 'css': {'errors': 2}},
+        {'url': 'https://a.ru/2/', 'html': {'errors': 0}, 'css': {'errors': 0}},
+        {'url': 'https://a.ru/3/', 'html': {'error': 'timeout'}, 'css': {}},
+    ]})
+    assert len(out) == 1
+    assert out[0].url == 'https://a.ru/1/'
+    assert '5' in out[0].problem
+    assert out[0].level == 'Предупреждение'
+
+
+def test_w3c_findings_пусто_если_ничего_не_передано():
+    assert w3c_findings(None) == []
+    assert w3c_findings({}) == []

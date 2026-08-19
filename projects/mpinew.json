@@ -1,0 +1,17 @@
+{
+  "id": "mpinew",
+  "name": "МПИ - новый прод",
+  "root_domain": "new.metpromintex.by",
+  "main_url": "https://new.metpromintex.by/",
+  "sitemap_url": "",
+  "subdomains_csv": "catalogs/mpinew-subdomains.csv",
+  "catalog_csv": "catalogs/mpi-catalog.csv",
+  "categories_csv": null,
+  "mandatory_city": "Минск",
+  "has_filters": true,
+  "has_products": false,
+  "trailing_slash": false,
+  "use_proxy": false,
+  "basic_auth": true,
+  "kp_sheet_url": ""
+}

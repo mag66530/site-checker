@@ -115,3 +115,27 @@ def ensure_browser() -> tuple[bool, str]:
         return _УСПЕХ
     _detail = f' - {last_error}' if last_error else ''
     return False, f'Chromium установлен, но не запускается{_detail} (проверьте packages.txt)'
+
+
+def ensure_for_run(log=print, метка: str = '') -> bool:
+    """ensure_browser() для ФОНОВОГО прогона: молчит при готовом браузере,
+    пишет в лог установку и внятную причину при отказе.
+
+    Зачем отдельно: в облаке Chromium не предустановлен, и прогон, который
+    поднимает Playwright сам, падал с «Executable doesn't exist … chrome-
+    headless-shell» - а в отчёте это выглядело как «проверок 0 из 0», будто
+    проверять было нечего. Локально ничего не качает.
+
+    Возвращает True/False, но прогон на этом останавливать не обязан: пусть
+    попробует запуститься и упадёт с настоящей ошибкой, если дело в другом."""
+    п = f'{метка}: ' if метка else ''
+    try:
+        ок, сообщение = ensure_browser()
+    except Exception as e:  # noqa: BLE001
+        log(f'⚠ {п}подготовка браузера не удалась ({e}) - пробую как есть.')
+        return False
+    if not ок:
+        log(f'⚠ {п}браузер не готов - {сообщение}')
+    elif сообщение != 'браузер готов':
+        log(f'{п}{сообщение}')
+    return ок

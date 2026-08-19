@@ -4,6 +4,14 @@ schema_checker.py - микроразметка Schema.org и OpenGraph (пунк
 ТЗ 3.5.1 - OpenGraph на основных типах страниц: og:url, og:title,
 og:description, og:image, og:type. Отсутствие поля = баг.
 
+Проверяем не только наличие тега, но и ПРИГОДНОСТЬ значения (check_og):
+  • значение пустое - тег есть, а толку нет (типовая поломка шаблона: тег
+    в вёрстке стоит, переменная не подставилась) = баг;
+  • og:url - абсолютный адрес и ведёт на эту же страницу;
+  • og:image - абсолютный адрес, не data: (соцсети такое не покажут);
+  • og:description - не длиннее 300 символов (обрежется в анонсе);
+  • og:type - из известных значений OpenGraph.
+
 ТЗ 3.5.2 - Schema.org. Формат: microdata (itemtype/itemprop) - основной,
 JSON-LD - допустим, но «по обстоятельствам»: тип найден ТОЛЬКО в JSON-LD =
 предупреждение, нет нигде = баг. Требования по типам страниц:
@@ -36,6 +44,22 @@ from typing import Optional
 
 _RE_OG = re.compile(
     r'<meta\b[^>]*property\s*=\s*["\']og:(\w+)["\'][^>]*>', re.I)
+_RE_OG_TAG = re.compile(r'<meta\b[^>]*>', re.I)
+_RE_OG_PROP = re.compile(r'property\s*=\s*["\']og:(\w+)["\']', re.I)
+_RE_OG_CONTENT = re.compile(r'content\s*=\s*["\']([^"\']*)["\']', re.I)
+
+# Длина og:description по чек-листу.
+OG_DESC_MAX = 300
+
+# Допустимые значения og:type. Список Open Graph: базовые + пространства имён
+# (article, book, profile, video.*, music.*). Незнакомое значение - не ошибка
+# (стандарт разрешает свои типы), но повод посмотреть глазами.
+OG_TYPES = {
+    'website', 'article', 'book', 'profile', 'product', 'product.group',
+    'product.item', 'video.movie', 'video.episode', 'video.tv_show',
+    'video.other', 'music.song', 'music.album', 'music.playlist',
+    'music.radio_station',
+}
 _RE_ITEMTYPE = re.compile(
     r'itemtype\s*=\s*["\']https?://schema\.org/(\w+)', re.I)
 _RE_ITEMPROP = re.compile(r'itemprop\s*=\s*["\'](\w+)["\']', re.I)
@@ -54,6 +78,92 @@ _IMAGE_TYPES = {'ImageObject', 'ImageGallery'}
 
 # На каких типах страниц что ОБЯЗАТЕЛЬНО (баг) и что ЖЕЛАТЕЛЬНО (предупр.)
 _SEO_TYPES = ('main', 'catalog', 'category', 'filter', 'product')
+
+
+def parse_og(html: str) -> dict:
+    """{свойство: значение} по OpenGraph-тегам страницы.
+
+    Читаем ИМЕННО значение (content), а не только факт наличия тега: пустой
+    «<meta property="og:title" content="">» раньше засчитывался как
+    заполненный, а на шаблонных сайтах это типовая ситуация - тег в шаблоне
+    есть, переменная не подставилась.
+
+    Повторные теги: берём ПЕРВОЕ непустое значение (og:image часто дублируют
+    для разных размеров). ЧИСТАЯ функция - есть юнит-тест.
+    """
+    out: dict = {}
+    for tag in _RE_OG_TAG.findall(html or ''):
+        mp = _RE_OG_PROP.search(tag)
+        if not mp:
+            continue
+        prop = mp.group(1).lower()
+        mc = _RE_OG_CONTENT.search(tag)
+        val = (mc.group(1) if mc else '').strip()
+        if prop not in out or (not out[prop] and val):
+            out[prop] = val
+    return out
+
+
+def _abs_url(v: str) -> bool:
+    """Адрес абсолютный (со схемой или «//host»)."""
+    s = (v or '').strip()
+    return bool(s) and (s.startswith('//') or bool(re.match(r'[a-z][a-z0-9+.\-]*:', s, re.I)))
+
+
+def check_og(og: dict, page_url: str = '') -> tuple:
+    """Проверка ЗНАЧЕНИЙ OpenGraph. → (issues, warnings).
+
+    Раньше проверялось только наличие пяти тегов. Здесь - что они пригодны:
+    непустые, адреса абсолютные, og:url ведёт на эту же страницу, описание не
+    длиннее 300 символов, тип из известных.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    issues, warnings = [], []
+    og = og or {}
+
+    # Пустое значение при наличии тега - тег бесполезен. Отсутствие тега
+    # ловится отдельно (og_missing), чтобы не выписывать две находки разом.
+    for f in OG_REQUIRED:
+        if f in og and not og[f]:
+            issues.append(f'OpenGraph-тег og:{f} пустой - значение не подставилось')
+
+    url_v = og.get('url') or ''
+    if url_v:
+        if not _abs_url(url_v):
+            issues.append('og:url - относительный адрес, нужен полный '
+                          '(со схемой и доменом)')
+        elif page_url:
+            def _norm(u):
+                from urllib.parse import urlsplit
+                sp = urlsplit(u if _abs_url(u) else 'https://' + u.lstrip('/'))
+                host = (sp.netloc or '').lower().removeprefix('www.')
+                return host + (sp.path or '/').rstrip('/')
+            try:
+                if _norm(url_v) != _norm(page_url):
+                    warnings.append('og:url ведёт не на эту страницу - в анонсе '
+                                    'соцсети покажут другой адрес')
+            except Exception:      # noqa: BLE001
+                pass
+
+    img = og.get('image') or ''
+    if img:
+        if img.lower().startswith('data:'):
+            issues.append('og:image встроен как data: - соцсети такую картинку '
+                          'не покажут, нужна ссылка на файл')
+        elif not _abs_url(img):
+            issues.append('og:image - относительный адрес, нужен полный '
+                          '(со схемой и доменом)')
+
+    desc = og.get('description') or ''
+    if desc and len(desc) > OG_DESC_MAX:
+        warnings.append(f'og:description длиннее {OG_DESC_MAX} символов - '
+                        f'в анонсе он обрежется')
+
+    typ = (og.get('type') or '').strip().lower()
+    if typ and typ not in OG_TYPES:
+        warnings.append(f'og:type - незнакомое значение «{typ}»: обычно это '
+                        f'website, article или product')
+
+    return issues, warnings
 
 
 def _jsonld_types(html: str) -> set:
@@ -242,6 +352,15 @@ _FIELD_RULES = {
                     'rec': [('превью', ('thumbnailUrl',)),
                             ('описание', ('description',))]},
     'FAQPage': {'req': [('вопросы-ответы', ('mainEntity',))], 'rec': []},
+    # Отзывы: без автора и оценки поиск звёзды не покажет, без даты - не
+    # поймёт свежесть. Текст отзыва желателен.
+    'Review': {'req': [('автор', ('author',)),
+                       ('оценка', ('reviewRating', 'ratingValue'))],
+               'rec': [('дата', ('datePublished', 'dateCreated')),
+                       ('текст отзыва', ('reviewBody', 'description'))]},
+    'AggregateRating': {'req': [('оценка', ('ratingValue',)),
+                                ('число отзывов', ('reviewCount', 'ratingCount'))],
+                        'rec': []},
 }
 
 # Видео на странице: свой <video> или встроенный плеер видеохостинга.
@@ -254,6 +373,122 @@ _RE_FAQ_CONTENT = re.compile(
     r'class\s*=\s*["\'][^"\']*\bfaq\b'
     r'|часто\s+задаваемые\s+вопросы|вопрос[\s-]*ответ|вопросы\s+и\s+ответы',
     re.I)
+
+
+# ── Отзывы на карточке товара (чек-лист) ────────────────────────────
+# Блок отзывов на товаре нужен и покупателю, и сниппету (звёзды в выдаче).
+# Проверяем три вещи: блок есть, он размечен, и разметка правдоподобна.
+#
+# Про «правдоподобие». Отзывы на таких сайтах генерируются, и это нормально -
+# но сгенерированные наспех видно сразу: одна дата у всех, один автор, у всех
+# пятёрки. Такую разметку поисковики наказывают ручными мерами, то есть это
+# вредит клиенту. Проверяем именно ЭТО, а не «насколько похоже на Фламп».
+
+_RE_REVIEW_TEXT_BLOCK = re.compile(
+    r'отзывы\s+(?:клиентов|покупателей|наших|о\s)', re.I)
+_REVIEW_MIN = 3          # меньше отзывов - о разбросе судить нельзя
+_REVIEW_SHORT = 25       # короче - отзыв «ни о чём», символов
+
+
+def _prop_str(props: dict, *names) -> str:
+    """Первое непустое строковое значение свойства объекта."""
+    for n in names:
+        for v in (props or {}).get(n) or []:
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+            if isinstance(v, dict):
+                # вложенный объект: Person → name, Rating → ratingValue
+                for k in ('name', 'ratingValue', 'value'):
+                    for vv in v.get('props', {}).get(k, []) if 'props' in v \
+                            else ([v.get(k)] if v.get(k) else []):
+                        if isinstance(vv, str) and vv.strip():
+                            return vv.strip()
+    return ''
+
+
+def collect_reviews(objs: list) -> list:
+    """Объекты Review → [{'author', 'rating', 'date', 'body'}].
+    ЧИСТАЯ функция - есть юнит-тест."""
+    out = []
+    for o in objs or []:
+        if (o.get('type') or '') != 'Review':
+            continue
+        p = o.get('props') or {}
+        out.append({
+            'author': _prop_str(p, 'author'),
+            'rating': _prop_str(p, 'reviewRating', 'ratingValue'),
+            'date': _prop_str(p, 'datePublished', 'dateCreated')[:10],
+            'body': _prop_str(p, 'reviewBody', 'description'),
+        })
+    return out
+
+
+def check_reviews_plausible(reviews: list) -> list:
+    """Признаки наспех сгенерированных отзывов. → список предупреждений.
+
+    Судим только когда отзывов достаточно (_REVIEW_MIN): на двух отзывах
+    «одинаковая дата» ничего не значит.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    out = []
+    n = len(reviews or [])
+    if n < _REVIEW_MIN:
+        return out
+
+    даты = [r.get('date') for r in reviews if r.get('date')]
+    if not даты:
+        out.append('у отзывов не проставлены даты - поиск не покажет их '
+                   'свежесть')
+    elif len(set(даты)) == 1 and len(даты) == n:
+        out.append('все отзывы с одной датой - выглядит как разовая '
+                   'генерация, поисковики за такое наказывают')
+
+    авторы = [r.get('author') for r in reviews if r.get('author')]
+    if not авторы:
+        out.append('у отзывов не указаны авторы - разметка неполная и '
+                   'недостоверная')
+    elif len(set(авторы)) == 1 and len(авторы) == n:
+        out.append('все отзывы от одного автора')
+
+    оценки = [r.get('rating') for r in reviews if r.get('rating')]
+    if оценки and len(set(оценки)) == 1 and len(оценки) == n and n >= 5:
+        out.append(f'у всех отзывов одинаковая оценка ({оценки[0]}) - '
+                   f'разброс выглядит естественнее')
+
+    короткие = sum(1 for r in reviews
+                   if len((r.get('body') or '').strip()) < _REVIEW_SHORT)
+    if короткие == n:
+        out.append('тексты отзывов слишком короткие - пользы покупателю нет')
+    return out
+
+
+def check_product_reviews(html: str, objs: list) -> tuple:
+    """Отзывы на карточке товара: есть ли блок, размечен ли, правдоподобен ли.
+    → (issues, warnings)."""
+    issues, warnings = [], []
+    reviews = collect_reviews(objs)
+    есть_агрегат = any((o.get('type') or '') == 'AggregateRating'
+                       for o in objs or [])
+    текстовый_блок = bool(_RE_REVIEW_TEXT_BLOCK.search(html or ''))
+
+    if not reviews and not есть_агрегат:
+        if текстовый_блок:
+            warnings.append('блок отзывов на товаре не размечен '
+                            '(schema.org/Review) - звёзды в сниппете не появятся')
+        else:
+            warnings.append('на карточке товара нет блока отзывов')
+        return issues, warnings
+
+    if есть_агрегат and not reviews:
+        # Звёзды в сниппете есть, а отзывов, из которых они складываются, нет.
+        # Google прямо считает это накруткой рейтинга и снимает сниппет.
+        warnings.append('на товаре есть сводная оценка (AggregateRating), но '
+                        'нет самих отзывов (Review) - поиск считает это '
+                        'накруткой звёзд')
+    if reviews and not есть_агрегат:
+        warnings.append('у отзывов нет сводной оценки '
+                        '(schema.org/AggregateRating)')
+    warnings.extend(check_reviews_plausible(reviews))
+    return issues, warnings
 
 
 def _validate_fields(html: str):
@@ -302,17 +537,21 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
     if type_code not in _SEO_TYPES and not is_contacts:
         return None
 
-    og_found = {m.group(1).lower() for m in _RE_OG.finditer(html)}
+    og = parse_og(html)
+    og_found = set(og)
     micro = {m.group(1) for m in _RE_ITEMTYPE.finditer(html)}
     ld = _jsonld_types(html)
     props = {m.group(1).lower() for m in _RE_ITEMPROP.finditer(html)}
 
     issues, warnings = [], []
 
-    # ── 3.5.1 OpenGraph: все 5 полей ──
+    # ── 3.5.1 OpenGraph: все 5 полей + пригодность значений ──
     og_missing = [f for f in OG_REQUIRED if f not in og_found]
     for f in og_missing:
         issues.append(f'нет OpenGraph-тега og:{f}')
+    _og_i, _og_w = check_og(og, url)
+    issues.extend(_og_i)
+    warnings.extend(_og_w)
 
     def _have(type_set):
         """(в microdata?, в json-ld?) хотя бы один тип из набора."""
@@ -355,6 +594,12 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
         if 'price' not in props and not (micro | ld) & _PRICE_TYPES:
             warnings.append('цена не размечена (Offer/PriceSpecification) - '
                             'норма для «цены по запросу»')
+        # ── Отзывы на карточке: блок, разметка, правдоподобие ──
+        _rv_i, _rv_w = check_product_reviews(
+            html, list(_walk_objects(_microdata_objects(html)))
+            + list(_walk_objects(_jsonld_objects(html))))
+        issues.extend(_rv_i)
+        warnings.extend(_rv_w)
 
     # ── Условные типы: требуем разметку, только когда сам контент есть ──
     # Видео на странице (свой <video> / встроенный плеер) → VideoObject.
@@ -382,6 +627,7 @@ def check_markup(html: Optional[str], type_code: str, url: str = '') -> Optional
 
     return {
         'og_missing': og_missing,
+        'og': og,
         'micro_types': sorted(micro),
         'ld_types': sorted(ld),
         'field_details': f_details,

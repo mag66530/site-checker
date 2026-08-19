@@ -12,10 +12,10 @@ http_checker.py - асинхронная проверка URL'ов.
   Если задана переменная окружения HTTP_PROXY (или передан proxy_url),
   все запросы идут через неё. Без прокси приложение работает локально как раньше.
 
-Оценка скорости (Google Core Web Vitals):
-  < 2.5с  → fast      (ОК)
-  2.5-4с  → normal    (ОК)
-  4-8с    → slow      (Медленно)
+Оценка скорости ответа документа (по чек-листу):
+  < 1с    → fast      (ОК)
+  1-2.5с  → normal    (предупреждение, не ошибка)
+  2.5-8с  → slow      (Медленно)
   > 8с    → very_slow (Долгий ответ сервера)
 """
 import asyncio
@@ -47,6 +47,13 @@ class STATUS:
     CANCELLED = 'cancelled'
 
 
+# Пороги скорости ответа документа (чек-лист). Держим константами: их читает
+# и оценка страницы, и вывод находок в отчёт - разъехаться не должны.
+SPEED_FAST_MS = 1000        # быстрее - норма
+SPEED_WARN_MS = 2500        # до этого - предупреждение, дальше - ошибка
+SPEED_VERY_SLOW_MS = 8000   # дальше - «долгий ответ сервера», критично
+
+
 class SPEED:
     FAST = 'fast'
     NORMAL = 'normal'
@@ -62,18 +69,24 @@ DEFAULT_USER_AGENT = (
 )
 
 
-def make_browser_headers(user_agent: str = DEFAULT_USER_AGENT) -> dict:
+def make_browser_headers(user_agent: str = DEFAULT_USER_AGENT,
+                         url: str = '') -> dict:
     """
     Реалистичный набор HTTP-заголовков, имитирующий настоящий Chrome.
-    
+
     Многие anti-bot защиты (включая Cloudflare и SiteSecure) детектируют ботов
     по отсутствию или нестандартному порядку этих заголовков. Реальный Chrome
     шлёт их именно в таком составе и порядке.
-    
+
     Sec-Fetch-* заголовки появились в Chrome 76 (2019) - отсутствие их сразу
     выдаёт «голый» HTTP-клиент.
+
+    url - адрес, для которого собираем заголовки. Передавайте его: если сайт
+    проекта закрыт паролем (см. установить_вход_прогона), к заголовкам
+    добавится Authorization - и только для этого домена, чужим не уйдёт.
+    Без url поведение прежнее.
     """
-    return {
+    return {**(заголовок_входа(url) if url else {}),
         'User-Agent': user_agent,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -93,14 +106,21 @@ def make_browser_headers(user_agent: str = DEFAULT_USER_AGENT) -> dict:
 
 
 def rate_speed(elapsed_ms: Optional[int]) -> Optional[str]:
-    """Оценить скорость по времени ответа."""
+    """Оценить скорость по времени ответа документа.
+
+    Пороги по чек-листу (строже Core Web Vitals, которые были раньше):
+      < 1с    → fast      норма
+      1-2.5с  → normal    предупреждение, но не ошибка
+      2.5-8с  → slow      медленно, чинить
+      > 8с    → very_slow долгий ответ сервера (критично, отдельный вердикт)
+    """
     if elapsed_ms is None:
         return None
-    if elapsed_ms < 2500:
+    if elapsed_ms < SPEED_FAST_MS:
         return SPEED.FAST
-    if elapsed_ms < 4000:
+    if elapsed_ms < SPEED_WARN_MS:
         return SPEED.NORMAL
-    if elapsed_ms < 8000:
+    if elapsed_ms < SPEED_VERY_SLOW_MS:
         return SPEED.SLOW
     return SPEED.VERY_SLOW
 
@@ -145,6 +165,10 @@ class CheckResult:
     subdomain: str
     type_code: str
     type_label: str
+    # Откуда взят адрес: «Каталог проекта» / «Карта сайта» / «Свой список URL» /
+    # «Тех. страницы». Нужен в отчёте: иначе не отличить страницу из каталога
+    # от случайной, попавшей в прогон из карты сайта.
+    source: str = 'Каталог проекта'
 
     # Результат запроса
     http_code: Optional[int] = None
@@ -381,6 +405,11 @@ def _extract_stylesheet_links(html: str, base_url: str) -> list[str]:
 
 _RE_IMG_ANY = re.compile(
     r'<img\b[^>]*?(?:data-src|src)\s*=\s*["\']([^"\']+)["\']', re.I)
+# Неотрендеренный клиентский шаблон в src: {{...}} (Handlebars/Vue), ${...}
+# (JS-литералы), <%...%> (EJS/ASP), #{...} (Pug). Это НЕ адрес файла, а заготовка
+# карточки - реальные картинки подставит JS. Проверять её как картинку
+# бессмысленно (всегда «404»), иначе ложная «битая картинка» на каждом листинге.
+_RE_TEMPLATE_SRC = re.compile(r'\{\{|\}\}|\$\{|<%|%>|#\{')
 
 
 def _extract_img_srcs(html: str, base_url: str, limit: int = 15) -> list[str]:
@@ -391,6 +420,12 @@ def _extract_img_srcs(html: str, base_url: str, limit: int = 15) -> list[str]:
         src = src.strip()
         if not src or src.startswith('data:'):
             continue
+        # Заготовка-шаблон, а не файл - пропускаем (её «404» - ложь).
+        if _RE_TEMPLATE_SRC.search(src):
+            continue
+        # Браузер нормализует обратные слеши в URL (\ -> /) для http(s); повторяем,
+        # иначе HEAD по литеральному '\' даёт ложный 404, хотя картинка грузится.
+        src = src.replace('\\', '/')
         absu = urljoin(base_url, src).split('#')[0]
         sp = urlsplit(absu)
         if sp.scheme not in ('http', 'https') or sp.netloc != host:
@@ -513,44 +548,107 @@ def _looks_minified(text) -> Optional[bool]:
 # ── «Ссылки реально открываются» (404) ──────────────────────────────
 
 
-async def _link_status(session, url, timeout_ms, proxy_url):
-    """Код ответа ссылки (после редиректов). HEAD дёшево; если сервер не любит
-    HEAD (405/501/5xx) - перепроверяем GET. None - не удалось определить
-    (таймаут/сеть): такое НЕ считаем битым (это не «нет страницы»)."""
-    to = aiohttp.ClientTimeout(total=min(timeout_ms, 20000) / 1000)
+MAX_LINK_HOPS = 5        # сколько шагов цепочки редиректов проходим руками
+EXT_LINKS_PER_RUN = 20   # внешних ссылок на весь прогон (см. check_content_links)
+
+
+async def _one_hop(session, url, to, proxy_url):
+    """Один запрос БЕЗ следования редиректу: (код, Location).
+    HEAD дёшево; если сервер не любит HEAD (405/501/5xx) - перепроверяем GET."""
     try:
-        async with session.head(url, timeout=to, allow_redirects=True,
+        async with session.head(url, timeout=to, allow_redirects=False,
                                 proxy=proxy_url) as r:
-            # 2xx/3xx и даже 401/403 - ссылка ведёт на существующую страницу
-            # (доступ/метод - не «битость»). 404/410 - явно битая.
+            # 2xx/3xx и даже 401/403 - страница существует (доступ/метод - не
+            # «битость»). 404/410 - явно битая. 405/501/5xx - HEAD не приняли.
             if r.status < 405 or r.status in (410,):
-                return r.status
+                return r.status, r.headers.get('Location')
     except Exception:
         pass
     try:
-        async with session.get(url, timeout=to, allow_redirects=True,
+        async with session.get(url, timeout=to, allow_redirects=False,
                                proxy=proxy_url) as r:
-            return r.status
+            return r.status, r.headers.get('Location')
     except Exception:
-        return None
+        return None, None
+
+
+async def _link_probe(session, url, timeout_ms, proxy_url):
+    """Прозвон ссылки с РУЧНЫМ обходом цепочки редиректов.
+
+    Раньше запрос шёл с allow_redirects=True, и редирект не был виден вовсе -
+    оставался только финальный код. Между «ссылка ведёт прямо на страницу» и
+    «ссылка ведёт на 301, а тот на 404» разница принципиальная: второе правят
+    в вёрстке, поэтому цепочку проходим сами.
+
+    → {'code': первый код, 'location': куда ведёт первый редирект,
+       'final_code': код в конце цепочки, 'final_url': адрес в конце,
+       'hops': сколько редиректов, 'loop': цепочка замкнулась}.
+    None в кодах - не дозвонились (таймаут/сеть): битым такое НЕ считаем."""
+    from urllib.parse import urljoin
+    to = aiohttp.ClientTimeout(total=min(timeout_ms, 20000) / 1000)
+    код, location = await _one_hop(session, url, to, proxy_url)
+    out = {'code': код, 'location': None, 'final_code': код,
+           'final_url': url, 'hops': 0, 'loop': False}
+    if код is None or not (300 <= код < 400):
+        return out
+    out['location'] = urljoin(url, location) if location else None
+    текущий, посещённые = url, {url}
+    while код is not None and 300 <= код < 400 and out['hops'] < MAX_LINK_HOPS:
+        if not location:
+            break                        # 3xx без Location - идти некуда
+        следующий = urljoin(текущий, location)
+        out['hops'] += 1
+        if следующий in посещённые:
+            out['loop'] = True
+            out['final_code'], out['final_url'] = код, следующий
+            return out
+        посещённые.add(следующий)
+        текущий = следующий
+        код, location = await _one_hop(session, текущий, to, proxy_url)
+    out['final_code'], out['final_url'] = код, текущий
+    return out
+
+
+async def _link_status(session, url, timeout_ms, proxy_url):
+    """Код ответа ссылки ПОСЛЕ редиректов - как было раньше. Оставлено для
+    кода, которому нужен только финальный код."""
+    r = await _link_probe(session, url, timeout_ms, proxy_url)
+    return r['final_code']
 
 
 async def check_content_links(session, html, base_url, *, proxy_url=None,
-                              timeout_ms=20000, limit=120,
+                              timeout_ms=20000, limit=120, ext_limit=10,
                               link_cache: dict = None,
-                              budget: list = None):
-    """Проверить, что ссылки СТРАНИЦЫ реально открываются (не 404).
-    Чек-лист «нет битых ссылок на странице»: ВСЯ страница (текст + блоки +
-    шапка/подвал/листинг), не только контентная зона.
+                              budget: list = None,
+                              ext_budget: list = None):
+    """Ссылки СТРАНИЦЫ: открываются ли, не ведут ли на редирект, нет ли ссылок
+    на саму себя. Чек-лист «нет битых ссылок на странице»: ВСЯ страница
+    (текст + блоки + шапка/подвал/листинг), не только контентная зона.
 
-    Только ВНУТРЕННИЕ ссылки (тот же сайт): внешние часто блокируют ботов и
-    дают ложные «битые». Битой считаем ТОЛЬКО явный 404/410 (страницы нет);
-    таймаут/сеть/5xx/403 не считаем (это не «нет страницы» и оно флаки).
+    Битой считаем ТОЛЬКО явный 404/410 (страницы нет); таймаут/сеть/5xx/403
+    не считаем - это не «нет страницы» и оно флаки.
 
-    link_cache - общий кеш кодов на весь прогон (шапка/подвал/меню одинаковы
-    на всех страницах - каждую уникальную ссылку звоним ОДИН раз за прогон).
+    Внутренние и ВНЕШНИЕ ссылки разведены: у внешних свой лимит (ext_limit) и
+    свои списки в ответе. Причина - чужой антибот отвечает 403/429 живой
+    странице, поэтому внешние нельзя судить теми же мерками.
+
+    403 - НЕ «битая ссылка» (страница существует, закрыт доступ), но и не норма:
+    держим отдельным, мягким видом. У внешних 403 к тому же чаще всего означает
+    антибот, а не закрытую страницу - поэтому внешних звоним не больше
+    ext_budget на весь прогон, чтобы не растить шум.
+
+    link_cache - общий кеш результатов на весь прогон (шапка/подвал/меню
+    одинаковы на всех страницах - каждую уникальную ссылку звоним ОДИН раз).
     budget - [остаток] общий лимит новых прозвонов на прогон.
-    Возвращает {'checked', 'broken':[{'url','code'}]} или None (нечего звонить)."""
+    ext_budget - [остаток] лимит ВНЕШНИХ ссылок на прогон (отдельно от budget).
+
+    → {'checked', 'broken': [{'url','code'}], 'forbidden': [{'url','code'}],
+       'redirects': [{'url','code','to','hops','loop'}],
+       'redirect_to_error': [{'url','code','to','final_code'}],
+       'self_links': [href],
+       'ext_checked', 'ext_redirects': [...], 'ext_broken': [...],
+       'ext_forbidden': [...]}
+      либо None (звонить нечего)."""
     from content_checker import extract_content_links
     from urllib.parse import urljoin, urlparse
     if not html:
@@ -562,37 +660,110 @@ async def check_content_links(session, html, base_url, *, proxy_url=None,
         return h[4:] if h.startswith('www.') else h
 
     base_host = _host(urlparse(base_url).netloc)
+    base_key = base_url.split('#')[0].rstrip('/')
+    главная_ли = (urlparse(base_url).path or '/').strip('/') == ''
     todo, seen = [], set()
+    внешние, внешние_seen = [], set()
+    self_links = []
     for h in extract_content_links(html, limit=limit * 4, include_chrome=True):
         absu = urljoin(base_url, h)
         pu = urlparse(absu)
-        if pu.scheme not in ('http', 'https') or _host(pu.netloc) != base_host:
-            continue                       # только http(s) и только свой сайт
+        if pu.scheme not in ('http', 'https'):
+            continue
         key = absu.split('#')[0]
+        if _host(pu.netloc) != base_host:
+            # Внешние - свой список и свой лимит: звоним щадяще и трактуем
+            # мягко (антибот чужого сайта отвечает 403/429 живой странице).
+            if key not in внешние_seen and len(внешние) < ext_limit:
+                внешние_seen.add(key)
+                внешние.append(key)
+            continue
+        # Ссылка страницы на саму себя. «#» и «#anchor» не считаем: это
+        # закладка внутри страницы, а не ссылка на неё.
+        # На ГЛАВНОЙ не считаем вовсе: там ссылка на «/» - это логотип в шапке,
+        # так сделан любой сайт. Находка была бы на каждой главной и только
+        # отвлекала бы от настоящих. На внутренних страницах логотип ведёт на
+        # «/», то есть ссылкой на себя не является, и правило работает как надо.
+        if (not главная_ли and key.rstrip('/') == base_key and '#' not in h):
+            if len(self_links) < 10:
+                self_links.append(h.strip())
         if key in seen:
             continue
         seen.add(key)
         todo.append(key)
         if len(todo) >= limit:
             break
-    if not todo:
+    # Внешние: свой лимит на ВЕСЬ прогон. Их 403/429 - чаще антибот, чем
+    # закрытая страница, поэтому звоним мало и осознанно. Уже проверенные
+    # (в кеше) бюджет не тратят - подвальные ссылки одни на всех страницах.
+    if ext_budget is not None:
+        _новых_внешних = [u for u in внешние if u not in link_cache]
+        _можно = max(ext_budget[0], 0)
+        if len(_новых_внешних) > _можно:
+            _разрешено = set(_новых_внешних[:_можно])
+            внешние = [u for u in внешние
+                       if u in link_cache or u in _разрешено]
+            _новых_внешних = _новых_внешних[:_можно]
+        ext_budget[0] -= len(_новых_внешних)
+
+    if not todo and not внешние:
         return None
 
     # Звоним только НОВЫЕ ссылки (нет в кеше прогона), в пределах бюджета.
-    new = [u for u in todo if u not in link_cache]
+    new = [u for u in todo + внешние if u not in link_cache]
     if budget is not None:
         new = new[:max(budget[0], 0)]
         budget[0] -= len(new)
     if new:
-        codes = await asyncio.gather(
-            *[_link_status(session, u, timeout_ms, proxy_url) for u in new],
+        ответы = await asyncio.gather(
+            *[_link_probe(session, u, timeout_ms, proxy_url) for u in new],
             return_exceptions=True)
-        for u, code in zip(new, codes):
-            link_cache[u] = None if isinstance(code, Exception) else code
-    checked = [u for u in todo if u in link_cache]
-    broken = [{'url': u, 'code': link_cache[u]}
-              for u in checked if link_cache[u] in (404, 410)]
-    return {'checked': len(checked), 'broken': broken}
+        for u, r in zip(new, ответы):
+            link_cache[u] = None if isinstance(r, Exception) else r
+    checked = [u for u in todo if link_cache.get(u)]
+    checked_ext = [u for u in внешние if link_cache.get(u)]
+
+    def _r(u):
+        return link_cache[u]
+
+    # Битая - ссылка, которая ведёт на 404/410 НАПРЯМУЮ. Случай «301, а за ним
+    # 404» держим отдельным видом (redirect_to_error): иначе одна ссылка давала
+    # бы сразу две находки, и в отчёте нельзя было бы понять, что править -
+    # адрес в вёрстке или сам редирект.
+    broken = [{'url': u, 'code': _r(u)['final_code']}
+              for u in checked
+              if not _r(u)['hops'] and _r(u)['final_code'] in (404, 410)]
+    # 403 - страница есть, но доступ закрыт: свой сайт не должен так отвечать
+    # на страницу, на которую сам ссылается. Мягко: это бывает и от защиты от
+    # ботов на своём же WAF/прокси, а не только от кривых прав.
+    forbidden = [{'url': u, 'code': _r(u)['final_code']}
+                 for u in checked
+                 if not _r(u)['hops'] and _r(u)['final_code'] == 403]
+    # Внутренняя ссылка ведёт на редирект: правится в вёрстке - надо сразу
+    # ставить конечный адрес, чтобы робот и покупатель не шли лишний шаг.
+    redirects = [{'url': u, 'code': _r(u)['code'], 'to': _r(u)['location'],
+                  'hops': _r(u)['hops'], 'loop': _r(u)['loop']}
+                 for u in checked if _r(u)['code'] in (301, 302, 303, 307, 308)]
+    # Редирект, приводящий к ошибке - хуже обычного редиректа.
+    redirect_to_error = [
+        {'url': u, 'code': _r(u)['code'], 'to': _r(u)['final_url'],
+         'final_code': _r(u)['final_code']}
+        for u in checked
+        if _r(u)['hops'] and _r(u)['final_code'] in (403, 404, 410)]
+    ext_redirects = [{'url': u, 'code': _r(u)['code'], 'to': _r(u)['location']}
+                     for u in checked_ext
+                     if _r(u)['code'] in (301, 302, 303, 307, 308)]
+    ext_broken = [{'url': u, 'code': _r(u)['final_code']}
+                  for u in checked_ext
+                  if not _r(u)['hops'] and _r(u)['final_code'] in (404, 410)]
+    ext_forbidden = [{'url': u, 'code': _r(u)['final_code']}
+                     for u in checked_ext
+                     if not _r(u)['hops'] and _r(u)['final_code'] == 403]
+    return {'checked': len(checked), 'broken': broken, 'forbidden': forbidden,
+            'redirects': redirects, 'redirect_to_error': redirect_to_error,
+            'self_links': self_links,
+            'ext_checked': len(checked_ext), 'ext_redirects': ext_redirects,
+            'ext_broken': ext_broken, 'ext_forbidden': ext_forbidden}
 
 
 # ── Проверка с ретраями ─────────────────────────────────────────────
@@ -647,6 +818,10 @@ async def check_one(
     get_image_infos: Optional[Callable] = None,
     links_cache: Optional[dict] = None,   # общий кеш прозвона ссылок (прогон)
     links_budget: Optional[list] = None,  # [остаток] лимит новых прозвонов
+    ext_links_budget: Optional[list] = None,  # [остаток] лимит ВНЕШНИХ ссылок
+    # Пути категорий проекта (+ их разделы) для проверки «в меню есть ссылка на
+    # каталог»: у части проектов раздела /catalog нет, см. layout_checker.
+    menu_category_paths: Optional[set] = None,
 ) -> CheckResult:
     """Проверить один URL с возможными повторами."""
     last = None
@@ -696,8 +871,12 @@ async def check_one(
             except Exception:
                 css_hidden = ()
         try:
+            # Город задачи (из карты присутствия) нужен проверке «выбор города
+            # в шапке»: на части сайтов переключатель подписан самим городом
+            # («Самара»), а слова «город» в шапке нет.
             content = check_content(a['body_text'], task.type_code,
-                                    css_hidden=css_hidden, url=task.url)
+                                    css_hidden=css_hidden, url=task.url,
+                                    city=getattr(task, 'city', '') or '')
         except Exception:
             content = None
 
@@ -779,7 +958,8 @@ async def check_one(
             broken_links = await check_content_links(
                 session, a['body_text'], a['final_url'] or task.url,
                 proxy_url=proxy_url, timeout_ms=timeout_ms,
-                link_cache=links_cache, budget=links_budget)
+                link_cache=links_cache, budget=links_budget,
+                ext_budget=ext_links_budget)
         except Exception:
             broken_links = None
 
@@ -824,7 +1004,8 @@ async def check_one(
                 _css_infos = await get_css_infos(
                     a['body_text'], a['final_url'] or task.url)
             layout = _check_layout(a['body_text'], _css_infos,
-                                   base_url=a['final_url'] or task.url)
+                                   base_url=a['final_url'] or task.url,
+                                   menu_category_paths=menu_category_paths)
         except Exception:
             layout = None
         # ТЗ 2.2/2.3: переходы из меню шапки (тех. страницы + каталог).
@@ -938,6 +1119,7 @@ async def check_one(
         subdomain=task.subdomain,
         type_code=task.type_code,
         type_label=task.type_label,
+        source=getattr(task, 'source', '') or 'Каталог проекта',
         http_code=a['http_code'],
         status=status,
         is_ok=is_ok,
@@ -983,6 +1165,116 @@ async def check_one(
     )
 
 
+# ── Вход по паролю (HTTP Basic) для закрытых сайтов ──────────────────
+
+
+def _basic_header(login: str, password: str) -> str:
+    import base64
+    ключ = base64.b64encode(f'{login}:{password}'.encode('utf-8')).decode()
+    return f'Basic {ключ}'
+
+
+class _СессияСПаролем(aiohttp.ClientSession):
+    """ClientSession, которая подставляет Basic-авторизацию ТОЛЬКО своему хосту.
+
+    Так закрытые стенды (напр. новый прод МПИ за nginx-паролем) проверяются
+    целиком: страницы, CSS, картинки, robots. Пароль при этом не утекает
+    наружу - проверка битых ссылок звонит и на чужие домены, а session-level
+    auth в aiohttp ушёл бы вместе с каждым таким запросом.
+    """
+
+    def __init__(self, *a, auth_host: str = '', auth_header: str = '', **kw):
+        super().__init__(*a, **kw)
+        self._auth_host = (auth_host or '').lower()
+        self._auth_header = auth_header or ''
+
+    async def _request(self, method, str_or_url, **kwargs):
+        if self._auth_host and self._auth_header:
+            try:
+                хост = (urlsplit(str(str_or_url)).hostname or '').lower()
+            except Exception:  # noqa: BLE001
+                хост = ''
+            # Поддомены закрытого стенда тоже под паролем.
+            if хост == self._auth_host or хост.endswith('.' + self._auth_host):
+                заголовки = dict(kwargs.get('headers') or {})
+                заголовки.setdefault('Authorization', self._auth_header)
+                kwargs['headers'] = заголовки
+        return await super()._request(method, str_or_url, **kwargs)
+
+
+def _сделать_сессию(headers, connector, basic_auth):
+    """Обычная сессия, а для закрытого сайта - с Basic-заголовком на свой хост.
+
+    basic_auth: {'host': 'new.example.by', 'login': …, 'password': …} или None.
+    """
+    if not basic_auth or not basic_auth.get('login'):
+        return aiohttp.ClientSession(headers=headers, connector=connector)
+    return _СессияСПаролем(
+        headers=headers, connector=connector,
+        auth_host=basic_auth.get('host', ''),
+        auth_header=_basic_header(basic_auth['login'],
+                                  basic_auth.get('password', '')))
+
+
+def basic_auth_for(cfg, creds):
+    """Вход по паролю для закрытого сайта или None - из карточки проекта и
+    доступов прогона.
+
+    Логин/пароль живут в «Настройках проекта» (site_basic_login /
+    site_basic_password), в секретах приложения или в поле на странице
+    прогона - в git и в конфиг проекта они не попадают. Хост берём из самого
+    проекта, чтобы пароль уходил только ему: проверка битых ссылок звонит и на
+    чужие домены.
+    """
+    if not (cfg or {}).get('basic_auth'):
+        return None
+    логин = (creds or {}).get('site_basic_login') or ''
+    пароль = (creds or {}).get('site_basic_password') or ''
+    if not логин:
+        return None
+    return {'host': (cfg.get('root_domain') or '').strip().lower(),
+            'login': логин, 'password': пароль}
+
+
+# Вход, действующий на ВЕСЬ текущий прогон. Нужен потому, что чек-лист, кроме
+# основного обхода, дёргает десяток отдельных проверок (robots, sitemap, 404,
+# дубли главной, поиск, нагрузка) - каждая ходит своим клиентом, и тащить
+# логин с паролем через все их сигнатуры пришлось бы руками. Глобальная
+# переменная тут безопасна: прогон - отдельный процесс на ОДИН проект.
+_ВХОД_ПРОГОНА: dict = {}
+
+
+def установить_вход_прогона(basic_auth) -> None:
+    """Запомнить вход на закрытый сайт на весь прогон (None - забыть)."""
+    global _ВХОД_ПРОГОНА
+    if not basic_auth or not basic_auth.get('login'):
+        _ВХОД_ПРОГОНА = {}
+        return
+    _ВХОД_ПРОГОНА = {
+        'host': (basic_auth.get('host') or '').strip().lower(),
+        'header': _basic_header(basic_auth['login'],
+                                basic_auth.get('password', '')),
+    }
+
+
+def заголовок_входа(url: str) -> dict:
+    """{'Authorization': …} если этот адрес - закрытый сайт прогона, иначе {}.
+
+    Хост сверяем строго (сам домен и его поддомены): пароль не должен уезжать
+    на чужие адреса, куда проверки тоже ходят.
+    """
+    if not _ВХОД_ПРОГОНА or not url:
+        return {}
+    try:
+        хост = (urlsplit(str(url)).hostname or '').lower()
+    except Exception:  # noqa: BLE001
+        return {}
+    свой = _ВХОД_ПРОГОНА['host']
+    if хост and (хост == свой or хост.endswith('.' + свой)):
+        return {'Authorization': _ВХОД_ПРОГОНА['header']}
+    return {}
+
+
 # ── Параллельный батч с прогрессом ───────────────────────────────────
 
 
@@ -1011,6 +1303,10 @@ async def run_batch(
     is_cancelled: Optional[Callable] = None,
     proxy_url: Optional[str] = None,
     kp_map: Optional[dict] = None,
+    basic_auth: Optional[dict] = None,
+    # Пути категорий проекта для проверки меню (layout_checker.
+    # menu_category_index). Не передано - работает прежний признак «/catalog».
+    menu_category_paths: Optional[set] = None,
 ) -> list[CheckResult]:
     """
     Прогнать все задачи параллельно с ограничением concurrency.
@@ -1022,6 +1318,11 @@ async def run_batch(
     помечаются как 'cancelled'.
 
     proxy_url - если задан (или есть env HTTP_PROXY), все запросы идут через прокси.
+
+    basic_auth - вход по паролю для закрытого сайта (стенд за nginx-паролем):
+    {'host': 'new.example.by', 'login': …, 'password': …}. Заголовок уходит
+    ТОЛЬКО на этот хост и его поддомены - на чужие адреса (проверка битых
+    ссылок) пароль не попадает.
     """
     # Если прокси не задан явно - берём из переменной окружения
     if proxy_url is None:
@@ -1033,6 +1334,11 @@ async def run_batch(
     total = len(tasks)
 
     headers = make_browser_headers(user_agent)
+    # Вход на закрытый сайт запоминаем на весь прогон: отдельные проверки
+    # чек-листа (robots, 404, дубли главной, поиск, нагрузка) ходят своими
+    # клиентами и берут заголовки через make_browser_headers - так пароль
+    # достаётся и им, без правки каждой сигнатуры.
+    установить_вход_прогона(basic_auth)
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
 
     # Кэш разобранных стилей (общий на весь батч - шаблонный CSS повторяется
@@ -1054,8 +1360,12 @@ async def run_batch(
     # прозвонов на прогон, чтобы прогон не разползался по времени.
     links_cache: dict = {}
     links_budget = [2500]
+    # ВНЕШНИЕ ссылки - отдельный, маленький лимит на прогон. Их 403/429 обычно
+    # означает антибот чужого сайта, а не закрытую страницу, поэтому смысла
+    # звонить их сотнями нет: чем больше проверим, тем больше шума.
+    ext_links_budget = [EXT_LINKS_PER_RUN]
 
-    async with aiohttp.ClientSession(headers=headers, connector=connector) as session:
+    async with _сделать_сессию(headers, connector, basic_auth) as session:
 
         async def get_css_hidden(html, base_url):
             sels = []
@@ -1106,6 +1416,7 @@ async def run_batch(
                     return CheckResult(
                         url=task.url, city=task.city, subdomain=task.subdomain,
                         type_code=task.type_code, type_label=task.type_label,
+                        source=getattr(task, 'source', '') or 'Каталог проекта',
                         status=STATUS.CANCELLED, is_ok=False, is_error=False,
                     )
                 result = await check_one(
@@ -1133,6 +1444,8 @@ async def run_batch(
                     get_css_infos=get_css_infos if check_layout else None,
                     get_image_infos=get_image_infos if check_images else None,
                     links_cache=links_cache, links_budget=links_budget,
+                    ext_links_budget=ext_links_budget,
+                    menu_category_paths=menu_category_paths,
                 )
                 done_count += 1
                 if on_progress:

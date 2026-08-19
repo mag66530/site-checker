@@ -38,6 +38,12 @@ from urllib.parse import urlsplit
 DROP_PCT = 30           # падение от пика больше этого - «обвал»
 SPIKE_FACTOR = 3.0      # рост от старта больше этого - «всплеск» (спам?)
 SAMPLE_LIMIT = 100      # сколько доноров тянем в выборку
+
+# Сколько подряд отказов 403 считаем приговором всему прогону. Права на
+# внешние ссылки выдаются OAuth-приложению целиком, а не по сайтам: если
+# отказали первым нескольким, откажут и остальным. Живой случай (ИМП): обход
+# всех 242 хостов впустую занимал 6 минут.
+_DENIED_STOP = 3
 SPAM_SHOW = 10          # сколько спам-доноров показываем в отчёте
 RECENT_DAYS = 30        # донор «внезапный», если найден за столько последних дней
 
@@ -222,30 +228,60 @@ def fetch_link_profile(project_id, token, proxy_url=None, log=None):
 
         _cutoff = _recent_cutoff()       # граница «внезапности» доноров - раз на прогон
         hosts_out = []
+        _denied = 0                      # хостов, где /links/external отдал 403
+        _отказ = ''                      # текст первого отказа - его и покажем
         for host_norm, host_id in selected:
             if not host_id:
                 continue
+            _s_err = _h_err = None
             try:
                 samples = _get(
                     token, f'/user/{user_id}/hosts/{host_id}/links/external/samples',
                     proxy_url, params={'offset': 0, 'limit': SAMPLE_LIMIT})
             except Exception as e:
-                _log(f'⚠ Ссылочный профиль ({host_norm}) samples: {e}')
-                samples = None
+                samples, _s_err = None, e
             try:
                 history = _get(
                     token, f'/user/{user_id}/hosts/{host_id}/links/external/history',
                     proxy_url, params={'indicator': 'LINKS_TOTAL_COUNT'})
             except Exception as e:
-                _log(f'⚠ Ссылочный профиль ({host_norm}) history: {e}')
-                history = None
+                history, _h_err = None, e
             if samples is None and history is None:
+                # Системный 403 по /links/external НЕ спамим на каждый хост
+                # (было 242×2 строки) - копим в счётчик и объясним одной
+                # строкой ниже. Прочие ошибки (сеть/таймаут) - как раньше.
+                _e = _s_err or _h_err
+                if _e is not None and '403' in str(_e):
+                    _denied += 1
+                    if _denied == 1:
+                        _отказ = str(_e)     # текст первого отказа - в итог
+                    # Права выдаются приложению целиком, не по хостам: если
+                    # первые несколько отказали, откажут и остальные 240.
+                    # Раньше прогон честно обходил все и терял 6 минут.
+                    if _denied >= _DENIED_STOP:
+                        _log(f'⚠ Ссылочный профиль: 403 на первых '
+                             f'{_denied} хостах - права выдаются приложению '
+                             f'сразу на все сайты, остальные проверять '
+                             f'бессмысленно. Прекращаю обход.')
+                        break
+                else:
+                    _log(f'⚠ Ссылочный профиль ({host_norm}): {_e}')
                 continue
             hosts_out.append(build_host_profile(
                 host_norm, _links_panel_url(host_id), samples, history,
                 recent_cutoff=_cutoff))
+        note = None
+        if _denied:
+            # Раньше здесь стояло «дело НЕ в токене, вероятно доступ
+            # делегированный». Это оказалось неверно и увело в сторону: на ИМП
+            # права владельца подтверждены на всех 242 хостах, а отказ давало
+            # OAuth-ПРИЛОЖЕНИЕ, которому не выдали право EXTERNAL_LINKS.
+            # Поэтому теперь показываем то, что ответил сам Яндекс.
+            note = (f'API Вебмастера вернул 403 на внешние ссылки '
+                    f'({_denied} хост(ов) подряд). {_отказ}')
+            _log('⚠ Ссылочный профиль: ' + note)
         return {'available': True, 'hosts': hosts_out,
-                'gsc_links_url': GSC_LINKS_URL}
+                'gsc_links_url': GSC_LINKS_URL, 'note': note}
     except PermissionError as e:
         return {'available': False, 'note': f'Доступ к API Вебмастера: {e}'}
     except Exception as e:

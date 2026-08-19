@@ -1,55 +1,56 @@
 domain,city,phone_seo,phone_ad,phone_common,all_phones,email,address,country,telegram,whatsapp,yandex_map_url,twogis_map_url,google_map_url
-metpromko.az,Баку,,,+994-12-311-01-45,123110145,info@metpromko.az,"ул. Муртуза Мухтарова, 201",Азербайджан,,,,,
-metpromko.am,Ереван,,,(861) 944-63-99,8619446399,info@metpromko.am,"ул. Гарегина Нжде, 46",Армения,,,,,
-metpromko.by,Минск,,,375 (44) 755-66-61,447556661,minsk@metpromko.ru,"Промышленная ул., д. 6/Б",Беларусь,,,,,
-metpromko.kz,Алматы,,,(727) 329-70-08,7273297008,almaty@metpromko.kz,"ул. Богенбай Батыра, д. 241",Казахстан,,,,,
-metpromko.kz,Астана,,,(7172) 78-30-80,7172783080,astana@metpromko.kz,"ш. Алаш, д. 18",Казахстан,,,,,
-metpromko.kz,Караганда,,,(708) 987-98-16,7089879816,karaganda@metpromko.kz,"проспект Бухар Жырау, д. 81/1",Казахстан,,,,,
-metpromko.kz,Шымкент,,,(708) 987-98-16,7089879816,shymkent@metpromko.kz,"проспект Тауке хана, 330",Казахстан,,,,,
-metpromko.kg,Бишкек,,,+996-777-51-72-23,777517223,info@metpromko.kg,"ул. Ибраимова, 30/1",Киргизия,,,,,
-metpromko.kg,Ош,,,+996-777-51-72-23,777517223,osh@metpromko.kg,"ул. Ленина, 316",Киргизия,,,,,
-metpromko.ru,Барнаул,,,(3852) 25-24-41,3852252441,barnaul@metpromko.ru,"Комсомольский проспект, 120",Россия,,(962) 223-51-86,,,
-metpromko.ru,Владивосток,,,(4232) 80-56-71,4232805671,vladivostok@metpromko.ru,"ул. Морозова, д. 11Б, оф. 106А",Россия,,(962) 223-51-86,,,
-metpromko.ru,Владикавказ,,,(800) 700-61-58,8007006158,vladikavkaz@metpromko.ru,"ул. Молодёжная, 21А",Россия,,(903) 411-77-85,,,
-metpromko.ru,Волгоград,,,(8442) 60-99-51,8442609951,volgograd@metpromko.ru,"ул. им. Рихарда Зорге, 55, оф. 3",Россия,,(903) 411-77-85,,,
-metpromko.ru,Воронеж,,,(4732) 51-42-33,4732514233,voronezh@metpromko.ru,"проспект Труда, 139Г, оф. 26",Россия,,(963) 136-87-88,,,
+metpromko.az,Баку,,,+994-12-311-01-45,123110145,info@metpromko.az,"ул. Муртуза Мухтарова, 201",Азербайджан,994-50-573-39-54,994-50-573-39-54,https://yandex.ru/maps/org/metpromko/126748759827/?ll=49.826539%2C40.385629&z=16,,https://maps.app.goo.gl/W6abVVPZgvfiDCfC8
+metpromko.am,Ереван,,,(861) 944-63-99,8619446399,info@metpromko.am,"ул. Гарегина Нжде, 46",Армения,(903) 411-77-85,(903) 411-77-85,https://yandex.ru/maps/org/metpromko/214182659342/?ll=44.500820%2C40.151246&z=19.72,,https://maps.app.goo.gl/bytCLLFtiHKWTVQCA
+metpromko.by,Минск,,,375 (44) 755-66-61,447556661,minsk@metpromko.ru,"Промышленная ул., д. 6/Б",Беларусь,375 (44) 755-66-61,375 (44) 755-66-61,https://yandex.ru/maps/org/metpromko/45291379736/?ll=27.679681%2C53.848425&z=14,,
+metpromko.kz,Алматы,,,(727) 329-70-08,7273297008,almaty@metpromko.kz,"ул. Богенбай Батыра, д. 241",Казахстан,,,https://yandex.ru/maps/org/metpromko/102744598655/?ll=76.906200%2C43.250593&z=16,https://2gis.kz/almaty/firm/70000001094131838?m=76.906418%2C43.250705%2F19.84,https://goo.gl/maps/cp42L8VJZsRbQJaF6
+metpromko.kz,Караганда,,,(708) 987-98-16,7089879816,karaganda@metpromko.kz,"проспект Бухар Жырау, д. 81/1",Казахстан,7-700-770-49-46,7-700-770-49-46,https://yandex.ru/maps/org/metpromko/228629431726/?ll=73.098790%2C49.789316&z=16,https://2gis.kz/karaganda/firm/70000001094228257,https://maps.app.goo.gl/FysgiCaTqDypu4616
+metpromko.kz,Астана,,,"(7172) 78-30-80
+(7172) 62-83-88",7172783080;7172628388,astana@metpromko.kz,"ш. Алаш, д. 18/1",Казахстан,7-700-770-49-46,7-700-770-49-46,https://yandex.ru/maps/org/metpromko/186521118667/?ll=71.453956%2C51.188283&z=16,https://2gis.kz/astana/firm/70000001018105033,https://goo.gl/maps/fa3sjqBJXCTa6QE46
+metpromko.kz,Шымкент,,,(708) 987-98-16,7089879816,shymkent@metpromko.kz,"проспект Тауке хана, 330",Казахстан,,,https://yandex.ru/maps/org/metpromko/5134179170/?ll=69.647696%2C42.304286&z=16,https://2gis.kz/shymkent/firm/70000001094125211,https://maps.app.goo.gl/ixvrjbkrKyXYSEKLA
+metpromko.kg,Бишкек,,,+996-777-51-72-23,777517223,info@metpromko.kg,"ул. Ибраимова, 30/1",Киргизия,996-777-51-72-23,996-777-51-72-23,https://yandex.ru/maps/org/metpromko/176277142300/?ll=74.615793%2C42.865371&z=16,https://2gis.kg/bishkek/firm/70000001077186965?m=74.615894%2C42.865377%2F16,https://goo.gl/maps/H8EoQENvV9fgVC6W7
+metpromko.kg,Ош,,,+996-777-51-72-23,777517223,osh@metpromko.kg,"ул. Ленина, 316",Киргизия,996-777-51-72-23,996-777-51-72-23,https://yandex.ru/maps/org/metpromko/26787635840/?ll=72.797350%2C40.528987&z=16,https://2gis.kg/osh/firm/70000001077459385?m=72.797425%2C40.528972%2F16,https://goo.gl/maps/emZsTGvZmsDbubwx5
+metpromko.ru,Барнаул,,,(3852) 25-24-41,3852252441,barnaul@metpromko.ru,"Комсомольский проспект, 120",Россия,(962) 223-51-86,(962) 223-51-86,https://yandex.ru/maps/org/metpromko/5233578189/?ll=83.778968%2C53.354498&z=17,https://2gis.ru/barnaul/firm/70000001082694221,
+metpromko.ru,Владивосток,,,(4232) 80-56-71,4232805671,vladivostok@metpromko.ru,"ул. Морозова, д. 11Б, оф. 106А",Россия,(962) 223-51-86,(962) 223-51-86,,,
+metpromko.ru,Владикавказ,,,(800) 700-61-58,8007006158,vladikavkaz@metpromko.ru,"ул. Молодёжная, 21А",Россия,(903) 411-77-85,(903) 411-77-85,https://yandex.ru/maps/org/metpromko/151093299561/?ll=44.681933%2C43.049861&z=16,,
+metpromko.ru,Волгоград,,,(8442) 60-99-51,8442609951,volgograd@metpromko.ru,"ул. им. Рихарда Зорге, 55, оф. 3",Россия,(903) 411-77-85,(903) 411-77-85,https://yandex.ru/maps/org/metpromko/202095418246/?ll=44.536253%2C48.757780&z=17,https://2gis.ru/volgograd/firm/70000001063446175,
+metpromko.ru,Воронеж,,,(4732) 51-42-33,4732514233,voronezh@metpromko.ru,"проспект Труда, 139Г, оф. 26",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/4935630903/?ll=39.166349%2C51.672746&z=14,https://2gis.ru/voronezh/firm/70000001053800368,
 metpromko.ru,Екатеринбург,,,"(343) 202-68-86
-(343) 202-38-83",3432026886;3432023883,ekb@metpromko.ru,"просп. Космонавтов д. 158, литер В",Россия,,(963) 136-87-88,,,
-metpromko.ru,Ижевск,,,(3412) 32-33-75,3412323375,izhevsk@metpromko.ru,"ул. Союзная, 161, оф. 18",Россия,,(965) 842-33-75,,,
-metpromko.ru,Иркутск,,,(3952) 57-92-40,3952579240,irkutsk@metpromko.ru,"ул. Советская, д. 45А, оф. 15",Россия,,(962) 223-51-86,,,
-metpromko.ru,Казань,,,(843) 216-62-83,8432166283,kazan@metpromko.ru,"ул. Тихорецкая, 2А, оф. 208",Россия,,(963) 230-68-83,,,
-metpromko.ru,Кемерово,,,(3842) 24-02-15,3842240215,kemerovo@metpromko.ru,"Кузбасская улица, 10",Россия,,(962) 223-51-86,,,
-metpromko.ru,Краснодар,,,(861) 944-63-99,8619446399,krasnodar@metpromko.ru,"ул. Коммунаров, 31/1, оф. 4/1",Россия,,(903) 411-77-85,,,
-metpromko.ru,Красноярск,,,(391) 271-78-47,3912717847,krasnoyarsk@metpromko.ru,"ул. Затонская, 32, оф. 3-3",Россия,,(962) 223-51-86,,,
-metpromko.ru,Махачкала,,,(800) 700-61-58,8007006158,makhachkala@metpromko.ru,"ул. Хаджи Булача, 17Г",Россия,,(903) 411-77-85,,,
-metpromko.ru,Москва,,,(495) 961-75-16,4959617516,moscow@metpromko.ru,"ул. Потаповская роща, 12к2, оф. 6",Россия,,(903) 961-75-16,,,
-metpromko.ru,Нижневартовск,,,(3466) 22-02-88,3466220288,nizhnevartovsk@metpromko.ru,"ул. 60 лет Октября, 4Пс8",Россия,,(963) 136-87-88,,,
-metpromko.ru,Нижний Новгород,,,(831) 213-65-38,8312136538,nn@metpromko.ru,"ул. Ванеева, 127, оф. 18",Россия,,(963) 230-68-83,,,
-metpromko.ru,Новокузнецк,,,(3843) 20-99-83,3843209983,novokuznetsk@metpromko.ru,"ул. Орджоникидзе,11",Россия,,(962) 223-51-86,,,
-metpromko.ru,Новосибирск,,,(383) 249-88-04,3832498804,novosibirsk@metpromko.ru,"ул. Залесского, д. 7/2, оф. 21",Россия,,(962) 223-51-86,,,
-metpromko.ru,Омск,,,(3812) 63-31-75,3812633175,omsk@metpromko.ru,"ул. Училищная, 12 / Потанина, д. 15, оф. 6",Россия,,(962) 223-51-86,,,
-metpromko.ru,Оренбург,,,(3532) 26-93-35,3532269335,orenburg@metpromko.ru,"ул. Аксакова, 8/9",Россия,,(963) 136-87-88,,,
-metpromko.ru,Пермь,,,(342) 259-22-85,3422592285,perm@metpromko.ru,"ул. Екатерининская, д. 120А, оф. 210",Россия,,(965) 842-33-75,,,
-metpromko.ru,Ростов-на-Дону,,,(863) 256-14-86,8632561486,rostov@metpromko.ru,"ул. Металлургическая, д. 113/46, оф. 1",Россия,,(903) 411-77-85,,,
-metpromko.ru,Рязань,,,(491) 299-57-69,4912995769,ryazan@metpromko.ru,"Куйбышевское ш., 25с17",Россия,,(963) 136-87-88,,,
-metpromko.ru,Самара,,,(846) 267-01-61,8462670161,samara@metpromko.ru,"ул. Галактионовская, 39, оф. 46",Россия,,(963) 136-87-88,,,
-metpromko.ru,Санкт-Петербург,,,(812) 982-40-68,8129824068,spb@metpromko.ru,"Малоохтинский проспект, д. 90",Россия,,(962) 686-43-08,,,
-metpromko.ru,Саратов,,,(8452) 65-17-66,8452651766,saratov@metpromko.ru,"ул. им. Е.И. Пугачева, 147/151, оф. 304Б",Россия,,(963) 136-87-88,,,
-metpromko.ru,Севастополь,,,(8692) 88-78-08,8692887808,sevastopol@metpromko.ru,"ул. Вакуленчука, 29, корп. 4",Россия,,(903) 411-77-85,,,
-metpromko.ru,Симферополь,,,(3652) 88-98-68,3652889868,simferopol@metpromko.ru,"ул. Глинки, 65",Россия,,(903) 411-77-85,,,
-metpromko.ru,Ставрополь,,,(8652) 92-75-24,8652927524,stavropol@metpromko.ru,"ул. Ленина, 392",Россия,,(903) 411-77-85,,,
-metpromko.ru,Сургут,,,(3462) 70-37-88,3462703788,surgut@metpromko.ru,"ул. Пионерная, 7",Россия,,(963) 136-87-88,,,
-metpromko.ru,Тольятти,,,(8482) 71-33-67,8482713367,tolyatti@metpromko.ru,"ул. Мира, 133А",Россия,,(963) 136-87-88,,,
-metpromko.ru,Томск,,,(3822) 22-59-81,3822225981,tomsk@metpromko.ru,"ул. Мичурина, 20",Россия,,(962) 223-51-86,,,
-metpromko.ru,Тула,,,(4872) 38-43-46,4872384346,tula@metpromko.ru,"пр. Ленина, д. 26",Россия,,(963) 136-87-88,,,
-metpromko.ru,Тюмень,,,(3452) 38-72-68,3452387268,tumen@metpromko.ru,"бульвар Бориса Щербины, 13, оф. 19",Россия,,(982) 938-76-58,,,
-metpromko.ru,Уфа,,,(347) 298-87-88,3472988788,ufa@metpromko.ru,"пр-т Октября, 1/2, оф. 204",Россия,,(963) 136-87-88,,,
-metpromko.ru,Хабаровск,,,(4212) 69-51-86,4212695186,khabarovsk@metpromko.ru,"ул. Серышева, 22",Россия,,(962) 223-51-86,,,
-metpromko.ru,Челябинск,,,(351) 216-28-58,3512162858,mpk74@metpromko.ru,"ул. Новоэлеваторная, 49, оф. 202",Россия,,(968) 113-28-58,,,
-metpromko.ru,Ярославль,,,(485) 266-24-51,4852662451,yaroslavl@metpromko.ru,"проспект Октября, 91А, оф. 308",Россия,,(963) 136-87-88,,,
-metpromko.uz,Ташкент,,,+998 (90) 002-86-68,900028668,info@metpromko.uz,"ул. Нукус, 86к3",Узбекистан,,,,,
-metpromko.ru,Донецк,,,(800) 700-61-58,8007006158,donetsk@metpromko.ru,"пл. Коммунаров, д. 1",Украина,,,,,
-metpromko.ru,Луганск,,,(800) 700-61-58,8007006158,lugansk@metpromko.ru,"ул. Оборонная, д. 28",Украина,,,,,
-metpromko.ru,Мариуполь,,,(800) 700-61-58,8007006158,mariupol@metpromko.ru,"ул. Макара Мазая, д. 10",Украина,,,,,
-metpromko.ru,Мелитополь,,,(800) 700-61-58,8007006158,melitopol@metpromko.ru,"Гетманская ул., д. 2",Украина,,,,,
-metpromko.ru,Херсон,,,(800) 700-61-58,8007006158,herson@metpromko.ru,"ул. Нефтяников, д. 1",Украина,,,,,
+(343) 202-38-83",3432026886;3432023883,ekb@metpromko.ru,"просп. Космонавтов д. 158, литер В",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/1020046502/?ll=60.614560%2C56.929958&z=17,2gis.ru/ekaterinburg/firm/1267166676312357,https://goo.gl/maps/desTo75j4Ci4nDhy6
+metpromko.ru,Ижевск,,,(3412) 32-33-75,3412323375,izhevsk@metpromko.ru,"ул. Союзная, 161, оф. 18",Россия,(965) 842-33-75,(965) 842-33-75,https://yandex.ru/maps/org/metpromko/226348510201/?ll=53.303774%2C56.859758&z=17,https://2gis.ru/izhevsk/firm/70000001053518508,
+metpromko.ru,Иркутск,,,(3952) 57-92-40,3952579240,irkutsk@metpromko.ru,"ул. Советская, д. 45А, оф. 15",Россия,(962) 223-51-86,(962) 223-51-86,https://yandex.ru/maps/org/metpromko/225021618338/?ll=104.313296%2C52.278327&z=17,,
+metpromko.ru,Казань,,,(843) 216-62-83,8432166283,kazan@metpromko.ru,"ул. Тихорецкая, 2А, оф. 208",Россия,(963) 230-68-83,(963) 230-68-83,https://yandex.ru/maps/org/metpromko/194961998884/?ll=49.122036%2C55.732418&z=15,https://2gis.ru/kazan/firm/70000001082698014,
+metpromko.ru,Кемерово,,,(3842) 24-02-15,3842240215,kemerovo@metpromko.ru,"Кузбасская улица, 10",Россия,(962) 223-51-86,(962) 223-51-86,https://yandex.ru/maps/org/metpromko/238041863875/?ll=86.074253%2C55.360316&z=17,https://2gis.ru/kemerovo/inside/704323096939475/firm/70000001036128661?m=86.074349%2C55.360312%2F16,
+metpromko.ru,Краснодар,,,(861) 944-63-99,8619446399,krasnodar@metpromko.ru,"ул. Коммунаров, 31/1, оф. 4/1",Россия,(903) 411-77-85,(903) 411-77-85,https://yandex.ru/maps/org/metpromko/67896931044/?ll=38.972285%2C45.019653&z=16,2gis.ru/krasnodar/firm/70000001034368056,"https://www.google.com/maps/place/%D0%9C%D0%95%D0%A2%D0%9F%D0%A0%D0%9E%D0%9C%D0%9A%D0%9E,+%D1%82%D0%BE%D1%80%D0%B3%D0%BE%D0%B2%D0%BE-%D0%BF%D1%80%D0%BE%D0%B8%D0%B7%D0%B2%D0%BE%D0%B4%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D0%B0%D1%8F+%D0%BA%D0%BE%D0%BC%D0%BF%D0%B0%D0%BD%D0%B8%D1%8F/@45.0231117,39.0436317,17.04z/data=!4m10!1m2!2m1!1z0JzQtdGC0L_RgNC-0LzQutC-INCa0YDQsNGB0L3QvtC00LDRgA!3m6!1s0x40f050091ba148d9:0x1d8aacb707f33100!8m2!3d45.0222795!4d39.0472858!15sCiXQnNC10YLQv9GA0L7QvNC60L4g0JrRgNCw0YHQvdC-0LTQsNGAIgOIAQHgAQA!16s%2Fg%2F11r9d2scsz?entry=ttu"
+metpromko.ru,Красноярск,,,(391) 271-78-47,3912717847,krasnoyarsk@metpromko.ru,"ул. Затонская, 32, оф. 3-3",Россия,(962) 223-51-86,(962) 223-51-86,https://yandex.ru/maps/org/metpromko/84004943006/?ll=92.930365%2C55.986607&z=16,2gis.ru/krasnoyarsk/firm/70000001053293392,https://goo.gl/maps/H1mWoCFj6HiWzLYbA
+metpromko.ru,Махачкала,,,(800) 700-61-58,8007006158,makhachkala@metpromko.ru,"ул. Хаджи Булача, 17Г",Россия,(903) 411-77-85,(903) 411-77-85,https://yandex.ru/maps/org/metpromko/61699830005/?ll=47.549311%2C42.954285&z=16,,
+metpromko.ru,Москва,,,(495) 961-75-16,4959617516,moscow@metpromko.ru,"ул. Потаповская роща, 12к2, оф. 6",Россия,(903) 961-75-16,(903) 961-75-16,https://yandex.ru/maps/org/metpromko/209920679828/?ll=37.499273%2C55.549659&z=17,2gis.ru/moscow/firm/70000001034312030,https://goo.gl/maps/eBw3QcUrRJuzBFnm8
+metpromko.ru,Нижневартовск,,,(3466) 22-02-88,3466220288,nizhnevartovsk@metpromko.ru,"ул. 60 лет Октября, 4Пс8",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/140485699952/?ll=76.547233%2C60.928076&z=17.05,https://2gis.ru/nizhnevartovsk/firm/70000001053058914,
+metpromko.ru,Нижний Новгород,,,(831) 213-65-38,8312136538,nn@metpromko.ru,"ул. Ванеева, 127, оф. 18",Россия,(963) 230-68-83,(963) 230-68-83,https://yandex.ru/maps/org/metpromko/24101869129/?ll=44.029908%2C56.301289&z=17.05,https://2gis.ru/n_novgorod/search/%D0%9C%D0%B5%D1%82%D0%BF%D1%80%D0%BE%D0%BC%D0%BA%D0%BE/firm/70000001043282379/44.030138%2C56.301311?m=44.00697%2C56.327077%2F11,
+metpromko.ru,Новокузнецк,,,(3843) 20-99-83,3843209983,novokuznetsk@metpromko.ru,"ул. Орджоникидзе,11",Россия,(962) 223-51-86,(962) 223-51-86,https://yandex.ru/maps/org/metpromko/115853979933/?ll=87.107540%2C53.764856&z=16,2gis.ru/novokuznetsk/firm/70000001054619373,
+metpromko.ru,Новосибирск,,,(383) 249-88-04,3832498804,novosibirsk@metpromko.ru,"ул. Залесского, д. 7/2, оф. 21",Россия,(962) 223-51-86,(962) 223-51-86,https://yandex.ru/maps/org/metpromko/124717167825/?ll=82.922307%2C55.068329&z=17.05,https://2gis.ru/novosibirsk/firm/70000001076748610,https://goo.gl/maps/c13KAgD1HMGV8btq9
+metpromko.ru,Омск,,,(3812) 63-31-75,3812633175,omsk@metpromko.ru,"ул. Училищная, 12 / Потанина, д. 15, оф. 6",Россия,(962) 223-51-86,(962) 223-51-86,https://yandex.ru/maps/org/metpromko/241452221590/?ll=73.388829%2C54.968468&z=17,https://2gis.ru/omsk/firm/70000001082695234,
+metpromko.ru,Оренбург,,,(3532) 26-93-35,3532269335,orenburg@metpromko.ru,"ул. Аксакова, 8/9",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/profile/127674670934,https://2gis.ru/orenburg/inside/6756035096219323/firm/70000001054190913?m=55.108273%2C51.772763%2F16,
+metpromko.ru,Пермь,,,(342) 259-22-85,3422592285,perm@metpromko.ru,"ул. Екатерининская, д. 120А, оф. 210",Россия,(965) 842-33-75,(965) 842-33-75,https://yandex.ru/maps/org/metpromko/203147447327/?indoorLevel=1&ll=56.233208%2C58.008204&z=17,https://2gis.ru/perm/firm/70000001018611116,https://goo.gl/maps/4jeJRyC6xuoDDMhy9
+metpromko.ru,Ростов-на-Дону,,,(863) 256-14-86,8632561486,rostov@metpromko.ru,"ул. Металлургическая, д. 113/46, оф. 1",Россия,(903) 411-77-85,(903) 411-77-85,https://yandex.ru/maps/org/metpromko/126587202764/?ll=39.769361%2C47.251232&z=17,https://2gis.ru/rostov/inside/3378335375696511/firm/70000001028062064?m=39.769411%2C47.251315%2F16,https://goo.gl/maps/KWVccepLqgJ15Qjs5
+metpromko.ru,Рязань,,,(491) 299-57-69,4912995769,ryazan@metpromko.ru,"Куйбышевское ш., 25с17",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/84923753699/?ll=39.768076%2C54.601981&z=17.05,https://2gis.ru/ryazan/firm/70000001082989175,
+metpromko.ru,Самара,,,(846) 267-01-61,8462670161,samara@metpromko.ru,"ул. Галактионовская, 39, оф. 46",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/169297265061/?ll=50.099187%2C53.186981&z=17,2gis.ru/samara/firm/70000001043102940,
+metpromko.ru,Санкт-Петербург,,,(812) 982-40-68,8129824068,spb@metpromko.ru,"Малоохтинский проспект, д. 90",Россия,(962) 686-43-08,(962) 686-43-08,https://yandex.ru/maps/org/metpromko/153342232999/?ll=30.405241%2C59.923771&z=17,https://2gis.ru/spb/search/%D0%9C%D0%B5%D1%82%D0%BF%D1%80%D0%BE%D0%BC%D0%BA%D0%BE/firm/70000001027992158/30.405255%2C59.923745?m=30.314808%2C59.939173%2F10.62,https://goo.gl/maps/4awDPtGoTeM54HiSA
+metpromko.ru,Саратов,,,(8452) 65-17-66,8452651766,saratov@metpromko.ru,"ул. им. Е.И. Пугачева, 147/151, оф. 304Б",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/125442518679/?ll=46.016560%2C51.542363&z=17,https://2gis.ru/saratov/search/%D0%9C%D0%B5%D1%82%D0%BF%D1%80%D0%BE%D0%BC%D0%BA%D0%BE/firm/70000001092604964/46.016604%2C51.542294/tab/reviews?m=46.034329%2C51.533664%2F11,
+metpromko.ru,Севастополь,,,(8692) 88-78-08,8692887808,sevastopol@metpromko.ru,"ул. Вакуленчука, 29, корп. 4",Россия,(903) 411-77-85,(903) 411-77-85,https://yandex.ru/maps/org/metpromko/222540742267/?ll=33.486939%2C44.588661&z=16,,
+metpromko.ru,Симферополь,,,(3652) 88-98-68,3652889868,simferopol@metpromko.ru,"ул. Глинки, 65",Россия,(903) 411-77-85,(903) 411-77-85,https://yandex.ru/maps/org/metpromko/89278144701/?ll=34.155285%2C44.974731&z=16,,
+metpromko.ru,Ставрополь,,,(8652) 92-75-24,8652927524,stavropol@metpromko.ru,"ул. Ленина, 392",Россия,(903) 411-77-85,(903) 411-77-85,https://yandex.ru/maps/org/metpromko/173385619448/?ll=41.941505%2C45.036560&z=16,2gis.ru/stavropol/firm/70000001053765397,
+metpromko.ru,Сургут,,,(3462) 70-37-88,3462703788,surgut@metpromko.ru,"ул. Пионерная, 7",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/176306194436/?ll=73.492772%2C61.271775&z=16,,
+metpromko.ru,Тольятти,,,(8482) 71-33-67,8482713367,tolyatti@metpromko.ru,"ул. Мира, 133А",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/163567062301/?ll=49.452328%2C53.510642&z=16,,
+metpromko.ru,Томск,,,(3822) 22-59-81,3822225981,tomsk@metpromko.ru,"ул. Мичурина, 20",Россия,(962) 223-51-86,(962) 223-51-86,https://yandex.ru/maps/org/metpromko/135623324199/?ll=85.016783%2C56.514257&z=17,2gis.ru/tomsk/firm/70000001034144476,
+metpromko.ru,Тула,,,(4872) 38-43-46,4872384346,tula@metpromko.ru,"пр. Ленина, д. 26",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/29405021502/?ll=37.614914%2C54.190246&z=17,,
+metpromko.ru,Тюмень,,,(3452) 38-72-68,3452387268,tumen@metpromko.ru,"бульвар Бориса Щербины, 13, оф. 19",Россия,(982) 938-76-58,(982) 938-76-58,https://yandex.ru/maps/org/metpromko/149022089246/?ll=65.626854%2C57.098940&z=17,,https://goo.gl/maps/PoLBw8aZ45WjphC98
+metpromko.ru,Уфа,,,(347) 298-87-88,3472988788,ufa@metpromko.ru,"пр-т Октября, 1/2, оф. 204",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/67283996189/?ll=55.982523%2C54.739872&z=14,https://2gis.ru/ufa/firm/70000001076895249,https://goo.gl/maps/5StJ5EqSJ5MHkwwJ9
+metpromko.ru,Хабаровск,,,(4212) 69-51-86,4212695186,khabarovsk@metpromko.ru,"ул. Серышева, 22",Россия,(962) 223-51-86,(962) 223-51-86,https://yandex.ru/maps/org/metpromko/86731764808/?ll=135.057193%2C48.481430&z=16,,
+metpromko.ru,Челябинск,,,(351) 216-28-58,3512162858,mpk74@metpromko.ru,"ул. Новоэлеваторная, 49, оф. 202",Россия,(968) 113-28-58,(968) 113-28-58,https://yandex.ru/maps/org/metpromko/27581085784/?ll=61.353227%2C55.105274&z=16,https://2gis.ru/chelyabinsk/firm/2111591606525537,https://goo.gl/maps/KmSG5TH9kAo6KwBAA
+metpromko.ru,Ярославль,,,(485) 266-24-51,4852662451,yaroslavl@metpromko.ru,"проспект Октября, 91А, оф. 308",Россия,(963) 136-87-88,(963) 136-87-88,https://yandex.ru/maps/org/metpromko/51596874731/?ll=39.842897%2C57.659936&z=17,https://2gis.ru/yaroslavl/search/%D0%9C%D0%B5%D1%82%D0%BF%D1%80%D0%BE%D0%BC%D0%BA%D0%BE/firm/70000001054070092/39.843098%2C57.659668?m=39.884799%2C57.626377%2F11,
+metpromko.uz,Ташкент,,,+998 (90) 002-86-68,900028668,info@metpromko.uz,"ул. Нукус, 86к3",Узбекистан,998-90-002-86-68,998-90-002-86-68,https://yandex.ru/maps/org/metpromko/56695871982/?ll=69.272532%2C41.289229&z=16,https://2gis.uz/tashkent/firm/70000001077143113?m=69.272442%2C41.289146%2F16,https://goo.gl/maps/aeNvge3NHmpDpa1WA
+metpromko.ru,Донецк,,,(800) 700-61-58,8007006158,donetsk@metpromko.ru,"пл. Коммунаров, д. 1",Россия,,,,,
+metpromko.ru,Луганск,,,(800) 700-61-58,8007006158,lugansk@metpromko.ru,"ул. Оборонная, д. 28",Россия,,,,,
+metpromko.ru,Мариуполь,,,(800) 700-61-58,8007006158,mariupol@metpromko.ru,"ул. Макара Мазая, д. 10",Россия,,,,,
+metpromko.ru,Мелитополь,,,(800) 700-61-58,8007006158,melitopol@metpromko.ru,"Гетманская ул., д. 2",Россия,,,,,
+metpromko.ru,Херсон,,,(800) 700-61-58,8007006158,herson@metpromko.ru,"ул. Нефтяников, д. 1",Россия,,,,,

@@ -21,6 +21,9 @@ class _FakeMissingLoc:
     def is_visible(self):
         return False
 
+    def evaluate(self, js, *a):
+        return False
+
     def click(self, timeout=None, force=None):
         raise Exception("not found")  # noqa: BLE001
 
@@ -49,6 +52,10 @@ class _FakeCloseBtn:
         return 1
 
     def is_visible(self):
+        return True
+
+    def evaluate(self, js, *a):
+        # заглушка _реально_видим: крестик открытой модалки видно
         return True
 
     def click(self, timeout=None, force=None):

@@ -383,6 +383,10 @@ def main():
     ap.add_argument('--resource', default=None,
                     help='GSC-ресурс, напр. sc-domain:stalmetural.ru')
     a = ap.parse_args()
+    # В облаке Chromium доустанавливается в рантайме - см. browser_setup.
+    import browser_setup
+    browser_setup.ensure_for_run(lambda m: print(m, flush=True),
+                                 '404 в индексе (GSC)')
     res = asyncio.run(_run(a.project, a.scout, acct_override=a.account,
                            res_override=a.resource))
     (ROOT / 'cache').mkdir(exist_ok=True)

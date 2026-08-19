@@ -111,11 +111,10 @@ def test_x_robots_tag_noindex_на_открытой_в_robots_странице_�
     assert out['issues'] == []
 
 
-# ── Секция 3а отчёта (reporter.py) не падает на новой структуре данных ──
+# ── Находки индексации доходят до «Проблем» (листа «Индексация» больше нет) ──
 
-def test_секция_отчёта_рендерится_с_находками_и_без():
-    from openpyxl import Workbook
-    from reporter import _build_indexing_sheet
+def test_заблокированные_страницы_попадают_в_проблемы():
+    from report_priorities import indexing_site_findings
 
     summary_с_находкой = {
         'host': 'example.ru', 'disallowed': [],
@@ -123,23 +122,15 @@ def test_секция_отчёта_рендерится_с_находками_и
             {'rule': '/starye-tovary/', 'path': '/starye-tovary/', 'status': 200},
         ]},
     }
-    wb = Workbook()
-    _build_indexing_sheet(wb, [], summary_с_находкой)
-    ws = wb['Индексация']
-    text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
-    assert 'Заблокированные страницы' in text
-    assert '/starye-tovary/' in text
+    находки = indexing_site_findings(summary_с_находкой)
+    assert any('robots.txt' in f.problem for f in находки), находки
+    assert any('/starye-tovary/' in f.url for f in находки)
 
     summary_без_находок = {
         'host': 'example.ru', 'disallowed': [],
         'directive_check': {'checked': 3, 'findings': []},
     }
-    wb2 = Workbook()
-    _build_indexing_sheet(wb2, [], summary_без_находок)
-    ws2 = wb2['Индексация']
-    text2 = ' '.join(str(c.value) for row in ws2.iter_rows() for c in row if c.value)
-    assert 'Заблокированные страницы' in text2
-    assert 'либо недоступны напрямую' in text2
+    assert indexing_site_findings(summary_без_находок) == []
 
 
 if __name__ == "__main__":

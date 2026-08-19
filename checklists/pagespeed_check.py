@@ -35,7 +35,8 @@ PID_FILE = OUT_ROOT / 'run.pid'
 PROJECTS = {
     'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром',
     'mpe': 'МПЭ - Мепэн', 'mpi': 'МПИ - МетПромИнтекс',
-    'sm': 'SHOPMET',
+    'sm': 'SM - SHOPMET', 'avia': 'АПС - Авиапромсталь',
+    'mtt': 'МТТ - Меттранстерминал',
 }
 
 # цвета (в тон приложению + пороги Google)
@@ -53,11 +54,27 @@ def _secret(key: str, default: str = '') -> str:
     return default
 
 
+def _project_setting(pid: str, name: str) -> str:
+    """Значение из настроек проекта (личный кабинет, БД). Пусто, если БД
+    недоступна или настройка не задана - тогда работают секреты ниже."""
+    try:
+        import auth
+        return str(auth.project_setting(pid, name) or '')
+    except Exception:  # noqa: BLE001
+        return ''
+
+
 def _api_key(pid: str) -> str:
-    """Ключ PageSpeed: сперва per-project (pagespeed_api_key_<pid>), затем общий
-    (pagespeed_api_key), затем PAGESPEED_API_KEY из окружения, затем то, что
-    введено в поле на этой сессии."""
-    return (_secret(f'pagespeed_api_key_{pid}') or _secret('pagespeed_api_key')
+    """Ключ PageSpeed. ПОРЯДОК тот же, что у остальных проверок (_secret_pid в
+    чек-листе): настройки проекта из личного кабинета → секрет приложения
+    pagespeed_api_key_<pid> → общий секрет pagespeed_api_key → окружение →
+    то, что вставили в поле на этой сессии.
+
+    Настройки проекта тут раньше не читались вовсе: ключ, сохранённый
+    руководителем на странице «Настройки проекта», страница не видела и
+    честно писала «Ключ не задан» - работал только ручной ввод на сессию."""
+    return (_project_setting(pid, 'pagespeed_api_key')
+            or _secret(f'pagespeed_api_key_{pid}') or _secret('pagespeed_api_key')
             or os.environ.get('PAGESPEED_API_KEY', '')
             or st.session_state.get(f'ps_key_{pid}', '')).strip()
 
@@ -332,12 +349,14 @@ OUT_DIR = OUT_ROOT / pid
 key = _api_key(pid)
 with st.expander('🔑 Ключ PageSpeed API', expanded=not key):
     if key:
-        st.markdown('✅ Ключ задан (из секретов/окружения).')
+        st.markdown('✅ Ключ задан (настройки проекта / секреты / окружение).')
     else:
         st.markdown('❌ Ключ не задан. Без ключа Google даёт очень жёсткий лимит - '
                     'проверка почти наверняка упрётся в ошибку лимита.')
-        st.caption('Постоянный ключ задаётся секретом `pagespeed_api_key` (или '
-                   '`pagespeed_api_key_<проект>`). Получить: Google Cloud Console → '
+        st.caption('Постоянный ключ проще всего завести на странице «Настройки '
+                   'проекта» (поле «Ключ PageSpeed API») - оттуда его видят все '
+                   'в проекте. Либо секретом `pagespeed_api_key` / '
+                   '`pagespeed_api_key_<проект>`. Получить: Google Cloud Console → '
                    'включить «PageSpeed Insights API» → Credentials → API key.')
         _typed = st.text_input('Или вставьте ключ на эту сессию', type='password',
                                key=f'ps_key_input_{pid}')
@@ -417,6 +436,32 @@ st.divider()
 alive = _pid_alive(_read_pid())
 _no_urls = (not scope.startswith('Выборка')) and not (locals().get('urls_text') or '').strip()
 
+# Примерное время: PageSpeed API считает каждую страницу отдельно и небыстро,
+# поэтому время линейно числу адресов - и заметно растёт от «страниц каждого типа».
+if scope.startswith('Выборка'):
+    # главная + каталог + категории + фильтры (+ товары), все по per_type
+    _est_urls = 2 + int(per_type) * (3 if locals().get('want_products') else 2)
+else:
+    _est_urls = len([u for u in (locals().get('urls_text') or '').splitlines()
+                     if u.strip()])
+if _est_urls:
+    # Облако перечитывает файл страницы после обновления кода, но модули из
+    # sys.modules не перезагружает: страница уже новая, run_estimate - ещё
+    # старый, и импорт новой функции ронял всю страницу ImportError.
+    import importlib
+
+    import run_estimate as _re
+    if not hasattr(_re, 'estimate_pagespeed_seconds'):
+        _re = importlib.reload(_re)
+    _lo_ps, _hi_ps = _re.estimate_pagespeed_seconds(_est_urls)
+    from checklists import ui_widgets as _uiw
+    _uiw.estimate_badge(_re.format_estimate(_lo_ps, _hi_ps),
+                        f'~{_est_urls} адресов. Зависит от очереди PageSpeed API.')
+
+st.caption('Готовый отчёт уходит в Telegram и на Google Диск - если они '
+           'настроены у проекта (те же настройки, что у чек-листа, форм и '
+           'целей). Не настроены - прогон просто пропустит отправку.')
+
 c1, c2 = st.columns([3, 1])
 with c1:
     if st.button('▶ Запустить проверку скорости', use_container_width=True,
@@ -432,7 +477,17 @@ with c1:
             uf = OUT_DIR / 'urls_input.txt'
             uf.write_text(urls_text, encoding='utf-8')
             args += ['--scope', 'list', '--urls-file', str(uf)]
-        _launch(args, extra_env={'PAGESPEED_API_KEY': key})
+        # Telegram и Google Диск: креды живут в секретах/кабинете, а прогон -
+        # отдельный процесс, поэтому кладём их в окружение (как у форм, целей
+        # и КП). Не настроено - runner_env вернёт пусто, и прогон просто
+        # пропустит отправку.
+        _extra = {'PAGESPEED_API_KEY': key}
+        try:
+            import tg_report
+            _extra.update(tg_report.runner_env(pid, PROJECTS.get(pid, pid)))
+        except Exception as _e:  # noqa: BLE001
+            st.warning(f'Не удалось собрать настройки отправки отчёта: {_e}')
+        _launch(args, extra_env=_extra)
         st.session_state['ps_started'] = datetime.now().strftime('%H:%M:%S')
         st.rerun()
 with c2:

@@ -77,6 +77,21 @@ PROJECTS = {
             'yandex': 'mepen88@yandex.ru', 'domain': 'mepen.ru'},
     'imp': {'name': 'ИМП - Инметпром', 'google': 'inmetprom77@gmail.com',
             'yandex': 'inmetprom77@yandex.ru', 'domain': 'inmetprom.ru'},
+    # Почты кабинетов проекта пока не переданы - страница честно покажет
+    # прочерк вместо адреса, а не выдаст чужой аккаунт.
+    # У SHOPMET и МПИ кабинеты на одном аккаунте (metpromintex@…).
+    'sm': {'name': 'SM - SHOPMET', 'google': 'metpromintex@gmail.com',
+           'yandex': 'metpromintex@yandex.com', 'domain': 'shopmet.ru'},
+    'mpi': {'name': 'МПИ - МетПромИнтекс', 'google': 'metpromintex@gmail.com',
+            'yandex': 'metpromintex@yandex.com', 'domain': 'metpromintex.ru'},
+    # Почты кабинетов (GSC/Вебмастер) пока не переданы - страница честно
+    # покажет прочерк вместо адреса; впишите, когда будут.
+    'avia': {'name': 'АПС - Авиапромсталь', 'google': 'aviastal@gmail.com',
+             'yandex': 'aviastalru@yandex.ru', 'domain': 'aviastal.ru'},
+    'mpk': {'name': 'МПК - Метпромко', 'google': '', 'yandex': '',
+            'domain': 'metpromko.ru'},
+    'mtt': {'name': 'МТТ - Меттранстерминал', 'google': '', 'yandex': '',
+            'domain': 'met-trans.ru'},
 }
 
 
@@ -99,9 +114,21 @@ def _cdp_alive(host='127.0.0.1', port=9222, timeout=1.0) -> bool:
 
 
 def _session_secret(project_id: str = ''):
-    """base64-сессия для облачного режима из Streamlit Secrets (или None).
-    Сначала по-проектный ключ (autoclick_session_<pid>) - у каждого проекта
-    свои аккаунты; общий autoclick_session - запасной вариант."""
+    """base64-сессия для облачного режима (или None).
+
+    ПОРЯДОК: настройки проекта из личного кабинета (поле «Сессия браузера») -
+    потом Streamlit Secrets: по-проектный ключ autoclick_session_<pid>, затем
+    общий autoclick_session. Кабинет первым - так же, как читает сессию сам
+    прогон чек-листа; иначе сессия, сохранённая руководителем в настройках,
+    здесь «не находилась» и облачный режим не включался."""
+    try:
+        import auth
+        for поле in ('autoclick_session', 'yandex_session'):
+            v = auth.project_setting(project_id, поле)
+            if v:
+                return str(v)
+    except Exception:
+        pass
     try:
         from autoclick_browser import SESSION_SECRET_KEY
         if hasattr(st, 'secrets'):
@@ -185,27 +212,82 @@ st.session_state['ac_project_sel'] = pid
 proj = PROJECTS[pid]
 st.markdown(
     f"Войди в браузере в аккаунты проекта **{proj['name']}**:\n"
-    f"- Google (GSC): `{proj['google']}`\n"
-    f"- Yandex (Вебмастер): `{proj['yandex']}`"
+    f"- Google (GSC): `{proj['google'] or '— почта не задана'}`\n"
+    f"- Yandex (Вебмастер): `{proj['yandex'] or '— почта не задана'}`"
 )
+if not (proj.get('google') and proj.get('yandex')):
+    st.warning('У проекта не указаны почты кабинетов - допишите их в PROJECTS '
+               '(checklists/autoclickers.py), иначе непонятно, под каким '
+               'аккаунтом логиниться.')
+
+def _session_info(b64: str) -> dict:
+    """Что внутри сессии: выполнен ли вход в Яндекс и в Google и под каким
+    аккаунтом Яндекса. Наличие cookies домена входа не доказывает - оба
+    сервиса ставят технические cookies и незалогиненному, поэтому смотрим
+    именно ключи авторизации."""
+    import base64 as _b64
+    import json as _json
+    try:
+        cookies = _json.loads(_b64.b64decode(''.join(str(b64).split())))\
+            .get('cookies', [])
+    except Exception:
+        return {}
+    имена = {c.get('name') for c in cookies}
+    return {
+        'yandex': bool(имена & {'Session_id', 'sessionid2'}),
+        'google': bool(имена & {'SID', '__Secure-1PSID'}),
+        'login': next((c.get('value') for c in cookies
+                       if c.get('name') == 'yandex_login'), None),
+        'всего': len(cookies),
+    }
+
 
 _cloud_session = _session_secret(pid)
+
+# База могла не отдать настройки (обрыв канала на больших значениях). Без этого
+# сообщения страница просто говорила бы «сессии нет» - и было бы непонятно, что
+# сессия на месте, а не прочиталась.
+try:
+    import auth as _auth
+    _db_err = _auth.settings_db_error()
+except Exception:
+    _db_err = ''
+if _db_err:
+    st.error(f'⚠ Настройки проекта не прочитались: {_db_err}')
+
+if _cloud_session:
+    _инфо = _session_info(_cloud_session)
+    if _инфо and not (_инфо['yandex'] and _инфо['google']):
+        st.error(
+            f'⚠ Сессия проекта неполная: вход в Яндекс - '
+            f'**{"есть" if _инфо["yandex"] else "НЕТ"}**, вход в Google - '
+            f'**{"есть" if _инфо["google"] else "НЕТ"}**. '
+            f'Кликер по сервису без входа будет открывать страницу входа '
+            f'вместо данных и отчитается «ошибок нет». Войди в НЕДОСТАЮЩИЙ '
+            f'аккаунт и повтори экспорт (Шаг 1).')
+    elif _инфо:
+        st.caption(f'Сессия проекта: вход в Яндекс ✓ '
+                   f'({_инфо["login"] or "аккаунт не определить"}), '
+                   f'вход в Google ✓ · cookies {_инфо["всего"]}')
+
 if _cdp:
     st.success('Режим: **локальный** - найден залогиненный Chrome (CDP 9222). '
                'Клики пойдут через него, как обычно.')
 elif _cloud_session:
-    st.info(f'Режим: **облачный** - локального Chrome нет, но в Secrets есть '
-            f'сессия проекта (autoclick_session_{pid}). Клики пойдут через '
-            f'headless-браузер с этой сессией. Протухнет - кликер напишет '
-            f'в лог, тогда пере-экспортируй её локально (Шаг 1).')
+    st.info('Режим: **облачный** - локального Chrome нет, но сессия проекта '
+            'найдена (настройки проекта либо Secrets). Клики пойдут через '
+            'headless-браузер с этой сессией. Протухнет - кликер напишет '
+            'в лог, тогда пере-экспортируй её локально (Шаг 1). Одна сессия '
+            'работает и для Вебмастера, и для Search Console: экспорт '
+            'забирает cookies обоих аккаунтов.')
 else:
     st.warning(
-        f'Локального Chrome нет (CDP 9222) и сессии проекта в Secrets нет '
-        f'(autoclick_session_{pid}). Два пути:\n'
-        f'1. **Локально**: открой браузер для входа (Шаг 1) и запускай как раньше.\n'
-        f'2. **Облако**: локально войди в аккаунты проекта, экспортируй сессию '
-        f'(кнопка в Шаге 1) и положи строку в Streamlit Secrets ключом '
-        f'`autoclick_session_{pid}` - после этого клики работают из облака.'
+        'Локального Chrome нет (CDP 9222) и сессии проекта тоже нет. Два пути:\n'
+        '1. **Локально**: открой браузер для входа (Шаг 1) и запускай как раньше.\n'
+        '2. **Облако**: локально войди в аккаунты проекта, экспортируй сессию '
+        '(кнопка в Шаге 1) и вставь строку в «Настройки проекта» → поле '
+        '«Сессия браузера: Яндекс + Google» - после этого клики работают из '
+        f'облака. (Запасной вариант - секрет `autoclick_session_{pid}`.)'
     )
 
 st.divider()
@@ -230,12 +312,13 @@ else:
         _run_foreground(['open_browser.py'], 'Открываю браузер…')
 
 if not _is_cloud_env:
-    st.caption(f'Для ОБЛАЧНЫХ кликов: когда вошёл в аккаунты **{proj["name"]}** - '
-               f'выгрузи сессию кнопкой ниже и положи строку в Streamlit Secrets '
-               f'ключом `autoclick_session_{pid}`. У каждого проекта свои аккаунты '
-               f'и свой секрет - экспортируй для каждого отдельно (вход → экспорт → '
-               f'выход → следующий проект). Кнопка активна, когда браузер для '
-               f'входа открыт (порт 9222).')
+    st.caption(f'Для ОБЛАЧНЫХ кликов: когда вошёл в аккаунты **{proj["name"]}** '
+               f'(и Яндекс, и Google) - выгрузи сессию кнопкой ниже и вставь '
+               f'строку в «Настройки проекта» → «Сессия браузера: Яндекс + '
+               f'Google». Одна строка покрывает Вебмастер, Search Console и '
+               f'Справочник. У каждого проекта свои аккаунты - экспортируй для '
+               f'каждого отдельно (вход → экспорт → выход → следующий проект). '
+               f'Кнопка активна, когда браузер для входа открыт (порт 9222).')
     if st.button(f'💾 Экспорт сессии для облака ({proj["name"]})',
                  use_container_width=True, disabled=not _cdp):
         _run_foreground(['session_export.py', '--project', pid],

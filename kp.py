@@ -76,11 +76,15 @@ KP_LAYOUT = {
     # берём из пикера выбора города прямо в HTML (parse_city_picker) + адрес из
     # блока филиала на /contacts (parse_branch_addresses) - см. variables_run.
     # SEO/Реклама у МПК нет - единственная колонка «телефон» идёт в слот «Общий».
+    # 18.08.2026 проект переехал на НОВУЮ таблицу КП (лист «Справочники»,
+    # расшарена на сервисный аккаунт kp-reader@…). Структура там как у СМУ:
+    # Общий/Реклама/SEO Город вместо единственной колонки «телефон» на старом
+    # листе «карта присутствия».
     'mpk': {
-        'sheet': 'карта присутствия',
-        'phone_seo':    ('seo', 'город'),      # нет таких колонок - слот пустой
-        'phone_ad':     ('реклама', 'город'),  # нет таких колонок - слот пустой
-        'phone_common': ('телефон',),          # единственная колонка «телефон»
+        'sheet': 'Справочники',
+        'phone_seo':    ('seo', 'город'),
+        'phone_ad':     ('реклама', 'город'),
+        'phone_common': ('общий', 'город'),
         'per_city': True,                      # один сайт на все города (пикер)
     },
     # МПИ (МетПромИнтекс). Лист «Карта присутсвия» (именно так, с опечаткой в
@@ -94,6 +98,17 @@ KP_LAYOUT = {
         'phone_ad':     ('реклама', 'город'),
         'phone_common': ('общий', 'город'),
         'url_col': 3,
+    },
+    # МТТ (Меттранстерминал). Лист «Справочники», структура как у СМУ/МПК:
+    # Общий/Реклама/SEO Город + Telegram/WhatsApp + блоки карт. У каждого города
+    # СВОЙ поддомен (spb.met-trans.ru, ekb.met-trans.ru), у стран - свои домены
+    # (met-trans.by/.am/.az/.uz, mtt.kz, mtt.kg), поэтому per_city НЕ ставим:
+    # города схлопываются по домену штатно.
+    'mtt': {
+        'sheet': 'Справочники',
+        'phone_seo':    ('seo', 'город'),
+        'phone_ad':     ('реклама', 'город'),
+        'phone_common': ('общий', 'город'),
     },
     # SHOPMET. Единственный лист «Лист1», шапка на 2-й строке (над ней -
     # объединённые заголовки блоков Телефония/Мессенджеры/Яндекс Бизнес/2ГИС/
@@ -281,6 +296,13 @@ class KPRow:
     def telegram_norm(self) -> str:
         """username Telegram в нижнем регистре, без @ и без t.me/."""
         return normalize_tg(self.telegram)
+
+    def telegram_phone_norm(self) -> str:
+        """Номер, если в колонке Telegram КП стоит НЕ ник, а телефон (так у
+        SHOPMET: контакт менеджера - ссылка t.me/+79090140017). '' - если в
+        ячейке ник или пусто."""
+        _p = phones_in_cell(self.telegram)
+        return _p[0] if _p else ''
 
     def whatsapp_norm(self) -> str:
         """номер WhatsApp - 10 значащих цифр. Через split_phones (в ячейке бывает
@@ -541,6 +563,11 @@ def extract_site_contacts(html: str) -> dict:
     _tg_skip = {'share', 'joinchat', 'iv', 's', 'proxy', 'socks',
                 'addstickers', 'joinchannel', 'addlist'}
     tg = [t.lower() for t in tg if t.lower() not in _tg_skip]
+    # Telegram БЕЗ ника: ссылка на номер (t.me/+79090140017) - так сделан контакт
+    # менеджера у SHOPMET. Ника в такой ссылке нет, поэтому по username сверить
+    # нечего, и раньше выходило ложное «Telegram на сайте отсутствует».
+    tg_phones = [n for n in (normalize_phone(x) for x in re.findall(
+        r'(?:t\.me|telegram\.me)/\+(\d[\d\-()\s]{7,})', _msgr_html, re.I)) if n]
     wa_raw = re.findall(
         r'(?:wa\.me/|api\.whatsapp\.com/send[^"\'\s]*?phone=|whatsapp://send\?phone=)'
         r'(\+?\d[\d\-()\s]{7,})', _msgr_html, re.I)
@@ -559,6 +586,7 @@ def extract_site_contacts(html: str) -> dict:
         'emails': list(dict.fromkeys(emails)),
         'address': addr,
         'telegram': list(dict.fromkeys(tg)),
+        'telegram_phones': list(dict.fromkeys(tg_phones)),
         'whatsapp': list(dict.fromkeys(wa)),
         'whatsapp_urls': list(dict.fromkeys(wa_urls)),
         'whatsapp_anchor_urls': list(dict.fromkeys(wa_anchor_urls)),
@@ -1050,28 +1078,36 @@ def _site_address_full(html: str) -> str:
     # Захватываем кусок ПОСЛЕ метки (не требуем стоп-маркера справа - иначе
     # адрес, за которым сразу идёт «Реквизиты»/«Скачать» без телефона/почты,
     # вообще не находился, напр. СПб «набережная Обводного канала, 64к2»).
-    m = re.search(r'(?:адрес|[uü]nvan)[:\s]+(.{4,120})', txt, re.IGNORECASE | re.U)
-    if not m:
-        return ''
-    # Обрезаем на первом «не-адресном» маркере (следующее поле карточки/меню:
-    # «Реквизиты», «Скачать», «Контакты», «Время работы», телефон, почта…).
-    cap = _обрезать_хвост_адреса(m.group(1).strip(' ,;·|'))
-    # В адресе ОБЯЗАТЕЛЬНО номер дома (цифра) И похожесть на адрес: слово-маркер
-    # улицы (рус/азерб) ЛИБО форма «Название, номер» («Ярмарочная, 55»,
-    # «Bakı, 23 İzmir küçəsi»). Иначе после случайного «адрес…» захватились бы
-    # категории/меню («Уличные фонари…»).
-    if not re.search(r'\d', cap):
-        return ''
-    if _ADDR_JUNK_RE.search(cap):        # попап выбора города и т.п. - не адрес
-        return ''
-    if not (_RE_ADDR_STREET.search(cap)
-            or re.search(r'[' + _ADDR_LETTER + r'][' + _ADDR_LETTER + r'\-]{2,}'
-                         r'\s*,\s*\d{1,4}\b', cap, re.U)):
-        return ''
-    return cap
+    # Слово «адрес» на странице встречается НЕ ТОЛЬКО как метка поля: у SHOPMET
+    # на «Контактах» сначала идёт заголовок «Адреса склада и часы работы», и
+    # только ниже - карточка «Адрес Екатеринбург, Машиностроителей, д. 19».
+    # Поэтому перебираем ВСЕ вхождения и берём первое, похожее на адрес, а не
+    # первое подряд (раньше в отчёт уходил обрывок фразы «склада и»).
+    for m in re.finditer(r'(?:адрес|[uü]nvan)[:\s]+(.{4,120})', txt,
+                         re.IGNORECASE | re.U):
+        # Обрезаем на первом «не-адресном» маркере (следующее поле карточки/меню:
+        # «Реквизиты», «Скачать», «Контакты», «Время работы», телефон, почта…).
+        cap = _обрезать_хвост_адреса(m.group(1).strip(' ,;·|'))
+        # В адресе ОБЯЗАТЕЛЬНО номер дома (цифра) И похожесть на адрес: слово-маркер
+        # улицы (рус/азерб) ЛИБО форма «Название, номер» («Ярмарочная, 55»,
+        # «Bakı, 23 İzmir küçəsi»). Иначе после случайного «адрес…» захватились бы
+        # категории/меню («Уличные фонари…»).
+        if not re.search(r'\d', cap):
+            continue
+        if _ADDR_JUNK_RE.search(cap):        # попап выбора города и т.п. - не адрес
+            continue
+        # «Название, номер» - и с явным «д.»/«дом» перед номером: у SHOPMET адрес
+        # записан как «Екатеринбург, Машиностроителей, д. 19» (слова «улица» нет,
+        # и без этого варианта полный адрес считался неполным).
+        if not (_RE_ADDR_STREET.search(cap)
+                or re.search(r'[' + _ADDR_LETTER + r'][' + _ADDR_LETTER + r'\-]{2,}'
+                             r'\s*,\s*(?:д\.?|дом)?\s*\d{1,4}\b', cap, re.U)):
+            continue
+        return cap
+    return ''
 
 
-def _site_address_raw(html: str) -> str:
+def _site_address_raw(html: str, city: str = '') -> str:
     """Текст поля «Адрес:» со страницы КАК ЕСТЬ - даже если адрес НЕПОЛНЫЙ (без
     улицы и дома), напр. битый «, г. Гродно,» на сайтах МПЭ/Беларусь. В отличие от
     _site_address_full НЕ требует ни номера дома, ни маркера улицы - нужен, чтобы
@@ -1085,21 +1121,34 @@ def _site_address_raw(html: str) -> str:
         txt = html_to_visible_text(html)
     except Exception:
         txt = html or ''
-    m = re.search(r'(?:адрес|[uü]nvan)[:\s]+(.{2,120})', txt, re.IGNORECASE | re.U)
-    if not m:
-        return ''
-    # Отрезаем почтовый индекс и хвост (телефон/почта/часы/след. поле), но НЕ
-    # трогаем запятые - в отличие от _обрезать_хвост_адреса, который срезал бы
-    # ведущую/конечную «,» и «, г. Гомель,» превращал в «г. Гомель».
-    raw = re.sub(r'(?<!\d)\d{6}(?!\d)\s*,?\s*', '', m.group(1))
-    cap = _ADDR_TAIL_RE.sub('', raw).strip()   # .strip() - только пробелы, не запятые
-    if _ADDR_JUNK_RE.search(cap):            # попап выбора города и т.п. - не адрес
-        return ''
-    # Должна остаться осмысленная текстовая часть (слово из букв), а не одни знаки
-    # препинания/цифры - иначе «, ,» или случайный «Адрес: 2» дал бы мусор.
-    if not re.search(r'[' + _ADDR_LETTER + r']{3,}', cap, re.U):
-        return ''
-    return cap
+    # Как и в _site_address_full, слово «адрес» встречается и вне поля адреса
+    # («Адреса склада и часы работы» в заголовке у SHOPMET) - перебираем все
+    # вхождения и берём первое, где стоит хоть какой-то адресный признак.
+    for m in re.finditer(r'(?:адрес|[uü]nvan)[:\s]+(.{2,120})', txt,
+                         re.IGNORECASE | re.U):
+        # Отрезаем почтовый индекс и хвост (телефон/почта/часы/след. поле), но НЕ
+        # трогаем запятые - в отличие от _обрезать_хвост_адреса, который срезал бы
+        # ведущую/конечную «,» и «, г. Гомель,» превращал в «г. Гомель».
+        raw = re.sub(r'(?<!\d)\d{6}(?!\d)\s*,?\s*', '', m.group(1))
+        cap = _ADDR_TAIL_RE.sub('', raw).strip()  # .strip() - пробелы, не запятые
+        if _ADDR_JUNK_RE.search(cap):        # попап выбора города и т.п. - не адрес
+            continue
+        # Должна остаться осмысленная текстовая часть (слово из букв), а не одни знаки
+        # препинания/цифры - иначе «, ,» или случайный «Адрес: 2» дал бы мусор.
+        if not re.search(r'[' + _ADDR_LETTER + r']{3,}', cap, re.U):
+            continue
+        # Поле адреса, даже битое, содержит адресный признак: маркер улицы,
+        # «г./город», цифру дома или НАЗВАНИЕ ГОРОДА (у SHOPMET в поле стоит
+        # голый «Иркутск» - адрес неполный, но он есть). Обрывок фразы
+        # («склада и») - не адрес, и в отчёте выглядел как дефект сайта,
+        # которого нет.
+        _есть_город = bool(city) and re.search(
+            r'\b' + re.escape(city.strip()) + r'\b', cap, re.I | re.U) is not None
+        if not (_RE_ADDR_STREET.search(cap) or re.search(r'\d', cap) or _есть_город
+                or re.search(r'\bг\.\s*[' + _ADDR_LETTER + r']|город\b', cap, re.U)):
+            continue
+        return cap
+    return ''
 
 
 def _addr_is_complete(s: str) -> bool:
@@ -1393,7 +1442,8 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     _fb = _обрезать_хвост_адреса((site.get("address") or "").strip())   # из шапки/подвала
     _site_full = (_site_address_full(html) or _site_address_full(contacts_html or "")
                   or (_fb if _addr_is_complete(_fb) else ""))
-    _site_raw = (_site_address_raw(html) or _site_address_raw(contacts_html or "")
+    _site_raw = (_site_address_raw(html, row.city)
+                 or _site_address_raw(contacts_html or "", row.city)
                  or (_fb if re.search(r'[а-яёa-z]{3,}', _fb, re.I) else ""))
     _site_shown = _site_full or _site_raw
 
@@ -1407,8 +1457,10 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
             add("Адрес", _kp_addr_show, _site_shown or "–", "bug",
                 "адрес на сайте не совпадает с КП")
         elif _site_full:
-            # В КП пусто, на сайте ПОЛНЫЙ адрес → ✗.
-            add("Адрес", "–", _site_full, "bug", "адрес на сайте не совпадает с КП")
+            # В КП пусто, на сайте ПОЛНЫЙ адрес → ✗. Сравнивать не с чем, поэтому
+            # пишем прямо: адреса нет в КП (раньше стояло «не совпадает с КП», и
+            # выглядело как ошибка сайта, хотя чинить надо КП).
+            add("Адрес", "–", _site_full, "bug", "адреса нет в КП, на сайте указан")
         elif _site_raw:
             # В КП пусто, но на сайте в поле адреса ЕСТЬ инфа, и она НЕПОЛНАЯ
             # (город без улицы/дома, «, г. Гродно,») - это дефект сайта, а не
@@ -1439,24 +1491,49 @@ def check_variables(html: str, domain: str, contacts_html: str = "",
     exp_tg = row.telegram_norm()
     site_tg = set(site.get("telegram", []))
     _tg_raw = (row.telegram or "").strip()
-    _tg_found = (", ".join("@" + t for t in sorted(site_tg)[:2]) if site_tg else "–")
-    # Значение КП для показа: ник (@…) либо сырой мусор («2»), либо «–» если пусто.
-    _tg_kp_show = ("@" + exp_tg) if exp_tg else (_tg_raw if _tg_raw
-                                                 and _tg_raw not in ("–", "-") else "–")
-    if not site_tg:
-        # На сайте Telegram НЕТ (в шапке нет значка). Если в КП значение есть -
-        # это ✗ «Telegram на сайте отсутствует» (просьба заказчика: так и писать,
-        # с крестиком и значением из КП). Если и в КП нет - прочерк.
-        if _tg_kp_show != "–":
-            add("Telegram", _tg_kp_show, "–", "bug", "Telegram на сайте отсутствует")
+    # В колонке Telegram КП бывает НОМЕР, а не ник (SHOPMET), и на сайте он стоит
+    # ссылкой t.me/+<номер>. Сверяем такие пары по номеру - иначе ни ника в КП,
+    # ни ника на сайте нет, и выходило ложное «Telegram на сайте отсутствует».
+    exp_tg_phone = row.telegram_phone_norm()
+    site_tg_phones = set(site.get("telegram_phones", []))
+    # Ники важнее: если и в КП, и на сайте есть username, сверяем по нему как
+    # раньше, а номерная ссылка рядом (общий канал компании) ни на что не влияет.
+    if exp_tg_phone or (site_tg_phones and not site_tg and not exp_tg):
+        _tg_ph_show = fmt(exp_tg_phone) if exp_tg_phone else "–"
+        _tg_ph_site = ", ".join(fmt(n) for n in sorted(site_tg_phones)) or "–"
+        if exp_tg_phone and exp_tg_phone in site_tg_phones:
+            add("Telegram", _tg_ph_show, _tg_ph_show, "ok", "совпадает с КП")
+        elif exp_tg_phone and not site_tg_phones and not site_tg:
+            add("Telegram", _tg_ph_show, "–", "bug", "Telegram на сайте отсутствует")
+        elif exp_tg_phone:
+            add("Telegram", _tg_ph_show, _tg_ph_site if site_tg_phones else
+                (", ".join("@" + t for t in sorted(site_tg)[:2]) or "–"),
+                "bug", "Telegram на сайте не совпадает с КП")
         else:
-            add("Telegram", "–", "–", "na", "нет ни в КП, ни на сайте")
-    elif exp_tg and exp_tg in site_tg:
-        add("Telegram", "@" + exp_tg, "@" + exp_tg, "ok", "совпадает с КП")
+            # В КП номера нет (ник или пусто), а на сайте Telegram - по номеру.
+            add("Telegram", ("@" + exp_tg) if exp_tg else "–", _tg_ph_site,
+                "bug" if exp_tg else "na",
+                "Telegram на сайте не совпадает с КП" if exp_tg
+                else "в КП Telegram не указан")
     else:
-        # На сайте Telegram ЕСТЬ, но другой (или в КП мусор) → не совпадает.
-        add("Telegram", _tg_kp_show, _tg_found, "bug",
-            "Telegram на сайте не совпадает с КП")
+        _tg_found = (", ".join("@" + t for t in sorted(site_tg)[:2]) if site_tg else "–")
+        # Значение КП для показа: ник (@…) либо сырой мусор («2»), либо «–» если пусто.
+        _tg_kp_show = ("@" + exp_tg) if exp_tg else (_tg_raw if _tg_raw
+                                                     and _tg_raw not in ("–", "-") else "–")
+        if not site_tg:
+            # На сайте Telegram НЕТ (в шапке нет значка). Если в КП значение есть -
+            # это ✗ «Telegram на сайте отсутствует» (просьба заказчика: так и писать,
+            # с крестиком и значением из КП). Если и в КП нет - прочерк.
+            if _tg_kp_show != "–":
+                add("Telegram", _tg_kp_show, "–", "bug", "Telegram на сайте отсутствует")
+            else:
+                add("Telegram", "–", "–", "na", "нет ни в КП, ни на сайте")
+        elif exp_tg and exp_tg in site_tg:
+            add("Telegram", "@" + exp_tg, "@" + exp_tg, "ok", "совпадает с КП")
+        else:
+            # На сайте Telegram ЕСТЬ, но другой (или в КП мусор) → не совпадает.
+            add("Telegram", _tg_kp_show, _tg_found, "bug",
+                "Telegram на сайте не совпадает с КП")
 
     # WhatsApp: СТРОГО сверяем номер из КП с номером в ссылке на сайте. Номер в
     # wa.me/<number> нормализуем к 10 цифрам. Если кнопка есть, но номер в

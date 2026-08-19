@@ -66,6 +66,12 @@ CACHE.mkdir(exist_ok=True)
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
+# Ниже этого числа товаров отсутствие блока фильтров - не находка, а норма
+# (сайт не рисует фильтр, когда фильтровать нечего). Порог заметно меньше
+# страницы листинга (у МПК на странице ~42 карточки), чтобы «фильтр пропал на
+# большой категории» по-прежнему считалось проблемой.
+MIN_CARDS_FOR_FILTER = 10
+
 _EMPTY_MARKERS = (
     'ничего не найдено', 'ничего не нашлось', 'товаров не найдено',
     'по вашему запросу ничего', 'список пуст', 'нет товаров',
@@ -376,6 +382,17 @@ def run_case(page, case: dict, log) -> dict:
         out['detail'] = f'селектор фильтра невалиден: {e}'
         return out
     if _n_filt == 0:
+        # Короткий листинг без блока фильтров - штатное поведение сайта, а не
+        # находка: фильтровать нечего (МПК/Amasty не рисует блок на категориях
+        # в несколько товаров). Красное «фильтр не найден» на таких страницах -
+        # чистый шум, и его тем больше, чем мельче категории проекта. Явный
+        # кейс из конфига (не авто-категория прогона) по-прежнему показываем:
+        # там селектор задан руками и обязан находиться.
+        if case.get('_auto') and baseline < MIN_CARDS_FOR_FILTER:
+            out['verdict'] = 'skipped'
+            out['detail'] = (f'блока фильтров нет, в категории всего '
+                             f'{baseline} товар(ов) - фильтровать нечего')
+            return out
         out['verdict'] = 'filter_absent'
         out['detail'] = f'селектор фильтра не найден: {filt}'
         return out
@@ -475,6 +492,11 @@ def run_case(page, case: dict, log) -> dict:
 
 def _launch_and_run(pid: str, cases: list, log) -> list:
     from playwright.sync_api import sync_playwright
+    # В облаке Chromium не предустановлен - доустанавливаем в рантайме, иначе
+    # прогон падает на «Executable doesn't exist … chrome-headless-shell», а в
+    # отчёте это выглядит как «ok 0 из 0», будто фильтров нет.
+    import browser_setup
+    browser_setup.ensure_for_run(log, 'Фильтр-тест')
     _via_driver = bool(os.environ.get('CCR_AGENT_PROXY_ENABLED'))
     results = []
     with sync_playwright() as pw:

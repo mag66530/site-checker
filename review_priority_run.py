@@ -23,6 +23,11 @@ def main():
     ap.add_argument('--out', required=True)
     args = ap.parse_args()
 
+    # В облаке Chromium доустанавливается в рантайме - см. browser_setup.
+    import browser_setup
+    browser_setup.ensure_for_run(lambda m: print(m, flush=True),
+                                 'Приоритет отзывов')
+
     proxy = os.environ.get('REVIEW_PRIORITY_PROXY') or None
     res = review_priority.run(args.project, proxy_url=proxy,
                               log=lambda m: print(m, flush=True))

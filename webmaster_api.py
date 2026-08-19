@@ -256,7 +256,26 @@ def _get(token: str, path: str, proxy_url: Optional[str] = None,
         if r.status_code == 401:
             raise PermissionError('OAuth токен невалиден или просрочен (401)')
         if r.status_code == 403:
-            raise PermissionError('Нет доступа (403): проверь scope webmaster:hostinfo')
+            # Яндекс в теле ответа прямо называет недостающее право и то, что
+            # выдано приложению. Раньше мы это прятали за общей фразой про
+            # «права владельца», и чинили не то: права на сайт бывают
+            # подтверждены, а токен всё равно не пускает - у OAuth-приложения
+            # не включён нужный scope (напр. EXTERNAL_LINKS для беклинков).
+            _нужен = re.search(r'Required scope:\s*([A-Z_]+)', r.text or '')
+            _есть = re.search(r'application scopes:\s*\[([^\]]*)\]', r.text or '')
+            if _нужен:
+                raise PermissionError(
+                    f'Нет доступа (403): OAuth-приложению не выдано право '
+                    f'{_нужен.group(1)}'
+                    + (f' (есть только: {_есть.group(1)})' if _есть else '')
+                    + '. Права на сайт тут ни при чём - добавьте это право '
+                      'приложению на oauth.yandex.ru и перевыпустите токен '
+                      'проекта.')
+            raise PermissionError(
+                'Нет доступа (403): либо у токена не хватает прав (scope), '
+                'либо у аккаунта нет прав на эти данные хоста (напр. доступ '
+                'делегированный, а данные - только для владельца). '
+                f'Ответ Яндекса: {(r.text or "")[:160]}')
         if r.status_code == 429:
             time.sleep(delay)
             delay = min(delay * 2, 40)
@@ -300,6 +319,35 @@ def _extract_inprogress_codes(payload) -> set:
             if code:
                 codes.add(str(code).upper())
     return codes
+
+
+def _без_зеркал(хосты: list) -> list:
+    """Оставить по ОДНОЙ записи на домен: https-зеркало вместо http.
+
+    В Вебмастере один и тот же сайт обычно добавлен дважды - «http:site:80» и
+    «https:site:443», это разные host_id с одинаковым доменом. Раньше цикл
+    опрашивал оба: вдвое больше запросов, а в логе один хост шёл двумя
+    строками с разными числами («активных 0» у мёртвого http-зеркала и
+    «активных 18» у рабочего https) - читалось как сбой.
+
+    Вход/выход: [(домен, host_id, url), …]. ЧИСТАЯ функция - юнит-тест без сети.
+    """
+    лучшие: dict[str, tuple] = {}
+    for запись in хосты:
+        домен = запись[0]
+        if not домен:
+            continue
+        hid = str(запись[1] or '')
+        текущий = лучшие.get(домен)
+        if текущий is None:
+            лучшие[домен] = запись
+            continue
+        # https выигрывает у http; при прочих равных - первая запись.
+        если_https = hid.lower().startswith('https:')
+        было_https = str(текущий[1] or '').lower().startswith('https:')
+        if если_https and not было_https:
+            лучшие[домен] = запись
+    return list(лучшие.values())
 
 
 def _parse_diagnostics(project_id: str, host: str, host_id: str,
@@ -385,6 +433,7 @@ def fetch_webmaster_issues(project_id: str, token: str,
             selected = [(_norm_host(h.get('ascii_host_url', '')),
                          h.get('host_id'), h.get('ascii_host_url', ''))
                         for h in api_hosts]
+        selected = _без_зеркал(selected)
 
         all_issues = []
         _dumped = False
@@ -440,7 +489,12 @@ def fetch_webmaster_issues(project_id: str, token: str,
                 # Диагностика: если сырых проблем много, а активных 0 - видно в логе
                 _log(f'  {host_norm}: в ответе {_raw_n}, активных {len(hi)}')
                 if _raw_n and not hi and isinstance(_raw, dict):
-                    _log(f'    ключи/шаблон: {list(_raw)[:6]}')
+                    # Не ошибка: Вебмастер отдаёт ВСЕ известные проверки, и у
+                    # чистого сайта они все в состоянии «отсутствует». Раньше
+                    # сюда печатался список кодов - читалось как список проблем,
+                    # хотя проблем как раз нет.
+                    _log(f'    все {_raw_n} проверок в состоянии «нет проблемы» '
+                         f'- активных замечаний у сайта нет')
             except Exception as e:
                 _log(f'⚠ Вебмастер-API ({host_norm}): {e}')
 

@@ -307,6 +307,16 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
     # ── Lazy loading (изображения и видео) ──
     img_tags = _RE_IMG_TAG.findall(clean)
     lazy_imgs = sum(1 for t in img_tags if _RE_LAZY.search(t))
+    # «Жадные» картинки (без ленивой загрузки) - конкретные адреса для detail
+    # отчёта: какие именно грузятся сразу (не только счётчик).
+    eager = []
+    for t in img_tags:
+        if _RE_LAZY.search(t):
+            continue
+        m = _RE_IMG_SRC.search(t)
+        s = ((m.group(1) or m.group(2) or '').strip() if m else '')
+        if s and not s.startswith('data:'):
+            eager.append(_short(s))
     media_tags = _RE_MEDIA.findall(clean)
     lazy_media = sum(1 for m in media_tags if _RE_LAZY_MEDIA.search(m))
     if len(img_tags) >= LAZY_MIN_IMGS and lazy_imgs == 0:
@@ -386,6 +396,9 @@ def check_images(html, base_url: str = '', image_infos=None) -> dict:
         'heavy': [{'url': i.get('url', ''), 'kb': (i.get('bytes') or 0) // 1024}
                   for i in heavy][:50],
         'mid_heavy': len(mid),
+        'mid': [{'url': i.get('url', ''), 'kb': (i.get('bytes') or 0) // 1024}
+                for i in mid][:50],
+        'eager': eager[:50],
         'broken_imgs': [{'url': i.get('url', '')} for i in broken_imgs][:20],
         'names': {'hashed': hashed, 'readable': readable,
                   'mismatch': mismatch, 'mismatch_n': mismatch_n},

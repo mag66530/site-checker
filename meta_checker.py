@@ -290,6 +290,180 @@ async def _probe_variant(session, url, proxy_url, timeout_ms=20000):
         return None, None
 
 
+# ── Дубли по СТРУКТУРЕ адреса (доп. чек-лист, раздел 2) ──────────────
+# Здесь мало знать код ответа: сайт может отдавать 200 и на «короткий» адрес,
+# и на товар в чужой категории, при этом показывая СОВСЕМ другую страницу
+# (лендинг, тег, редирект-заглушку). Дубль - это когда по двум адресам одно и
+# то же содержимое, поэтому сравниваем <title>: он у дубля совпадает, а у
+# другой страницы - нет. Без этого проверка выдавала бы ложные находки.
+
+DUP_SAMPLE = 10          # сколько адресов каждого вида пробовать за прогон
+
+
+def short_path_variant(path: str) -> str:
+    """«/catalog/truba/truba-profilnaya/» → «/truba-profilnaya/»: тот же слаг
+    без раздела. '' - вариант не имеет смысла (сегмент один или их нет).
+    ЧИСТАЯ функция - есть юнит-тест."""
+    segs = [s for s in (path or '').split('/') if s]
+    if len(segs) < 2:
+        return ''
+    return '/' + segs[-1] + '/'
+
+
+def swap_category(path: str, other_category: str) -> str:
+    """Тот же товар в ЧУЖОЙ категории: «/catalog/truba/tovar-1/» +
+    «/catalog/list/» → «/catalog/list/tovar-1/». '' - подставить некуда
+    (у адреса нет родителя или категория совпала с исходной).
+    ЧИСТАЯ функция - есть юнит-тест."""
+    segs = [s for s in (path or '').split('/') if s]
+    if len(segs) < 2 or not other_category:
+        return ''
+    родитель = '/' + '/'.join(segs[:-1]) + '/'
+    чужая = '/' + other_category.strip('/') + '/'
+    if чужая == родитель:
+        return ''
+    return чужая + segs[-1] + '/'
+
+
+def _norm_title(t: str) -> str:
+    return ' '.join((t or '').split()).strip().lower()
+
+
+async def _fetch_title(session, url, proxy_url, timeout_ms=20000):
+    """(код ответа, <title>, финальный адрес, canonical) по адресу.
+
+    Редиректы проходим: если вариант редиректит на исходную страницу, дубля
+    нет - и это видно по адресу. canonical нужен, чтобы отличить открытый
+    дубль от прикрытого: страница-двойник с canonical на основной адрес - это
+    замечание, а не ошибка."""
+    import aiohttp
+    to = aiohttp.ClientTimeout(total=timeout_ms / 1000)
+    try:
+        async with session.get(url, timeout=to, allow_redirects=True,
+                               proxy=proxy_url) as r:
+            if r.status != 200:
+                return r.status, '', str(r.url), None
+            data = await r.content.read(200_000)
+            html = data.decode('utf-8', errors='replace')
+            m = _TITLE_RE.search(html)
+            from indexing_checker import _find_canonicals
+            canons = _find_canonicals(html)
+            return (r.status, (m.group(1) if m else ''), str(r.url),
+                    canons[0] if canons else None)
+    except Exception:
+        return None, '', None, None
+
+
+async def _same_page(session, исходный, вариант, proxy_url):
+    """Отдают ли два адреса одну и ту же страницу.
+    → dict находки или None. Дубль признаём, только если вариант ответил 200
+    сам (не редиректом на исходный) и заголовок совпал.
+
+    canonical_ok - у страницы-двойника canonical указывает на исходный адрес:
+    дубль есть, но он прикрыт, и это замечание, а не ошибка."""
+    from urllib.parse import urlsplit, urljoin
+    код_в, title_в, финал_в, canon_в = await _fetch_title(
+        session, вариант, proxy_url)
+    if код_в != 200 or not финал_в:
+        return None
+    # Редирект на исходный адрес - штатное поведение, дубля нет.
+    if urlsplit(финал_в).path.rstrip('/') == urlsplit(исходный).path.rstrip('/'):
+        return None
+    код_и, title_и, _, _ = await _fetch_title(session, исходный, proxy_url)
+    if код_и != 200:
+        return None
+    if not _norm_title(title_в) or not _norm_title(title_и):
+        return None                      # без заголовков сравнивать нечего
+    if _norm_title(title_в) != _norm_title(title_и):
+        return None                      # другая страница, а не дубль
+    canonical_ok = False
+    if canon_в:
+        try:
+            canonical_ok = (urlsplit(urljoin(вариант, canon_в)).path.rstrip('/')
+                            == urlsplit(исходный).path.rstrip('/'))
+        except Exception:                # noqa: BLE001
+            canonical_ok = False
+    return {'canonical': исходный, 'variant': вариант,
+            'title': ' '.join((title_и or '').split())[:200],
+            'canonical_ok': canonical_ok}
+
+
+async def _прогнать_пары(задачи, proxy_url, concurrency, _сессия=None):
+    """Проверить пары (исходный, вариант) на «одна и та же страница».
+    _сессия - только для тестов: подменяет сетевую сессию фейковой."""
+    import aiohttp
+    from http_checker import make_browser_headers
+    sem = asyncio.Semaphore(concurrency)
+    out = []
+
+    async def one(session, исходный, вариант):
+        async with sem:
+            r = await _same_page(session, исходный, вариант, proxy_url)
+        if r:
+            out.append(r)
+
+    if _сессия is not None:
+        await asyncio.gather(*(one(_сессия, a, b) for a, b in задачи))
+        return out
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=задачи[0][0])) as session:
+        await asyncio.gather(*(one(session, a, b) for a, b in задачи))
+    return out
+
+
+async def check_short_path_duplicates(urls: list, *, proxy_url=None,
+                                      limit: int = DUP_SAMPLE,
+                                      concurrency: int = 4,
+                                      _сессия=None) -> list:
+    """Доп. чек-лист: «дубли без раздела» - /catalog/truba/profil/ доступен
+    ещё и как /profil/. → [{'canonical', 'variant', 'title'}]."""
+    from urllib.parse import urlsplit, urlunsplit
+    задачи = []
+    for u in (urls or []):
+        sp = urlsplit(u)
+        короткий = short_path_variant(sp.path)
+        if короткий:
+            задачи.append((u, urlunsplit((sp.scheme, sp.netloc, короткий,
+                                          '', ''))))
+        if len(задачи) >= limit:
+            break
+    if not задачи:
+        return []
+    return await _прогнать_пары(задачи, proxy_url, concurrency, _сессия)
+
+
+async def check_product_cross_category(products: list, categories: list, *,
+                                       proxy_url=None, limit: int = DUP_SAMPLE,
+                                       concurrency: int = 4,
+                                       _сессия=None) -> list:
+    """Доп. чек-лист: «один товар - один адрес». Подставляем товар в ЧУЖУЮ
+    категорию: открылся с тем же заголовком - товар доступен по двум адресам.
+
+    products - полные адреса карточек, categories - пути категорий проекта.
+    Если у карточки нет категории в адресе (корневой слаг у ИМП, /product/… у
+    SHOPMET), подставлять некуда - такие пропускаем.
+    → [{'canonical', 'variant', 'title'}]."""
+    from urllib.parse import urlsplit, urlunsplit
+    кат = [c for c in (categories or []) if c and c.strip('/')]
+    if not кат or not products:
+        return []
+    задачи = []
+    for u in products:
+        sp = urlsplit(u)
+        # Берём заведомо ДРУГУЮ категорию: первую, что не совпала с родителем.
+        for c in кат[:5]:
+            вариант = swap_category(sp.path, c)
+            if вариант:
+                задачи.append((u, urlunsplit((sp.scheme, sp.netloc, вариант,
+                                              '', ''))))
+                break
+        if len(задачи) >= limit:
+            break
+    if not задачи:
+        return []
+    return await _прогнать_пары(задачи, proxy_url, concurrency, _сессия)
+
+
 async def check_url_duplicates(urls: list, *, proxy_url=None,
                                concurrency: int = 6) -> list:
     """Прозвонить варианты адресов (http/слэш/www/index.*) для списка
@@ -319,8 +493,10 @@ async def check_url_duplicates(urls: list, *, proxy_url=None,
 
     tasks = []
     connector = aiohttp.TCPConnector(limit=concurrency, ttl_dns_cache=300)
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=connector) as session:
+    # url= первого адреса: вход на закрытый сайт, если он под паролем.
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=(urls[0] if urls else '')),
+            connector=connector) as session:
         seen = set()
         for u in urls:
             for kind, variant in _url_variants(u):
@@ -360,8 +536,10 @@ async def check_test_domains(root_host: str, *, proxy_url=None) -> list:
     out = []
     to = aiohttp.ClientTimeout(total=15)
     connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=300)
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=connector) as session:
+    # url= корня: поддомены закрытого сайта тоже под паролем.
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=f'https://{root}/'),
+            connector=connector) as session:
         async def probe(sub):
             host = f'{sub}.{root}'
             try:
@@ -455,6 +633,28 @@ def _short(s: str, n: int = 60) -> str:
     return s if len(s) <= n else s[:n - 1] + '…'
 
 
+# Чистота H1. <br> внутри допустим (перенос строки). Исключение из «тегов
+# внутри»: ВЕСЬ текст H1 обёрнут в ОДИН <span> БЕЗ атрибутов (частый шаблон
+# <h1><span>Название</span></h1>) - визуально ничего не меняет и для поиска
+# безвреден, багом не считаем. Всё остальное - атрибуты (style/class/id),
+# несколько тегов, вложенность, эмфазис/блочные теги (<b>/<i>/<div>…), частичная
+# обёртка - это реальная разметка/стили, их по-прежнему ловим.
+_RE_H1_BR = re.compile(r'<\s*/?\s*br\s*/?\s*>', re.I)
+_RE_H1_TAG = re.compile(r'<\s*/?[a-z]', re.I)
+_RE_H1_BENIGN_SPAN = re.compile(r'\s*<span\s*>[^<>]*</span\s*>\s*', re.I)
+
+
+def _h1_has_inner_markup(inner: str) -> bool:
+    """Есть ли внутри <h1> РЕАЛЬНАЯ разметка/стили (а не чистый текст/один голый
+    <span>). True → показать бага «теги внутри H1»."""
+    s = _RE_H1_BR.sub(' ', inner)
+    if not _RE_H1_TAG.search(s):
+        return False                     # тегов (кроме <br>) нет - чистый текст
+    if _RE_H1_BENIGN_SPAN.fullmatch(s):
+        return False                     # весь H1 - один <span> без атрибутов
+    return True
+
+
 def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict:
     """Проверка единственности title/description/H1 (+ дубли H2).
     Возвращает {'issues': [...], 'counts': {...}}."""
@@ -501,7 +701,7 @@ def check_meta_uniqueness(html: str, url: str = '', type_code: str = '') -> dict
     m_h1 = re.search(r'<h1\b[^>]*>(.*?)</h1>', h, re.I | re.S)
     if m_h1:
         inner = m_h1.group(1)
-        if re.search(r'<(?!/?br\b)[a-z]', inner, re.I):
+        if _h1_has_inner_markup(inner):
             issues.append({'тип': 'h1', 'найдено': 'теги внутри',
                            'пояснение': 'внутри H1 вложенные теги/стили - '
                                         'H1 должен быть чистым текстом: '

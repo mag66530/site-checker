@@ -307,6 +307,10 @@ def main():
                     help='только показать кнопки скачивания, не качать')
     a = ap.parse_args()
 
+    # В облаке Chromium доустанавливается в рантайме - см. browser_setup.
+    import browser_setup
+    browser_setup.ensure_for_run(lambda m: print(m, flush=True), '404 в индексе')
+
     res = asyncio.run(_run(a.project, a.max_hosts, a.scout))
     (ROOT / 'cache').mkdir(exist_ok=True)
     out = ROOT / 'cache' / f'index404_{a.project}.json'

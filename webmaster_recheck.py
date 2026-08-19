@@ -133,6 +133,28 @@ async def _goto_backoff(page, url: str, tries: int = 6) -> bool:
     return False
 
 
+class NotAuthorized(Exception):
+    """Вебмастер увёл на страницу входа - сессия протухла или её нет."""
+
+
+async def _check_auth(page) -> bool:
+    """Авторизованы ли мы в Вебмастере. Проверяем ОДИН раз в начале прогона:
+    при --project список сайтов берётся из каталога, _collect_sites не
+    вызывается, и раньше проверки авторизации не было вовсе - кликер молча
+    разбирал страницу логина и на каждом сайте писал «блоков 0»."""
+    await page.goto(SITES_URL, wait_until='domcontentloaded')
+    await page.wait_for_timeout(3000)
+    if 'passport.yandex' in page.url:
+        _log('НЕ АВТОРИЗОВАН в Яндексе: Вебмастер увёл на страницу входа.',
+             'error')
+        _log('Локально: войди в webmaster.yandex.ru в открытом Chrome. '
+             'В облаке: сессия протухла - пере-экспортируй её (вкладка '
+             '«Автокликеры» → «Экспорт сессии для облака») и обнови в '
+             'настройках проекта.', 'error')
+        return False
+    return True
+
+
 async def _open_checklist(page, site_root: str) -> bool:
     """Открыть страницу ошибок диагностики сайта (прямой переход с бэкоффом)."""
     if await _goto_backoff(page, site_root + 'optimization/checklist/'):
@@ -151,6 +173,12 @@ async def _open_checklist(page, site_root: str) -> bool:
 
 async def _process_problems(page, dry_run: bool) -> dict:
     stat = {'problems': 0, 'checking': 0, 'no_button': 0, 'clicked': 0, 'errors': 0}
+
+    # Сессия могла отвалиться посреди прогона (Яндекс разлогинил, сработала
+    # антибот-защита). Тогда на месте диагностики - форма входа, и «блоков 0»
+    # означает не «ошибок нет», а «мы смотрим не туда».
+    if 'passport.yandex' in page.url:
+        raise NotAuthorized(page.url)
 
     problems = await page.query_selector_all(SEL_PROBLEM)
     stat['problems'] = len(problems)
@@ -268,6 +296,12 @@ async def run(single_site: str | None, dry_run: bool, limit: int,
                  'в Secrets ключом autoclick_session.')
             return
 
+        # Авторизацию проверяем ДО обхода: иначе прогон «успешно» пройдёт по
+        # всем сайтам, разбирая страницу входа, и отчитается нулями.
+        if not await _check_auth(page):
+            await browser.close()
+            return
+
         if single_site:
             sites = [single_site]
         elif project:
@@ -289,6 +323,15 @@ async def run(single_site: str | None, dry_run: bool, limit: int,
                 await _open_checklist(page, site)
                 stat = await _process_problems(page, dry_run)
                 entries.append({'site': site, **stat})
+            except NotAuthorized:
+                # Дальше идти бессмысленно: остальные сайты дадут то же самое.
+                _log('  сессия отвалилась посреди прогона - Вебмастер увёл на '
+                     'страницу входа. Останавливаюсь, чтобы не отчитаться '
+                     'нулями по остальным сайтам.', 'error')
+                _log('  Пере-экспортируй сессию и запусти заново.', 'error')
+                entries.append({'site': site, 'error': 'не авторизован'})
+                _save_log(entries)
+                break
             except Exception as e:
                 _log(f'  сайт упал: {e}', 'error')
                 entries.append({'site': site, 'error': str(e)})

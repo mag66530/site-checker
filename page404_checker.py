@@ -234,8 +234,11 @@ async def check_404_pages(entries: list, proxy_url=None) -> dict:
         return {'available': False, 'hosts': []}
     from http_checker import make_browser_headers
     connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=300)
-    async with aiohttp.ClientSession(headers=make_browser_headers(),
-                                     connector=connector) as session:
+    # url= первого хоста: без входа закрытый сайт отдал бы 401 вместо 404, и
+    # проверка «страница 404 настроена» врала бы на каждом хосте.
+    async with aiohttp.ClientSession(
+            headers=make_browser_headers(url=(entries[0][1] if entries else '')),
+            connector=connector) as session:
         hosts = await asyncio.gather(
             *[_check_host(session, u, c, proxy_url, category_url=cat)
               for c, u, cat in entries])

@@ -21,13 +21,20 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from checklists import page_templates as _tpl
+from checklists import ui_widgets as _ui
 PY = sys.executable
 
 PROJECTS = {
     'smu': 'СМУ - Стальметурал',
     'imp': 'ИМП - Инметпром',
     'mpe': 'МПЭ - Мепэн',
-    'sm': 'SHOPMET',
+    'sm': 'SM - SHOPMET',
+    'avia': 'АПС - Авиапромсталь',
+    # Стенд закрыт паролем: логин/пароль спрашиваем блоком «Вход на закрытый
+    # сайт» ниже и передаём движку через окружение.
+    'mpinew': 'МПИ - новый прод',
+    'mpk': 'МПК - Метпромко',
+    'mtt': 'МТТ - Меттранстерминал',
 }
 
 # Внутри проекта - выбор страны/сайта; значение = код каталога goals-<pid>.json.
@@ -58,6 +65,43 @@ PROJECTS = {
         ('mpe-kz', 'Казахстан · mepen.kz'),
         ('mpe-kg', 'Кыргызстан · mepen.kg'),
         ('mpe-rb', 'Беларусь · mepen.by'),
+    ],
+    # АПС - Авиапромсталь. Один счётчик Метрики на страну (свой домен). Россия
+    # (aviastal.ru) ждёт выгрузку целей: goals-avia.json пока нет - строка РФ
+    # будет неактивна («домен уточняется»), пока каталог не появится.
+    'avia': [
+        ('avia',    'Россия · aviastal.ru'),
+        ('avia-uz', 'Узбекистан · aviastal.uz'),
+        ('avia-az', 'Азербайджан · aviastal.az'),
+        ('avia-am', 'Армения · aviastal.am'),
+        ('avia-kg', 'Кыргызстан · aviastal.kg'),
+        ('avia-kz', 'Казахстан · aviastal.kz'),
+        ('avia-rb', 'Беларусь · aviastal.by'),
+    ],
+    # МПК - свой счётчик на каждый доменный сайт. У пяти страновых счётчиков
+    # заведены ТОЛЬКО автоцели Метрики (клики по телефону/почте/мессенджерам,
+    # отправка формы) - проверять извне там нечего, поэтому по умолчанию они
+    # сняты (см. _есть_проверяемые), но выбрать их можно.
+    'mpk': [
+        ('mpk',    'Россия · metpromko.ru'),
+        ('mpk-kz', 'Казахстан · metpromko.kz'),
+        ('mpk-rb', 'Беларусь · metpromko.by'),
+        ('mpk-kg', 'Кыргызстан · metpromko.kg'),
+        ('mpk-uz', 'Узбекистан · metpromko.uz'),
+        ('mpk-az', 'Азербайджан · metpromko.az'),
+        ('mpk-am', 'Армения · metpromko.am'),
+    ],
+    # МТТ - счётчик на каждый сайт. Города РФ сидят на поддоменах с общим
+    # набором целей, поэтому проверяем по одному сайту на страну. Армения - на
+    # НОВОМ интерфейсе (другая вёрстка), у неё свой план обхода.
+    'mtt': [
+        ('mtt',    'Россия · met-trans.ru'),
+        ('mtt-rb', 'Беларусь · met-trans.by'),
+        ('mtt-kz', 'Казахстан · mettransterminal.kz'),
+        ('mtt-am', 'Армения · met-trans.am (новый интерфейс)'),
+        ('mtt-az', 'Азербайджан · met-trans.az'),
+        ('mtt-uz', 'Узбекистан · met-trans.uz'),
+        ('mtt-kg', 'Кыргызстан · mtt.kg'),
     ],
 }
 
@@ -128,6 +172,25 @@ _tpl.render_panel(
 _варианты = СТРАНЫ.get(_base, [(_base, PROJECTS[_base])])
 
 
+def _метрика_токен(pid: str) -> str:
+    """OAuth-токен Метрики проекта: «Настройки проекта» (БД) → секрет
+    metrika_oauth_<pid> → общий metrika_oauth. Тот же порядок, что у чек-листа."""
+    try:
+        import auth as _a
+        v = _a.project_setting(pid, 'metrika_oauth')
+        if v:
+            return v
+    except Exception:
+        pass
+    for key in (f'metrika_oauth_{pid}', 'metrika_oauth'):
+        try:
+            if hasattr(st, 'secrets') and key in st.secrets:
+                return st.secrets[key]
+        except Exception:
+            pass
+    return ''
+
+
 def _load_cat(pid):
     f = ROOT / 'catalogs' / f'goals-{pid}.json'
     if f.is_file():
@@ -149,6 +212,19 @@ def _домен_ок(pid):
     return bool(c and (c.get('домен') or '').strip())
 
 
+def _есть_проверяемые(pid) -> bool:
+    """Есть ли у сайта цели, которые вообще можно проверить снаружи (js/url).
+
+    У части страновых счётчиков (напр. МПК .by/.kg/.uz/.az/.am) заведены ТОЛЬКО
+    автоцели Метрики - клики по телефону/почте/мессенджерам, отправка формы.
+    Их Яндекс считает сам на сервере, отдельного сигнала в трафике нет, и лист
+    отчёта по такому сайту вышел бы пустым. Поэтому по умолчанию такие сайты
+    не отмечаем - выбрать вручную по-прежнему можно."""
+    c = _cats.get(pid) or {}
+    return any(str(g.get('тип', '')).startswith(('js', 'url'))
+               for g in c.get('цели', []))
+
+
 # ── Выбор сайтов/стран галочками (как на «Проверке форм») ────────────
 st.subheader('Сайты / страны')
 st.caption('По умолчанию отмечены все доступные. Проверка пройдёт по каждому '
@@ -164,7 +240,7 @@ def _ck(pid):
 if st.session_state.get('gc_last_base') != _base:
     st.session_state['gc_last_base'] = _base
     for p, _ in _варианты:
-        st.session_state[_ck(p)] = _домен_ок(p)
+        st.session_state[_ck(p)] = _домен_ок(p) and _есть_проверяемые(p)
 
 _доступные = [p for p, _ in _варианты if _домен_ок(p)]
 _all_on = all(st.session_state.get(_ck(p), False) for p in _доступные)
@@ -182,17 +258,50 @@ with _left:
         _ok = _домен_ок(p)
         c = _cats.get(p)
         _n = len(c.get('цели', [])) if c else 0
-        _lbl = f'{label}  ·  целей {_n}' + ('' if _ok else '  ·  домен уточняется')
+        # Показываем не только «сколько целей всего», но и сколько из них
+        # реально проверяемых: сайт с одними автоцелями иначе выглядит
+        # полноценным, а лист отчёта по нему выйдет пустым.
+        _n_ок = sum(1 for g in (c or {}).get('цели', [])
+                    if str(g.get('тип', '')).startswith(('js', 'url')))
+        _lbl = f'{label}  ·  целей {_n}'
+        if _ok and not _n_ок:
+            _lbl += '  ·  только автоцели Метрики - проверять нечего'
+        elif _ok and _n_ок < _n:
+            _lbl += f' (проверяемых {_n_ок})'
+        if not _ok:
+            _lbl += '  ·  домен уточняется'
         if st.checkbox(_lbl, key=_ck(p), disabled=not _ok) and _ok:
             _selected.append(p)
 _n_sel = len(_selected)
 if _n_sel:
-    _lo_est, _hi_est = 3 + 5 * _n_sel, 5 + 10 * _n_sel
-    _time_hint = (f' Ориентировочно ~{_lo_est}-{_hi_est} мин '
-                  '(≈5-10 мин на сайт + сквозной заказ в начале).')
+    # Оценка по РЕАЛЬНОМУ плану обхода выбранных сайтов (сколько страниц
+    # открываем), а не «на глазок по числу сайтов»: у SHOPMET план из 9
+    # страниц, у СМУ - в разы больше, и время отличается кратно.
+    # Облако перечитывает файл страницы после обновления кода, но модули из
+    # sys.modules не перезагружает: страница уже новая, run_estimate - ещё
+    # старый, и импорт новой функции ронял всю страницу ImportError.
+    import importlib
+
+    import run_estimate as _re
+    if not hasattr(_re, 'estimate_goals_seconds'):
+        _re = importlib.reload(_re)
+    try:
+        import goals_tester as _gt
+        _est_pages = max(
+            len((_gt.ACTIONS.get(p)
+                 or _gt._план_страна(p, (_gt.загрузить_каталог(p) or {}).get('домен', ''))
+                 ).get('страницы', []))
+            for p in _selected)
+    except Exception:  # noqa: BLE001
+        _est_pages = 10
+    _lo_g, _hi_g = _re.estimate_goals_seconds(_est_pages, _n_sel, run_orders=True)
+    _оценка = (_re.format_estimate(_lo_g, _hi_g),
+               f'{_est_pages} страниц на сайт + сквозной заказ в начале.')
 else:
-    _time_hint = ''
-st.caption(f'Выбрано сайтов: **{_n_sel} / {len(_доступные)}**.{_time_hint}')
+    _оценка = None
+st.caption(f'Выбрано сайтов: **{_n_sel} / {len(_доступные)}**.')
+if _оценка:
+    _ui.estimate_badge(*_оценка)
 
 # Рабочие файлы (лог/PID общего прогона) держим под базовым проектом.
 WORK = ROOT / 'cache' / 'goals' / _base
@@ -277,6 +386,12 @@ if not _alive:
 import auth
 _goals_proxy = auth.fill_proxy_slot(_base)
 
+# Вход на закрытый паролем стенд (МПИ новый прод). Блок сам решает, показываться
+# ли: рисуется только проектам с basic_auth в карточке. Пароль уходит движку
+# через окружение прогона - на диск не пишется.
+import site_access as _sa
+_site_env = _sa.render_site_login(_base, key_prefix='gc_site')
+
 c1, c2 = st.columns([3, 1])
 with c1:
     if st.button('▶ Запустить проверку целей', use_container_width=True,
@@ -297,11 +412,20 @@ with c1:
         # inmetprom.ru режут зарубежный IP сервера - «РФ не отвечает»).
         if _goals_proxy:
             env['GOALS_PROXY'] = _goals_proxy
+        # Вход на закрытый сайт: и браузеру целей (http_credentials), и догрузке
+        # JS того же домена (см. goals_tester._basic_auth_from_env).
+        env.update(_site_env)
+        # Токен Метрики: прогон перечитывает цели ЖИВЬЁМ из API (management/v1),
+        # а не из снапшота каталога. Берём его там же, где остальные проверки -
+        # «Настройки проекта» → секрет metrika_oauth_<pid> → общий metrika_oauth.
+        _mt_token = _метрика_токен(_base)
+        if _mt_token:
+            env['METRIKA_OAUTH'] = _mt_token
         # Telegram: креды берём из секретов (те же, что у еженедельной проверки) и
         # кладём в окружение прогона - goals_run сам отправит сводный отчёт в чат.
         try:
             import tg_report
-            env.update(tg_report.runner_env(_base))
+            env.update(tg_report.runner_env(_base, PROJECTS.get(_base, _base)))
         except Exception:
             pass
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0
@@ -352,10 +476,14 @@ _sm = _re.findall(r'СТРАНА\s+(\d+)\s*/\s*(\d+)', log_txt)
 _pm = _re.findall(r'ПРОГРЕСС\s+(\d+)\s*/\s*(\d+)', log_txt)
 _goals_hit = len(_re.findall(r'цель:\s', log_txt))
 _forms_now = ('ФОРМЫ:' in log_txt) and ('СТРАНА' not in log_txt)
-# Секундомер прогона (как на «Проверке форм»): сколько времени идёт/заняло.
-# Старт берём из session_state (ставится при запуске); показываем только для
-# СВОЕГО прогона - после перезагрузки страницы отметки нет, тогда «…».
-_gts = st.session_state.get('goals_started_ts') if _own_run else None
+# Секундомер прогона: сколько времени идёт/заняло. Старт берём из pid-файла,
+# а не из session_state: прогон живёт отдельным процессом, и время должно быть
+# видно после перезагрузки страницы и из другой сессии (раньше там был «…»).
+# _ui импортирован в шапке модуля - здесь он нужен НЕ первым: выше по файлу
+# есть estimate_badge, и импорт в этом месте оставлял страницу без _ui ровно
+# до сюда (NameError, как только у прогноза времени появлялись данные).
+_gts = (_ui.run_started_at(PID_FILE, LOG_FILE)
+        or (st.session_state.get('goals_started_ts') if _own_run else None))
 if _running:
     _elapsed = int(time.time() - _gts) if _gts else None
     _run_mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'

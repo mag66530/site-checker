@@ -53,10 +53,74 @@ class RobotsInfo:
     groups: dict = field(default_factory=dict)
     sitemaps: list = field(default_factory=list)
     error: Optional[str] = None
+    # ── гигиена самого файла (доп. чек-лист) ──
+    size_bytes: int = 0                   # вес файла
+    content_type: str = ''                # Content-Type ответа
+    bom: bool = False                     # UTF-8 BOM в начале файла
+    utf8_ok: bool = True                  # байты читаются как UTF-8
+    looks_html: bool = False              # вместо текста отдали HTML-страницу
+    clean_params: list = field(default_factory=list)   # значения Clean-Param
+    commented: list = field(default_factory=list)      # закомментированные директивы
 
     @property
     def ok(self) -> bool:
         return self.fetched and self.status == 200
+
+
+# Предел, после которого Google перестаёт читать robots.txt (500 КиБ).
+ROBOTS_MAX_BYTES = 500 * 1024
+
+# Директивы, которые имеет смысл искать закомментированными: пропущенный «#»
+# перед строкой выключает правило целиком, а выглядит файл рабочим.
+_ROBOTS_DIRECTIVES = ('user-agent', 'disallow', 'allow', 'sitemap',
+                      'clean-param', 'host', 'crawl-delay')
+_RE_COMMENTED_DIRECTIVE = re.compile(
+    r'^\s*#+\s*(' + '|'.join(_ROBOTS_DIRECTIVES) + r')\s*:\s*(\S.*)?$', re.I)
+
+
+def find_commented_directives(text: str, limit: int = 10) -> list:
+    """Строки robots.txt, где директива целиком закомментирована через «#».
+
+    Разбор правил комментарии срезает (так велит стандарт), поэтому такая
+    строка не видна ни нам, ни роботу - файл выглядит рабочим, а правила нет.
+    Намеренно это или нет, снаружи не понять, поэтому находка мягкая.
+    → [{'line': номер, 'text': строка}]. ЧИСТАЯ функция - есть юнит-тест.
+    """
+    out = []
+    for n, raw in enumerate((text or '').splitlines(), 1):
+        if _RE_COMMENTED_DIRECTIVE.match(raw):
+            out.append({'line': n, 'text': raw.strip()[:200]})
+            if len(out) >= limit:
+                break
+    return out
+
+
+def analyze_robots_file(data: bytes, content_type: str = '') -> dict:
+    """Гигиена файла robots.txt по сырому ответу: вес, формат, кодировка.
+
+    → {'size_bytes', 'too_big', 'content_type', 'looks_html', 'bom',
+       'utf8_ok', 'text'}. ЧИСТАЯ функция - есть юнит-тест.
+
+    BOM важен не только «для галочки»: с ним первая строка становится
+    «\\ufeffUser-agent», ключ директивы не распознаётся, и ПЕРВАЯ группа
+    правил теряется целиком. Поэтому текст отдаём уже без BOM.
+    """
+    data = data or b''
+    bom = data.startswith(b'\xef\xbb\xbf')
+    body = data[3:] if bom else data
+    try:
+        text = body.decode('utf-8')
+        utf8_ok = True
+    except UnicodeDecodeError:
+        text = body.decode('utf-8', errors='replace')
+        utf8_ok = False
+    ct = (content_type or '').split(';')[0].strip().lower()
+    # HTML вместо текста: типовой случай - сайт отдаёт на /robots.txt свою
+    # страницу с кодом 200, и роботы читают её как пустой файл.
+    looks_html = bool(re.match(r'\s*(<!doctype html|<html)', text, re.I))
+    return {'size_bytes': len(data), 'too_big': len(data) > ROBOTS_MAX_BYTES,
+            'content_type': ct, 'looks_html': looks_html, 'bom': bom,
+            'utf8_ok': utf8_ok, 'text': text}
 
 
 def _pattern_to_regex(pattern: str):
@@ -71,8 +135,13 @@ def _pattern_to_regex(pattern: str):
 
 
 def parse_robots(text: str, host: str = '') -> RobotsInfo:
-    """Разобрать текст robots.txt: группы правил по агентам + Sitemap."""
+    """Разобрать текст robots.txt: группы правил по агентам + Sitemap.
+
+    Заодно собираем Clean-Param (директива Яндекса против дублей по
+    GET-параметрам) и строки, где директива закомментирована.
+    """
     info = RobotsInfo(host=host, fetched=True, status=200)
+    info.commented = find_commented_directives(text)
     groups: dict = {}
     current_agents: list = []
     last_was_agent = False
@@ -97,6 +166,12 @@ def parse_robots(text: str, host: str = '') -> RobotsInfo:
         if key == 'sitemap':
             if val:
                 info.sitemaps.append(val)
+            continue
+        if key == 'clean-param':
+            # Директива Яндекса: «Clean-param: utm_source&utm_medium /catalog/».
+            # Действует независимо от группы, поэтому просто копим значения.
+            if val:
+                info.clean_params.append(val)
             continue
         if key in ('allow', 'disallow'):
             if not current_agents:
@@ -170,9 +245,17 @@ async def fetch_robots(session, host: str, *, proxy_url=None,
             if status != 200:
                 return RobotsInfo(host=host, status=status, fetched=True)
             data = await r.read()
-            text = data.decode('utf-8', errors='replace')
-            info = parse_robots(text, host)
+            ct = r.headers.get('Content-Type', '')
+            # Гигиена файла (вес/формат/кодировка) - до разбора правил: текст
+            # для разбора берём уже без BOM, иначе теряется первая группа.
+            f = analyze_robots_file(data, ct)
+            info = parse_robots(f['text'], host)
             info.status = status
+            info.size_bytes = f['size_bytes']
+            info.content_type = f['content_type']
+            info.bom = f['bom']
+            info.utf8_ok = f['utf8_ok']
+            info.looks_html = f['looks_html']
             return info
     except Exception as e:
         return RobotsInfo(host=host, fetched=False, error=str(e))
@@ -217,14 +300,44 @@ def _find_meta_robots(html: str):
     return None, False
 
 
-def _find_canonicals(html: str) -> list:
-    """href ВСЕХ rel=canonical на странице (валидно - ровно один)."""
+_RE_HEAD_END = re.compile(r'</head\s*>', re.I)
+
+
+def find_canonicals_ex(html: str) -> list:
+    """[{'href', 'in_head'}] по ВСЕМ rel=canonical страницы.
+
+    in_head: тег стоит до </head>. Канониклы в <body> браузер и робот
+    игнорируют - тег обязан быть в <head>. Если </head> в разметке нет вовсе,
+    судить не берёмся и считаем, что тег на месте (in_head=True): иначе на
+    битой вёрстке получалось бы обвинение на пустом месте.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    head = html[:200_000]
+    m_end = _RE_HEAD_END.search(head)
+    граница = m_end.start() if m_end else None
     out = []
-    for m in _CANONICAL_RE.finditer(html[:200_000]):
+    for m in _CANONICAL_RE.finditer(head):
         hm = _HREF_RE.search(m.group(0))
         if hm and hm.group(1).strip():
-            out.append(hm.group(1).strip())
+            out.append({'href': hm.group(1).strip(),
+                        'in_head': True if граница is None
+                        else m.start() < граница})
     return out
+
+
+def _find_canonicals(html: str) -> list:
+    """href ВСЕХ rel=canonical на странице (валидно - ровно один)."""
+    return [c['href'] for c in find_canonicals_ex(html)]
+
+
+def is_relative_url(href: str) -> bool:
+    """Адрес относительный (без схемы и без «//host»). Google требует в
+    canonical АБСОЛЮТНЫЙ адрес: относительный он разрешает от текущей
+    страницы, и на дублях-зеркалах это даёт разные каноникл-цели.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    s = (href or '').strip()
+    if not s:
+        return False
+    return not (urlsplit(s).scheme or s.startswith('//'))
 
 
 def _internal_link_profile(html: str, url: str) -> tuple:
@@ -344,6 +457,7 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
         'x_robots': None, 'x_robots_noindex': False,
         'canonical': None, 'canonical_count': 0,
         'canonical_self': None, 'canonical_disallowed': False,
+        'canonical_relative': False, 'canonical_outside_head': False,
         'hreflang_count': 0, 'ext_nofollow': [],
         'issues': [], 'warnings': [],
     }
@@ -379,7 +493,8 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
     #    ровно один тег; указывает на себя; не на чужой хост; не на URL,
     #    закрытый в robots. Отсутствие тега - предупреждение.
     if html:
-        canons = _find_canonicals(html)
+        canons_ex = find_canonicals_ex(html)
+        canons = [c['href'] for c in canons_ex]
         out['canonical'] = canons[0] if canons else None
         out['canonical_count'] = len(canons)
         if not canons:
@@ -389,14 +504,29 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                 issues.append('несколько rel="canonical" на странице - '
                               'поисковики игнорируют такой сигнал')
             canon = canons[0]
+            # Тег обязан стоять в <head>: в <body> его игнорируют.
+            if not canons_ex[0]['in_head']:
+                out['canonical_outside_head'] = True
+                issues.append('rel="canonical" стоит вне <head> - '
+                              'поисковики такой тег игнорируют')
+            # Относительный адрес в canonical: Google требует абсолютный.
+            out['canonical_relative'] = is_relative_url(canon)
+            if out['canonical_relative']:
+                issues.append('в rel="canonical" относительный адрес, а не '
+                              'полный - нужен абсолютный с доменом')
+            # Сравнение «на себя» - по АБСОЛЮТНОМУ адресу: относительный
+            # canonical иначе никогда не совпадал с URL страницы, и находка
+            # «canonical ведёт на другой URL» выписывалась зря.
             try:
-                self_ref = _norm_url(canon) == _norm_url(url)
+                from urllib.parse import urljoin
+                canon_abs = urljoin(url, canon)
+                self_ref = _norm_url(canon_abs) == _norm_url(url)
             except Exception:
-                self_ref = None
+                canon_abs, self_ref = canon, None
             out['canonical_self'] = self_ref
             if self_ref is False:
                 _page_host = (urlsplit(url).netloc or '').lower().removeprefix('www.')
-                _can_host = (urlsplit(canon).netloc or '').lower().removeprefix('www.')
+                _can_host = (urlsplit(canon_abs).netloc or '').lower().removeprefix('www.')
                 if _can_host and _can_host != _page_host:
                     # Канонизация на другой домен/поддомен: страница города
                     # отдаёт свой вес чужому хосту - выпадает из поиска.
@@ -405,7 +535,7 @@ def analyze_page_indexing(html: Optional[str], headers: Optional[dict],
                     # Каноникл на закрытый robots'ом URL - канонизируем
                     # «в никуда» (robots того же хоста).
                     if robots is not None and robots.ok:
-                        c_dis, _c_rule, _ = robots_verdict(robots, canon)
+                        c_dis, _c_rule, _ = robots_verdict(robots, canon_abs)
                         if c_dis:
                             out['canonical_disallowed'] = True
                             issues.append('расхождение с robots.txt: canonical '
@@ -499,6 +629,23 @@ _ADVISORY_PATHS = [
     ('политика конфиденциальности', '/policy/'),
     ('политика конфиденциальности', '/privacy/'),
 ]
+
+# Коды «сайт нас не пустил»: ответ говорит о защите/лимите, а НЕ о том, что
+# страницы нет. Сайты под антиботом (у МПИ это видно прямо: любой запрос
+# уводит на /challenge) отдают такое на служебные пробы, и раньше это
+# читалось как «страница не найдена - создать», хотя страница могла
+# существовать. Разница принципиальная: «нет страницы» - задача клиенту,
+# «нас не пустили» - ограничение проверки, и врать об этом нельзя.
+#   403 - доступ запрещён (часто как раз антибот/WAF)
+#   429 - слишком много запросов
+#   503 - временно недоступен (типовой ответ страницы-испытания)
+BLOCKED_STATUSES = (403, 429, 503)
+
+
+def is_blocked_status(status) -> bool:
+    """Ответ - про защиту сайта, а не про отсутствие страницы."""
+    return status in BLOCKED_STATUSES
+
 
 # Обязательные страницы (чек-лист: «созданы страницы Конфиденциальность,
 # Cookies, Доставка, Оплата»). У каждой - типовые варианты адреса; страница
@@ -684,12 +831,17 @@ async def check_paths_against_robots(host: str, paths: list, *,
        • .css/.js главной страницы не закрыты Disallow - Google требует
          доступ к ресурсам для рендеринга, закрытые = баг.
 
+       • гигиена самого файла: вес не больше 500 КБ, отдаётся как текст
+         (а не HTML-страница), кодировка UTF-8 без BOM, директивы не
+         закомментированы, прописан Clean-Param против дублей по
+         GET-параметрам - см. robots_file.
+
     Возвращает {'host', 'robots_status', 'sitemaps', 'checked',
                 'disallowed': [...], 'directive_check': {'checked', 'findings'},
                 'junk_open': [...],
                 'sitemap_checks': {...}, 'blanket_disallow': [...],
                 'ua_groups': {...}, 'assets_checked': int,
-                'assets_closed': [...], 'error'}."""
+                'assets_closed': [...], 'robots_file': {...}, 'error'}."""
     import aiohttp
     from http_checker import make_browser_headers
     out = {'host': host, 'robots_status': None, 'sitemaps': [],
@@ -699,16 +851,31 @@ async def check_paths_against_robots(host: str, paths: list, *,
            'advisory_open': [], 'pagination': None,
            'required_pages': [], 'otgruzki': None, 'news_dates': None,
            'directive_check': {'checked': 0, 'findings': []},
+           'robots_file': None,
            'error': None}
     try:
         async with aiohttp.ClientSession(
-                headers=make_browser_headers()) as session:
+                # url= - вход на закрытый сайт: robots.txt там тоже за паролем.
+                headers=make_browser_headers(url=f'https://{host}/')) as session:
             info = await fetch_robots(session, host, proxy_url=proxy_url)
             out['robots_status'] = info.status
             out['sitemaps'] = info.sitemaps
             if not info.ok:
                 out['error'] = info.error or f'robots.txt: HTTP {info.status}'
                 return out
+
+            # ── 0. Гигиена самого файла (доп. чек-лист) ──
+            out['robots_file'] = {
+                'size_bytes': info.size_bytes,
+                'too_big': info.size_bytes > ROBOTS_MAX_BYTES,
+                'limit_bytes': ROBOTS_MAX_BYTES,
+                'content_type': info.content_type,
+                'looks_html': info.looks_html,
+                'bom': info.bom,
+                'utf8_ok': info.utf8_ok,
+                'clean_params': list(info.clean_params),
+                'commented': list(info.commented),
+            }
 
             # ── 0а. «Disallow: /» - сайт закрыт целиком (доп. чек-лист) ──
             # Буквальное правило: даже если частично перекрыто Allow,
@@ -894,14 +1061,21 @@ async def check_paths_against_robots(host: str, paths: list, *,
                          and not re.search(
                              r'auth|login|register|basket|cart|\.php',
                              p_, re.I)][:2]
-                found = None
+                found, blocked_st = None, None
                 for v in smart + list(variants):
                     st, fpath, _h = await _fetch_final(f'https://{host}{v}')
                     # Редирект на главную = страницы нет (заглушка-склейка).
                     if st == 200 and (fpath or '/').strip('/'):
                         found = fpath
                         break
-                out['required_pages'].append({'label': label, 'found': found})
+                    # Запомним, что сайт нас не пустил: без этого «страницы
+                    # нет» и «нас не пустили» выглядят одинаково.
+                    if blocked_st is None and is_blocked_status(st):
+                        blocked_st = st
+                out['required_pages'].append({
+                    'label': label, 'found': found,
+                    'blocked': None if found else blocked_st,
+                })
 
             # Даты публикации/обновления у статей и новостей.
             out['news_dates'] = None
@@ -1033,35 +1207,67 @@ _RE_CYR = re.compile(r'[а-яё]', re.I)
 _RE_UPPER = re.compile(r'[A-Z]')
 _RE_SLUG_JUNK = re.compile(r'[^a-z0-9\-_./]')
 
-_EXAMPLES = 10        # сколько примеров каждого типа показывать в отчёте
+_MAX_BAD_PATHS = 500  # потолок адресов одного типа (каждый - строка «Проблем»)
+
+# Предел длины адреса: 2048 - общепринятая граница (исторический потолок
+# адресной строки), дальше адрес рискует обрезаться в чужих системах.
+MAX_URL_LEN = 2048
+
+# Схема внутри пути: «/https://site.ru/…» или «/http:/site.ru/…» (второй вид
+# получается, когда шаблон склеил адрес и потерял слэш).
+_RE_SCHEME_IN_PATH = re.compile(r'(?:^|/)https?:?/', re.I)
+
+# Виды находок формата адреса. ОДИН список: по нему и обнуляются счётчики, и
+# считается total_bad - иначе новый вид молча не попадал бы в итог (и в отчёт).
+URL_FORMAT_KINDS = ('domain_twice', 'too_long', 'non_sef', 'cyrillic',
+                    'uppercase', 'underscore', 'junk_chars')
 
 
-def check_url_format(paths: list) -> dict:
+def check_url_format(paths: list, root_domain: str = '') -> dict:
     """ЧПУ и формат адресов. paths - пути каталога и тех. страниц
     ('/catalog/truba/…'). Запросов не делает - чистая валидация строк.
 
-    Находки:
+    root_domain - домен проекта; нужен, чтобы поймать домен внутри пути.
+
+    Находки (адрес попадает РОВНО в один вид - первый подошедший):
+      • domain_twice - домен или схема внутри пути (/site.ru/catalog/,
+        /https://site.ru/…) - типовой след ошибки в шаблоне ссылок;
+      • too_long - адрес длиннее 2048 символов;
       • non_sef  - технический адрес (query ?ID=…, index.php и т.п.) - не ЧПУ;
       • cyrillic - кириллица в пути (включая %-энкод и punycode xn--);
       • uppercase - ЗАГЛАВНЫЕ буквы (риск дублей /Catalog/ vs /catalog/);
       • underscore - подчёркивания (чек-лист требует дефисы);
       • junk_chars - прочие символы (пробелы и спецсимволы)."""
-    out = {'checked': 0, 'non_sef': [], 'cyrillic': [], 'uppercase': [],
-           'underscore': [], 'junk_chars': []}
+    out = {'checked': 0, 'domain_twice': [], 'too_long': [], 'non_sef': [],
+           'cyrillic': [], 'uppercase': [], 'underscore': [], 'junk_chars': []}
+    корень = (root_domain or '').strip().lower().removeprefix('www.')
 
     def _add(kind, p):
-        if len(out[kind]) < _EXAMPLES:
+        # Держим адреса целиком (до потолка), а не 10 примеров: в «Проблемах»
+        # каждый кривой адрес - отдельная строка, иначе исполнителю непонятно,
+        # что именно править. Потолок - чтобы отчёт не раздувался на сайтах,
+        # где не-ЧПУ вообще весь каталог.
+        if len(out[kind]) < _MAX_BAD_PATHS:
             out[kind].append(p)
         out[kind + '_n'] += 1
 
-    for kind in ('non_sef', 'cyrillic', 'uppercase', 'underscore',
-                 'junk_chars'):
+    for kind in URL_FORMAT_KINDS:
         out[kind + '_n'] = 0
     for p in paths or []:
         if not p or p == '/':
             continue
         out['checked'] += 1
         low = p.lower()
+        # Домен внутри пути: схема (/https://…) либо сам домен проекта вторым
+        # разом. Проверяем ПЕРВЫМ: такой адрес кривой целиком, остальные виды
+        # для него уже не важны.
+        if _RE_SCHEME_IN_PATH.search(low) or (корень and корень in low):
+            _add('domain_twice', p)
+            continue
+        # Длина: считаем по пути, для полного адреса добавляем домен и https://
+        if len(p) + len(корень) + 8 > MAX_URL_LEN:
+            _add('too_long', p)
+            continue
         # Не-ЧПУ: значимая часть адреса в query или скриптовое расширение.
         if ('?' in p or '.php' in low.split('?')[0]
                 or '.asp' in low.split('?')[0]):
@@ -1082,7 +1288,5 @@ def check_url_format(paths: list) -> dict:
             continue
         if _RE_SLUG_JUNK.search(path):
             _add('junk_chars', p)
-    out['total_bad'] = sum(out[k + '_n'] for k in
-                           ('non_sef', 'cyrillic', 'uppercase', 'underscore',
-                            'junk_chars'))
+    out['total_bad'] = sum(out[k + '_n'] for k in URL_FORMAT_KINDS)
     return out

@@ -13,6 +13,11 @@ touch) и меряем геометрию - ничего не заполняем
 import os
 from datetime import datetime
 
+try:
+    from . import site_auth as _site_auth
+except ImportError:
+    import site_auth as _site_auth
+
 _MOBILE_W = 390          # ширина экрана телефона (iPhone 12/13/14)
 _MOBILE_H = 844
 _TAP_MIN = 44            # минимальная сторона тач-цели (px)
@@ -176,14 +181,17 @@ def выполнить_проверку(страницы, excel_path: str = "log
     log(f"📱 Мобильная вёрстка: проверяю {len(страницы)} страниц(ы) на ширине {_MOBILE_W}px …")
     with sync_playwright() as pw:
         _kw = dict(headless=not show,
-                   args=["--disable-blink-features=AutomationControlled"])
+                   args=["--disable-blink-features=AutomationControlled",
+                         "--disable-dev-shm-usage"])
         _prx = _playwright_proxy_from_env()
         if _prx:
             _kw["proxy"] = _prx
         b = pw.chromium.launch(**_kw)
-        ctx = b.new_context(locale="ru-RU", user_agent=_MOBILE_UA,
-                            viewport={"width": _MOBILE_W, "height": _MOBILE_H},
-                            is_mobile=True, has_touch=True, device_scale_factor=2)
+        # Пароль сайта (закрытый стенд) - иначе меряли бы окно авторизации.
+        ctx = b.new_context(**_site_auth.добавить_вход(dict(
+            locale="ru-RU", user_agent=_MOBILE_UA,
+            viewport={"width": _MOBILE_W, "height": _MOBILE_H},
+            is_mobile=True, has_touch=True, device_scale_factor=2)))
         try:
             for метка, url in страницы:
                 page = ctx.new_page()

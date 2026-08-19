@@ -66,6 +66,17 @@ def _retry(fn):
         for attempt in range(5):
             try:
                 return fn(*args, **kwargs)
+            except psycopg.errors.QueryCanceled as e:
+                # Запрос упёрся в statement_timeout - повторять бессмысленно:
+                # он и в следующий раз не уложится, а пользователь ждёт впятеро
+                # дольше. Обычно это не «сервер занят», а канал не пропускает
+                # ответ (см. STATEMENT_TIMEOUT_MS).
+                raise TimeoutError(
+                    'База не ответила за '
+                    f'{STATEMENT_TIMEOUT_MS // 1000} с. Если зависают именно '
+                    'большие настройки (сессия браузера) - проблема в канале '
+                    'до базы: сеть режет крупные пакеты. Проверьте VPN/прокси '
+                    'или уменьшите MTU сетевого интерфейса.') from e
             except _RETRY_ERRORS as e:
                 last = e
                 if attempt < 4:
@@ -74,12 +85,60 @@ def _retry(fn):
     return wrap
 
 
+# Потолок на ОДИН запрос. Без него страница висит бесконечно: connect_timeout
+# закрывает только установку соединения, а уже открытый коннект, где пакеты
+# теряются в сети, ждёт вечно. Живой случай: на канале с MTU меньше 1500 и
+# заблокированным ICMP большие значения (сессия браузера ~15 КБ) не доходили,
+# и «Автокликеры» грузились без конца, вместо того чтобы сказать об ошибке.
+STATEMENT_TIMEOUT_MS = 20_000
+
+# Серверного таймаута мало: сервер запрос ВЫПОЛНИЛ быстро, а вот ответ не
+# доходит - клиент ждёт данные, которых не будет. Поэтому поверх ещё и
+# клиентский дедлайн: операция уходит в отдельный поток, и если он не уложился,
+# работа продолжается без настроек (проверка честно скажет, что их нет), а не
+# зависает навсегда.
+CLIENT_DEADLINE_SEC = 25
+
+
+def _with_deadline(fn, *args, **kwargs):
+    """Выполнить операцию с жёстким клиентским дедлайном.
+
+    Поток - демон: если запрос завис на сокете, ждать его завершения нельзя,
+    иначе процесс не выйдет (ThreadPoolExecutor на выходе дожидается своих
+    потоков). Зависший поток тихо умрёт вместе с процессом."""
+    import queue
+    import threading
+
+    ящик: 'queue.Queue' = queue.Queue(maxsize=1)
+
+    def _работа():
+        try:
+            ящик.put(('ok', fn(*args, **kwargs)))
+        except BaseException as e:      # noqa: BLE001 - отдаём вызывающему как есть
+            ящик.put(('err', e))
+
+    threading.Thread(target=_работа, daemon=True,
+                     name='db-deadline').start()
+    try:
+        вид, значение = ящик.get(timeout=CLIENT_DEADLINE_SEC)
+    except queue.Empty:
+        raise TimeoutError(
+            f'База не ответила за {CLIENT_DEADLINE_SEC} с. Если зависают '
+            'именно большие настройки (сессия браузера ~15 КБ) - канал до '
+            'базы режет крупные пакеты: проверьте VPN/прокси или уменьшите '
+            'MTU сетевого интерфейса.') from None
+    if вид == 'err':
+        raise значение
+    return значение
+
+
 def _new_conn():
     # autocommit: каждый стейтмент коммитится сразу. Многооператорные операции
     # (set_user_projects) теряют атомарность, но идемпотентны и под @_retry.
     return psycopg.connect(
         _db_url(), connect_timeout=5, autocommit=True,
         prepare_threshold=None,
+        options=f'-c statement_timeout={STATEMENT_TIMEOUT_MS}',
         keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
     )
 
@@ -390,8 +449,7 @@ def _ensure_proj_settings_table() -> None:
 
 
 @_retry
-def get_project_settings(project_key: str) -> dict:
-    """{name: значение (расшифрованное)} настроек проекта."""
+def _get_project_settings_raw(project_key: str) -> dict:
     _ensure_proj_settings_table()
     with _conn() as c, c.cursor() as cur:
         cur.execute(
@@ -399,6 +457,16 @@ def get_project_settings(project_key: str) -> dict:
             (project_key,),
         )
         return {n: security.decrypt_secret(v) for n, v in cur.fetchall()}
+
+
+def get_project_settings(project_key: str) -> dict:
+    """{name: значение (расшифрованное)} настроек проекта.
+
+    Под клиентским дедлайном: в этой выборке лежит сессия браузера (~15 КБ), и
+    на «узком» канале ответ может не дойти - страница висела бесконечно.
+    Лучше отдать пустой словарь и дать проверкам сказать «настройка не задана»,
+    чем заморозить интерфейс."""
+    return _with_deadline(_get_project_settings_raw, project_key)
 
 
 @_retry
@@ -681,6 +749,203 @@ def session_delete_expired() -> None:
     _ensure_sessions_table()
     with _conn() as c, c.cursor() as cur:
         cur.execute("DELETE FROM sessions WHERE expires_at < now()")
+
+
+# ---------- настройки приложения (общие для всех проектов) ----------
+
+_APP_SETTINGS_READY = False
+
+
+def _ensure_app_settings_table() -> None:
+    """Ключ-значение на всё приложение. Нужны вещи, которые не привязаны к
+    проекту: например, служебный Google-аккаунт для выкладки отчётов - его
+    подключают ОДИН раз, а папки проектов просто расшаривают на него."""
+    global _APP_SETTINGS_READY
+    if _APP_SETTINGS_READY:
+        return
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                name       text PRIMARY KEY,
+                value      text NOT NULL,
+                updated_at timestamptz NOT NULL DEFAULT now()
+            );
+            """
+        )
+    _APP_SETTINGS_READY = True
+
+
+@_retry
+def get_app_settings() -> dict:
+    """{name: значение} общих настроек приложения (значения расшифрованы)."""
+    _ensure_app_settings_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("SELECT name, value FROM app_settings")
+        return {n: security.decrypt_secret(v) for n, v in cur.fetchall()}
+
+
+@_retry
+def set_app_settings(values: dict) -> None:
+    """Upsert общих настроек; пустое значение = удалить настройку."""
+    _ensure_app_settings_table()
+    to_set = {k: v for k, v in (values or {}).items() if str(v or "").strip()}
+    to_del = [k for k, v in (values or {}).items() if not str(v or "").strip()]
+    with _conn() as c, c.cursor() as cur:
+        if to_set:
+            cur.executemany(
+                """INSERT INTO app_settings (name, value)
+                   VALUES (%s, %s)
+                   ON CONFLICT (name) DO UPDATE
+                     SET value = EXCLUDED.value, updated_at = now()""",
+                [(k, security.encrypt_secret(str(v))) for k, v in to_set.items()],
+            )
+        if to_del:
+            cur.execute("DELETE FROM app_settings WHERE name = ANY(%s)", (to_del,))
+
+
+# ---------- привязка Telegram (уведомления о прогонах) ----------
+
+_TG_READY = False
+
+
+def _ensure_telegram_table() -> None:
+    """Таблица привязок Telegram: одна строка на пользователя.
+
+    code   - одноразовый код, который человек передаёт боту командой
+             /start <code> (ссылка из личного кабинета);
+    chat_id- заполняется, когда бот увидел этот /start (до тех пор пусто -
+             привязка «ожидает подтверждения»);
+    mode   - что присылать: 'own' - только свои запуски (так у сотрудников),
+             'projects' - все прогоны по проектам человека (доступно
+             руководителю и админу).
+    """
+    global _TG_READY
+    if _TG_READY:
+        return
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_telegram (
+                user_id    text PRIMARY KEY,
+                code       text NOT NULL,
+                chat_id    text,
+                username   text,
+                mode       text NOT NULL DEFAULT 'own',
+                created_at timestamptz NOT NULL DEFAULT now(),
+                linked_at  timestamptz
+            );
+            """
+        )
+        # Таблица могла быть создана ДО появления режима - добавляем колонку.
+        cur.execute("ALTER TABLE user_telegram ADD COLUMN IF NOT EXISTS "
+                    "mode text NOT NULL DEFAULT 'own';")
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS user_telegram_code_idx "
+            "ON user_telegram (code);"
+        )
+    _TG_READY = True
+
+
+@_retry
+def telegram_get(user_id: str) -> Optional[dict]:
+    """Привязка пользователя: {user_id, code, chat_id, username, linked_at} или None."""
+    if not user_id:
+        return None
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT * FROM user_telegram WHERE user_id = %s", (str(user_id),))
+        return cur.fetchone()
+
+
+@_retry
+def telegram_ensure_code(user_id: str, code: str) -> dict:
+    """Вернуть существующую привязку или завести новую с этим кодом.
+    Код меняем только если привязки ещё нет - иначе ссылка «прыгала» бы при
+    каждом заходе на страницу."""
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """INSERT INTO user_telegram (user_id, code)
+               VALUES (%s, %s)
+               ON CONFLICT (user_id) DO NOTHING""",
+            (str(user_id), code),
+        )
+        cur.execute("SELECT * FROM user_telegram WHERE user_id = %s", (str(user_id),))
+        return cur.fetchone()
+
+
+@_retry
+def telegram_link_by_code(code: str, chat_id: str, username: str = "") -> Optional[str]:
+    """Подтвердить привязку по коду из /start. → user_id или None (код не найден)."""
+    if not code or not chat_id:
+        return None
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """UPDATE user_telegram
+                  SET chat_id = %s, username = %s, linked_at = now()
+                WHERE code = %s
+            RETURNING user_id""",
+            (str(chat_id), (username or "")[:100], code),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+@_retry
+def telegram_set_mode(user_id: str, mode: str) -> None:
+    """Режим уведомлений: 'own' (только свои запуски) или 'projects' (все
+    прогоны по проектам человека). Чужое значение игнорируем - пишем 'own'."""
+    if not user_id:
+        return
+    _ensure_telegram_table()
+    mode = mode if mode in ("own", "projects") else "own"
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("UPDATE user_telegram SET mode = %s WHERE user_id = %s",
+                    (mode, str(user_id)))
+
+
+@_retry
+def telegram_project_subscribers(project_key: str) -> list[dict]:
+    """Кому слать отчёт о ЛЮБОМ прогоне по этому проекту.
+
+    Это те, кто в личном кабинете выбрал «все прогоны по моим проектам»
+    (mode='projects') И у кого этот проект есть в списке. Админ получает по
+    любому проекту - у него доступ ко всем.
+    → [{'user_id', 'chat_id', 'role'}, …]
+    """
+    if not project_key:
+        return []
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            SELECT ut.user_id, ut.chat_id, u.role::text AS role
+              FROM user_telegram ut
+              JOIN users u ON u.id::text = ut.user_id
+             WHERE ut.chat_id IS NOT NULL
+               AND ut.mode = 'projects'
+               AND u.status::text = 'active'
+               AND (u.role::text = 'admin'
+                    OR EXISTS (SELECT 1 FROM user_projects up
+                                WHERE up.user_id::text = ut.user_id
+                                  AND up.project_key = %s))
+            """,
+            (project_key,),
+        )
+        return list(cur.fetchall())
+
+
+@_retry
+def telegram_unlink(user_id: str) -> None:
+    """Отключить уведомления: строку удаляем целиком, следующий заход выдаст
+    новый код (старая ссылка перестаёт работать)."""
+    if not user_id:
+        return
+    _ensure_telegram_table()
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM user_telegram WHERE user_id = %s", (str(user_id),))
 
 
 # ---------- seed admin ----------

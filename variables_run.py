@@ -34,13 +34,24 @@ from types import SimpleNamespace
 ROOT = Path(__file__).parent
 WORK_ROOT = ROOT / 'cache' / 'variables'
 
-from proxy_config import project_use_proxy, resolve_proxy
+from proxy_config import project_use_proxy, resolve_proxy, env_use_proxy
 
-PROJECT_NAMES = {
-    'smu': 'СМУ - Стальметурал', 'imp': 'ИМП - Инметпром',
-    'mpe': 'МПЭ - Мепэн', 'avia': 'АПС - Авиапромсталь',
-    'mpk': 'МПК - Метпромко', 'mpi': 'МПИ - МетПромИнтекс',
-}
+def _имена_проектов() -> dict:
+    """id → название из projects/*.json. Раньше список был прибит гвоздями, и
+    новый проект (SHOPMET) не запускался: «invalid choice: 'sm'», хотя каталог
+    и КП у него уже были. Теперь достаточно добавить projects/<id>.json."""
+    имена = {}
+    for f in sorted((ROOT / 'projects').glob('*.json')):
+        try:
+            cfg = json.loads(f.read_text(encoding='utf-8'))
+        except Exception:  # noqa: BLE001 - битый json не должен ронять запуск
+            continue
+        if cfg.get('id'):
+            имена[cfg['id']] = cfg.get('name') or cfg['id']
+    return имена
+
+
+PROJECT_NAMES = _имена_проектов()
 
 # Порядок и подписи переменных-колонок. Телефоны - с префиксом «Тел.» (чтобы не
 # путать с колонкой «Город»), в порядке КП: общий → реклама → SEO. «Страна»
@@ -920,7 +931,23 @@ def main() -> int:
     # напрямую из CLI без env - падаем на единый механизм (proxy_config.py: БД
     # личного кабинета → proxy_url_<pid> → proxy_url → HTTP_PROXY).
     proxy = (os.environ.get('proxy_url') or '').strip() or None
-    if project_use_proxy(a.project):
+    _выбор = env_use_proxy()
+    if _выбор is False:
+        # Галочка «Прокси» на странице выключена - это осознанное решение на
+        # ЭТОТ прогон, оно сильнее use_proxy проекта. Раньше выключение
+        # только не клало адрес в env, а прогон доставал его сам, и проект с
+        # use_proxy=true всё равно шёл через прокси.
+        if proxy or project_use_proxy(a.project):
+            _stamp('Прокси выключен галочкой на странице - страницы качаем '
+                   'напрямую.')
+        proxy = None
+    elif _выбор is True:
+        if not proxy:
+            proxy = resolve_proxy(a.project)
+        if not proxy:
+            _stamp('⚠️ Прокси включён галочкой, но адрес не найден (ни в env, '
+                   'ни в личном кабинете/секретах) - качаем напрямую.')
+    elif project_use_proxy(a.project):
         if not proxy:
             proxy = resolve_proxy(a.project)
         if not proxy:
@@ -1021,6 +1048,17 @@ def main() -> int:
         else:
             _части.append('Проверены все домены и поддомены проекта')
         _части.append('📎 Полный отчёт - в прикреплённом xlsx-файле')
+        # Диск: <Год>/Сайт чекер/<Месяц>/<Дата>/Проверка КП/<файл>.
+        if xlsx.is_file():
+            try:
+                import drive_reports
+                _d = drive_reports.upload_from_env(str(xlsx), 'Проверка КП',
+                                                   log=_stamp)
+                if _d.get('link'):
+                    _части.append(
+                        f'📁 <a href="{_d["link"]}">Отчёт на Google Диске</a>')
+            except Exception as _e:  # noqa: BLE001
+                _stamp(f'⚠ Google Диск: {_e}')
         _текст = '\n\n'.join(_части)
         _res = tn.send_report_from_env(
             project_name=PROJECT_NAMES[a.project], summary_text=_текст,

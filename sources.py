@@ -63,6 +63,10 @@ class CheckTask:
     subdomain: str
     type_code: str       # 'main', 'catalog', 'category', 'filter', 'product', 'custom'
     type_label: str      # 'Главная', 'Каталог', ...
+    # Откуда взялся адрес: обычная выборка по каталогу проекта, случайная
+    # проверка карт сайта, свой список или технические страницы. Без этого в
+    # отчёте не отличить страницу каталога от случайной из sitemap.
+    source: str = 'Каталог проекта'
 
 
 @dataclass
@@ -250,6 +254,29 @@ TECH_PAGE_PATHS = {
         '/about', '/contacts', '/delivery', '/payment',
         '/providers', '/vacancies',
     ],
+    # SHOPMET - тоже Next.js, адреса без завершающего слеша. Список собран по
+    # шапке и подвалу и проверен вживую (каждая отдаёт 200); типовых /delivery,
+    # /payment, /vacancies у проекта нет - страницы «Оплата и доставка» нет.
+    'sm': [
+        '/about', '/contacts', '/privacy', '/cookie', '/sitemap', '/search',
+    ],
+    # АПС - адреса БЕЗ завершающего слеша: со слешем сайт отдаёт 301 на форму
+    # без него (проверено на каждой странице списка). Список собран по шапке и
+    # подвалу главной и проверен вживую - все четыре отдают 200 с крошками.
+    #
+    # Больше служебных страниц у проекта нет: прозвонил типовые слуги
+    # (/vacancy, /rekvizity, /faq, /oplata, /payment, /price-list, /garantii,
+    # /vozvrat-tovara, /news, /partners) - все 404. Политики
+    # конфиденциальности и согласия на обработку ПД у сайта тоже нет, ни по
+    # одному из привычных адресов; это же видно и по формам - там «ссылка на
+    # политику: нет».
+    #
+    # Намеренно НЕ включены: /sitemap - без слеша 301 на /sitemap/, а тот
+    # отдаёт 403; /search - 500; /cart - часть оформления заказа, а не
+    # служебная страница (её проверяет форм-тестер).
+    'avia': [
+        '/about', '/delivery', '/contacts', '/sprav',
+    ],
 }
 
 
@@ -304,6 +331,13 @@ TECH_PAGE_LABELS = {
     # МПИ (пути на сайте без слеша - tech_page_label нормализует их сам)
     '/vacancies/': 'Вакансии',
     '/providers/': 'Поставщики',
+    # SHOPMET
+    '/privacy/': 'Политика конфиденциальности',
+    '/cookie/': 'Соглашение по cookie',
+    # АПС (пути без слеша - tech_page_label нормализует их сам). /delivery
+    # у них называется «Доставка и оплата», но подпись общая на все проекты,
+    # и «Доставка» её не искажает.
+    '/sprav/': 'Справочники',
 }
 
 
@@ -338,6 +372,7 @@ def build_plan(
     mandatory_hosts: Optional[list[str]] = None,  # домены, всегда в выборке (напр. smg.az)
     cis_extra_subdomains: int = 0,      # сколько доп. СНГ-доменов помимо mandatory_hosts
     trailing_slash: bool = True,        # каноническая форма адресов сайта
+    catalog_path: Optional[str] = None,  # путь раздела каталога; '' - раздела нет
     seed: Optional[int] = None,
     rotation_history: Optional[set[str]] = None,  # pathname'ы проверенные за 7 дней
 ) -> Plan:
@@ -352,6 +387,12 @@ def build_plan(
         и на сайте без слеша (напр. Next.js: /catalog) запрос «/catalog/» уходит
         в редирект на каноническую форму. Раньше это выглядело как «дубль без
         слэша», хотя дубля нет: мы сами ходили по неканоническому адресу.
+    catalog_path - путь раздела каталога. None (по умолчанию) - как было:
+        «/catalog/» или «/catalog» по trailing_slash. Пустая строка - у сайта
+        такого раздела НЕТ, задачу «Каталог» не ставим вовсе: у АПС разделы
+        лежат в корне («/chernyi-prokat»), и запрос «/catalog/» отдавал 404 по
+        каждому городу выборки - находка была ложной, её же и «чинили» бы.
+        Непустая строка - берём как есть (если раздел зовётся иначе).
 
     Если передана rotation_history - pathname'ы из неё получают меньший
     вес (в 3 раза реже попадают в выборку), но не исключаются полностью.
@@ -392,7 +433,8 @@ def build_plan(
             return _pick_random(items, n, rng)
         return weighted_sample(items, n, recent, rng)
 
-    catalog_path = '/catalog/' if trailing_slash else '/catalog'
+    if catalog_path is None:
+        catalog_path = '/catalog/' if trailing_slash else '/catalog'
 
     tasks = []
     for sub in selected:
@@ -413,7 +455,7 @@ def build_plan(
                 url=sub.url, city=sub.city, subdomain=sub.host,
                 type_code='main', type_label=TYPE_LABELS['main'],
             ))
-        if check_catalog:
+        if check_catalog and catalog_path:
             tasks.append(CheckTask(
                 url=f'{base}{catalog_path}', city=sub.city, subdomain=sub.host,
                 type_code='catalog', type_label=TYPE_LABELS['catalog'],
@@ -443,6 +485,7 @@ def build_plan(
 def build_custom_tasks_typed(
     urls: list[str],
     sources: 'Sources | None' = None,
+    source: str = 'Свой список URL',
 ) -> list[CheckTask]:
     """
     Задачи для своего списка URL **в контексте проекта**: тип определяется
@@ -512,6 +555,7 @@ def build_custom_tasks_typed(
             subdomain=host,
             type_code=tcode,
             type_label=TYPE_LABELS[tcode],
+            source=source,
         ))
 
     return tasks

@@ -33,9 +33,19 @@ DEFAULT_USER_AGENT = (
 )
 
 
-def _sitemap_headers(user_agent: str = DEFAULT_USER_AGENT) -> dict:
-    """Заголовки для запроса XML-карты сайта (Accept: xml, остальное как у браузера)."""
-    return {
+def _sitemap_headers(user_agent: str = DEFAULT_USER_AGENT,
+                     url: str = '') -> dict:
+    """Заголовки для запроса XML-карты сайта (Accept: xml, остальное как у браузера).
+
+    url - адрес карты. Если сайт закрыт паролем (см. http_checker.
+    установить_вход_прогона), добавится Authorization - иначе sitemap.xml
+    закрытого стенда отвечает 401 и «карта не найдена»."""
+    try:
+        from http_checker import заголовок_входа
+        _вход = заголовок_входа(url) if url else {}
+    except Exception:  # noqa: BLE001
+        _вход = {}
+    return {**_вход,
         'User-Agent': user_agent,
         'Accept': 'application/xml,text/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -83,7 +93,7 @@ async def collect_all_urls(
     queue = [root_sitemap_url]
     processed = 0
 
-    headers = _sitemap_headers(user_agent)
+    headers = _sitemap_headers(user_agent, url=root_sitemap_url)
     async with aiohttp.ClientSession(headers=headers) as session:
         while queue and processed < max_sitemaps:
             next_url = queue.pop(0)

@@ -98,7 +98,14 @@ PROJECTS = {
     'mpe': {'name': 'МПЭ - Мепэн', 'domain': 'mepen.ru'},
     'avia': {'name': 'АПС - Авиапромсталь', 'domain': 'aviastal.ru'},
     'metpromko': {'name': 'МПК - Метпромко', 'domain': 'metpromko.ru'},
-    'shopmet': {'name': 'SHOPMET', 'domain': 'shopmet.ru'},
+    'shopmet': {'name': 'SM - SHOPMET', 'domain': 'shopmet.ru'},
+    # Стенд закрыт паролем (nginx Basic auth) - логин/пароль вводятся ниже, в
+    # блоке «Вход на закрытый сайт», и уходят движку только через окружение.
+    'mpinew': {'name': 'МПИ - новый прод', 'domain': 'new.metpromintex.by'},
+    # У МТТ два интерфейса (старый на всех доменах, новый на Армении), но проект
+    # ОДИН: домены выбираются городами, а формы каждого интерфейса ограничены
+    # ключами «кроме_городов»/«только_города» в config.py.
+    'mtt': {'name': 'МТТ - Меттранстерминал', 'domain': 'met-trans.ru'},
 }
 
 # Проекты-варианты берут справочник городов у «родителя» (свой config.py,
@@ -200,6 +207,31 @@ def _project_has_admin(project: str) -> bool:
         return bool(getattr(m, 'АДМИН_ЗОНЫ', None))
     except Exception:
         return False
+
+
+def _project_closed(project: str) -> bool:
+    """True, если сайт проекта закрыт паролем (nginx Basic auth) - тогда движку
+    нужно передать логин/пароль, иначе браузер увидит только окно входа."""
+    try:
+        from proxy_config import canonical_project_id
+        from sources import load_project_config
+        cfg = load_project_config(canonical_project_id(project)) or {}
+        return bool(cfg.get('basic_auth'))
+    except Exception:
+        return False
+
+
+def _site_login_saved(project: str) -> tuple[str, str]:
+    """Логин/пароль закрытого сайта из «Настроек проекта» (если заведены).
+    Пусто - поля просто останутся незаполненными."""
+    try:
+        from proxy_config import canonical_project_id
+        import auth as _auth
+        pid = canonical_project_id(project)
+        return (_auth.project_setting(pid, 'site_basic_login') or '',
+                _auth.project_setting(pid, 'site_basic_password') or '')
+    except Exception:
+        return '', ''
 
 
 def _count_expected(project: str) -> int:
@@ -329,7 +361,11 @@ def _rows_done(xlsx: Path):
         except ValueError:
             i_name = -1
         _skip = ('согласие и политика', 'cookie-уведомление',
-                 'ссылка на политику', 'живочат')
+                 'ссылка на политику', 'живочат',
+                 # Мобильная вёрстка и файл-проба - тоже не формы: раньше их
+                 # строки раздували счётчик выше «всего».
+                 'нет горизонтального скролла', 'тач-размер',
+                 'без поломок', 'проба загрузки файла')
         n = 0
         for r in rows:
             if not r or all(v in (None, '') for v in r):
@@ -962,6 +998,29 @@ _forms_all_selected = (len(_chosen_forms) == len(_all_form_names))
 _forms_none = bool(_all_forms) and len(_chosen_forms) == 0
 
 # ── Запуск ──────────────────────────────────────────────────────────
+# ── Вход на закрытый сайт (стенд за паролем nginx) ──────────────────
+# Показываем только тем проектам, у которых сайт реально закрыт (basic_auth в
+# карточке проекта). Логин/пароль уходят движку через окружение - на диск
+# ничего не пишется.
+_site_env: dict[str, str] = {}
+if _project_closed(pid_key):
+    st.subheader('Вход на закрытый сайт')
+    st.caption('Сайт закрыт паролем: без него браузер увидит только окно '
+               '«Требуется авторизация» и ни одной формы не найдёт. '
+               'Подставлены значения из «Настроек проекта» - их можно заменить.')
+    _sl_saved, _sp_saved = _site_login_saved(pid_key)
+    st.session_state.setdefault(f'fc_site_login_{pid_key}', _sl_saved)
+    st.session_state.setdefault(f'fc_site_pass_{pid_key}', _sp_saved)
+    _sl = st.text_input('Логин сайта', key=f'fc_site_login_{pid_key}')
+    _sp = st.text_input('Пароль сайта', type='password',
+                        key=f'fc_site_pass_{pid_key}')
+    if _sl.strip() and _sp:
+        _site_env = {'SITE_BASIC_LOGIN': _sl.strip(), 'SITE_BASIC_PASSWORD': _sp}
+    else:
+        st.warning('Без логина и пароля прогон по этому сайту смысла не имеет: '
+                   'все страницы ответят «401».')
+    st.divider()
+
 # ── Проверка админки: отдельный блок, как у форм (проверять/не проверять) ──
 # Логин/пароль вводятся здесь и передаются проверке через окружение - на диск
 # ничего не пишется и никуда не отправляется.
@@ -1111,6 +1170,42 @@ import auth
 from proxy_config import canonical_project_id
 _forms_proxy = auth.fill_proxy_slot(canonical_project_id(pid_key))
 
+# Примерное время прогона по ТЕКУЩЕМУ выбору: число форм × число доменов -
+# главный множитель, поэтому оценка меняется сразу при снятии галочек.
+if not _alive:
+    _est_forms = len(_chosen_forms) if _all_forms else 1
+    _est_cities = max(1, len(_chosen_cities) or 1)
+    _est_admin = bool(st.session_state.get(f'fc_admin_on_{pid_key}'))
+    # Облако перечитывает файл страницы после обновления кода, но модули из
+    # sys.modules не перезагружает: страница уже новая, run_estimate - ещё
+    # старый, и импорт новой функции ронял всю страницу ImportError.
+    import importlib
+
+    import run_estimate as _re
+    if not hasattr(_re, 'estimate_forms_seconds'):
+        _re = importlib.reload(_re)
+    _lo, _hi = _re.estimate_forms_seconds(_est_forms, _est_cities, admin=_est_admin)
+    from checklists import ui_widgets as _uiw
+    _uiw.estimate_badge(_re.format_estimate(_lo, _hi),
+                        f'{_est_forms} форм × {_est_cities} домен(ов). '
+                        f'Зависит от скорости сайта и числа проб.')
+
+# ── Сколько форм проверять одновременно ──────────────────────────────
+# У каждого потока СВОЙ Chromium, и в облаке они делят контейнер с самим
+# приложением: на трёх контейнер выходил за лимит памяти, его убивали, и
+# падало всё приложение вместе с прогоном. Поэтому число вынесено сюда:
+# в облаке 1-2, локально можно смелее.
+_workers = st.number_input(
+    'Форм одновременно', min_value=1, max_value=5, value=2, step=1,
+    key=f'fc_workers_{pid_key}',
+    help='Сколько форм проверяется параллельно. У каждой свой браузер, '
+         'поэтому это же число браузеров в памяти. Больше - быстрее, но '
+         'тяжелее: в облаке на 3+ приложение может упасть по памяти. '
+         'Локально 3-5 безопасно.')
+if _workers >= 3:
+    st.caption('⚠ Три и больше браузеров разом - для запуска на своём '
+               'компьютере. В облаке приложение может не выдержать.')
+
 _run_col, _cancel_col = st.columns([3, 1])
 with _run_col:
     if st.button('▶ Запустить проверку', use_container_width=True, type='primary',
@@ -1143,6 +1238,7 @@ with _run_col:
                 args.append('--server-validation-probe')  # проба серверной валидации
             if rate_limit_probe:
                 args.append('--rate-limit-probe')  # активная проверка лимита запросов
+            args += ['--workers', str(int(_workers))]  # форм разом = браузеров
             if _chosen_cities:
                 args += ['--cities', ','.join(_chosen_cities)]
             # Фильтр форм: передаём только если выбрано подмножество (не все).
@@ -1166,11 +1262,12 @@ with _run_col:
             # forms_run сам отправит отчёт в чат после прогона.
             try:
                 import tg_report
-                _tg_env = tg_report.runner_env(pid_key)
+                _tg_env = tg_report.runner_env(pid_key, PROJECTS[pid_key]['name'])
             except Exception:
                 _tg_env = {}
             _launch_background(args, LOG_FILE,
-                               extra_env={**_admin_env, **_mail_env, **_proxy_env, **_tg_env})
+                               extra_env={**_admin_env, **_mail_env, **_proxy_env,
+                                          **_tg_env, **_site_env})
             st.session_state['forms_started'] = datetime.now().strftime('%H:%M:%S')
             st.session_state['forms_started_ts'] = time.time()
             st.session_state['forms_project'] = pid_key
@@ -1259,14 +1356,22 @@ if _alive and not _done_by_log:
         st.info('▶ Проверку этого проекта запустили в другой сессии (на другом '
                 'компьютере). Здесь виден живой прогресс по логу; секундомер и '
                 'остаток считаются у того, кто запустил.')
-    _ts = st.session_state.get('forms_started_ts') if _own else None
+    # Секундомер: время старта берём из pid-файла прогона, а не из session_state.
+    # Прогон живёт отдельным процессом, и время должно быть видно после
+    # перезагрузки страницы, из другой сессии и после обновления приложения в
+    # облаке (там session_state обнуляется, и таймер пропадал совсем).
+    from checklists import ui_widgets as _uiw_t
+    _ts = _uiw_t.run_started_at(PID_FILE) \
+        or (st.session_state.get('forms_started_ts') if _own else None)
     _elapsed = int(time.time() - _ts) if _ts else None
     _mmss = f'{_elapsed // 60}:{_elapsed % 60:02d}' if _elapsed is not None else '…'
-    # Прогресс по живому логу (обновляется сразу); подстраховка - строки Excel.
+    # Прогресс считаем по живому логу: там ровно одна строка «▶ Форма N» на
+    # форму. Строки Excel - только запасной путь (лог потерялся), потому что в
+    # лист «Логи» кроме форм попадают мобильная вёрстка, файл-проба и прочие
+    # проверки: из-за них счётчик перерастал «всего» и рос дальше («91 из 60»).
     _done = _forms_done_live(_log_txt)
-    _xl = _rows_done(xlsx)
-    if _xl and _xl > _done:
-        _done = _xl
+    if not _done:
+        _done = _rows_done(xlsx) or 0
     _total = (st.session_state.get('forms_expected_total') if _own else 0) \
         or _count_expected(_sel) * (st.session_state.get('forms_cities_n', 1) if _own else 1)
     # Оценка приблизительная (кроме форм в прогон попадают проверки 2.13/2.12,
@@ -1295,6 +1400,13 @@ if _alive and not _done_by_log:
             if _rem > 0:
                 _eta_txt = (f' Осталось ~{_rem // 60}:{_rem % 60:02d} (мин:сек) '
                             'при текущем темпе.')
+            else:
+                # Проверено столько же или больше, чем ожидали: посчитать
+                # остаток нечем. Раньше строка просто исчезала - выглядело как
+                # пропавший прогноз; честнее сказать, что идёт дольше плана.
+                _eta_txt = (' Прогноз исчерпан: проверено не меньше, чем '
+                            'ожидалось - прогон идёт дольше плана, осталось '
+                            'немного.')
     else:
         st.progress(min(0.95, (_elapsed or 0) / 90.0), text='Идёт проверка…')
 

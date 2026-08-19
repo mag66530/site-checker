@@ -99,9 +99,10 @@ def test_проблемы_колонка_как_исправить_заполн�
 
 
 def test_fix_where_refs_переписывает_ссылку_на_слитый_лист():
-    """Индексация/Фильтры ПС/Ошибки сервисов больше не отдельные вкладки -
-    _regroup_into_groups сливает их в «Техничка»/«Аналитика». where=«Лист
-    «Индексация»» без исправления вёл бы в никуда."""
+    """Индексация/Фильтры ПС - больше не вкладки: их находки уехали в
+    «Проблемы» (лист «Техничка» удалён целиком). Ошибки сервисов сливаются в
+    «Аналитику». where=«Лист «Индексация»» без исправления вёл бы в никуда.
+    «Хосты и аномалии» - реальный самостоятельный лист, остаётся как есть."""
     from reporter import _fix_where_refs
     from report_priorities import Task
     tasks = [
@@ -111,10 +112,10 @@ def test_fix_where_refs_переписывает_ссылку_на_слитый_
         Task(1, 'd', 'т', 'ч', 1, 'п', 'о', 'Лист «Фильтры ПС»'),
     ]
     _fix_where_refs(tasks)
-    assert tasks[0].where == 'Лист «Техничка», раздел «Индексация»'
+    assert tasks[0].where == 'Лист «Проблемы», раздел «Индексация»'
     assert tasks[1].where == 'Лист «Аналитика», раздел «Ошибки сервисов»'
-    assert tasks[2].where == 'Лист «Аналитика», раздел «Аномалии»'
-    assert tasks[3].where == 'Лист «Техничка», раздел «Фильтры ПС»'
+    assert tasks[2].where == 'Лист «Хосты и аномалии»'
+    assert tasks[3].where == 'Лист «Проблемы», раздел «Фильтры ПС»'
 
 
 def test_traffic_прямые_заходы_рост_красный_как_отказы():
@@ -122,7 +123,7 @@ def test_traffic_прямые_заходы_рост_красный_как_отк
     разметка, трафик из рекламы/ПС проваливается в «прямой», а не реальный
     органический рост) - красим красным, как и рост отказов, а не зелёным."""
     from openpyxl import Workbook
-    from reporter import _build_traffic_sheet, C
+    from reporter import _build_traffic_overview_sheet, C
     wb = Workbook()
     row_tpl = {'yandex': 0, 'google': 0, 'leads': 0, 'conv': 0, 'bounce': 0,
               'depth': 0, 'duration': 0, 'pages': {}}
@@ -132,13 +133,42 @@ def test_traffic_прямые_заходы_рост_красный_как_отк
         {'period': 'День', 'kind': 'прошлый', 'year': 2026,
          'd1': '2026-08-03', 'visits': 100, 'direct': 64, **row_tpl},
     ]}]}
-    _build_traffic_sheet(wb, traffic)
-    ws = wb['Динамика трафика']
+    _build_traffic_overview_sheet(wb, traffic)
+    ws = wb['Трафик и траст']
     delta_row = next(row[0].row for row in ws.iter_rows(min_row=1, max_row=ws.max_row)
-                     if row[2].value == 'Δ, %')
-    cell = ws.cell(row=delta_row, column=5)   # E = «Прямые заходы»
+                     if row[3].value == 'Δ, %')  # D = «Δ, %»
+    cell = ws.cell(row=delta_row, column=6)   # F = «Прямые заходы»
     assert cell.value == '+18.8%'
     assert cell.font.color.rgb == 'FF' + C.err
+
+
+def test_траст_и_ссылочный_профиль_в_разных_колонках():
+    """Раньше Траст и Ссылочный профиль стояли один под другим в ОДНИХ И
+    ТЕХ ЖЕ колонках - узкие числовые колонки траста (ИКС/DR) навязывали
+    свою ширину колонкам ссылочного профиля. Проверяем, что их таблицы
+    физически не пересекаются по колонкам."""
+    from openpyxl import Workbook
+    from reporter import _build_traffic_overview_sheet
+    wb = Workbook()
+    trust = {'available': True, 'hosts': [{'host': 'a.ru', 'sqi': 15, 'dr': 20}]}
+    link_profile = {'available': True, 'hosts': [{
+        'host': 'a.ru', 'total': 100, 'distinct_hosts': 10,
+        'history': {'points': 2, 'first': 100, 'latest': 90, 'dropped': False},
+        'warnings': ['подозрительный спам-донор'], 'spam_hosts': [],
+    }]}
+    _build_traffic_overview_sheet(wb, None, trust, link_profile)
+    ws = wb['Трафик и траст']
+
+    def _find_cols(text):
+        return {c.column for row in ws.iter_rows() for c in row if c.value == text}
+
+    trust_cols = _find_cols('Хост') | _find_cols('ИКС (Яндекс)')
+    lp_cols = _find_cols('Ссылок') | _find_cols('Доноров') | _find_cols('Что не так')
+    assert not (trust_cols & lp_cols), (
+        f'колонки Траста {trust_cols} пересекаются с Ссылочным профилем {lp_cols}')
+    what_wrong_cell = ws.cell(row=1, column=next(iter(_find_cols('Что не так'))))
+    assert ws.column_dimensions[what_wrong_cell.column_letter].width >= 40
+    print('✓ Траст и Ссылочный профиль в независимых колонках')
 
 
 def test_wrap_line_count_растёт_с_длиной_текста():
@@ -211,23 +241,24 @@ def test_basic_report_creation():
         from openpyxl import load_workbook
         wb = load_workbook(out)
         assert 'Обзор' in wb.sheetnames
-        assert 'Все детали' in wb.sheetnames
+        assert 'Страницы' in wb.sheetnames
         assert 'Битые тексты' not in wb.sheetnames  # нет находок
-        
-        # На листе «Все детали» - 3 строки данных + 1 шапка = 4
-        ws = wb['Все детали']
-        rows_with_data = sum(1 for r in ws.iter_rows(values_only=True) if r[0])
-        assert rows_with_data == 4
+
+        # На листе «Страницы» (колонка B - «Город») - 3 строки данных
+        # (заголовок таблицы на строке 5, данные с 6-й).
+        ws = wb['Страницы']
+        rows_with_data = sum(1 for r in ws.iter_rows(min_row=6, values_only=True) if r[1])
+        assert rows_with_data == 3
     print('✓ Базовый отчёт создаётся')
 
 
 def test_report_with_text_issues():
-    """Если есть битые тексты - добавляется третий лист."""
+    """Битые тексты - находки прямо в «Проблемы», отдельного листа нет."""
     issue1 = TextIssue(pattern='{{...}}', match='{{city}}',
                        context='Купить трубу в {{city}} с доставкой')
     issue2 = TextIssue(pattern='%переменная%', match='%price%',
                        context='Цена от %price% рублей')
-    
+
     results = [
         make_result(url='https://stalmetural.ru/cat-a',
                     text_issues=[issue1], has_text_issues=True),
@@ -235,7 +266,7 @@ def test_report_with_text_issues():
                     text_issues=[issue2], has_text_issues=True),
     ]
     selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
-    
+
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / 'test.xlsx'
         build_report(
@@ -245,17 +276,259 @@ def test_report_with_text_issues():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        # «Битые тексты» теперь - секция внутри группового листа «Техничка».
-        assert 'Техничка' in wb.sheetnames
         assert 'Битые тексты' not in wb.sheetnames
-        ws = wb['Техничка']
+        ws = wb['Проблемы']
         all_cells = []
         for row in ws.iter_rows(values_only=True):
             all_cells.extend(c for c in row if c)
-        assert '{{city}}' in all_cells
-        assert '%price%' in all_cells
-        assert '▸ Битые тексты' in all_cells   # полоса-разделитель секции
-    print('✓ Секция «Битые тексты» в листе «Техничка»')
+        assert '{{city}}' in ' '.join(str(c) for c in all_cells)
+        assert '%price%' in ' '.join(str(c) for c in all_cells)
+    print('✓ Битые тексты - находки прямо в «Проблемы»')
+
+
+def test_indexing_site_findings_попадают_в_проблемы_и_план_работ_без_дублей():
+    """indexing_site_findings (постатейно в «Проблемы») и extra_site_tasks
+    (агрегатом в «Плане работ») читают один indexing_summary независимо -
+    в «Проблемах» видна конкретная страница, в «Плане работ» - сводка
+    без задвоения (одна задача на категорию, не по одной на каждый путь)."""
+    results = [make_result(url='https://stalmetural.ru/', type_label='Главная')]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    indexing_summary = {
+        'host': 'stalmetural.ru',
+        'disallowed': [{'path': '/catalog/a/', 'rule': 'Disallow: /catalog/'},
+                       {'path': '/catalog/b/', 'rule': 'Disallow: /catalog/'}],
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            indexing_summary=indexing_summary,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        prob_cells = [c for row in wb['Проблемы'].iter_rows(values_only=True)
+                     for c in row if c]
+        prob_text = ' '.join(str(c) for c in prob_cells)
+        assert 'https://stalmetural.ru/catalog/a/' in prob_text
+        assert 'https://stalmetural.ru/catalog/b/' in prob_text
+
+        plan_rows = [row for row in wb['План работ'].iter_rows(values_only=True)
+                    if row and row[2] == 'Открыть в robots.txt страницы из sitemap']
+        assert len(plan_rows) == 1   # одна сводная задача, не по одной на путь
+    print('✓ Индексация: сайт-уровневые находки в «Проблемах» без дублей в «Плане работ»')
+
+
+def test_негодные_opengraph_доходят_до_листов_отчёта():
+    """OG-теги на месте, но значения непригодны: пустое, относительный адрес,
+    data:-картинка, длинное описание, чужой тип. Всё это должно быть видно
+    строками в «Проблемах» и собраться в задачи «Плана работ»."""
+    from schema_checker import check_markup
+    html = ('<html><head>'
+            '<meta property="og:url" content="/catalog/truba/">'
+            '<meta property="og:title" content="">'
+            '<meta property="og:description" content="' + 'а' * 320 + '">'
+            '<meta property="og:image" content="data:image/png;base64,iVBOR">'
+            '<meta property="og:type" content="страница">'
+            '</head><body></body></html>')
+    markup = check_markup(html, 'category', 'https://stalmetural.ru/catalog/truba/')
+    results = [make_result(url='https://stalmetural.ru/catalog/truba/',
+                           type_label='Категория', markup=markup)]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва',
+                          host='stalmetural.ru')]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out)
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        prob = ' '.join(
+            str(c) for row in wb['Проблемы'].iter_rows(values_only=True)
+            for c in row if c)
+        assert 'og:title пустой' in prob
+        assert 'og:url - относительный адрес' in prob
+        assert 'og:image встроен как data:' in prob
+        assert 'og:description длиннее 300' in prob
+        assert 'og:type - незнакомое значение' in prob
+        assert 'Разметка' in prob
+
+        задачи = [row[2] for row in wb['План работ'].iter_rows(values_only=True)
+                  if row and row[2]]
+        assert 'Заполнить пустые OpenGraph-теги' in задачи
+        assert 'Поправить og:url' in задачи
+        assert 'Поправить картинку анонса (og:image)' in задачи
+        assert 'Сократить og:description' in задачи
+        assert 'Проверить og:type' in задачи
+        # У КАЖДОЙ находки по OG - своя задача, не общая «проверить
+        # микроразметку». (Сама общая задача на листе быть может: на этой
+        # странице нет ещё и Schema.org-разметки, вот она и появляется.)
+        from report_priorities import classify, _markup_findings
+        og_находки = [f for f in _markup_findings(
+            markup, city='Москва', page_type='Категория',
+            url='https://stalmetural.ru/catalog/truba/')
+            if 'og:' in f.problem]
+        assert len(og_находки) == 5
+        assert all(classify(f)['task_group'] != 'schema_generic'
+                   for f in og_находки)
+    print('✓ OpenGraph: негодные значения в «Проблемах» и «Плане работ»')
+
+
+def test_ссылки_и_дубли_адресов_доходят_до_листов_отчёта():
+    """Раздел 2 доп. чек-листа: ссылки (битые/редиректы/на себя) и дубли
+    адресов (короткий адрес, товар в чужой категории) должны быть видны в
+    «Проблемах» отдельными строками своих разделов и собраться в задачи."""
+    results = [make_result(
+        url='https://stalmetural.ru/catalog/truba/',
+        broken_links={
+            'checked': 12,
+            'broken': [{'url': 'https://stalmetural.ru/gone/', 'code': 404}],
+            'redirect_to_error': [
+                {'url': 'https://stalmetural.ru/old/', 'code': 301,
+                 'to': 'https://stalmetural.ru/gone/', 'final_code': 404}],
+            'redirects': [
+                {'url': 'https://stalmetural.ru/moved/', 'code': 301,
+                 'to': 'https://stalmetural.ru/new/', 'hops': 1, 'loop': False}],
+            'self_links': ['/catalog/truba/'],
+            'ext_checked': 3,
+            'ext_redirects': [{'url': 'https://vendor.com/a/', 'code': 302,
+                               'to': 'https://vendor.com/b/'}],
+            'ext_broken': [{'url': 'https://vendor.com/gone/', 'code': 404}],
+        })]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва',
+                          host='stalmetural.ru')]
+    meta_summary = {
+        'duplicates': {'same_city': [], 'cross_city': []},
+        'url_duplicates': [],
+        'test_domains': [],
+        'short_path_duplicates': [
+            {'canonical': 'https://stalmetural.ru/catalog/truba/profil/',
+             'variant': 'https://stalmetural.ru/profil/',
+             'title': 'Профильная труба'}],
+        'product_cross_category': [
+            {'canonical': 'https://stalmetural.ru/catalog/truba/t-1/',
+             'variant': 'https://stalmetural.ru/catalog/list/t-1/',
+             'title': 'Труба 20 мм'}],
+        'probed_urls': 2,
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            meta_summary=meta_summary,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        строки = [row for row in wb['Проблемы'].iter_rows(values_only=True)
+                  if row and any(row)]
+        текст = ' '.join(str(c) for row in строки for c in row if c)
+
+        # Ссылки
+        assert 'Ссылки' in текст
+        assert 'несуществующую страницу (404)' in текст
+        assert 'а он - на ошибку' in текст
+        assert 'ведёт на редирект 301' in текст
+        assert 'сама на себя' in текст
+        assert 'внешняя ссылка' in текст
+        assert 'https://vendor.com/gone/' in текст
+        # Дубли адресов - в своём разделе
+        assert 'Дубли и редиректы' in текст
+        assert 'короткому адресу без раздела' in текст
+        assert 'чужой категории' in текст
+
+        задачи = [row[2] for row in wb['План работ'].iter_rows(values_only=True)
+                  if row and row[2]]
+        assert 'Починить битые ссылки на страницах' in задачи
+        assert 'Убрать ссылки, ведущие через редирект в ошибку' in задачи
+        assert 'Проставить в ссылках конечные адреса' in задачи
+        assert 'Убрать ссылки страницы на саму себя' in задачи
+        assert 'Убрать дубли по короткому адресу без раздела' in задачи
+        assert 'Оставить у товара один адрес' in задачи
+        # общих «разобраться» быть не должно: у каждой находки своё правило
+        assert 'Разобраться со ссылками на страницах' not in задачи
+        assert 'Разобраться с дублями адресов' not in задачи
+    print('✓ Ссылки и дубли адресов: «Проблемы» + «План работ»')
+
+
+def test_гигиена_robots_и_карты_доходит_до_листов_отчёта():
+    """Доп. чек-лист: вес/формат/кодировка/закомментированные директивы/
+    Clean-Param у robots.txt и формат/кодировка/код ответа/noindex у карты
+    сайта - должны быть видны и в «Проблемах», и в «Плане работ», и строкой
+    в «Обзоре»."""
+    results = [make_result(url='https://stalmetural.ru/', type_label='Главная')]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва',
+                          host='stalmetural.ru')]
+    indexing_summary = {
+        'host': 'stalmetural.ru',
+        'robots_file': {
+            'size_bytes': 600 * 1024, 'too_big': True,
+            'limit_bytes': 500 * 1024, 'content_type': 'text/plain',
+            'looks_html': False, 'bom': True, 'utf8_ok': True,
+            'clean_params': [],
+            'commented': [{'line': 3, 'text': '# Disallow: /bitrix/'}]},
+        'sitemap_audit': {
+            'format_issues': [],
+            'encoding_issues': [{'url': 'https://stalmetural.ru/sitemap.xml',
+                                 'why': 'файл не читается как UTF-8'}],
+            'url_probe': {
+                'checked': 200, 'sample_of': 10627, 'blocked': 0,
+                'bad_status': [{'url': 'https://stalmetural.ru/old/',
+                                'status': 301}],
+                'noindex': [{'url': 'https://stalmetural.ru/hidden/',
+                             'signal': 'meta robots: noindex'}]}},
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            indexing_summary=indexing_summary,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+
+        prob = ' '.join(
+            str(c) for row in wb['Проблемы'].iter_rows(values_only=True)
+            for c in row if c)
+        assert 'тяжелее 500 КБ' in prob
+        assert 'BOM' in prob
+        assert 'закомментирована' in prob
+        assert 'Clean-Param' in prob
+        assert 'не читается как UTF-8' in prob
+        assert 'отвечает не 200' in prob
+        assert 'закрыт noindex' in prob
+        # адреса конкретных страниц, а не только самого файла
+        assert 'https://stalmetural.ru/old/' in prob
+        assert 'https://stalmetural.ru/hidden/' in prob
+        assert 'https://stalmetural.ru/robots.txt' in prob
+
+        задачи = [row[2] for row in wb['План работ'].iter_rows(values_only=True)
+                  if row and row[2]]
+        assert 'Починить сам файл robots.txt' in задачи
+        assert 'Прописать Clean-Param в robots.txt' in задачи
+        assert 'Убрать из карты сайта адреса, не отдающие 200' in задачи
+        assert 'Развести карту сайта и noindex' in задачи
+        assert 'Починить формат и кодировку карты сайта' in задачи
+        # по одной сводной задаче на тему, а не по строке на находку
+        assert задачи.count('Починить сам файл robots.txt') == 1
+
+        обзор = ' '.join(
+            str(c) for row in wb['Обзор'].iter_rows(values_only=True)
+            for c in row if c)
+        assert 'сам файл robots.txt' in обзор
+        assert 'закомментированы' in обзор
+        assert 'адресов карты отвечают не 200' in обзор
+        assert 'закрыты noindex' in обзор
+    print('✓ Гигиена robots.txt и карты сайта: «Проблемы», «План работ», «Обзор»')
 
 
 def test_redirect_chain_in_path_column():
@@ -285,14 +558,13 @@ def test_redirect_chain_in_path_column():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        ws = wb['Все детали']
+        ws = wb['Страницы']
 
         # Находим колонку «Откуда перешли» по заголовку, а не по фикс. индексу -
-        # в лист «Все детали» со временем добавляли колонки (напр. «Отдел»),
-        # из-за чего хардкод column=10 ломался.
-        header_row = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+        # колонки со временем добавлялись, хардкод индекса ломался.
+        header_row = [ws.cell(row=5, column=c).value for c in range(1, ws.max_column + 1)]
         path_col = header_row.index('Откуда перешли') + 1
-        paths = [ws.cell(row=r, column=path_col).value for r in range(2, 4)]
+        paths = [ws.cell(row=r, column=path_col).value for r in range(6, 8)]
         # Должна быть и цепочка и «Прямая ссылка»
         assert any('301:' in p for p in paths if p)
         assert any('Прямая ссылка' in p for p in paths if p)
@@ -313,21 +585,90 @@ def test_speed_with_comma():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        ws = wb['Все детали']
-        # Колонка G - «Скорость, с»
-        speed = ws.cell(row=2, column=7).value
+        ws = wb['Страницы']
+        header_row = [ws.cell(row=5, column=c).value for c in range(1, ws.max_column + 1)]
+        speed_col = header_row.index('Скорость, с') + 1
+        speed = ws.cell(row=6, column=speed_col).value
         assert speed == '2,34', f'Ожидалось "2,34", получили {speed!r}'
     print('✓ Скорость с запятой')
 
 
+def test_w3c_колонки_на_странице_только_для_выборки():
+    """W3C-колонки появляются на «Страницы» только если была валидация;
+    заполнены только у страниц из выборки, у остальных - пусто."""
+    results = [
+        make_result(url='https://stalmetural.ru/', type_label='Главная'),
+        make_result(url='https://stalmetural.ru/catalog/', type_label='Каталог'),
+    ]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    w3c_check = {'available': True, 'pages': [{
+        'url': 'https://stalmetural.ru/',
+        'html': {'errors': 3, 'warnings': 5}, 'css': {'errors': 2, 'warnings': 0},
+        'timings': {'total_ms': 4818},
+    }]}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            w3c_check=w3c_check,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        ws = wb['Страницы']
+        header_row = [ws.cell(row=5, column=c).value for c in range(1, ws.max_column + 1)]
+        err_col = header_row.index('W3C ошибок') + 1
+        ms_col = header_row.index('Загрузка, мс') + 1
+        by_url = {}
+        for r in range(6, 8):
+            url_col = header_row.index('Адрес страницы') + 1
+            by_url[ws.cell(row=r, column=url_col).value] = (
+                ws.cell(row=r, column=err_col).value, ws.cell(row=r, column=ms_col).value)
+        assert by_url['https://stalmetural.ru/'] == (5, 4818)   # 3 HTML + 2 CSS
+        assert by_url['https://stalmetural.ru/catalog/'] == (None, None)
+    print('✓ W3C-колонки на «Страницы» только для выборки')
+
+
+def test_гск_страницы_секцией_на_трафик_и_траст():
+    """Лист «Страницы в ГСК» удалён - метрика (индексировано/просканировано
+    + Δ) теперь секция на «Трафик и траст», а не отдельная вкладка."""
+    results = [make_result(url='https://stalmetural.ru/')]
+    selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
+    gsc_pages = {'available': True, 'indexed': 1200, 'crawled_not_indexed': 40,
+                'total': 1240, 'deltas': {'indexed': 15, 'crawled_not_indexed': -3}}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / 'test.xlsx'
+        build_report(
+            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
+            finished_at_ms=int(time.time() * 1000),
+            selected_subdomains=selected, results=results, output_path=out,
+            gsc_pages=gsc_pages,
+        )
+        from openpyxl import load_workbook
+        wb = load_workbook(out)
+        assert 'Страницы в ГСК' not in wb.sheetnames
+        ws = wb['Трафик и траст']
+        cells = [c.value for row in ws.iter_rows() for c in row if c.value]
+        text = ' '.join(str(c) for c in cells)
+        assert 'Страницы в ГСК' in text
+        assert 1200 in cells and 40 in cells and 1240 in cells
+        assert any('+15' in str(c) for c in cells)
+    print('✓ «Страницы в ГСК» - секция на «Трафик и траст»')
+
+
 def test_sheet_ref_переписывает_слитый_лист_иначе_отдаёт_как_есть():
     """_sheet_ref - как _fix_where_refs, но для текста внутри предложений
-    («см. лист {ref}»), а не только Task.where. Индексация уходит в
-    Техничку, Обзор нигде не сливается - остаётся как есть."""
+    («см. лист {ref}»), а не только Task.where. Индексация уехала в
+    «Проблемы», Ошибки сервисов - в «Аналитику», Обзор и Хосты и аномалии
+    нигде не сливаются - остаются как есть."""
     from reporter import _sheet_ref
-    assert _sheet_ref('Индексация') == '«Техничка», раздел «Индексация»'
+    assert _sheet_ref('Индексация') == '«Проблемы», раздел «Индексация»'
+    assert _sheet_ref('Ошибки сервисов') == '«Аналитика», раздел «Ошибки сервисов»'
     assert _sheet_ref('Обзор') == '«Обзор»'
-    assert _sheet_ref('Хосты и аномалии') == '«Аналитика», раздел «Аномалии»'
+    assert _sheet_ref('Хосты и аномалии') == '«Хосты и аномалии»'
 
 
 def test_страницы_хосты_и_аномалии_трафик_создаются_с_реальными_данными():
@@ -359,6 +700,10 @@ def test_страницы_хосты_и_аномалии_трафик_созда
          'visits': 90, 'direct': 64, 'yandex': 9, 'google': 5, 'leads': 1,
          'conv': 1.1, 'bounce': 45, 'depth': 2, 'duration': 55, 'pages': {}},
     ]}]}
+    anomalies = {'gsc': {'available': True, 'spiked': True,
+                        'total_impr_cur': 500, 'total_impr_prev': 200,
+                        'spam_queries_count': 1,
+                        'spam_queries': [{'query': 'порно казино', 'impressions': 40}]}}
 
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / 'test.xlsx'
@@ -366,39 +711,53 @@ def test_страницы_хосты_и_аномалии_трафик_созда
             project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
             finished_at_ms=int(time.time() * 1000), selected_subdomains=selected,
             results=results, output_path=out, service_issues=service_issues,
-            wm_metrics=wm_metrics, traffic=traffic,
+            wm_metrics=wm_metrics, traffic=traffic, anomalies=anomalies,
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        assert {'Страницы', 'Хосты и аномалии', 'Трафик'} <= set(wb.sheetnames)
+        assert {'Страницы', 'Хосты и аномалии', 'Трафик и траст'} <= set(wb.sheetnames)
+        assert 'Аномалии' not in wb.sheetnames   # слит в «Хосты и аномалии»
 
         pages = wb['Страницы']
-        urls = [pages.cell(row=r, column=5).value for r in range(6, 8)]
+        # Ищем по всей строке, а не по номеру колонки: состав колонок листа
+        # меняется (добавился «Источник»), и жёсткий индекс ломал бы тест на
+        # каждой такой правке.
+        urls = [c.value for row in pages.iter_rows() for c in row if c.value]
         assert 'https://a.ru/catalog/' in urls   # реальный URL, не выдумка
+        # Источник адреса виден в таблице
+        assert 'Каталог проекта' in urls
 
         ha = wb['Хосты и аномалии']
         texts = [c.value for row in ha.iter_rows() for c in row if c.value]
         assert any('Сайт не загружается' in str(t) for t in texts)
         assert any('5xx' in str(t) for t in texts)
+        assert any('порно казино' in str(t) for t in texts)   # часть B (ГСК)
 
-        tr = wb['Трафик']
+        tr = wb['Трафик и траст']
         vals = [c.value for row in tr.iter_rows() for c in row if c.value]
         assert 76 in vals and 64 in vals   # реальные visits/direct, не выдумка
+
+        # Проблемы из сервисов идут на лист «Аналитика» одной таблицей: раздел
+        # стал значением колонки «Источник», а не отдельной секцией.
+        an = wb['Аналитика']
+        an_texts = [c.value for row in an.iter_rows() for c in row if c.value]
+        assert any('Вебмастер (API)' in str(t) for t in an_texts)
+        assert any('Сайт не загружается' in str(t) for t in an_texts)
 
 
 def test_every_detail_sheet_is_grouped():
     """Защита от потери функционала: КАЖДЫЙ лист, создаваемый в reporter
     через create_sheet('литерал'), должен попадать либо в группу
-    (_SHEET_GROUPS), либо быть standalone (Обзор/Все детали). Иначе новый
-    лист «осиротеет» - появится после «Все детали» и потеряется в группировке."""
+    (_SHEET_GROUPS), либо быть standalone (Обзор/Страницы/...). Иначе новый
+    лист «осиротеет» - появится в конце и потеряется в группировке."""
     import re as _re
     from reporter import _SHEET_GROUPS
     src = (Path(__file__).parent.parent / 'reporter.py').read_text(encoding='utf-8')
     literal_sheets = set(_re.findall(r"create_sheet\('([^']+)'\)", src))
     covered = ({m for _, ms in _SHEET_GROUPS for m in ms}
-               | {'Обзор', 'Все детали', 'Структура страниц', 'Я.Бизнес и GMB',
+               | {'Обзор', 'Структура страниц', 'Отзывы', 'Аналитика',
                  'План работ', 'Проблемы', 'Страницы', 'Хосты и аномалии',
-                 'Трафик'})
+                 'Трафик и траст'})
     orph = literal_sheets - covered
     assert not orph, f'листы вне групп (потеряются): {sorted(orph)}'
     print(f'✓ Все {len(literal_sheets)} листов распределены по группам')
@@ -550,10 +909,41 @@ def test_problem_text_human_phrases():
     print('✓ «Что чинить»: человеческие формулировки')
 
 
-def test_metrika_404_goal_есть():
-    """Цель на 404 найдена - строка появляется на листе «404 из Метрики»,
-    даже если 404-страниц за период не было (сам факт проверки цели не
-    должен теряться, когда сшивка сама по себе пустая)."""
+def test_metrika_404_findings_подтверждено_и_только_в_метрике():
+    """_metrika_404_findings (report_priorities.py) - реальный merge: URL,
+    совпавший с 404-страницей из самого прогона ("results"), помечается как
+    подтверждённый; URL вне выборки прогона - как «только по Метрике» с
+    отдельной формулировкой, не одинаковым текстом."""
+    from report_priorities import _metrika_404_findings
+    from metrika_404 import Report404, Page404
+    results = [make_result(url='https://stalmetural.ru/dead/', http_code=404,
+                           status='not_found', is_ok=False, is_error=True)]
+    reports = [Report404(
+        project_id='t', country_code='RU', country_name='Россия',
+        report_date='2026-08-03', received_at='2026-08-03T00:00:00',
+        pages=[
+            Page404(page_title='Страница не найдена', page_url='https://stalmetural.ru/dead/',
+                    views=5, visitors=3, referer=None),
+            Page404(page_title='Страница не найдена', page_url='https://stalmetural.kz/other/',
+                    views=2, visitors=1, referer=None),
+        ],
+        total_views=7, total_pages=2)]
+    out = _metrika_404_findings(reports, results)
+    assert len(out) == 2
+    confirmed = next(f for f in out if f.url == 'https://stalmetural.ru/dead/')
+    not_confirmed = next(f for f in out if f.url == 'https://stalmetural.kz/other/')
+    assert confirmed.section == '404 в индексе' == not_confirmed.section
+    assert 'обходом сайта' in confirmed.problem
+    assert 'вне выборки' in not_confirmed.problem
+    assert confirmed.problem != not_confirmed.problem
+    print('✓ 404 из Метрики: подтверждённые и «только в Метрике» различаются')
+
+
+def test_metrika_404_goal_параметр_не_ломает_сборку():
+    """metrika_404_goal - параметр build_report(), сейчас не отображается
+    отдельно (лист «404 из Метрики» удалён, находки - в «Проблемы» через
+    _metrika_404_findings); передача параметра просто не должна ронять
+    сборку и не должна создавать никакого «404 из Метрики»."""
     selected = [Subdomain(url='https://stalmetural.ru/', city='Москва', host='stalmetural.ru')]
     results = [make_result(url='https://stalmetural.ru/')]
 
@@ -569,39 +959,8 @@ def test_metrika_404_goal_есть():
         )
         from openpyxl import load_workbook
         wb = load_workbook(out)
-        # «404 из Метрики» теперь - секция внутри группового «Аналитика».
-        assert 'Аналитика' in wb.sheetnames
         assert '404 из Метрики' not in wb.sheetnames
-        ws = wb['Аналитика']
-        text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
-        assert 'Цель на 404' in text
-        assert 'есть' in text.lower()
-    print('✓ Секция «404 из Метрики» в листе «Аналитика»: «цель есть»')
-
-
-def test_metrika_404_goal_не_найдена():
-    selected = [Subdomain(url='https://mepen.ru/', city='Москва', host='mepen.ru')]
-    results = [make_result(url='https://mepen.ru/')]
-
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / 'test.xlsx'
-        build_report(
-            project_name='Тест', started_at_ms=int(time.time() * 1000) - 5000,
-            finished_at_ms=int(time.time() * 1000),
-            selected_subdomains=selected, results=results, output_path=out,
-            metrika_reports=None,
-            metrika_404_goal={'есть': False, 'счётчики':
-                               {'99551890': {'есть': False, 'название': None}}},
-        )
-        from openpyxl import load_workbook
-        wb = load_workbook(out)
-        assert 'Аналитика' in wb.sheetnames
-        assert '404 из Метрики' not in wb.sheetnames
-        ws = wb['Аналитика']
-        text = ' '.join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
-        assert 'не найдена' in text.lower()
-        assert 'стоит создать' in text.lower()
-    print('✓ Секция «404 из Метрики» в «Аналитике»: «цель не найдена»')
+    print('✓ metrika_404_goal без metrika_reports не ломает сборку')
 
 
 def test_metrika_404_goal_none_без_данных_лист_не_создаётся():

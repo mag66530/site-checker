@@ -36,7 +36,15 @@ from sources import (
 )
 from profiles import PROFILES, get_profile_kwargs
 from history import load_history, save_history, WEEKLY_TTL_MS
-from run_estimate import estimate_run_seconds, format_estimate
+# Облако перечитывает файлы страниц после обновления кода, но модули из
+# sys.modules не перезагружает: страница уже новая, run_estimate - ещё старый,
+# и импорт добавленной функции валит страницу ImportError. Перечитываем сами.
+import importlib
+
+import run_estimate as _re
+if not hasattr(_re, 'estimate_run_seconds'):
+    _re = importlib.reload(_re)
+estimate_run_seconds, format_estimate = _re.estimate_run_seconds, _re.format_estimate
 from sitemap import (
     load_product_pathnames, get_cached_products_info, invalidate_sitemap_cache,
 )
@@ -49,7 +57,7 @@ from metrika_404 import MAILBOX_CONFIG
 from webmaster_notify import (
     WEBMASTER_YANDEX_CONFIG, GSC_GMAIL_CONFIG,
     YABUSINESS_YANDEX_CONFIG, TWOGIS_YANDEX_CONFIG, GOOGLE_ACCOUNTS_CONFIG,
-    GOOGLE_FOLDER_YANDEX_CONFIG,
+    GOOGLE_FOLDER_YANDEX_CONFIG, DEFAULT_FOLDERS,
     fetch_webmaster_yandex, fetch_gsc_gmail,
     fetch_yandex_folder_simple, fetch_google_accounts,
     load_notifications,
@@ -59,6 +67,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 from checklists import page_templates as _tpl
+from checklists import ui_widgets as _ui
 REPORTS_DIR = PROJECT_ROOT / 'reports'
 REPORTS_DIR.mkdir(exist_ok=True)
 
@@ -98,18 +107,58 @@ def _secret_pid(base, project_id):
     return _secret(base)
 
 
-def get_metrika_credentials(project_id):
-    cfg = MAILBOX_CONFIG.get(project_id)
+# Ящики проекта: поля личного кабинета для каждого почтовика. Настройки
+# проекта ПЕРВЫЕ - руководитель заводит новый проект сам, без доступа к
+# секретам приложения; секреты остаются для уже настроенных проектов.
+_MAIL_FIELDS = {
+    'yandex': ('mail_yandex_login', 'mail_yandex_password'),
+    'google': ('mail_google_login', 'mail_google_password'),
+}
+
+
+def _mail_creds(kind, project_id, cfg):
+    """(логин, пароль) ящика проекта: сначала настройки из кабинета, потом
+    секреты приложения по именам из cfg. cfg может быть None - тогда работают
+    только настройки проекта (новый проект не требует правки кода)."""
+    поле_логин, поле_пароль = _MAIL_FIELDS[kind]
+    логин = пароль = None
+    try:
+        import auth
+        логин = auth.project_setting(project_id, поле_логин) or None
+        пароль = auth.project_setting(project_id, поле_пароль) or None
+    except Exception:
+        pass
+    if логин and пароль:
+        return логин, пароль
     if not cfg:
-        return None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
+        return логин, пароль
+    return (логин or _secret(cfg['secret_email']),
+            пароль or _secret(cfg['secret_password']))
+
+
+def get_metrika_credentials(project_id):
+    return _mail_creds('yandex', project_id, MAILBOX_CONFIG.get(project_id))
 
 
 def get_gsc_credentials(project_id):
-    cfg = GSC_GMAIL_CONFIG.get(project_id)
-    if not cfg:
-        return None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
+    return _mail_creds('google', project_id, GSC_GMAIL_CONFIG.get(project_id))
+
+
+def _basic_auth_for(cfg, creds):
+    """Вход по паролю для закрытого сайта (стенд за nginx-паролем) или None.
+
+    Логин/пароль живут в «Настройках проекта» (site_basic_login /
+    site_basic_password) или в секретах приложения - в git и в конфиг проекта
+    они не попадают. Хост берём из самого проекта, чтобы пароль уходил только
+    ему: проверка битых ссылок звонит и на чужие домены."""
+    if not (cfg or {}).get('basic_auth'):
+        return None
+    логин = (creds or {}).get('site_basic_login') or ''
+    пароль = (creds or {}).get('site_basic_password') or ''
+    if not логин:
+        return None
+    return {'host': (cfg.get('root_domain') or '').strip().lower(),
+            'login': логин, 'password': пароль}
 
 
 def get_gsc_sa(project_id):
@@ -142,34 +191,90 @@ def get_gsc_sa(project_id):
 
 def get_yabusiness_credentials(project_id):
     cfg = YABUSINESS_YANDEX_CONFIG.get(project_id)
-    if not cfg:
-        return None, None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
+    л, п = _mail_creds('yandex', project_id, cfg)
+    return л, п, (cfg or {}).get('folder', DEFAULT_FOLDERS['yabusiness'])
 
 
 def get_twogis_credentials(project_id):
     cfg = TWOGIS_YANDEX_CONFIG.get(project_id)
-    if not cfg:
-        return None, None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
+    л, п = _mail_creds('yandex', project_id, cfg)
+    return л, п, (cfg or {}).get('folder', DEFAULT_FOLDERS['twogis'])
 
 
 def get_google_accounts_credentials(project_id):
-    cfg = GOOGLE_ACCOUNTS_CONFIG.get(project_id)
-    if not cfg:
-        return None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password'])
+    return _mail_creds('google', project_id,
+                       GOOGLE_ACCOUNTS_CONFIG.get(project_id))
 
 
 def get_google_folder_credentials(project_id):
     """Яндекс-папка с письмами GSC («Гугл» / «Google Search Console»)."""
     cfg = GOOGLE_FOLDER_YANDEX_CONFIG.get(project_id)
-    if not cfg:
-        return None, None, None
-    return _secret(cfg['secret_email']), _secret(cfg['secret_password']), cfg['folder']
+    л, п = _mail_creds('yandex', project_id, cfg)
+    return л, п, (cfg or {}).get('folder', DEFAULT_FOLDERS['google_folder'])
+
+
+def _gdrive_refresh(project_id: str) -> str:
+    """Ключ служебного Google-аккаунта для выкладки отчётов: сперва общая
+    привязка (один аккаунт на все проекты), потом привязка самого проекта."""
+    try:
+        import auth
+        v = auth.gdrive_account_settings(project_id)
+        if v.get('refresh_token'):
+            return v['refresh_token']
+    except Exception:  # noqa: BLE001
+        pass
+    return _secret_pid('gdrive_refresh_token', project_id)
+
+
+def _кто_запустил() -> str:
+    """«Имя Фамилия» текущего пользователя ('' - не определён). Подпись к
+    отчёту: у руководителя в чате смешиваются свои и чужие прогоны.
+
+    Определение одно на все прогоны (tg_report.кто_запустил): подпись должна
+    выглядеть одинаково и у чек-листа, и у форм/целей/КП/скорости."""
+    try:
+        import tg_report
+        return tg_report.кто_запустил()
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def get_telegram_recipients(project_id):
+    """Кому уходит отчёт о прогоне:
+
+      • ТОМУ, КТО ЗАПУСТИЛ - если он подключил Telegram в личном кабинете;
+      • плюс руководителям/админам, выбравшим в кабинете «все прогоны по моим
+        проектам» (см. db.telegram_project_subscribers) - им видны и чужие
+        запуски по их проектам.
+
+    Сотруднику выбора нет: он получает только свои запуски. Если Telegram не
+    подключил никто - откатываемся на старый список из секрета
+    telegram_recipients_<проект>, чтобы уже настроенные проекты не остались
+    без уведомлений."""
+    chats = []
+
+    def _add(v):
+        v = str(v or '').strip()
+        if v and v not in chats:
+            chats.append(v)
+
+    try:
+        import auth
+        import telegram_link
+        _u = auth.current_user()
+        if _u:
+            _add(telegram_link.chat_id_for_user(_u['id']))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from auth import db as _db
+        for _s in _db.telegram_project_subscribers(project_id):
+            _add(_s.get('chat_id'))
+    except Exception:  # noqa: BLE001
+        pass
+    if chats:
+        return chats
+
     val = _secret(f'telegram_recipients_{project_id}')
     if isinstance(val, str):
         return [val.strip()] if val.strip() else []
@@ -456,6 +561,9 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             mandatory_hosts=cfg.get('mandatory_hosts'),
             cis_extra_subdomains=int(flags.get('cis_extra', 0)),
             trailing_slash=cfg.get('trailing_slash', True),
+            # Ключа нет - None, и раздел каталога собирается как раньше.
+            # Пустая строка в конфиге (АПС) - раздела у сайта нет, не проверяем.
+            catalog_path=cfg.get('catalog_path'),
             rotation_history=recent,
         )
         append_log(f'Города: {", ".join(s.city for s in plan.selected_subdomains)}')
@@ -509,6 +617,7 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             check_meta=bool(flags.get('check_meta', True)),
             region_ctx=region_ctx,
             on_progress=on_progress, proxy_url=proxy_url, kp_map=kp_map,
+            basic_auth=_basic_auth_for(cfg, creds),
         ))
 
         finished_ms = int(time.time() * 1000)
@@ -583,14 +692,16 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
             _proxy = proxy_url   # с учётом use_proxy проекта (как для страниц)
 
             _yw_e, _yw_p = creds['metrika']
-            _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid)
-            if _yw_e and _yw_p and _yw_cfg:
+            _yw_cfg = WEBMASTER_YANDEX_CONFIG.get(pid) or {}
+            _yw_folder = _yw_cfg.get('folder', DEFAULT_FOLDERS['webmaster'])
+            if _yw_e and _yw_p:
                 try:
-                    fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_cfg['folder'], 30, _proxy, _nlog)
+                    fetch_webmaster_yandex(pid, _yw_e, _yw_p, _yw_folder, 30, _proxy, _nlog)
                 except Exception as _e:
                     append_log(f'⚠ Вебмастер: {_e}')
             else:
-                append_log(f'⚠ Вебмастер: креды не найдены (metrika_{pid}_email / metrika_{pid}_password)')
+                append_log('⚠ Вебмастер: не задана почта проекта - впишите её в '
+                           '«Настройки проекта» (почта Яндекса + пароль приложения)')
 
             _gsc_e, _gsc_p = creds['gsc']
             if _gsc_e and _gsc_p:
@@ -600,7 +711,8 @@ def _run_worker(pid, cfg, src, stats, budget, random_cities, flags, creds):
                 except Exception as _e:
                     append_log(f'⚠ GSC: {_e}')
             else:
-                append_log(f'⚠ GSC: креды не найдены (gsc_{pid}_email / gsc_{pid}_password). '
+                append_log('⚠ GSC: не задан Gmail проекта - впишите его в '
+                           '«Настройки проекта» (Gmail + пароль приложения). '
                            f'Похожие ключи в секретах: {creds.get("secret_keys_hint") or "нет"}')
 
             _yab_e, _yab_p, _yab_f = creds['yab']
@@ -1471,14 +1583,30 @@ if pid:
                         key='c30_check_indexing',
                         help='**Сверяем сигналы индексации страницы с эталоном - '
                              'robots.txt.**\n\n'
+                             'Страница:\n'
                              '- ошибка: noindex на странице, открытой в robots, или '
                              'canonical на закрытый URL\n'
                              '- закрыта в robots и есть noindex - это норма, не '
                              'показываем\n'
-                             '- canonical: ровно один тег, на себя, не на чужой домен\n'
+                             '- canonical: ровно один тег, на себя, не на чужой домен, '
+                             'полный адрес (не относительный), внутри `<head>`\n'
                              '- hreflang: если есть - валидируем (коды языков, URL, '
-                             'self-reference); если нет - не ошибка\n'
-                             '- сверяем все пути каталога (sitemap) с robots.txt')
+                             'self-reference); если нет - не ошибка\n\n'
+                             'robots.txt - и правила, и сам файл:\n'
+                             '- все пути каталога сверяются с robots.txt\n'
+                             '- служебные адреса и мусорные параметры закрыты\n'
+                             '- вес до 500 КБ, отдаётся текстом (а не HTML-страницей), '
+                             'кодировка UTF-8 без BOM\n'
+                             '- директивы не закомментированы через #\n'
+                             '- прописан Clean-Param (дубли по GET-параметрам)\n\n'
+                             'Карта сайта:\n'
+                             '- формат .xml/.txt и кодировка UTF-8\n'
+                             '- категории/фильтры/услуги из выгрузки есть в карте\n'
+                             '- лимиты файлов, даты lastmod, HTML-карта\n'
+                             '- выборочный прозвон адресов из карты: код ответа и '
+                             'meta robots noindex\n\n'
+                             'Адреса каталога: ЧПУ, кириллица, заглавные, подчёркивания, '
+                             'спецсимволы, длина до 2048, домен внутри пути.')
             st.checkbox('Корректность вывода и дубли (заголовки, метаданные, урлы)',
                         key='c30_check_meta',
                         help='**Проверяем корректность и уникальность заголовков, '
@@ -1487,21 +1615,39 @@ if pid:
                              'поддомена в title/description, длины в норме\n'
                              '- дубли внутри города - баг; полное совпадение между '
                              'городами - не подставился город\n'
-                             '- дубли URL: варианты адреса (http, слэш, www) главной '
-                             'и каталога должны редиректить\n'
                              '- единственность тегов: ровно один title/description/H1, '
                              'ищем дубли H2\n'
                              '- «текстовость» заголовков: h2-h6 не должны быть в '
-                             'шапке/подвале/меню/сайдбаре')
+                             'шапке/подвале/меню/сайдбаре, плюс скачки уровней '
+                             '(после h1 сразу h3)\n\n'
+                             'Дубли адресов (раздел «Дубли и редиректы»):\n'
+                             '- варианты адреса (http, слэш, www, index.php) главной '
+                             'и каталога должны 301-редиректить\n'
+                             '- тот же слаг без раздела: /catalog/truba/profil/ '
+                             'и /profil/ - одна страница\n'
+                             '- один товар - один адрес: карточка не должна '
+                             'открываться в чужой категории\n'
+                             '- индексируемые тестовые поддомены (test./dev./stage.)\n\n'
+                             'Дубли сверяются по заголовку страницы, а не по коду '
+                             'ответа: 200 сам по себе дублём не делает. Дубль, '
+                             'прикрытый canonical, - замечание, а не ошибка.')
             st.checkbox('Микроразметка и OpenGraph (Schema.org, og:*)',
                         key='c30_check_markup',
                         help='**Проверяем микроразметку Schema.org и OpenGraph '
                              '(ТЗ 3.5).**\n\n'
-                             '- OpenGraph (og:url/title/description/image/type) на '
-                             'основных страницах\n'
+                             '- OpenGraph: все пять тегов (og:url/title/description/'
+                             'image/type) на месте И ПРИГОДНЫ - значение не пустое, '
+                             'og:url ведёт на эту же страницу полным адресом, '
+                             'og:image - ссылка на файл (не data:), '
+                             'og:description до 300 символов, og:type из известных\n'
                              '- Schema.org: данные компании везде, крошки '
                              'BreadcrumbList, листинги, на товаре Product + '
                              'характеристики + фото + цены\n'
+                             '- на товаре - блок отзывов: есть ли он, размечен '
+                             'ли (Review + AggregateRating) и правдоподобен ли '
+                             '(одна дата у всех, один автор, одинаковые оценки, '
+                             'пустые тексты = разовая генерация, за такое дают '
+                             'ручные санкции)\n'
                              '- условно: видео → VideoObject, FAQ-блок → FAQPage, '
                              'адрес → PostalAddress\n'
                              '- основной формат - microdata; тип только в JSON-LD = '
@@ -1557,16 +1703,28 @@ if pid:
                              'меры», «security issue») + ссылка на ручную сверку '
                              'в Search Console\n\n'
                              'Отдельный лист «Фильтры ПС».')
-            st.checkbox('Проверять, что ссылки на страницах реально открываются (404)',
+            st.checkbox('Проверять ссылки на страницах (404, редиректы, ссылки на себя)',
                         key='c30_check_links',
-                        help='**Прозваниваем внутренние ссылки всех страниц прогона '
-                             'и ищем 404/410.**\n\n'
+                        help='**Прозваниваем ссылки всех страниц прогона.**\n\n'
+                             'Что ищем:\n'
+                             '- битые: 404/410\n'
+                             '- закрытые: 403 (предупреждение - бывает и от '
+                             'защиты от ботов)\n'
+                             '- ссылки на редирект: надо ставить сразу конечный '
+                             'адрес\n'
+                             '- редирект, который приводит к ошибке (301 → 404)\n'
+                             '- ссылки страницы на саму себя (на главной не '
+                             'считаем: там это логотип)\n\n'
+                             'Охват:\n'
                              '- вся страница целиком: текст, блоки, шапка, подвал, '
                              'листинг\n'
+                             '- внешние ссылки - тоже, но мягче и не больше 20 на '
+                             'прогон: у чужих сайтов 403/429 обычно отдаёт антибот\n'
                              '- уникальные ссылки дедупятся по прогону (сквозное '
                              'меню звоним один раз)\n'
                              '- общий лимит - 2500 прозвонов\n\n'
-                             'Дольше обычного - по запросу на каждую новую ссылку.')
+                             'Находки - на листе «Проблемы», раздел «Ссылки». '
+                             'Дольше обычного: по запросу на каждую новую ссылку.')
             st.checkbox('Проверять 404 среди страниц в индексе (Яндекс.Вебмастер + Google)',
                         key='c30_check_index_404',
                         help='**Ищем страницы, которые есть в индексе, но отдают '
@@ -1592,18 +1750,26 @@ if pid:
                              'Как coolakov.ru и be1.ru/dubli-stranic, но точнее: '
                              'смотрим редирект и тег canonical. Быстро, без '
                              'браузера. Отдельный лист «Дубли главной».')
-            st.checkbox('Ошибки JavaScript в консоли + адаптивность (браузер)',
+            st.checkbox('Ошибки JS, адаптивность и доступность (браузер)',
                         key='c30_check_console',
-                        help='**Открывает в браузере каждую страницу прогона и '
-                             'ловит ошибки JS в консоли.**\n\n'
-                             '- главная, каталог, категории, фильтры, товары, тех. '
-                             'страницы\n'
-                             '- ловим console.error и исключения; шум аналитики/'
-                             'виджетов отсеивается\n'
-                             '- той же поездкой - адаптивность на ширинах '
-                             '1440/768/390: нет горизонтального скролла, блоки не '
-                             'накладываются при ресайзе (масштаб Ctrl+/- покрыт той '
-                             'же сеткой), на мобильном шрифт минимум 14px\n\n'
+                        help='**Открывает каждую страницу прогона в браузере.**\n\n'
+                             'Консоль: console.error и исключения; шум аналитики '
+                             'и виджетов отсеивается.\n\n'
+                             'Адаптивность - той же поездкой на ширинах '
+                             '1440 / 768 / 390 (масштаб Ctrl+/- покрыт этой же '
+                             'сеткой):\n'
+                             '- нет горизонтального скролла и наложения блоков\n'
+                             '- меню доступно на каждой ширине: видимая навигация '
+                             'либо кнопка-бургер\n'
+                             '- размер шрифта: на ПК основной текст от 15px, '
+                             'h1-h2 от 22px, h3-h6 от 16px; на планшете и телефоне '
+                             'текст от 14px\n'
+                             '- кнопки не мельче 44x44 на сенсорных ширинах\n\n'
+                             'Доступность (всё - предупреждения, не ошибки):\n'
+                             '- контраст текста по WCAG (4.5:1, для крупного 3:1)\n'
+                             '- навигация с клавиатуры: Tab доходит до ссылок и '
+                             'кнопок, фокус видно\n'
+                             '- картинки не битые и не растянутые\n\n'
                              'Тяжёлый браузерный проход - по запросу.')
 
         _sec_ver = st.container(key='c30_sec_ver')
@@ -1656,14 +1822,23 @@ if pid:
 
         _sec_sec = st.container(key='c30_sec_sec')
         with _sec_sec.expander(f'🔒  Безопасность – заголовки ответа сервера  `{_sec_n(_SEC_SEC)}/{len(_SEC_SEC)}`', expanded=True):
-            st.checkbox('Заголовки безопасности (HSTS, CSP, X-Frame и т.п.)',
+            st.checkbox('Заголовки безопасности и SSL-сертификат',
                         key='c30_check_security',
-                        help='**Проверяем HTTP-заголовки безопасности ответа '
-                             'сервера.**\n\n'
+                        help='**Заголовки ответа сервера + сам сертификат.**\n\n'
+                             'Заголовки:\n'
                              '- нет HSTS / CSP / X-Content-Type-Options / защиты от '
                              'кликджекинга = предупреждение (мягко)\n'
                              '- битое значение (HSTS max-age=0, ALLOW-FROM, '
-                             'не-nosniff, конфликт дублей) = баг')
+                             'не-nosniff, конфликт дублей) = баг\n\n'
+                             'SSL-сертификат (один запрос на хост, без внешних '
+                             'сервисов - читаем прямо из TLS-соединения):\n'
+                             '- истёк или осталось меньше 14 дней = баг; меньше '
+                             '30 дней = предупреждение\n'
+                             '- выписан на этот домен (с учётом *.домен)\n'
+                             '- сервер отдаёт полную цепочку (неполная часто '
+                             'работает на десктопе, но не на мобильных)\n'
+                             '- не дозвонились - пишем «не проверить», дефектом '
+                             'сайта это не считаем')
 
         _sec_kp = st.container(key='c30_sec_kp')
         with _sec_kp.expander(f'🗺️  Данные по городам  `{_sec_n(_SEC_KP)}/{len(_SEC_KP)}`', expanded=True):
@@ -2294,6 +2469,32 @@ if pid:
     # (единственное место). Здесь блока больше нет: прогон сам берёт адрес
     # через proxy_config, с учётом use_proxy проекта.
 
+    # ── Вход на закрытый сайт (стенд за паролем nginx) ────────────────
+    # Показываем ТОЛЬКО проектам с basic_auth в карточке. Значения по
+    # умолчанию - из «Настроек проекта»; введённое здесь их перебивает и
+    # действует только на этот запуск (в базу не пишется).
+    # Без этого блока стенд отвечал 401 на каждой странице, и весь отчёт
+    # состоял из ошибок доступа.
+    if (cfg or {}).get('basic_auth'):
+        with st.container(border=True):
+            st.markdown('**Вход на закрытый сайт**')
+            st.caption('Сайт закрыт паролем: без него все страницы ответят '
+                       '«401», и проверять будет нечего.')
+            _sb1, _sb2 = st.columns(2)
+            st.session_state.setdefault(
+                'c30_site_login', _secret_pid('site_basic_login', pid) or '')
+            st.session_state.setdefault(
+                'c30_site_password', _secret_pid('site_basic_password', pid) or '')
+            with _sb1:
+                st.text_input('Логин сайта', key='c30_site_login')
+            with _sb2:
+                st.text_input('Пароль сайта', key='c30_site_password',
+                              type='password')
+            if not (st.session_state.get('c30_site_login', '').strip()
+                    and st.session_state.get('c30_site_password', '')):
+                st.warning('Пока не заполнено - прогон вернёт 401 по всем '
+                           'страницам.')
+
     # БЛОК запуска
     with st.container():
         _paths = _c30_paths(pid)
@@ -2339,13 +2540,20 @@ if pid:
                     'c30_fetch_notifications', 'c30_fetch_metrika_404',
                 )
             }
+            # Число ХОСТОВ проекта: ссылочный профиль, ИКС и аномалии ходят по
+            # ВСЕМ сайтам, сколько бы городов ни выбрали для страниц. На
+            # проекте с 242 хостами это минуты - без этого прогноз занижался.
+            _est_hosts = stats.get('subdomains_count') or _est_cities
             _est_low, _est_high = estimate_run_seconds(
-                _est_pages, _est_cities, _est_checks)
-            st.caption(
-                f'⏱ Примерное время: **{format_estimate(_est_low, _est_high)}** · '
-                f'{_est_pages} страниц, {_est_cities} городов. '
-                'Оценка грубая: зависит от скорости сайта, прокси и лимитов '
-                'внешних сервисов.')
+                _est_pages, _est_cities, _est_checks, hosts=_est_hosts)
+            # Прогноз кладём в состояние: ниже, у секундомера, он нужен для
+            # остатка времени и сравнения «прогноз против факта».
+            st.session_state['c30_est'] = (_est_low, _est_high)
+            _ui.estimate_badge(
+                format_estimate(_est_low, _est_high),
+                f'{_est_pages} страниц, {_est_cities} городов, '
+                f'{_est_hosts} хостов проекта. Зависит от скорости сайта, '
+                f'прокси и лимитов внешних сервисов.')
         if _go:
             flags = {
                 'check_main': st.session_state.c30_check_main,
@@ -2446,13 +2654,37 @@ if pid:
             except Exception:
                 _sk_hint, _wm_hint = [], []
             # Токен Яндекс OAuth (Вебмастер-API; тот же подойдёт для Метрики).
-            # Имя секрета: yandex_oauth_<pid> (с запасными вариантами).
-            _wm_token = (_secret_pid('yandex_oauth', pid)
-                         or _secret_pid('webmaster_oauth', pid))
+            # ПОРЯДОК ВАЖЕН: поле «OAuth-токен Вебмастера» (webmaster_oauth)
+            # главнее «OAuth-токена Яндекса» (yandex_oauth). Раньше было
+            # наоборот, и это стоило дня разбирательств: у проекта заполнены
+            # ОБА поля, человек перевыпустил токен с недостающим правом и
+            # положил его в поле с точным названием, а прогон продолжал брать
+            # старый - в логе снова «нет права EXTERNAL_LINKS».
+            _wm_token = (_secret_pid('webmaster_oauth', pid)
+                         or _secret_pid('yandex_oauth', pid))
             creds = {
                 'proxy_url': _c30_effective_proxy,
+                # Решение галочки «Прокси» (вкл/выкл/не рисовалась). Без него
+                # выключение галочки не отключало прокси: адрес прогон
+                # находит сам, и use_proxy проекта побеждал.
+                'use_proxy_choice': __import__('site_access').proxy_choice(pid),
                 'tg_token': _secret('telegram_bot_token'),
                 'tg_recipients': get_telegram_recipients(pid),
+                # Кто запустил - руководителю, который следит за всеми
+                # прогонами проекта, важно понимать, чей это отчёт.
+                'started_by': _кто_запустил(),
+                # Google Диск для отчётов: общий диск (Shared Drive) и, если
+                # задана, готовая папка проекта. Пусто = выкладка пропускается.
+                'gdrive_shared_drive_id': _secret_pid('gdrive_shared_drive_id', pid),
+                'gdrive_folder_id': _secret_pid('gdrive_folder_id', pid),
+                # Служебный Google-аккаунт: общая привязка на всё приложение
+                # (её делают один раз), иначе - привязка самого проекта.
+                'gdrive_refresh_token': _gdrive_refresh(pid),
+                # Ключи OAuth живут в настройках проекта (их видит руководитель),
+                # секрет приложения - запасной источник; _secret_pid уже даёт
+                # именно такой приоритет.
+                'google_oauth_client_id': _secret_pid('google_oauth_client_id', pid),
+                'google_oauth_client_secret': _secret_pid('google_oauth_client_secret', pid),
                 'metrika': get_metrika_credentials(pid),
                 'gsc': get_gsc_credentials(pid),
                 # Сервисный аккаунт GSC для источника «Google» в «404 в индексе»
@@ -2463,6 +2695,19 @@ if pid:
                 'google': get_google_accounts_credentials(pid),
                 'google_folder': get_google_folder_credentials(pid),
                 'webmaster_oauth': _wm_token,
+                # Вход на закрытый стенд (nginx-пароль). Пусто у обычных
+                # проектов - тогда обход идёт как раньше, без авторизации.
+                # Поля на странице (блок «Вход на закрытый сайт») перебивают
+                # настройки проекта: пароль стенда меняют часто, и ждать
+                # сохранения в кабинете ради одного прогона незачем.
+                'site_basic_login': (st.session_state.get('c30_site_login', '').strip()
+                                     or _secret_pid('site_basic_login', pid)),
+                'site_basic_password': (st.session_state.get('c30_site_password', '')
+                                        or _secret_pid('site_basic_password', pid)),
+                # DR на листе «Траст проекта» (trust_check.fetch_dr). Без этого
+                # ключа ИКС приходил, а DR всегда стоял прочерком: runner читает
+                # creds['openpagerank_key'], а сюда его никто не клал.
+                'openpagerank_key': _secret_pid('openpagerank_key', pid),
                 'metrika_oauth': _secret_pid('metrika_oauth', pid),
                 'metrika_counter': _secret_pid('metrika_counter', pid),
                 # Сессия для облачного автокликера (base64 storage_state).
@@ -2507,11 +2752,14 @@ if pid:
     # Завершение определяем по появлению артефакта (отчёт/результат), а не только
     # по живости pid: на Linux дочерний процесс может стать zombie и «жить» в
     # таблице процессов, из-за чего _alive остаётся True и UI зависает на прогрессе.
+    _est = st.session_state.get('c30_est') or (None, None)
     if _alive and not _done:
         with st.container(border=True):
             st.markdown('### ⏳ Идёт проверка')
             st.caption('Можно переключаться на другие вкладки - прогон идёт в фоне '
                        'и не прервётся.')
+            _ui.elapsed_caption(_paths['pid'], _paths['log'], running=True,
+                                estimate_low=_est[0], estimate_high=_est[1])
             _prog, _ptext = 0.0, 'Подготовка…'
             try:
                 _s = json.loads(_paths['status'].read_text(encoding='utf-8'))
@@ -2601,6 +2849,16 @@ if pid:
                 st.warning(f'Найдены проблемы. Проверено {total} страниц за {format_duration(duration)}.')
             else:
                 st.success(f'✓ Все проверки прошли успешно: {total} страниц за {format_duration(duration)}.')
+            # Сверка с прогнозом: видно, врёт оценка или нет.
+            if _est[0] and _est[1]:
+                if duration < _est[0]:
+                    _вердикт = 'быстрее прогноза'
+                elif duration > _est[1]:
+                    _вердикт = 'дольше прогноза'
+                else:
+                    _вердикт = 'в рамках прогноза'
+                st.caption(f'⏱ Прогноз был {format_estimate(_est[0], _est[1])} - '
+                           f'{_вердикт}.')
 
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric('Всего', total)

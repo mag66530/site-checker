@@ -78,12 +78,41 @@ def _norm(s):
     return re.sub(r'\s+', ' ', (s or '').strip().lower().replace('ё', 'е'))
 
 
-def load_branches(project_id):
-    """catalogs/reviews-<pid>.csv → [{'city','country','yandex_url','2gis_url'}].
-    None - если конфига нет."""
-    f = BASE / 'catalogs' / f'reviews-{project_id}.csv'
+def _branches_from_kp(project_id):
+    """Филиалы из карты присутствия: у КП уже есть колонки yandex_map_url и
+    twogis_map_url - те самые ссылки на карточки, которые нужны проверке.
+    Отдельный reviews-<pid>.csv для этого не нужен: клиент ведёт ссылки в КП,
+    а мы их просто читаем. Города без единой ссылки пропускаем - проверять
+    там нечего. None - если КП проекта нет."""
+    f = BASE / 'catalogs' / f'{project_id}-kp.csv'
     if not f.is_file():
         return None
+    out = []
+    with open(f, encoding='utf-8-sig', newline='') as fh:
+        for row in csv.DictReader(fh):
+            city = (row.get('city') or '').strip()
+            я = (row.get('yandex_map_url') or '').strip()
+            г = (row.get('twogis_map_url') or '').strip()
+            if not city or not (я or г):
+                continue
+            out.append({'city': city,
+                        'country': (row.get('country') or '').strip(),
+                        'yandex_url': я, '2gis_url': г})
+    return out or None
+
+
+def load_branches(project_id):
+    """Филиалы для проверки отзывов: [{'city','country','yandex_url','2gis_url'}].
+
+    Источник по порядку:
+      1. catalogs/reviews-<pid>.csv - если у проекта свой список (переопределяет
+         КП: там могут быть только «важные» филиалы);
+      2. карта присутствия catalogs/<pid>-kp.csv - ссылки на карточки Яндекса и
+         2ГИС клиент и так ведёт там.
+    None - если нет ни того, ни другого (или ссылок нигде не проставлено)."""
+    f = BASE / 'catalogs' / f'reviews-{project_id}.csv'
+    if not f.is_file():
+        return _branches_from_kp(project_id)
     out = []
     with open(f, encoding='utf-8-sig', newline='') as fh:
         for row in csv.DictReader(fh):
@@ -101,7 +130,11 @@ def load_branches(project_id):
 
 _RE_YA_RATING = re.compile(
     r'"ratingValue"\s+content="([\d.]+)"|itemprop="ratingValue"\s+content="([\d.]+)"')
+# Число отзывов: сперва микроразметка, но у части карточек её нет - тогда
+# берём значение из состояния страницы ("reviewCount":2). Ноль там означает
+# «отзывов нет», и это тоже ответ, а не сбой чтения.
 _RE_YA_COUNT = re.compile(r'"reviewCount"\s+content="(\d+)"')
+_RE_YA_COUNT_JSON = re.compile(r'"reviewCount"\s*:\s*"?(\d+)"?')
 
 
 async def _fetch_yandex(ctx, sem, url):
@@ -119,9 +152,14 @@ async def _fetch_yandex(ctx, sem, url):
             mr = _RE_YA_RATING.search(html)
             if mr:
                 rating = float(mr.group(1) or mr.group(2))
-            mc = _RE_YA_COUNT.search(html)
+            mc = _RE_YA_COUNT.search(html) or _RE_YA_COUNT_JSON.search(html)
             if mc:
                 count = int(mc.group(1))
+            # Рейтинг 0 у Яндекса означает «оценок нет», а не «ноль баллов»:
+            # иначе филиал без отзывов выглядел бы как филиал с худшим в мире
+            # рейтингом.
+            if rating is not None and rating <= 0:
+                rating = None
         except Exception:
             pass
         finally:
@@ -134,14 +172,24 @@ async def _fetch_yandex(ctx, sem, url):
 
 async def _fetch_2gis_light(ctx, sem, url):
     """Рейтинг и число отзывов из 2ГИС без скролла ленты (быстро)."""
-    city, fid = twogis_check.parse_firm(url)
-    if not fid:
+    if not url:
         return {'rating': None, 'count': None}
+    city, fid = twogis_check.parse_firm(url)
     city = city or 'moscow'
     async with sem:
         page = await ctx.new_page()
         data = {'rating': None, 'count': None}
         try:
+            if not fid:
+                # В КП попадаются короткие ссылки (go.2gis.com/xxxx) и ссылки
+                # поиска - id карточки в них нет. Открываем как есть и берём id
+                # из адреса, куда 2ГИС нас привёл.
+                await page.goto(url, wait_until='domcontentloaded', timeout=45000)
+                await page.wait_for_timeout(2500)
+                city2, fid = twogis_check.parse_firm(page.url)
+                city = city2 or city
+                if not fid:
+                    return data
             await page.goto(f'https://2gis.ru/{city}/firm/{fid}/tab/reviews',
                             wait_until='domcontentloaded', timeout=45000)
             await page.wait_for_timeout(3000)
@@ -150,6 +198,9 @@ async def _fetch_2gis_light(ctx, sem, url):
             c = twogis_check._RE_COUNT.search(html)
             data['rating'] = float(r.group(1)) if r else None
             data['count'] = int(c.group(1)) if c else None
+            # Как и у Яндекса: 0 - это «оценок нет», не нулевой рейтинг.
+            if data['rating'] is not None and data['rating'] <= 0:
+                data['rating'] = None
         except Exception:
             pass
         finally:
@@ -203,6 +254,19 @@ def compute_priority(branches):
         b['low_rating'] = (r is not None and r < RATING_THRESHOLD) or r is None
         b['negative'] = (r is not None and r < NEGATIVE_RATING)
         b['order'] = ORDER_NEGATIVE if b['negative'] else ORDER_DEFAULT
+        # Рейтинга нет по двум разным причинам, и это разные задачи:
+        #   • карточка ответила, но отзывов у неё нет  → докупать в первую
+        #     очередь (филиал вообще без отзывов);
+        #   • ни один источник не ответил               → чинить ссылки/доступ,
+        #     про рейтинг мы попросту ничего не знаем.
+        _счётчики = [b.get(k, {}).get('count') for k in ('yandex', 'twogis')]
+        _ответили = [c for c in _счётчики if c is not None]
+        _всего_отзывов = sum(_ответили)
+        b['no_reviews'] = r is None and bool(_ответили) and _всего_отзывов == 0
+        # Отзывы есть, а оценки нет: их оставили текстом, без звёзд, либо их
+        # слишком мало для расчёта. Не «сбой чтения» и не «нет отзывов».
+        b['no_rating_yet'] = r is None and _всего_отзывов > 0
+        b['unknown'] = r is None and not _ответили
 
     # Сортировка: сначала приоритетные (низкий рейтинг), внутри - по населению
     # (города-миллионники выше); затем остальные по населению. Население - для

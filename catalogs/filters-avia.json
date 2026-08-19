@@ -1,0 +1,29 @@
+{
+  "_comment": "АПС (aviastal.ru) - фильтр в две ступени, не Bitrix-smartfilter. Группа (.filter-item .filter-button) раскрывается по клику, значения подгружаются AJAX-запросом /catalog/filter-get и рисуются ссылками ВНУТРИ раскрытой группы (.filter-item.active a). Клик по значению = переход на отфильтрованный адрес вида /категория/tolshina_0,35 - те самые адреса, что лежат в каталоге проекта типом «тег». Поэтому filter = кнопка группы, apply = первое значение: _apply_filter кликает их именно в этом порядке. Кликаем именно <p> внутри кнопки: клик всплывает на неё и группа раскрывается, зато в отчёт идёт человеческая подпись нажатого фильтра («Толщина», «Раскрой»), а не заголовок страницы - _clicked_label берёт текст самого элемента. До раскрытия .filter-item.active a пусто, так что apply не может кликнуть чужую ссылку. Карточка товара - .verticalProductContainer (сайт умеет и горизонтальную раскладку, но по умолчанию отдаёт вертикальную). Счётчика «найдено N» на страницах нет, поэтому вердикт держится на смене набора товаров. Селекторы проверены вживую 2026-08-12: 20 карточек до фильтра → 1 / 11 / 20 после, набор товаров менялся на всех трёх кейсах.",
+  "cases": [
+    {
+      "name": "Лист горячекатаный - по толщине",
+      "category": "https://aviastal.ru/chernyi-prokat/listovoi-prokat/list-goryachekatanyi",
+      "card": ".verticalProductContainer",
+      "filter": ".filter-item .filter-button p",
+      "apply": ".filter-item.active a",
+      "wait_ms": 5000
+    },
+    {
+      "name": "Круг нержавеющий - по диаметру",
+      "category": "https://aviastal.ru/nerzhaveushii-prokat/krug-nerzhaveushii",
+      "card": ".verticalProductContainer",
+      "filter": ".filter-item .filter-button p",
+      "apply": ".filter-item.active a",
+      "wait_ms": 5000
+    },
+    {
+      "name": "Задвижка чугунная - по диаметру",
+      "category": "https://aviastal.ru/zapornaya-armatura/zadvizhki/zadvizhka-chugunnaya",
+      "card": ".verticalProductContainer",
+      "filter": ".filter-item .filter-button p",
+      "apply": ".filter-item.active a",
+      "wait_ms": 5000
+    }
+  ]
+}

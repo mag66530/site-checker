@@ -62,12 +62,51 @@ PROJECT_SETTING_FIELDS = [
     ("textru_key", "Ключ Text.ru (антиплагиат)", "password"),
     ("arsenkin_token", "Токен Арсенкина", "password"),
     ("pagespeed_api_key", "Ключ PageSpeed API", "password"),
-    ("metrika_counter", "Номер счётчика Метрики", "text"),
+    # DR на листе «Траст проекта». Ключ бесплатный (openpagerank.com), выдаётся
+    # сразу после регистрации; без него ИКС приходит, а DR остаётся прочерком.
+    ("openpagerank_key", "Ключ Open PageRank", "password"),
+    # Закрытый стенд за nginx-паролем (окно «Требуется авторизация»): без этих
+    # полей обход получит 401 на каждой странице. Заполнять только тем
+    # проектам, у которых сайт действительно закрыт.
+    ("site_basic_login", "Логин к закрытому сайту (Basic)", "text"),
+    ("site_basic_password", "Пароль к закрытому сайту (Basic)", "password"),
+    # Несколько счётчиков (у проекта сайт на каждую страну) пишутся через
+    # запятую: «21630337, 21636463, 92687116». Список из двух и более счётчиков
+    # ГЛАВНЕЕ всего остального (см. metrika_api._counters_for) - по нему и
+    # собираются 404, динамика трафика и аномалии переходов сразу по всем сайтам.
+    ("metrika_counter", "Номер счётчика Метрики (несколько - через запятую)", "text"),
     ("metrika_oauth", "OAuth-токен Метрики", "password"),
-    ("webmaster_oauth", "OAuth-токен Вебмастера", "password"),
-    ("yandex_oauth", "OAuth-токен Яндекса", "password"),
-    ("autoclick_session", "Сессия Яндекса (base64, автокликеры/Я.Бизнес)", "textarea"),
+    # Два поля делают одно и то же (Вебмастер-API), исторически. Главное -
+    # webmaster_oauth: если заполнены оба, берётся оно. Без этой подписи
+    # человек кладёт новый токен в одно поле, а прогон продолжает брать
+    # старый из другого - и в логе снова «не хватает прав».
+    ("webmaster_oauth", "OAuth-токен Вебмастера (основной)", "password"),
+    ("yandex_oauth", "OAuth-токен Яндекса (запасной, если поле выше пустое)", "password"),
+    # Одна строка сессии покрывает ОБА кабинета: экспорт забирает cookies и
+    # Яндекса, и Google - значит и Вебмастер, и Search Console, и Справочник.
+    ("autoclick_session", "Сессия браузера: Яндекс + Google (base64) - автокликеры, Я.Бизнес", "textarea"),
     ("gsc_service_account", "Сервис-аккаунт GSC (JSON)", "textarea"),
+    # Ящики проекта для раздела «Уведомления» (письма Вебмастера, Я.Бизнеса,
+    # 2ГИС, Google Search Console). Читаются по IMAP, поэтому нужен ПАРОЛЬ
+    # ПРИЛОЖЕНИЯ, а не обычный пароль от почты. Раньше эти адреса жили только
+    # в секретах приложения - руководитель без доступа к секретам не мог
+    # подключить новый проект сам.
+    ("mail_yandex_login", "Почта Яндекса проекта (письма Вебмастера, Я.Бизнеса, 2ГИС)", "text"),
+    ("mail_yandex_password", "Пароль приложения Яндекс-почты (IMAP)", "password"),
+    ("mail_google_login", "Gmail проекта (письма Google Search Console)", "text"),
+    ("mail_google_password", "Пароль приложения Gmail (IMAP)", "password"),
+    # Google Диск для отчётов о прогонах: у каждого проекта может быть СВОЙ
+    # диск/папка. Внутри инструмент сам заводит
+    # <Проект>/<Год>/Сайт чекер/<Месяц>/<Дата>/<Вид прогона>/.
+    ("gdrive_shared_drive_id", "ID общего диска Google (отчёты проекта)", "text"),
+    ("gdrive_folder_id", "ID папки Google (если вместо диска - готовая папка)", "text"),
+    # Ключи OAuth-приложения Google. Технически они общие для всех проектов, но
+    # держим их ЗДЕСЬ, а не в секретах приложения: секреты видит только владелец
+    # хостинга, а настройки проекта - любой руководитель со своими правами.
+    # Вписываются один раз (одни и те же значения можно продублировать в каждый
+    # проект); секрет остаётся запасным источником.
+    ("google_oauth_client_id", "Google OAuth: Client ID (для подключения Диска)", "text"),
+    ("google_oauth_client_secret", "Google OAuth: Client secret", "password"),
 ]
 
 
@@ -197,7 +236,14 @@ def _c_all_rights() -> dict:
 
 @st.cache_data(ttl=20, show_spinner=False)
 def _c_proj_settings(pk: str) -> dict:
-    return db.get_project_settings(pk)
+    """Настройки проекта. Недоступность базы кэшируем как «настроек нет»:
+    иначе при обрыве канала КАЖДЫЙ рендер страницы заново ждёт дедлайн и
+    интерфейс стоит колом. Причину показываем один раз - см. вызов ниже."""
+    try:
+        return db.get_project_settings(pk)
+    except TimeoutError as e:
+        st.session_state['_settings_db_error'] = str(e)
+        return {}
 
 
 def live_settings_projects(user: dict) -> list[str]:
@@ -220,6 +266,13 @@ def project_setting(project_id: str, name: str):
         return _c_proj_settings(str(project_id)).get(name) or None
     except Exception:
         return None
+
+
+def settings_db_error() -> str:
+    """Почему настройки проекта не прочитались (или ''). Страницы показывают
+    это сообщение сами: без него «настройка не задана» выглядит как ошибка
+    пользователя, хотя на деле не отвечает база."""
+    return st.session_state.get('_settings_db_error', '')
 
 
 def _invalidate() -> None:
@@ -620,9 +673,123 @@ def render_account_ui() -> None:
         global _proxy_slot
         _proxy_slot = st.empty()
 
+        render_telegram_block(user)
+
         if st.button("Выйти", key="logout_btn", use_container_width=True):
             logout()
             st.rerun()
+
+
+def _tg_bot_token() -> str:
+    """Токен бота уведомлений (тот же, что шлёт отчёты)."""
+    try:
+        return str(st.secrets.get("telegram_bot_token") or "").strip()
+    except Exception:
+        return ""
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _tg_bot_name(token: str) -> tuple[str, str]:
+    """(@имя бота, текст ошибки). Ошибку возвращаем, а не глотаем: «бот не
+    отвечает» без причины не даёт понять, дело в токене, сети или вебхуке."""
+    import telegram_link
+    try:
+        return telegram_link.bot_username(token), ""
+    except Exception as e:  # noqa: BLE001
+        return "", str(e)
+
+
+def render_telegram_block(user: dict) -> None:
+    """«Уведомления в Telegram» в личном кабинете: ссылка-подключение и статус.
+
+    Человек жмёт ссылку, Telegram открывает бота и шлёт ему «/start <код>»;
+    кнопка «Проверить подключение» вычитывает апдейты и записывает chat_id.
+    Дальше отчёты о ЕГО прогонах приходят ему в личку - без ручного вписывания
+    chat_id в секреты."""
+    import telegram_link
+    from . import db
+
+    token = _tg_bot_token()
+    with st.expander("🔔 Уведомления в Telegram", expanded=False):
+        if not token:
+            st.caption("Бот не настроен: нет секрета `telegram_bot_token`.")
+            return
+        try:
+            row = db.telegram_get(user["id"])
+        except Exception as e:  # noqa: BLE001
+            st.caption(f"Не удалось прочитать привязку: {e}")
+            return
+
+        if row and row.get("chat_id"):
+            кто = row.get("username") or row["chat_id"]
+            st.success(f"Подключено: {кто}")
+            # Руководитель (и админ) может следить за всеми прогонами своих
+            # проектов - в том числе за чужими. Сотруднику выбор не нужен:
+            # ему приходят только его собственные запуски.
+            if user["role"] in ("manager", "admin"):
+                _варианты = ["own", "projects"]
+                _подписи = {
+                    "own": "Только мои запуски",
+                    "projects": ("Все прогоны по моим проектам"
+                                 if user["role"] == "manager"
+                                 else "Все прогоны по всем проектам"),
+                }
+                _тек = row.get("mode") if row.get("mode") in _варианты else "own"
+                _новый = st.radio(
+                    "Что присылать", _варианты, index=_варианты.index(_тек),
+                    format_func=lambda k: _подписи[k], key="tg_mode")
+                if _новый != _тек:
+                    db.telegram_set_mode(user["id"], _новый)
+                    st.rerun()
+            else:
+                st.caption("Отчёты о ваших прогонах приходят в этот чат.")
+            if st.button("Отключить", key="tg_unlink", use_container_width=True):
+                db.telegram_unlink(user["id"])
+                st.rerun()
+            return
+
+        bot, ошибка = _tg_bot_name(token)
+        if not bot:
+            st.caption(f"Бот не отвечает: {ошибка or 'причина неизвестна'}. "
+                       "Проверьте токен `telegram_bot_token` и доступ к "
+                       "api.telegram.org (при блокировке - через прокси).")
+            if st.button("Повторить", key="tg_retry", use_container_width=True):
+                _tg_bot_name.clear()
+                st.rerun()
+            return
+        code = (row or {}).get("code") or telegram_link.make_code(user["id"])
+        try:
+            row = db.telegram_ensure_code(user["id"], code)
+            code = row["code"]
+        except Exception as e:  # noqa: BLE001
+            st.caption(f"Не удалось создать код привязки: {e}")
+            return
+
+        st.caption("1. Откройте бота и нажмите «Start» 2. Вернитесь и нажмите "
+                   "«Проверить подключение».")
+        st.link_button("Открыть бота", telegram_link.link_url(bot, code),
+                       use_container_width=True)
+        if st.button("Проверить подключение", key="tg_check",
+                     use_container_width=True):
+            try:
+                _linked = telegram_link.try_link_all(token)
+            except Exception as e:  # noqa: BLE001
+                _hook = telegram_link.webhook_set(token)
+                if _hook:
+                    st.error("У бота задан вебхук - привязка кодом не работает. "
+                             "Снимите вебхук (deleteWebhook) или подключайте "
+                             "chat_id вручную.")
+                else:
+                    st.error(f"Telegram не ответил: {e}")
+            else:
+                # Подтвердиться могла привязка ДРУГОГО человека (его /start
+                # лежал в общей очереди апдейтов) - тогда для нажавшего ничего
+                # не изменилось, и делать вид, что всё готово, нельзя.
+                if str(user["id"]) in _linked:
+                    st.rerun()
+                else:
+                    st.info("Пока не вижу вашего «Start». Откройте бота по "
+                            "кнопке выше, нажмите «Start» и повторите проверку.")
 
 
 _proxy_slot = None
@@ -858,6 +1025,74 @@ def project_settings_page() -> None:
             except Exception as e:
                 st.error(f"❌ Не удалось сохранить: {e}")
 
+    render_gdrive_account(pid, cur)
+
+    # Google Диск для отчётов: сразу говорим, годится ли указанный ID. Личный
+    # gmail и Общий диск снаружи выглядят одинаково, а пишет туда сервисный
+    # аккаунт - разницу видно только пробной записью (см. drive_reports).
+    def _поле(name: str) -> str:
+        """Значение поля: сперва то, что человек ввёл ПРЯМО СЕЙЧАС (виджет), потом
+        сохранённое. Иначе проверка ругалась «укажите ID и сохраните» на уже
+        вставленный, но ещё не сохранённый ID - и выглядело как поломка."""
+        v = st.session_state.get(f"ps_{pid}_{name}")
+        return str(v if v is not None else cur.get(name, "") or "").strip()
+
+    # Из поля принимаем и голый ID, и ссылку на папку целиком.
+    try:
+        from drive_reports import folder_id as _folder_id
+    except Exception:  # noqa: BLE001
+        def _folder_id(v):
+            return v
+    _drive_id = _folder_id(_поле("gdrive_folder_id")
+                           or _поле("gdrive_shared_drive_id"))
+    # Что РЕАЛЬНО сохранено: значения из формы попадают в настройки только по
+    # кнопке «Сохранить ключи», и прогон берёт именно их. Без этой подписи
+    # выходило непонимание: в поле ссылка вставлена, а отчёты летят в корень.
+    _сохранённая_папка = _folder_id(cur.get("gdrive_folder_id")
+                                    or cur.get("gdrive_shared_drive_id") or "")
+    if _сохранённая_папка:
+        st.caption(f"Сейчас сохранено: папка `{_сохранённая_папка}` - отчёты "
+                   f"пойдут в неё.")
+    else:
+        st.caption("Папка не сохранена - отчёты лягут в корень Диска. Вставьте "
+                   "ссылку в поле выше и нажмите «💾 Сохранить ключи».")
+
+    if st.button("🔍 Проверить доступ к Google Диску", key=f"gd_check_{pid}"):
+        _refresh = (cur.get("gdrive_refresh_token") or "").strip()
+        if not _drive_id and not _refresh:
+            st.warning("Укажите ID папки или общего диска в полях выше (либо "
+                       "подключите аккаунт проекта) - и повторите проверку. "
+                       "Проверять можно сразу после ввода, до сохранения.")
+        else:
+            try:
+                import drive_reports
+                from kp_sheets import service_account_info
+                if _refresh:
+                    # Подключённый аккаунт проекта: проверяем запись ЕГО
+                    # токеном - сервисный аккаунт тут вообще ни при чём.
+                    import google_oauth
+                    cid, csec = _google_oauth_creds(pid, cur)
+                    tok = google_oauth.access_token(cid, csec, _refresh)
+                    res = drive_reports.check_write_as_user(
+                        tok, _drive_id or "root")
+                else:
+                    res = drive_reports.check_access(service_account_info(),
+                                                     _drive_id)
+            except Exception as e:  # noqa: BLE001
+                res = {"ok": False, "error": str(e), "kind": "", "name": ""}
+            if res.get("ok"):
+                _где = f"{res.get('kind') or 'Диск'} «{res.get('name') or ''}»".strip()
+                st.success(f"✅ {_где} доступен на запись - отчёты будут "
+                           f"складываться сюда: год / Сайт чекер / месяц / "
+                           f"дата / вид проверки.")
+                if _drive_id and _drive_id != (cur.get("gdrive_folder_id") or
+                                               cur.get("gdrive_shared_drive_id")):
+                    st.info("Не забудьте нажать «💾 Сохранить ключи» - "
+                            "проверка прошла по введённому значению, но в "
+                            "настройках оно ещё не сохранено.")
+            else:
+                st.error(f"❌ {res.get('error')}")
+
     # Проверка доступа к сайту - здесь, рядом с полем прокси. Раньше этот блок
     # висел на каждой странице чек-листов; убрали, чтобы настройки прокси были
     # ровно в одном месте.
@@ -869,6 +1104,218 @@ def project_settings_page() -> None:
                             known_proxy=cur.get("proxy_url") or None)
     except Exception as e:  # noqa: BLE001
         st.caption(f"⚠ Блок проверки доступа не загрузился: {e}")
+
+
+def _google_oauth_creds(pid: str | None = None,
+                        settings: dict | None = None) -> tuple[str, str]:
+    """(client_id, client_secret) для привязки Google-аккаунтов.
+
+    Порядок: настройки проекта (их видит и правит руководитель прямо в
+    интерфейсе) → секреты приложения (доступны только владельцу хостинга,
+    остаются как запасной вариант для уже настроенных установок)."""
+    cid = csec = ""
+    src = settings
+    if src is None and pid:
+        try:
+            src = _c_proj_settings(pid)
+        except Exception:  # noqa: BLE001
+            src = None
+    if src:
+        cid = str(src.get("google_oauth_client_id") or "").strip()
+        csec = str(src.get("google_oauth_client_secret") or "").strip()
+    if cid and csec:
+        return cid, csec
+    # Ключи OAuth-приложения ОДНИ на все проекты, поэтому вписывать их в каждый
+    # проект не нужно: если у этого пусто - берём у любого, где заполнено.
+    try:
+        for _p in project_keys():
+            if _p == pid:
+                continue
+            s = _c_proj_settings(_p)
+            _cid = str(s.get("google_oauth_client_id") or "").strip()
+            _csec = str(s.get("google_oauth_client_secret") or "").strip()
+            if _cid and _csec:
+                return _cid, _csec
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return (cid or str(st.secrets.get("google_oauth_client_id") or "").strip(),
+                csec or str(st.secrets.get("google_oauth_client_secret") or "").strip())
+    except Exception:
+        return cid, csec
+
+
+APP_GDRIVE_PID = "_app"          # «проект» для общей привязки Google (state OAuth)
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def _c_app_settings() -> dict:
+    return db.get_app_settings()
+
+
+def gdrive_account_settings(pid: str | None = None) -> dict:
+    """Данные подключённого Google-аккаунта для выкладки отчётов.
+
+    Сначала ОБЩАЯ привязка (один служебный аккаунт на все проекты - его
+    подключают один раз, а владельцы просто расшаривают ему папки), потом -
+    привязка конкретного проекта, если её успели сделать раньше."""
+    try:
+        app = _c_app_settings()
+    except Exception:  # noqa: BLE001
+        app = {}
+    if app.get("gdrive_refresh_token"):
+        return {"refresh_token": app["gdrive_refresh_token"],
+                "account": app.get("gdrive_account", ""), "scope": "общий"}
+    if pid:
+        try:
+            proj = _c_proj_settings(pid)
+        except Exception:  # noqa: BLE001
+            proj = {}
+        if proj.get("gdrive_refresh_token"):
+            return {"refresh_token": proj["gdrive_refresh_token"],
+                    "account": proj.get("gdrive_account", ""), "scope": "проект"}
+    return {}
+
+
+def render_gdrive_account(pid: str, cur: dict) -> None:
+    """Блок «Google Диск»: подключение СЛУЖЕБНОГО Google-аккаунта - одного на все
+    проекты.
+
+    Почему не сервисный аккаунт: Google прямо отвечает «Service Accounts do not
+    have storage quota» - файл, созданный им в чужой папке, писать некуда.
+    Почему один аккаунт, а не по одному на проект: вход через Google нужен
+    ровно раз, а владельцы проектов просто расшаривают свои папки на этот
+    обычный адрес почты - без паролей и подтверждений с их стороны."""
+    import google_oauth
+
+    st.markdown("**Google Диск: аккаунт для выкладки отчётов**")
+    привязка = gdrive_account_settings(pid)
+    if привязка:
+        _чей = ("общий для всех проектов" if привязка["scope"] == "общий"
+                else "привязан к этому проекту")
+        st.success(f"Подключён аккаунт: {привязка['account'] or 'Google'} "
+                   f"({_чей}). Отчёты складываются в папку, указанную выше; "
+                   f"если поле пустое - в «Мой диск» этого аккаунта.")
+        st.caption("Владельцу проекта достаточно расшарить свою папку на этот "
+                   "адрес с правом «Редактор».")
+        st.caption("Если в папке уже есть свои папки (например «2026»), а чекер "
+                   "заводит рядом такие же - подключение было выдано на узкий "
+                   "доступ «только файлы приложения»: созданное вручную оно не "
+                   "видит. Отключите аккаунт и подключите заново, отметив в "
+                   "окне Google все флажки.")
+        _к = st.columns(2)
+        if привязка["scope"] == "общий":
+            if _к[0].button("Отключить общий аккаунт", key="gd_unlink_app"):
+                db.set_app_settings({"gdrive_refresh_token": "",
+                                     "gdrive_account": ""})
+                _c_app_settings.clear()
+                st.rerun()
+        else:
+            if _к[0].button("Отключить аккаунт проекта", key=f"gd_unlink_{pid}"):
+                db.set_project_settings(pid, {**cur, "gdrive_refresh_token": "",
+                                              "gdrive_account": ""})
+                _invalidate()
+                st.rerun()
+        return
+
+    cid, csec = _google_oauth_creds(pid, cur)
+    base = _app_base_url()
+    if not (cid and csec):
+        st.caption("Заполните выше поля «Google OAuth: Client ID» и «Client "
+                   "secret» (берутся в Google Cloud → Credentials → OAuth "
+                   "client ID, тип Web application) и сохраните - тогда "
+                   "появится кнопка подключения. Если у проекта есть Общий "
+                   "диск (Workspace), подключать аккаунт не нужно: хватит "
+                   "поля с ID диска.")
+        return
+    if not base:
+        st.caption("Не задан `app.base_url` - без него Google некуда вернуть "
+                   "ответ авторизации.")
+        return
+    st.caption("Два способа - выберите удобный.")
+    _c1, _c2 = st.columns(2)
+    with _c1:
+        st.link_button(f"Подключить аккаунт «{project_label(pid)}»",
+                       google_oauth.auth_url(cid, base, pid),
+                       use_container_width=True)
+        st.caption("Входите почтой САМОГО проекта. Отчёты лягут на его Диск и "
+                   "займут его место. В окне Google отметьте ВСЕ флажки - без "
+                   "права видеть Диск чекер не найдёт готовые папки проекта. "
+                   "Почта должна быть в списке Test users экрана согласия "
+                   "(Google Cloud → OAuth consent screen).")
+    with _c2:
+        st.link_button("Подключить один служебный аккаунт",
+                       google_oauth.auth_url(cid, base, APP_GDRIVE_PID),
+                       use_container_width=True)
+        st.caption("Один вход на ВСЕ проекты. Владельцы просто расшаривают "
+                   "свои папки на его адрес («Редактор»); файлы лежат в папке "
+                   "проекта, место - служебного аккаунта.")
+
+
+def handle_gdrive_oauth_redirect() -> None:
+    """Приём ответа Google после согласия: ?code=…&state=gdrive:<проект>.
+
+    Зовётся из app.py на КАЖДОЙ странице - Google возвращает человека на
+    базовый адрес приложения, а не на страницу настроек."""
+    import google_oauth
+    try:
+        params = st.query_params
+        code = params.get("code")
+        state = params.get("state")
+    except Exception:  # noqa: BLE001
+        return
+    pid = google_oauth.project_from_state(state or "")
+    if not (code and pid):
+        return
+    # Код одноразовый: Streamlit успевает перерисовать страницу несколько раз с
+    # теми же параметрами, и второй обмен Google отбивает «Bad Request»
+    # (invalid_grant). Запоминаем уже обработанные коды.
+    _обработанные = st.session_state.setdefault("_gdrive_codes", set())
+    if code in _обработанные:
+        return
+    _обработанные.add(code)
+    # Ключи берём ПО ПРОЕКТУ из state: обработчик срабатывает на любой
+    # странице, до того как человек снова выбрал проект в интерфейсе.
+    # Для общей привязки (state = gdrive:_app) ключи берутся из любого проекта,
+    # где они заполнены - client_id/secret у OAuth-приложения одни на всех.
+    cid, csec = _google_oauth_creds(None if pid == APP_GDRIVE_PID else pid)
+    if pid == APP_GDRIVE_PID and not (cid and csec):
+        for _p in project_keys():
+            cid, csec = _google_oauth_creds(_p)
+            if cid and csec:
+                break
+    base = _app_base_url()
+    if not (cid and csec and base):
+        return
+    try:
+        res = google_oauth.exchange_code(cid, csec, code, base)
+        if pid == APP_GDRIVE_PID:
+            # Общий служебный аккаунт: одна привязка на всё приложение.
+            vals = {"gdrive_account": res.get("email", "")}
+            if res.get("refresh_token"):
+                vals["gdrive_refresh_token"] = res["refresh_token"]
+            db.set_app_settings(vals)
+            _c_app_settings.clear()
+            st.success(f"✅ Служебный Google-аккаунт {res.get('email') or ''} "
+                       f"подключён. Расшарьте на него папки проектов.")
+        else:
+            vals = dict(db.get_project_settings(pid))
+            if res.get("refresh_token"):
+                vals["gdrive_refresh_token"] = res["refresh_token"]
+            vals["gdrive_account"] = res.get("email", "")
+            db.set_project_settings(pid, vals)
+            _invalidate()
+            st.success(f"✅ Google-аккаунт {res.get('email') or ''} подключён к "
+                       f"проекту «{project_label(pid)}»")
+    except Exception as e:  # noqa: BLE001
+        st.error(f"❌ Подключить Google не вышло: {e}")
+    finally:
+        # Код одноразовый - убираем из адреса, иначе обновление страницы
+        # пыталось бы обменять его повторно и падало.
+        try:
+            st.query_params.clear()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def admin_panel_page() -> None:

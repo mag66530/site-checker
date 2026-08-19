@@ -121,10 +121,44 @@ _SOFT_HYPHEN_LIMIT = 30      # мягких переносов больше - з
 
 # Меню: пункты-«пустышки» (не прямые ссылки) и прямая ссылка на каталог.
 _RE_MENU_ZONE_ALL = re.compile(r'<(header|nav)\b[^>]*>.*?</\1>', re.I | re.S)
+# Запасная зона: сайт может быть на div-вёрстке без <header>/<nav> вовсе (так у
+# Метпромко - зона пустая, и проверка меню молча не работала, а в отчёте это
+# выглядело как «проблем нет»). Тогда ищем контейнеры, чей class/id говорит,
+# что это меню.
+_RE_MENU_ZONE_FALLBACK = re.compile(
+    r'<(ul|div|nav)\b[^>]*(?:class|id)\s*=\s*["\'][^"\']*'
+    r'(?:menu|nav|header)[^"\']*["\'][^>]*>.*?</\1>', re.I | re.S)
 _RE_A_DUMMY = re.compile(
     r'<a\b[^>]*href\s*=\s*["\'](?:#|javascript:[^"\']*)["\']', re.I)
+# Запасной признак каталога, когда пути категорий проекта не переданы. ВАЖНО:
+# у части проектов раздела /catalog нет вовсе (у АПС категории лежат в корне -
+# /chernyi-prokat), и такая проверка выписывала им ложное «нет ссылки на
+# каталог». Поэтому основной способ - сверка с реальными путями категорий, см.
+# menu_category_index.
 _RE_A_CATALOG = re.compile(
     r'<a\b[^>]*href\s*=\s*["\'][^"\']*/catalog[/"\']', re.I)
+
+
+def _norm_cat_path(p: str) -> str:
+    """Путь категории к сравнимому виду: нижний регистр, без слешей по краям."""
+    return (p or '').strip().lower().strip('/')
+
+
+def menu_category_index(paths) -> set:
+    """Множество путей категорий И ИХ РОДИТЕЛЕЙ - для поиска ссылки на каталог
+    в меню. Родители нужны потому, что в шапке обычно ссылка на РАЗДЕЛ
+    («/list/»), а в выгрузке каталога лежат его подкатегории
+    («/list/list-riflenyj/»).
+
+    Строится ОДИН раз на прогон и передаётся в check_layout: на каждой
+    странице пересобирать 12 тысяч путей ни к чему.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    out = set()
+    for p in paths or []:
+        segs = [s for s in _norm_cat_path(p).split('/') if s]
+        for i in range(1, len(segs) + 1):
+            out.add('/'.join(segs[:i]))
+    return out
 
 # Доступность: кнопки/ссылки-ИКОНКИ (без текста) должны иметь aria-label/
 # title - иначе скринридер объявит «кнопка» без смысла.
@@ -149,15 +183,22 @@ def _norm_host(h: str) -> str:
 
 
 def check_layout(html: Optional[str], css_infos: Optional[list],
-                 base_url: str = '', platform: str = '') -> dict:
+                 base_url: str = '', platform: str = '',
+                 menu_category_paths: Optional[set] = None) -> dict:
     """Проверка вёрстки одной страницы.
 
     css_infos - список {'url', 'status', 'has_media', 'minified'} по
     подключённым CSS (из кэша http_checker). base_url - адрес страницы (для
     определения СВОИХ CSS/JS). platform - движок сайта ('nextjs', 'bitrix', …):
     часть правил на chunk-сборках неприменима и даёт ложные срабатывания, см.
-    platform_profile. Пусто - определяем по HTML. Возвращает dict для
-    CheckResult.layout."""
+    platform_profile. Пусто - определяем по HTML.
+
+    menu_category_paths - пути категорий проекта и их разделов (собирает
+    menu_category_index), чтобы искать в меню ссылку на каталог ИМЕННО ЭТОГО
+    сайта, а не строку «/catalog»: у части проектов такого раздела нет вовсе.
+    Не передано - работает прежний признак «/catalog».
+
+    Возвращает dict для CheckResult.layout."""
     html = html or ''
     css_infos = css_infos or []
     issues, warnings = [], []
@@ -431,17 +472,52 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
     # Кап 500КБ: шапка всегда в начале документа, а зонный regex с .*? по
     # мегабайтному листингу - лишний CPU.
     menu_dummy, menu_catalog = 0, False
+    menu_checked, menu_zone = False, ''
     _menu_html = ' '.join(m.group(0)
                           for m in _RE_MENU_ZONE_ALL.finditer(body[:500_000]))
     if _menu_html:
+        menu_zone = 'header/nav'
+    else:
+        # Нет <header>/<nav> - пробуем контейнеры с «меню» в class/id.
+        _menu_html = ' '.join(
+            m.group(0) for m in _RE_MENU_ZONE_FALLBACK.finditer(body[:500_000]))
+        if _menu_html:
+            menu_zone = 'class/id'
+    if _menu_html:
+        # Закомментированную вёрстку не считаем - по таким пунктам посетитель
+        # перейти не может. Так же поступает extract_menu_links (прозвон меню):
+        # иначе выключенная из меню ссылка на категорию сходила бы за рабочую.
+        _menu_html = _RE_HTML_COMMENT.sub(' ', _menu_html)
+        menu_checked = True
         menu_dummy = len(_RE_A_DUMMY.findall(_menu_html))
-        menu_catalog = bool(_RE_A_CATALOG.search(_menu_html))
         if menu_dummy >= 2:
             warnings.append('пункты меню не прямыми ссылками (href="#"/'
                             'javascript:) - краулер по ним не пройдёт')
-        if not menu_catalog:
-            warnings.append('в меню шапки нет прямой ссылки на каталог '
-                            '(/catalog…) - категории недоступны в один клик')
+        # Ссылка на каталог: сверяем с РЕАЛЬНЫМИ путями категорий проекта, если
+        # они переданы. Иначе - старым признаком «/catalog» (он врёт проектам,
+        # у которых категории в корне).
+        if menu_category_paths:
+            for _href in _RE_A_HREF.findall(_menu_html):
+                try:
+                    _p = _norm_cat_path(urlsplit(urljoin(base_url, _href)).path)
+                except Exception:       # noqa: BLE001
+                    continue
+                if _p and _p in menu_category_paths:
+                    menu_catalog = True
+                    break
+            if not menu_catalog:
+                warnings.append('в меню шапки нет ссылок на категории каталога '
+                                '- категории недоступны в один клик')
+        else:
+            menu_catalog = bool(_RE_A_CATALOG.search(_menu_html))
+            if not menu_catalog:
+                warnings.append('в меню шапки нет прямой ссылки на каталог '
+                                '(/catalog…) - категории недоступны в один клик')
+    else:
+        # Молчать нельзя: в отчёте «нет находок» читалось бы как «меню в порядке».
+        warnings.append('меню не проверено: на странице нет ни <header>/<nav>, '
+                        'ни контейнера с «menu/nav» в class - проверить меню '
+                        'вручную')
 
     # 15. Последняя хлебная крошка должна быть БЕЗ ссылки (текущая страница).
     # Только на страницах СО ВЛОЖЕННОСТЬЮ - на главной/корне крошек нет.
@@ -485,6 +561,8 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'bad_hyphens': bad_hyphens,
         'menu_dummy': menu_dummy,
         'menu_catalog': menu_catalog,
+        'menu_checked': menu_checked,
+        'menu_zone': menu_zone,
         'crumb_last_link': crumb_last_link,
         'states': {'hover': has_hover, 'focus': has_focus,
                    'active': has_active},

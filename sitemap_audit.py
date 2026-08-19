@@ -25,6 +25,7 @@ sitemap_audit.py - аудит карты сайта (часть пункта 1.7
 Sitemap-индекс обходится рекурсивно (лимит файлов). Работает по тому же
 адресу, что и загрузка товаров (sitemap_url проекта / robots).
 """
+import asyncio
 import json
 import re
 import time
@@ -44,6 +45,23 @@ _RE_PRIORITY = re.compile(r'<priority>', re.I)
 MAX_SITEMAPS = 10        # файлов индекса за прогон
 MAX_ENTRIES = 20000      # записей <url> суммарно
 SNAPSHOT_SAMPLE = 1000   # сколько пар url→lastmod хранить между прогонами
+
+# Сколько адресов ИЗ карты прозваниваем на код ответа и noindex. Все нельзя:
+# в карте бывают сотни тысяч записей (у Метпромко - 290 406), это отдельный
+# прогон на часы. Берём срез с РАВНЫМ шагом по всему списку, а не первые N:
+# карта обычно отсортирована по разделам, и первые N - это один раздел.
+URL_PROBE_SAMPLE = 200
+URL_PROBE_CONCURRENCY = 8
+# Потолок времени на весь прозвон. Нужен именно потолок, а не только таймаут
+# одного запроса: 200 адресов по 20 с на восьми потоках, да ещё со второй
+# попыткой - это до 16 минут внутри получасового прогона. Что не успели -
+# помечаем как «не проверено», а не как находку.
+URL_PROBE_BUDGET_S = 180
+_PROBE_HEAD_BYTES = 200_000   # сколько читать для поиска meta robots в <head>
+
+_RE_XML_DECL_ENC = re.compile(r'<\?xml[^>]*encoding\s*=\s*["\']([^"\']+)["\']', re.I)
+_RE_LOOKS_XML = re.compile(r'\s*(<\?xml|<urlset\b|<sitemapindex\b)', re.I)
+_RE_LOOKS_HTML = re.compile(r'\s*(<!doctype html|<html\b)', re.I)
 
 
 def _norm_host(h: str) -> str:
@@ -66,6 +84,194 @@ _SM_TYPE_KEYS = (
 )
 
 
+def analyze_sitemap_file(url: str, data: bytes, content_type: str = '') -> dict:
+    """Формат и кодировка одного файла карты сайта (доп. чек-лист).
+
+    Формат: карта - это .xml или .txt. Проверяем не расширение (оно может быть
+    любым, если отдаётся через обработчик), а СОДЕРЖИМОЕ: XML-карта начинается
+    с <?xml/<urlset/<sitemapindex, txt-карта - это список адресов по строке.
+    HTML вместо карты - типовая поломка: сайт отдаёт страницу с кодом 200, и
+    робот читает пустую карту.
+
+    Кодировка: байты обязаны читаться как UTF-8; если в XML-декларации указана
+    другая кодировка - это тоже находка (робот поверит декларации).
+
+    → {'kind': 'xml'|'txt'|'html'|'непонятный', 'format_why': str|None,
+       'encoding_why': str|None, 'declared_encoding': str|None, 'text': str}
+    ЧИСТАЯ функция - есть юнит-тест.
+    """
+    data = data or b''
+    bom = data.startswith(b'\xef\xbb\xbf')
+    body = data[3:] if bom else data
+    try:
+        text = body.decode('utf-8')
+        enc_why = None
+    except UnicodeDecodeError:
+        text = body.decode('utf-8', errors='replace')
+        enc_why = 'файл не читается как UTF-8'
+
+    m = _RE_XML_DECL_ENC.search(text[:400])
+    declared = (m.group(1).strip().lower() if m else None)
+    if enc_why is None and declared and declared not in ('utf-8', 'utf8'):
+        enc_why = f'в XML-декларации заявлена кодировка {declared}, а не UTF-8'
+
+    ct = (content_type or '').split(';')[0].strip().lower()
+    if _RE_LOOKS_HTML.match(text):
+        kind, fmt_why = 'html', 'вместо карты сайта отдаётся HTML-страница'
+    elif _RE_LOOKS_XML.match(text):
+        kind, fmt_why = 'xml', None
+    elif _txt_sitemap_urls(text):
+        # txt-карта: непустой список адресов, по одному в строке.
+        kind, fmt_why = 'txt', None
+    else:
+        kind = 'непонятный'
+        fmt_why = (f'содержимое не похоже ни на XML, ни на список адресов'
+                   + (f' (Content-Type: {ct})' if ct else ''))
+    return {'kind': kind, 'format_why': fmt_why, 'encoding_why': enc_why,
+            'declared_encoding': declared, 'content_type': ct, 'text': text}
+
+
+def _txt_sitemap_urls(text: str) -> list:
+    """Адреса из txt-карты: по одному в строке, только http(s). Пустой список -
+    значит это не txt-карта. ЧИСТАЯ функция - есть юнит-тест."""
+    out = []
+    for raw in (text or '').splitlines():
+        s = raw.strip()
+        if not s or s.startswith('#'):
+            continue
+        if not s.lower().startswith(('http://', 'https://')) or ' ' in s:
+            return []                    # хоть одна «не строка-адрес» - не txt
+        out.append(s)
+    return out
+
+
+def pick_probe_sample(urls: list, limit: int = URL_PROBE_SAMPLE) -> list:
+    """Срез адресов для прозвона: равный шаг по всему списку, порядок сохранён.
+    Меньше лимита - берём всё. ЧИСТАЯ функция - есть юнит-тест."""
+    urls = [u for u in (urls or []) if u]
+    if limit <= 0:
+        return []
+    if len(urls) <= limit:
+        return list(urls)
+    step = len(urls) / limit
+    return [urls[int(i * step)] for i in range(limit)]
+
+
+async def probe_sitemap_urls(urls: list, *, proxy_url=None,
+                             limit: int = URL_PROBE_SAMPLE,
+                             concurrency: int = URL_PROBE_CONCURRENCY,
+                             budget_s: float = URL_PROBE_BUDGET_S,
+                             log=None) -> dict:
+    """Прозвон адресов ИЗ карты: код ответа и meta robots noindex.
+
+    Зачем именно так:
+      • редиректы НЕ ходим - 301 в карте сайта сам по себе находка, «куда
+        привёл» не меняет того, что в карте лежит устаревший адрес;
+      • берём GET, а не HEAD: заодно нужен <head> для meta robots, а часть
+        сайтов на HEAD отвечает иначе, чем на обычный запрос;
+      • noindex ищем и в meta, и в заголовке X-Robots-Tag - равноправные
+        сигналы, второй в HTML не виден вовсе.
+
+    Сеть отдельно от кодов ответа: таймаут или обрыв - это НЕ «страница
+    отвечает не 200», это «проверить не удалось». Свалить их в одну кучу
+    значит отправить клиенту в работу живые адреса, до которых не доехали мы
+    сами. Поэтому на сетевой сбой даём вторую попытку, и только потом
+    записываем адрес в unreachable - отдельным, мягким списком.
+
+    → {'checked', 'sample_of', 'bad_status': [{'url','status'}],
+       'noindex': [{'url','signal'}], 'unreachable': [{'url','why'}],
+       'blocked': int, 'error': str|None}
+    """
+    import aiohttp
+    from indexing_checker import (_find_meta_robots, _x_robots_noindex,
+                                  is_blocked_status)
+    from sitemap import _sitemap_headers
+
+    sample = pick_probe_sample(urls, limit)
+    out = {'checked': 0, 'sample_of': len(urls or []), 'bad_status': [],
+           'noindex': [], 'unreachable': [], 'blocked': 0, 'skipped': 0,
+           'error': None}
+    if not sample:
+        return out
+    sem = asyncio.Semaphore(max(1, concurrency))
+    дедлайн = time.monotonic() + max(0.0, budget_s)
+
+    def _почему(e: Exception) -> str:
+        """Текст сетевой ошибки. У таймаутов aiohttp str(e) пустой - тогда
+        берём имя класса, иначе в отчёт уходит «нет ответа: »."""
+        return (str(e) or '').strip() or type(e).__name__
+
+    async def one(session, url):
+        последняя = ''
+        for попытка in (1, 2):          # вторая попытка - против случайных таймаутов
+            if time.monotonic() >= дедлайн:
+                # Бюджет вышел: честно «не проверено». Первая попытка уже
+                # могла упасть - но раз времени нет, выводов не делаем.
+                return {'url': url, 'status': None, 'skipped': True}
+            async with sem:
+                try:
+                    async with session.get(
+                            url, timeout=aiohttp.ClientTimeout(total=20),
+                            allow_redirects=False, proxy=proxy_url) as r:
+                        status = r.status
+                        hdrs = {k.lower(): v for k, v in r.headers.items()}
+                        body = b''
+                        if status == 200:
+                            body = await r.content.read(_PROBE_HEAD_BYTES)
+                    break
+                except Exception as e:      # noqa: BLE001
+                    последняя = _почему(e)
+            if попытка == 2:
+                return {'url': url, 'status': None, 'error': последняя}
+        html = body.decode('utf-8', errors='replace') if body else ''
+        _, meta_noidx = _find_meta_robots(html) if html else (None, False)
+        x_val, x_noidx = _x_robots_noindex(hdrs)
+        return {'url': url, 'status': status, 'meta_noindex': meta_noidx,
+                'x_noindex': x_noidx, 'x_val': x_val, 'error': None,
+                'blocked': is_blocked_status(status)}
+
+    try:
+        async with aiohttp.ClientSession(
+                headers=_sitemap_headers(url=sample[0])) as session:
+            результаты = await asyncio.gather(
+                *(one(session, u) for u in sample))
+    except Exception as e:              # noqa: BLE001
+        out['error'] = str(e)
+        return out
+
+    for r in результаты:
+        if r.get('skipped'):
+            out['skipped'] += 1
+            continue
+        out['checked'] += 1
+        st = r.get('status')
+        if st is None:
+            # До адреса не доехали мы - в находки клиенту это не идёт.
+            out['unreachable'].append({'url': r['url'],
+                                       'why': r.get('error') or 'нет ответа'})
+            continue
+        if r.get('blocked'):
+            # 403/429/503 - это про защиту сайта, а не про адрес в карте.
+            out['blocked'] += 1
+            continue
+        if st != 200:
+            out['bad_status'].append({'url': r['url'], 'status': st})
+            continue
+        if r.get('meta_noindex') or r.get('x_noindex'):
+            out['noindex'].append({
+                'url': r['url'],
+                'signal': ('X-Robots-Tag: ' + (r.get('x_val') or 'noindex')
+                           if r.get('x_noindex') else 'meta robots: noindex')})
+    if log:
+        log('info', f'Прозвон карты сайта: проверено {out["checked"]} из '
+                    f'{out["sample_of"]}, не 200 - {len(out["bad_status"])}, '
+                    f'с noindex - {len(out["noindex"])}, '
+                    f'не доехали - {len(out["unreachable"])}'
+                    + (f', не успели за {int(budget_s)} с - {out["skipped"]}'
+                       if out['skipped'] else ''))
+    return out
+
+
 def _sitemap_type(loc: str) -> str:
     """Тип дочернего sitemap по имени файла; не опознан → 'прочее'.
     Слово «sitemap» вырезаем: оно содержит подстроку «item» и иначе
@@ -79,15 +285,21 @@ def _sitemap_type(loc: str) -> str:
 
 async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                         known_categories=None, known_filters=None,
-                        known_services=None, log=None) -> dict:
+                        known_services=None, log=None,
+                        probe_urls: int = URL_PROBE_SAMPLE) -> dict:
     """Скачать sitemap (с обходом индекса) и проверить структуру записей.
+
+    probe_urls - сколько адресов ИЗ карты прозвонить на код ответа и noindex
+    (0 - не звонить вовсе).
 
     Возвращает {'files': n, 'total': n, 'bad_urls': [{'url','why'}, …],
                 'with_lastmod': n, 'with_changefreq': n, 'with_priority': n,
                 'lastmod_dates': {url: lastmod}, 'is_index': bool,
                 'file_stats': [{'url','urls','bytes'}], 'truncated': bool,
                 'index_children': [{'url','type'}], 'index_types': [str],
-                'missing_catalog': {...}|None, 'error': str|None}."""
+                'missing_catalog': {...}|None,
+                'format_issues': [{'url','why'}], 'encoding_issues': [...],
+                'url_probe': {...}|None, 'error': str|None}."""
     import aiohttp
     from urllib.parse import urlsplit
     from sitemap import _sitemap_headers
@@ -95,12 +307,16 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
            'with_lastmod': 0, 'with_changefreq': 0, 'with_priority': 0,
            'lastmod_dates': {}, 'is_index': False, 'file_stats': [],
            'truncated': False, 'index_children': [], 'index_types': [],
-           'missing_catalog': None, 'error': None}
+           'missing_catalog': None, 'format_issues': [], 'encoding_issues': [],
+           'url_probe': None, 'error': None}
     my_host = _norm_host(host)
     sm_paths = set()          # нормализованные пути всех URL из sitemap
+    all_locs = []             # абсолютные адреса из карты - для прозвона
     seen, queue = set(), [root_url]
     try:
-        async with aiohttp.ClientSession(headers=_sitemap_headers()) as session:
+        # url= - вход на закрытый сайт (там и sitemap за паролем).
+        async with aiohttp.ClientSession(
+                headers=_sitemap_headers(url=root_url)) as session:
             while queue:
                 if out['files'] >= MAX_SITEMAPS or out['total'] >= MAX_ENTRIES:
                     out['truncated'] = True
@@ -119,13 +335,38 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                                 return out
                             continue
                         data = await r.read()
-                        xml = data.decode('utf-8', errors='replace')
+                        _ct = r.headers.get('Content-Type', '')
                 except Exception as e:
                     if not out['files']:
                         out['error'] = f'sitemap не скачался: {e}'
                         return out
                     continue
+                # Формат и кодировка файла (доп. чек-лист). Текст берём отсюда:
+                # он уже без BOM и с честным разбором UTF-8.
+                _f = analyze_sitemap_file(u, data, _ct)
+                xml = _f['text']
+                if _f['format_why'] and len(out['format_issues']) < 20:
+                    out['format_issues'].append({'url': u, 'why': _f['format_why']})
+                if _f['encoding_why'] and len(out['encoding_issues']) < 20:
+                    out['encoding_issues'].append({'url': u,
+                                                   'why': _f['encoding_why']})
                 out['files'] += 1
+                if _f['kind'] == 'txt':
+                    # txt-карта: просто список адресов, без lastmod/priority.
+                    _txt_urls = _txt_sitemap_urls(xml)
+                    for loc in _txt_urls:
+                        if out['total'] >= MAX_ENTRIES:
+                            out['truncated'] = True
+                            break
+                        out['total'] += 1
+                        all_locs.append(loc)
+                        try:
+                            sm_paths.add(_norm_path(urlsplit(loc).path))
+                        except Exception:
+                            pass
+                    out['file_stats'].append(
+                        {'url': u, 'urls': len(_txt_urls), 'bytes': len(data)})
+                    continue
                 if _RE_INDEX.search(xml):
                     if u == root_url:
                         out['is_index'] = True
@@ -149,6 +390,7 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                         continue
                     out['total'] += 1
                     _file_urls += 1
+                    all_locs.append(loc)
                     try:
                         sm_paths.add(_norm_path(urlsplit(loc).path))
                     except Exception:
@@ -197,6 +439,12 @@ async def audit_sitemap(root_url: str, host: str, *, proxy_url=None,
                 'filters': _missing(known_filters)[:50],
                 'services': _missing(known_services)[:50],
             }
+
+        # ── Адреса ИЗ карты: код ответа и noindex (доп. чек-лист) ──
+        # Своим запросом, срезом по всей карте: см. URL_PROBE_SAMPLE.
+        if probe_urls and all_locs:
+            out['url_probe'] = await probe_sitemap_urls(
+                all_locs, proxy_url=proxy_url, limit=probe_urls, log=log)
     except Exception as e:
         out['error'] = str(e)
     return out
@@ -215,14 +463,20 @@ async def audit_html_sitemap(host: str, *, proxy_url=None) -> dict:
     """HTML-карта сайта (доп. чек-лист): существует по типовому адресу
     и не содержит ссылок на служебные страницы.
 
-    Возвращает {'url': str|None, 'status': int|None,
-                'junk_links': [{'url','label'}], 'error': str|None}."""
+    Возвращает {'url': str|None, 'status': int|None, 'blocked': int|None,
+                'junk_links': [{'url','label'}], 'error': str|None}.
+
+    blocked - код вида 403/429/503, если сайт не пустил пробу. Тогда «карта не
+    найдена» сказать нельзя: мы просто не смогли посмотреть."""
     import aiohttp
     from urllib.parse import urlsplit, urljoin
     from sitemap import _sitemap_headers
-    out = {'url': None, 'status': None, 'junk_links': [], 'error': None}
+    from indexing_checker import is_blocked_status
+    out = {'url': None, 'status': None, 'blocked': None,
+           'junk_links': [], 'error': None}
     try:
-        async with aiohttp.ClientSession(headers=_sitemap_headers()) as session:
+        async with aiohttp.ClientSession(
+                headers=_sitemap_headers(url=f'https://{host}/')) as session:
             html = None
             for path in ('/sitemap/', '/sitemap.html'):
                 u = f'https://{host}{path}'
@@ -237,6 +491,8 @@ async def audit_html_sitemap(host: str, *, proxy_url=None) -> dict:
                             break
                         if out['status'] is None:
                             out['url'], out['status'] = u, r.status
+                        if out['blocked'] is None and is_blocked_status(r.status):
+                            out['blocked'] = r.status
                 except Exception as e:
                     if out['error'] is None:
                         out['error'] = str(e)
