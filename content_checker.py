@@ -448,6 +448,7 @@ class _Ctx:
     html_lower: str
     text: str
     text_lower: str
+    url: str = ''
     # Регионы шапки/подвала - чтобы проверять «телефон в шапке» и «телефон в
     # подвале» по отдельности, а не «телефон где-то на странице».
     # *_html - сырой HTML региона (телефон/почту ищем тут: там tel:/mailto:),
@@ -1016,7 +1017,11 @@ def _photo_stub_names(html: str, limit: int = 8) -> list[str]:
 
 def _d_catalog_blocks(c: _Ctx):
     # Блоки каталога на корне: ссылки на разделы/подкатегории (/catalog/<раздел>/).
-    n = len(set(re.findall(r'href="[^"]*/catalog/[a-z0-9\-]+/', c.html_lower)))
+    # steelborg.ru отдаёт адреса БЕЗ слеша на конце (trailing_slash: false у
+    # проекта) - для остальных проектов паттерн (со слешем) не меняем.
+    pattern = (r'href="[^"]*/catalog/[a-z0-9\-]+"' if 'steelborg.ru' in c.url
+               else r'href="[^"]*/catalog/[a-z0-9\-]+/')
+    n = len(set(re.findall(pattern, c.html_lower)))
     return n >= 3, n
 
 
@@ -1570,6 +1575,7 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
         html_lower=html.lower(),
         text=html_to_visible_text(html),
         text_lower='',
+        url=url,
     )
     ctx.text_lower = ctx.text.lower()
 
