@@ -92,6 +92,11 @@ PROJECTS = {
             'domain': 'metpromko.ru'},
     'mtt': {'name': 'МТТ - Меттранстерминал', 'google': '', 'yandex': '',
             'domain': 'met-trans.ru'},
+    # Почты кабинетов пока не переданы. Аккаунт Яндекса, под которым выдан
+    # рабочий токен Метрики проекта, - steelborg-msk; вписать сюда, когда
+    # подтвердят, что кабинеты Вебмастера и GSC на нём же.
+    'stb': {'name': 'STB - Steelborg', 'google': '', 'yandex': '',
+            'domain': 'steelborg.ru'},
 }
 
 
