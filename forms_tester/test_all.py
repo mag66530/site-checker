@@ -4229,7 +4229,11 @@ def _html_структурные_проверки(form, html: str = "", куки
                 js_рисует_согласие = True
                 break
 
-    if not js_рисует_согласие:
+    if js_рисует_согласие:
+        # Служебный маркер для вызывающего кода: по статике не ответить, нужен
+        # браузер. В отчёт не попадает - вызывающий его вынимает через pop().
+        out["_согласие_рисует_js"] = True
+    else:
         out["согласие_чекбоксы"] = f"{len(видимые_cb)} (нужно ≥2)"
         out["согласие_предустановка"] = ('да' if not предустановлены
                                          else 'НЕТ - стоят по умолчанию')
@@ -7899,6 +7903,10 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             try:
                 _куки = csrf_куки_инфо(_куки_из_ответа_requests(response))
                 _структ = _html_структурные_проверки(form, response.text, _куки)
+                # Согласие рисует JS - по статике не видно. Дочитываем в браузере
+                # (без отправки), иначе колонки 2.13 остались бы прочерками.
+                if _структ.pop("_согласие_рисует_js", False):
+                    _структ.update(_согласие_через_браузер(url, форма_config, название))
             except Exception as _est:  # noqa: BLE001
                 print(f"      ⚠️ Структурные проверки по коду не удались: {_est}")
 
@@ -11492,6 +11500,115 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 page.close()
             except Exception:
                 pass
+
+    def _согласие_через_браузер(url, форма_config, название):
+        """Согласие 2.13 у формы, проверенной ПО КОДУ: доразведка в браузере.
+
+        Блок согласия часто рисует JS в пустой контейнер (у СМУ это
+        <div class="confidentiality_checkboxes" data-conf-id="…"></div>), и по
+        статическому HTML галочек не видно - `_html_структурные_проверки` в таком
+        случае вердикт не выносит, иначе выходит ложное «чек-боксов нет». Здесь
+        открываем страницу настоящим браузером и считаем галочки на живой форме,
+        НИЧЕГО не отправляя (форма уже отправлена через requests).
+
+        Возвращает те же log-ключи, что и браузерный путь, или {} если форму
+        найти не удалось (тогда в отчёте останутся прочерки).
+        """
+        use_text = "text" in форма_config and str(форма_config.get("text", "")).strip()
+        sel = _playwright_form_css_selector(форма_config)
+        if not use_text and not sel:
+            return {}
+
+        def _найти(page):
+            if use_text:
+                loc = page.locator("form").filter(
+                    has_text=str(форма_config["text"]).strip())
+                return loc if loc.count() else None
+            for cand in _expand_form_selector_fallbacks(sel):
+                try:
+                    loc = page.locator(cand)
+                    if loc.count():
+                        return loc
+                except Exception:  # noqa: BLE001
+                    continue
+            return None
+
+        def _run(page):
+            try:
+                _goto_with_retry(page, url)
+                page.wait_for_timeout(1500)
+                _run_page_prep(page, определить_страницу(url))
+            except Exception:  # noqa: BLE001
+                return {}
+            try:
+                закрыть_попап_региона(page)
+            except Exception:  # noqa: BLE001
+                pass
+            loc = _найти(page)
+            if loc is None:
+                # Форма могла отрисоваться позже (AJAX) - подождём и повторим.
+                try:
+                    page.wait_for_selector(sel, timeout=4000, state="attached")
+                except Exception:  # noqa: BLE001
+                    pass
+                loc = _найти(page)
+            if loc is None:
+                return {}
+            try:
+                idx = int(форма_config.get("индекс", 0))
+            except (TypeError, ValueError):
+                idx = 0
+            scope = loc.nth(idx) if idx < loc.count() else loc.first
+            # Галочки согласия дорисовывает JS - дадим ему долистать.
+            try:
+                scope.scroll_into_view_if_needed(timeout=3000)
+            except Exception:  # noqa: BLE001
+                pass
+            for _ in range(10):
+                try:
+                    if scope.locator("input[type='checkbox']").count():
+                        break
+                except Exception:  # noqa: BLE001
+                    break
+                page.wait_for_timeout(500)
+            c = проверка_согласия_2_13(scope, page)
+            n = c.get("чекбоксов", 0)
+            # «Согласие текстом» - только когда чекбоксов НЕТ вовсе (тот же
+            # критерий, что в браузерном пути): текст рядом с живыми галочками
+            # не отменяет их.
+            текст = bool(c.get("текст_согласия")) and n == 0
+            где = "рядом с формой" if c.get("текст_рядом") else "у кнопки"
+            if текст:
+                обяз = ''
+            elif c.get("валидация"):
+                обяз = 'да'
+            elif n == 0:
+                обяз = 'нет'
+            else:
+                обяз = 'не подтверждено'
+            return {
+                "согласие_чекбоксы": (f"0 - чекбокса нет, есть текст-согласие ({где})"
+                                      if текст else f"{n} (нужно ≥2)"),
+                "согласие_предустановка": ('' if n == 0
+                                           else ('да' if not c.get("предустановлены")
+                                                 else 'НЕТ - стоят по умолчанию')),
+                "согласие_ссылка": ('да' if (c.get("ссылка") or c.get("ссылка_рядом"))
+                                    else 'нет'),
+                "согласие_обязательно": обяз,
+            }
+
+        try:
+            рез = _with_browser_page(_run) or {}
+        except Exception as e:  # noqa: BLE001
+            print(f"   ⚠️ Доразведка согласия в браузере не удалась «{название}»: {e}")
+            return {}
+        if рез:
+            print(f"   🔎 Согласие «{название}» дочитано в браузере: "
+                  f"чек-боксов {рез['согласие_чекбоксы']}, "
+                  f"ссылка на политику: {рез['согласие_ссылка']}")
+        else:
+            print(f"   ⚠️ Согласие «{название}»: форму в браузере не нашли - прочерки")
+        return рез
 
     def отправить_форму_через_playwright(url, форма_config, название):
         """
