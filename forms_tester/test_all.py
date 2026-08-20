@@ -4127,6 +4127,12 @@ _CSRF_ИМЯ_RE = re.compile(
     r"csrf|sessid|_token|authenticity_token|requestverificationtoken|xsrf|nonce",
     re.I)
 
+# Пустой контейнер, который наполняет JS уже в браузере. У СМУ это
+# <div class="confidentiality_checkboxes" data-conf-id="form-order-quick_order"></div>:
+# в статическом HTML чекбоксов согласия нет, на живой странице их два.
+_СОГЛАСИЕ_КОНТЕЙНЕР_RE = re.compile(
+    r"confid|consent|agree|soglas|privacy|policy|personal|politic", re.I)
+
 
 def _html_структурные_проверки(form, html: str = "", куки: dict | None = None) -> dict:
     """Структурные проверки формы ПО СТАТИЧЕСКОМУ HTML (без браузера) - те же
@@ -4203,11 +4209,32 @@ def _html_структурные_проверки(form, html: str = "", куки
         if ссылка_ведёт_на_политику(str(_attr(a, "href") or ""), txt):
             ссылка = True
             break
-    out["согласие_чекбоксы"] = f"{len(видимые_cb)} (нужно ≥2)"
-    out["согласие_предустановка"] = ('да' if not предустановлены
-                                     else 'НЕТ - стоят по умолчанию')
-    out["согласие_ссылка"] = 'да' if ссылка else 'нет'
-    out["согласие_обязательно"] = 'да' if обязательно else 'нет'
+    # Отсутствие чекбоксов в статике НЕ доказывает их отсутствие на странице:
+    # блок согласия часто рисует JS в пустой контейнер. В таком случае вердикт не
+    # выносим - колонки остаются прочерками (как до code-проверок), иначе форма с
+    # реально работающим согласием получает ложный ✗.
+    js_рисует_согласие = False
+    if not видимые_cb:
+        for el in _find_all(True):
+            try:
+                if el.find("input") is not None or (el.get_text() or "").strip():
+                    continue
+                признаки = " ".join(
+                    [" ".join(_attr(el, "class") or []), str(_attr(el, "id") or "")]
+                    + [f"{k} {v}" for k, v in (el.attrs or {}).items()
+                       if k.startswith("data-")])
+            except Exception:  # noqa: BLE001
+                continue
+            if _СОГЛАСИЕ_КОНТЕЙНЕР_RE.search(признаки):
+                js_рисует_согласие = True
+                break
+
+    if not js_рисует_согласие:
+        out["согласие_чекбоксы"] = f"{len(видимые_cb)} (нужно ≥2)"
+        out["согласие_предустановка"] = ('да' if not предустановлены
+                                         else 'НЕТ - стоят по умолчанию')
+        out["согласие_ссылка"] = 'да' if ссылка else 'нет'
+        out["согласие_обязательно"] = 'да' if обязательно else 'нет'
 
     # ── Выпадающие списки: пустой <select> - битый; со списком - корректно. ──
     selects = _find_all("select")
