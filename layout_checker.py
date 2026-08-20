@@ -182,6 +182,70 @@ def _norm_host(h: str) -> str:
     return (h or '').lower().removeprefix('www.')
 
 
+# ── Теги-артефакты форматирования (пункт «Верстка») ─────────────────
+# <strong>/<b>/<em> в ПОДЗАГОЛОВКАХ, шапке и подвале - следы копипаста из Word/
+# визуального редактора: жирность и курсив там задаются стилями, а не тегами.
+# <i> сюда же, НО только с текстом: пустой <i> и <i class="icon…"> - это иконка
+# (у МПЭ таких в шапке 549 штук), её артефактом считать нельзя.
+_ARTIFACT_TAGS = ('strong', 'b', 'em', 'i')
+_RE_ARTIFACT = re.compile(
+    r'<(%s)\b([^>]*)>(.*?)</\1\s*>' % '|'.join(_ARTIFACT_TAGS), re.I | re.S)
+_RE_SUBHEAD = re.compile(r'<h([2-6])\b[^>]*>(.*?)</h\1\s*>', re.I | re.S)
+_RE_HEADER_ZONE = re.compile(r'<(header|nav)\b[^>]*>(.*?)</\1\s*>', re.I | re.S)
+_RE_FOOTER_ZONE = re.compile(r'<(footer)\b[^>]*>(.*?)</\1\s*>', re.I | re.S)
+# Классы иконочных шрифтов: fa/fas/fab, icon, material-icons, glyphicon, ion.
+_RE_ICON_CLASS = re.compile(
+    r'class\s*=\s*["\'][^"\']*\b(?:fa[srlbd]?-|fa\b|icon|ico\b|glyphicon|'
+    r'material-icons|ion-|bi-|ti-)', re.I)
+# Сколько примеров тащим в отчёт (иначе строка раздувается на весь экран).
+_ARTIFACT_EXAMPLES = 5
+
+
+def _текст_без_тегов(s: str) -> str:
+    return _RE_STRIP_TAGS.sub('', s or '').replace('&nbsp;', ' ').strip()
+
+
+def артефакты_в_куске(html_кусок: str, зона: str) -> list:
+    """Найти теги-артефакты в куске разметки. Возвращает список
+    {'тег','зона','текст'}. ЧИСТАЯ функция - есть юнит-тест.
+
+    Иконки не считаем: <i> без текста или с иконочным классом - это значок, а
+    не «жирный кусок текста»."""
+    out = []
+    for m in _RE_ARTIFACT.finditer(html_кусок or ''):
+        тег = m.group(1).lower()
+        атрибуты, внутри = m.group(2) or '', m.group(3) or ''
+        текст = _текст_без_тегов(внутри)
+        if тег == 'i' and (not текст or _RE_ICON_CLASS.search(атрибуты)):
+            continue                      # иконка, а не форматирование текста
+        if not текст:
+            continue                      # пустой тег-обёртка - не артефакт
+        out.append({'тег': тег, 'зона': зона, 'текст': текст[:60]})
+    return out
+
+
+def проверить_артефакты(html: str) -> dict:
+    """Теги-артефакты (<strong>/<b>/<em>/<i> с текстом) в подзаголовках h2-h6,
+    шапке/меню и подвале. h1 не трогаем - его чистота проверяется отдельно
+    (meta_checker._h1_has_inner_markup), иначе одна и та же находка попадала бы
+    в отчёт дважды.
+
+    Возвращает {'всего', 'по_зонам', 'примеры'}."""
+    html = html or ''
+    найдено = []
+    for m in _RE_SUBHEAD.finditer(html):
+        найдено += артефакты_в_куске(m.group(2), f'подзаголовок h{m.group(1)}')
+    for m in _RE_HEADER_ZONE.finditer(html):
+        найдено += артефакты_в_куске(m.group(2), 'шапка/меню')
+    for m in _RE_FOOTER_ZONE.finditer(html):
+        найдено += артефакты_в_куске(m.group(2), 'подвал')
+    по_зонам = {}
+    for a in найдено:
+        по_зонам[a['зона']] = по_зонам.get(a['зона'], 0) + 1
+    return {'всего': len(найдено), 'по_зонам': по_зонам,
+            'примеры': найдено[:_ARTIFACT_EXAMPLES]}
+
+
 def check_layout(html: Optional[str], css_infos: Optional[list],
                  base_url: str = '', platform: str = '',
                  menu_category_paths: Optional[set] = None) -> dict:
@@ -539,6 +603,19 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
                                 'страница в крошках должна быть текстом '
                                 'без ссылки')
 
+    # 16. Теги-артефакты (<strong>/<b>/<em>/<i> с текстом) в подзаголовках,
+    # шапке и подвале - следы копипаста из редактора; жирность/курсив там
+    # задаются стилями. Замечание, а не ошибка: сайт от этого не ломается.
+    артефакты = проверить_артефакты(body)
+    if артефакты['всего']:
+        _зоны = ', '.join(f'{з} - {n}' for з, n in
+                          sorted(артефакты['по_зонам'].items(),
+                                 key=lambda x: -x[1]))
+        _прим = '; '.join(f'<{a["тег"]}> «{a["текст"]}»'
+                          for a in артефакты['примеры'][:3])
+        warnings.append(f'теги-артефакты форматирования: {артефакты["всего"]} '
+                        f'({_зоны}). Например: {_прим}')
+
     return {
         'viewport': viewport,
         'css_total': len(css_infos),
@@ -567,6 +644,7 @@ def check_layout(html: Optional[str], css_infos: Optional[list],
         'states': {'hover': has_hover, 'focus': has_focus,
                    'active': has_active},
         'icon_noaria': icon_noaria,
+        'artifacts': артефакты,
         'issues': issues,
         'warnings': warnings,
     }

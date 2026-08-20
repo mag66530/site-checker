@@ -370,7 +370,15 @@ class ContentResult:
 # сум/сўм/UZS, сом/KGS, ₼/манат/AZN, ֏/драм/AMD, BYN; учитываем копейки и
 # пробелы (в т.ч. неразрывные) в числе, плюс сокращения «р.», «с.»/«c.» и
 # киргизский сом в виде «c/кг» (латинская ИЛИ кириллическая c перед «/»).
-_PRICE_RE = re.compile(r'\d[\d\s\u00a0]{0,12}(?:[.,]\d{1,2})?\s*(?:[₽₸₼֏]|руб|тенге|тг\.?|сум|сўм|сом|манат|драм|uzs|kzt|kgs|byn|azn|amd|rub|р\.|[сc]\.|[сc](?=\s*/))', re.IGNORECASE)
+# Разделителем тысяч бывает запятая ('25,170 Р' - МТТ), а рубль на части
+# сайтов пишут одной буквой 'Р' без точки: её засчитываем, только если
+# следом не буква и не цифра, иначе '150 РАЗМЕР' сошло бы за цену.
+_PRICE_RE = re.compile(r'\d[\d\s\u00a0,]{0,12}(?:[.,]\d{1,2})?\s*(?:[₽₸₼֏]|руб|тенге|тг\.?|сум|сўм|сом|манат|драм|uzs|kzt|kgs|byn|azn|amd|rub|р\.|р(?![а-яёa-z0-9])|[сc]\.|[сc](?=\s*/))', re.IGNORECASE)
+# Цена микроразметкой: <td class="product-list__price" itemprop="price"
+# content="25948"> (МТТ: цены лежат в таблице типоразмеров). Сигнал точный -
+# валюту рядом писать необязательно.
+_RE_PRICE_MICRO = re.compile(
+    r'itemprop\s*=\s*"price"[^>]*content\s*=\s*"\s*\d', re.I)
 _PHONE_RE = re.compile(
     # Узбекистан: +998 (90) 006-84-48 / tel:998900068448
     r'\+?998[\s\-(]*\d{2}[\s\-)]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}'
@@ -462,12 +470,18 @@ class _Ctx:
     footer_html: str = ''
     footer_text: str = ''
     footer_text_lower: str = ''
+    # Регионы найдены по тегам <header>/<footer> (точно), а не «по положению»
+    # (первые/последние 28% страницы - грубая догадка).
+    header_exact: bool = False
+    footer_exact: bool = False
     # «Ценовая» область: на карточке товара - текст ДО блока рекомендаций
     # («с этим товаром покупают», «похожие»), чтобы цена/«по запросу» из
     # чужих карточек снизу не считались ценой самого товара. На листинге и
     # прочих типах = весь текст страницы.
     price_text: str = ''
     price_text_lower: str = ''
+    # Тот же кусок, но HTML - для цены микроразметкой (itemprop="price").
+    price_html_lower: str = ''
     # «Видимая» часть страницы (без disabled/скрытых блоков) - для цены и
     # кнопок: то, что покупатель реально видит. Скрытая цена/кнопка = её нет.
     vis_html_lower: str = ''
@@ -499,10 +513,31 @@ def _d_h2(c: _Ctx):
 _RE_BREADCRUMB = re.compile(r'(?:class|id|aria-label|itemtype)="[^"]*breadcrumb', re.I)
 
 
+# Крошки не всегда зовутся breadcrumb: у МТТ это <nav class="layout-product__path">
+# c <ul class="product-path">, у части CMS - nav-chain / pathway. Чтобы не ловить
+# по слову «path» что попало (icon-path, image-path), требуем от блока признаки
+# настоящих крошек: две и больше ссылки, одна из них - на главную.
+_RE_CRUMB_BLOCK = re.compile(
+    r'<(nav|ul|ol|div|p)\b[^>]*(?:class|id)="[^"]*(?:crumb|-path|path-|_path|'
+    r'pathway|nav-chain|navchain)[^"]*"[^>]*>(.*?)</\1\s*>', re.I | re.S)
+_RE_LINK_ROOT = re.compile(r'<a\b[^>]*href="(?:https?://[^"/]+)?/?"', re.I)
+
+
+def _крошки_по_вёрстке(html_lower: str) -> bool:
+    """Блок-«путь» без слова breadcrumb в классе: >=2 ссылки + ссылка на главную."""
+    for m in _RE_CRUMB_BLOCK.finditer(html_lower):
+        кусок = m.group(2)
+        if len(re.findall(r'<a\b', кусок)) >= 2 and _RE_LINK_ROOT.search(кусок):
+            return True
+    return False
+
+
 def _d_breadcrumbs(c: _Ctx):
     # Микроразметка BreadcrumbList или класс/атрибут breadcrumb на реальном
-    # элементе - практически универсальный признак хлебных крошек.
-    return bool(_RE_BREADCRUMB.search(c.html_lower)), None
+    # элементе - практически универсальный признак хлебных крошек. Плюс
+    # запасной разбор вёрстки для сайтов, где крошки названы «путь».
+    return (bool(_RE_BREADCRUMB.search(c.html_lower))
+            or _крошки_по_вёрстке(c.html_lower)), None
 
 
 # Все <img> страницы должны иметь СОДЕРЖАТЕЛЬНЫЙ alt. По требованию НЕ
@@ -579,9 +614,12 @@ def _d_hdr_callback(c: _Ctx):
 
 
 def _d_hdr_request(c: _Ctx):
-    # СМУ: «Оставить заявку». ИМП: «Заявка» / «Быстрый заказ» / «Оформите
-    # быстрый заказ». Ловим любой запрос-CTA в шапке (не только дословное
-    # «оставить заявку»), иначе на ИМП был бы ложный баг.
+    # Смысл проверки: в шапке есть кнопка обращения - чтобы посетитель мог
+    # связаться с первого экрана. Подписи у сайтов разные: СМУ «Оставить
+    # заявку», ИМП «Заявка»/«Быстрый заказ», МТТ «Закажите обратный звонок»,
+    # где-то «Получить консультацию» или «Задать вопрос». Засчитываем любую из
+    # них: раньше проверка знала только про «заявку» и на МТТ давала ложный баг
+    # при живой кнопке звонка.
     t = c.header_text_lower
     present = (
         'заявк' in t            # заявка/заявку/оставить заявку
@@ -589,6 +627,18 @@ def _d_hdr_request(c: _Ctx):
         or 'оформить заказ' in t
         or 'оформите заказ' in t
         or 'оставить заявку' in t
+        # обращение звонком: «Закажите обратный звонок», «Перезвоните мне»
+        or 'звонок' in t or 'перезвон' in t
+        # консультация/вопрос/связь и расчёт
+        or 'консультац' in t
+        or 'задать вопрос' in t
+        or 'связаться' in t
+        or 'свяжитесь' in t
+        or 'написать нам' in t
+        or 'рассчитать стоимость' in t
+        or 'расчитать стоимость' in t
+        or 'узнать цену' in t
+        or 'запросить' in t
         # структурно: кнопка «оставить заявку» СМУ (txt-back-form / make-request),
         # чтобы на переведённых зеркалах (.az и др.) не было ложного бага
         or 'txt-back-form' in c.header_html.lower()
@@ -701,19 +751,25 @@ def _d_ftr_address(c: _Ctx):
     return present, None
 
 
+def _цена_в_разметке(c: _Ctx) -> bool:
+    """itemprop="price" с числом в ценовой области - цена есть точно."""
+    return bool(_RE_PRICE_MICRO.search(c.price_html_lower or ''))
+
+
 def _d_price(c: _Ctx):
     # Число с ₽/руб (товар с ценой) ИЛИ «по запросу» (товар без цены).
     # Ищем в «ценовой» области (на карточке - без блока рекомендаций снизу).
     present = (
         bool(_PRICE_RE.search(c.price_text))
+        or _цена_в_разметке(c)
         or 'по запросу' in c.price_text_lower
     )
     return present, None
 
 
 def _d_price_real(c: _Ctx):
-    # Настоящая цена - число с ₽/руб (в ценовой области).
-    return bool(_PRICE_RE.search(c.price_text)), None
+    # Настоящая цена - число с ₽/руб (в ценовой области) либо цена микроразметкой.
+    return bool(_PRICE_RE.search(c.price_text)) or _цена_в_разметке(c), None
 
 
 def _d_price_request(c: _Ctx):
@@ -769,19 +825,67 @@ def _d_btn_oneclick(c: _Ctx):
     return present, None
 
 
+# Кнопка заказа бывает не «корзиной»: у МТТ товар выбирают галочкой в таблице,
+# а заказ уходит кнопкой «Отправить заявку» (открывает форму). Такие подписи
+# засчитываем только ВНЕ шапки и подвала - иначе шапочная «Оставить заявку»
+# закрывала бы отсутствие кнопки заказа у самого товара.
+_ЗАКАЗ_ПОДПИСИ = ('отправить заявку', 'оставить заявку', 'отправить заказ',
+                  'оформить заказ', 'оформить заявку', 'заказать товар',
+                  'добавить в заявку', 'запросить цену', 'запросить счет',
+                  'запросить стоимость', 'получить счет', 'рассчитать заказ',
+                  'расчитать заказ')
+
+
+# Та же подпись бывает у формы обратной связи «Не нашли что искали» (СМУ:
+# <button>Оставить заявку</button> внутри формы feedback-search). Это не кнопка
+# заказа товара - такие вхождения отбрасываем по окружению.
+_НЕ_ЗАКАЗ_РЯДОМ = ('feedback', 'не нашли', 'подписк', 'subscribe', 'рассылк',
+                   'консультац', 'задать вопрос', 'отзыв')
+_RE_КЛИКАБЕЛЬНОЕ = re.compile(
+    r'<(button|a|span|div)\b[^>]*>\s*([^<]{2,80}?)\s*</\1\s*>', re.I | re.S)
+
+
+def _кнопок_заказа(html_lower: str) -> int:
+    """Сколько кнопок/ссылок «Отправить заявку», «Оформить заказ» и т.п. в куске."""
+    n = 0
+    for m in _RE_КЛИКАБЕЛЬНОЕ.finditer(html_lower or ''):
+        подпись = re.sub(r'\s+', ' ', m.group(2)).strip()
+        if not any(ф in подпись for ф in _ЗАКАЗ_ПОДПИСИ):
+            continue
+        окружение = html_lower[max(0, m.start() - 700):m.start()]
+        if any(x in окружение for x in _НЕ_ЗАКАЗ_РЯДОМ):
+            continue
+        n += 1
+    return n
+
+
+def _заказ_в_теле(c: _Ctx) -> bool:
+    """Кнопка-заявка есть в теле страницы, а не только в шапке/подвале.
+
+    Вычитаем шапку и подвал, только когда они найдены по тегам <header>/
+    <footer>. Если тегов нет, регион - это первые/последние 28% страницы: на
+    МТТ товарная кнопка «Отправить заявку» попадает в такой псевдоподвал, и
+    вычитание съело бы настоящую кнопку заказа.
+    """
+    всего = _кнопок_заказа(c.vis_html_lower)
+    обвязка = ((_кнопок_заказа(c.header_html.lower()) if c.header_exact else 0)
+               + (_кнопок_заказа(c.footer_html.lower()) if c.footer_exact else 0))
+    return всего > обвязка
+
+
 def _d_btn_order_listing(c: _Ctx):
     # Главная коммерческая проверка списка: есть ХОТЯ БЫ ОДНА кнопка заказа.
     # «В корзину» (товар с ценой) и «Купить в один клик» (товар по запросу) -
     # на сайте взаимоисключающие, поэтому обязательна не каждая, а любая из них.
     cart, _ = _d_btn_cart(c)
     one, _ = _d_btn_oneclick(c)
-    return (cart or one), None
+    return (cart or one or _заказ_в_теле(c)), None
 
 
 def _d_btn_order_product(c: _Ctx):
     cart, _ = _d_btn_add_cart(c)
     one, _ = _d_btn_oneclick(c)
-    return (cart or one), None
+    return (cart or one or _заказ_в_теле(c)), None
 
 
 def _d_availability(c: _Ctx):
@@ -1128,7 +1232,7 @@ BLOCK_DESCRIPTIONS = {
     'img_alt':       'У всех <img> страницы есть содержательный alt. Пустой alt="" НЕ допустим наравне с полным отсутствием атрибута. Число = сколько картинок без alt или с пустым alt="".',
     'hdr_phone':     'Телефон в шапке: номер +7… внутри региона <header>. Обязателен.',
     'hdr_callback':  'Кнопка «Заказать звонок» (или «обратный звонок») в шапке. Обязательна.',
-    'hdr_request':   'Запрос-CTA в шапке: «Оставить заявку» / «Заявка» / «Быстрый заказ». Обязателен.',
+    'hdr_request':   'Кнопка обращения в шапке: «Оставить заявку» / «Заявка» / «Быстрый заказ» / «Закажите обратный звонок» / «Получить консультацию». Обязательна любая из них.',
     'hdr_city':      'Выбор города в шапке («Город: …», «Ваш город»). Обязателен.',
     'ftr_phone':     'Телефон в подвале: номер +7… внутри региона <footer>. Обязателен.',
     'ftr_email':     'E-mail в подвале (адрес почты). Обязателен.',
@@ -1139,7 +1243,7 @@ BLOCK_DESCRIPTIONS = {
     'price':         'Цена в любом виде: число с валютой (₽, тенге, сум, сом, ₼, ֏…) ИЛИ «по запросу». Нет ни того ни другого - баг.',
     'price_real':    'Цена суммой: конкретное число с валютой (₽, UZS, тенге, сом…). Справочно; «-» значит на странице только «по запросу».',
     'price_request': '«Цена по запросу» на странице. Информационный столбец, не баг.',
-    'btn_order':     'Хотя бы одна кнопка заказа: «В корзину» ИЛИ «Купить в 1 клик» (они взаимоисключающие). Ни одной - баг.',
+    'btn_order':     'Хотя бы одна кнопка заказа: «В корзину» ИЛИ «Купить в 1 клик» (они взаимоисключающие) ИЛИ заявка в теле страницы («Отправить заявку», «Оформить заказ»). Ни одной - баг.',
     'btn_cart':      'Кнопка «В корзину»: вёрстка корзины (an-ico-basket / add-to-cart) или текст «в корзину».',
     'btn_oneclick':  'Кнопка «Купить в 1 клик»: текст «в один клик» или класс one-click.',
     'availability':  'Статус наличия: текст «в наличии» на странице (бейдж на карточках или ссылки «В наличии»).',
@@ -1198,7 +1302,7 @@ def _b(key, label, required, detect):
 _HEADER = [
     _b('hdr_phone',    'Шапка: телефон',         True, _d_hdr_phone),
     _b('hdr_callback', 'Шапка: заказать звонок', True, _d_hdr_callback),
-    _b('hdr_request',  'Шапка: оставить заявку', True, _d_hdr_request),
+    _b('hdr_request',  'Шапка: кнопка обращения', True, _d_hdr_request),
     _b('hdr_city',     'Шапка: город',           True, _d_hdr_city),
 ]
 _FOOTER = [
@@ -1639,6 +1743,8 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
     ctx.header_html = _extract_region(html, 'header', 'top')
     ctx.header_text = html_to_visible_text(ctx.header_html)
     ctx.header_text_lower = ctx.header_text.lower()
+    ctx.header_exact = bool(re.search(r'<header\b', html, re.I))
+    ctx.footer_exact = bool(re.search(r'<footer\b', html, re.I))
     ctx.footer_html = _extract_region(html, 'footer', 'bottom')
     ctx.footer_text = html_to_visible_text(ctx.footer_html)
     ctx.footer_text_lower = ctx.footer_text.lower()
@@ -1657,6 +1763,7 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
     # самого товара, на product берём текст ДО первого блока рекомендаций.
     ctx.price_text = visible_text
     ctx.price_text_lower = ctx.vis_text_lower
+    ctx.price_html_lower = ctx.vis_html_lower
     if type_code == 'product':
         _related = _REC_MARKERS
         cut = len(ctx.vis_text_lower)
@@ -1675,6 +1782,7 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
             if 0 <= j < hcut:
                 hcut = j
         ctx.rec_html_lower = ctx.vis_html_lower[hcut:] if hcut < len(ctx.vis_html_lower) else ''
+        ctx.price_html_lower = ctx.vis_html_lower[:hcut]
         # Полная (не vis) нижняя область - для покарточного разбора: strip_hidden
         # выбрасывает href, а по нему отличаем реальные карточки от мусора.
         hcut_f = len(ctx.html_lower)

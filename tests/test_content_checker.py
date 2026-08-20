@@ -133,12 +133,18 @@ def test_header_footer_translated_site():
 
 
 def test_header_missing_request_is_bug():
-    """Нет «Оставить заявку» в шапке → красный баг именно по этому столбцу."""
-    header_no_request = (
+    """В шапке нет НИ ОДНОЙ кнопки обращения → красный баг по этому столбцу.
+
+    Проверка про возможность обратиться с первого экрана, а подпись у кнопки
+    у каждого сайта своя: «Оставить заявку», «Быстрый заказ», «Закажите
+    обратный звонок», «Получить консультацию». Любая из них закрывает пункт -
+    иначе на МТТ (в шапке только звонок) был бы ложный баг.
+    """
+    header_no_cta = (
         '<header><a href="tel:+74951234567">+7 (495) 123-45-67</a>'
-        '<button>Заказать звонок</button><span>Город: Москва</span></header>'
+        '<span>Город: Москва</span></header>'
     )
-    html = (header_no_request + '<div class="breadcrumb">x</div><h1>K</h1>'
+    html = (header_no_cta + '<div class="breadcrumb">x</div><h1>K</h1>'
             '<footer><a href="tel:+74951234567">+7</a>'
             '<a href="mailto:a@b.ru">a@b.ru</a>Написать нам Адрес: ул. Мира 5</footer>'
             + CARD_WITH_PRICE + FORM_NF + SMU_MARKER)
@@ -147,7 +153,14 @@ def test_header_missing_request_is_bug():
     assert not b['hdr_request'].present
     assert any(bug.key == 'hdr_request' for bug in r.bugs)
     # остальные элементы шапки на месте
-    assert b['hdr_phone'].present and b['hdr_callback'].present and b['hdr_city'].present
+    assert b['hdr_phone'].present and b['hdr_city'].present
+
+    # А шапка МТТ - только «Закажите обратный звонок» - пункт закрывает.
+    мтт = html.replace('<span>Город: Москва</span>',
+                       '<span>Закажите обратный звонок</span>'
+                       '<span>Город: Москва</span>')
+    b2 = _by_key(check_content(мтт, 'main'))
+    assert b2['hdr_request'].present and b2['hdr_callback'].present
 
 
 def test_footer_missing_email_is_bug():
