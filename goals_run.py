@@ -97,9 +97,15 @@ def _прогнать_формы(base: str, show: bool, only_orders: bool = Fals
         _env['FORMS_PROXY'] = _gp
         _stamp(f'ФОРМЫ: прокси прогона проброшен форм-движку ({_gp.split("@")[-1]})')
     try:
+        # encoding/errors ОБЯЗАТЕЛЬНЫ: без них text=True берёт системную
+        # кодировку (на Windows cp1251), а форм-движок печатает UTF-8 с
+        # эмодзи - лог шёл кракозяброй, а на первом же неотображаемом байте
+        # чтение падало с «'charmap' codec can't decode byte 0x98», и цели
+        # заказа не проверялись вообще («ФОРМЫ: не удалось прогнать»).
+        # В autoclick_run.py тот же запуск сделан с кодировкой - здесь забыли.
         proc = subprocess.Popen(args, cwd=str(ROOT), stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1,
-                                env=_env)
+                                encoding='utf-8', errors='replace', env=_env)
         for line in proc.stdout:            # стримим в общий лог И ловим цели/URL
             print(line, end='', flush=True)
             for m in _pat1.finditer(line):
