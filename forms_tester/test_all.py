@@ -4752,6 +4752,47 @@ def _alternate_form_root_selector(sel: str) -> str | None:
     return None
 
 
+# Части селектора, которые понимает ТОЛЬКО Playwright: фильтры видимости,
+# порядковый номер, поиск по тексту. BeautifulSoup (soupsieve) на них падает.
+_PW_ONLY_ЧАСТЬ = re.compile(
+    r'^(?:visible|nth|text|has-text|has|internal:|xpath|css|role|left-of|'
+    r'right-of|above|below|near)\s*[=:]', re.I)
+
+
+def css_для_soup(sel: str) -> str:
+    """Playwright-селектор → чистый CSS для BeautifulSoup (или пусто).
+
+    Живой случай (ИМП, 21.08.2026): в конфиге селекторы вида
+    `.send-question__form >> visible=true` - нормальные для Playwright. Но
+    быстрый путь «по коду» отдавал их в soup.select() как есть, soupsieve
+    падал с SelectorSyntaxError («The combinator '>' … must have a selector
+    before it»), исключение уходило в общий except - и форма писалась в отчёт
+    «Ошибкой», БЕЗ попытки проверить её браузером. В матрице все шесть форм
+    ИМП стояли ✗, хотя руками работают.
+
+    `.a >> .b` (цепочка) → `.a .b`; `text=Купить` → пусто.
+
+    Пусто = «по коду не ищем, пусть решает браузер». Так же поступаем с
+    фильтром видимости (`>> visible=true`, `:visible`): в конфиге он стоит
+    там, где на странице НЕСКОЛЬКО одинаковых форм (у ИМП по два
+    `.send-question__form` на карточке товара) и проверять надо именно
+    видимую. В статическом HTML видимость не определить, а взять «первую
+    попавшуюся» - значит молча проверить не ту форму.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    s = (sel or '').strip()
+    if not s:
+        return ''
+    if re.search(r'\bvisible\s*=|:visible\b', s, re.I):
+        return ''
+    части = []
+    for кусок in s.split('>>'):
+        кусок = кусок.strip()
+        if not кусок or _PW_ONLY_ЧАСТЬ.match(кусок):
+            continue
+        части.append(кусок)
+    return ' '.join(части).strip()
+
+
 def _expand_form_selector_fallbacks(sel: str) -> list[str]:
     """
     Цепочка CSS для page.locator / soup.select: основной селектор и более общие варианты.
@@ -7793,10 +7834,18 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 if idx_bs < len(candidates):
                     form = candidates[idx_bs]
             else:
-                sel_rq = _playwright_form_css_selector(форма_config)
+                sel_rq = css_для_soup(_playwright_form_css_selector(форма_config))
+                if not sel_rq and probe:
+                    # Селектор чисто браузерный (text=…) - по коду искать нечем.
+                    return None
                 if sel_rq:
                     for c in _expand_form_selector_fallbacks(sel_rq):
-                        candidates = soup.select(c)
+                        try:
+                            candidates = soup.select(c)
+                        except Exception:
+                            # Вариант не по зубам soupsieve - не повод писать
+                            # «Ошибка»: пробуем следующий, иначе отдадим браузеру.
+                            continue
                         if idx_bs < len(candidates):
                             form = candidates[idx_bs]
                             break
@@ -7996,6 +8045,14 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             return True
 
         except Exception as e:
+            # В режиме пробы сбой быстрого пути - НЕ вердикт форме: отдаём её
+            # браузеру. Иначе любая заминка по коду (кривой для soupsieve
+            # селектор, обрыв соединения) превращалась в «Ошибка» в отчёте,
+            # хотя форму никто так и не проверил.
+            if probe:
+                print(f"   ↪ «{название}»: быстрый путь не сработал ({e}) - "
+                      f"проверяю через браузер")
+                return None
             записать_в_excel(
                 {
                     "тип": "REQUESTS",
