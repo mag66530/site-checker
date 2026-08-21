@@ -251,6 +251,10 @@ def _clicked_label(page, idx, filt) -> str:
         (window.CSS&&CSS.escape?CSS.escape(el.id):el.id)+'"]'); if(l) val=l.textContent; } } catch(e){}
       if (!val) { const p = el.closest('label'); if (p) val = p.textContent; }
       if (!val) val = el.getAttribute('title') || el.value || '';
+      // Значение подписано не label'ом, а собственным текстом элемента
+      // (STB: <div class="filter-value-item"><button…><p>27 мм</p></div>).
+      // У чекбоксов Битрикса textContent пустой, так что чужого не подхватим.
+      if (!val && el.children.length < 3) val = el.textContent || '';
       val = norm(val);
       // Название свойства (Ширина/Марка…): заголовок блока или элемент ПЕРЕД
       // блоком значений. Не берём то, что совпадает со значением.
@@ -336,6 +340,36 @@ def _apply_filter(page, idx, filt, apply_sel, wait_ms, pre_apply_ms,
     return nav['code']
 
 
+MAX_OPEN_GROUPS = 12     # сколько групп фильтра раскрывать при «открыть_все»
+
+
+def _раскрыть(page, sel: str, все: bool, wait_ms: int) -> str:
+    """Раскрыть группы фильтра перед кликом по значениям. Возвращает '' или
+    текст ошибки первого клика.
+
+    «открыть_все» нужен там, где КАЖДАЯ группа свойств раскрывается своим
+    заголовком, а свёрнутая группа обрезана по высоте (СТБ: max-height:0 +
+    overflow:hidden). Раньше открывалась только первая: попытки 2 и 3 брали
+    значения соседних, ещё закрытых групп, клик уходил в родителя, выдача не
+    менялась - и исправный фильтр получал «не удалось применить»."""
+    try:
+        n = min(page.locator(sel).count(), MAX_OPEN_GROUPS) if все else 1
+    except Exception:
+        n = 1
+    if n <= 1:
+        ош = _click(page.locator(sel).first)
+        page.wait_for_timeout(wait_ms)
+        return ош
+    ош = ''
+    for i in range(n):
+        e = _click(page.locator(sel).nth(i))
+        if e and not ош:
+            ош = e
+        page.wait_for_timeout(250)
+    page.wait_for_timeout(wait_ms)
+    return ош
+
+
 def _count_filter_groups(page, filt: str):
     """Сколько РАЗНЫХ групп фильтра (свойств), а не значений. Группируем по
     имени: arrFilter_<группа>_<значение> (Bitrix), ocf[<группа>] (ИМП), иначе
@@ -402,6 +436,14 @@ def run_case(page, case: dict, log) -> dict:
                          if case.get('_auto') else
                          f'карточки не распознаны (селектор {card or "авто"})')
         return out
+    if baseline <= 1 and case.get('_auto'):
+        # Один товар в категории - сузить выдачу физически нечем: любой фильтр
+        # оставит тот же товар, и проверка писала бы «не удалось применить» на
+        # исправном фильтре (СТБ: у сайта тысячи таких мелких листингов).
+        out['verdict'] = 'skipped'
+        out['detail'] = (f'в категории всего {baseline} товар - '
+                         f'сужать нечего, фильтр не проверяем')
+        return out
     base_ids = _card_ids(page, used_sel)
     total_before = _read_total(page, total_sel)
 
@@ -410,13 +452,25 @@ def run_case(page, case: dict, log) -> dict:
     # клика по ней). Без этого клика значений фильтра на странице просто нет и
     # проверка честно писала бы «селектор фильтра не найден».
     _открыть = case.get('открыть') or case.get('open')
+    _все = bool(case.get('открыть_все') or case.get('open_all'))
     if _открыть:
-        _ош = _click(page.locator(_открыть).first)
-        page.wait_for_timeout(int(case.get('open_wait_ms') or 1000))
+        _ош = _раскрыть(page, _открыть, _все,
+                        int(case.get('open_wait_ms') or 1000))
         if _ош:
             log(f'      ⚠ не удалось открыть параметры фильтра ({_открыть}): {_ош}')
 
     # 3. Фильтр есть?
+    # Значения фильтра часто дорисовываются AJAX-ом уже после загрузки страницы
+    # (STB: POST /catalog/filter-values, ~1,5 с, на нагруженном прогоне дольше).
+    # Считать их сразу - гонка: на медленном ответе выходило ложное «селектор
+    # фильтра не найден». Поэтому сначала ждём появления, и только потом счёт.
+    # Ждём только там, где фильтр вообще уместен: на коротком авто-листинге его
+    # штатно нет, и лишнее ожидание умножилось бы на 20 категорий прогона.
+    if not case.get('_auto') or baseline >= MIN_CARDS_FOR_FILTER:
+        try:
+            page.wait_for_selector(filt, timeout=8000, state='attached')
+        except Exception:
+            pass
     try:
         _n_filt = page.locator(filt).count()
     except Exception as e:
@@ -461,8 +515,8 @@ def run_case(page, case: dict, log) -> dict:
                 page.wait_for_timeout(1500)
                 # Попап параметров после перезагрузки снова закрыт - открываем.
                 if _открыть:
-                    _click(page.locator(_открыть).first)
-                    page.wait_for_timeout(int(case.get('open_wait_ms') or 1000))
+                    _раскрыть(page, _открыть, _все,
+                              int(case.get('open_wait_ms') or 1000))
             except Exception:
                 break
         _tries = attempt + 1
@@ -668,7 +722,8 @@ def main():
         _skipped = sum(1 for r in results if r.get('verdict') == 'skipped')
         results = [r for r in results if r.get('verdict') != 'skipped']
         if _skipped:
-            log(f'Пропущено {_skipped} страниц без товаров (не листинги).')
+            log(f'Пропущено {_skipped} страниц: не листинги товаров или '
+                f'фильтровать нечего.')
         payload = {'available': True, 'cases': results, 'note': None}
     except Exception as e:
         log(f'⚠ Фильтр-тест: {e}')

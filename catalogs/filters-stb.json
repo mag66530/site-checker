@@ -1,0 +1,38 @@
+{
+  "_comment": "STB (steelborg.ru, Laravel, не Bitrix) - фильтр чисто AJAX, адрес НЕ меняется, кнопки «Показать» нет, поэтому apply = null. Группы свойств (.filter-item[prop-id]) по умолчанию СВЁРНУТЫ: у .filter-item-show стоит max-height:0 + overflow:hidden, значения лежат в DOM, но обрезаны, и обычный клик по ним уходит в родительский .filter-item - обработчик $(document).on('click', '.filter-value-item') не срабатывает, выдача не меняется, тест писал бы ложное «не удалось применить». Поэтому «открыть» = .filter-item-title (клик разворачивает группу) и «открыть_все»: true - раскрываем ВСЕ группы, а не первую: попытки 2 и 3 берут значения соседних групп, и в свёрнутой группе клик снова ушёл бы в родителя (ловилось на chushki-brkd1 и shtutser-latunnyy-8). Кликаем сам .filter-value-item - это селектор, на который навешен делегированный обработчик в js/compiled/section.js. Группы с классом d-none исключены: они скрыты сайтом. Счётчика «найдено N» на страницах нет, вердикт держится на смене набора товаров. Карточка - .product-item (18 на страницу). Селекторы проверены вживую 2026-08-21: 18 карточек до фильтра → 1 / 10 / 1 после, набор товаров менялся на всех кейсах, POST /catalog/filter-get + /catalog/filter-values уходят.",
+  "cases": [
+    {
+      "name": "Профиль стоечный - по размеру",
+      "category": "https://steelborg.ru/catalog/profil-stoechnyy",
+      "card": ".product-item",
+      "открыть": ".filter-item[prop-id]:not(.d-none) .filter-item-title",
+      "открыть_все": true,
+      "open_wait_ms": 3000,
+      "filter": ".filter-item[prop-id]:not(.d-none) .filter-value-item",
+      "apply": null,
+      "wait_ms": 5000
+    },
+    {
+      "name": "Арматура - по диаметру",
+      "category": "https://steelborg.ru/catalog/armatura",
+      "card": ".product-item",
+      "открыть": ".filter-item[prop-id]:not(.d-none) .filter-item-title",
+      "открыть_все": true,
+      "open_wait_ms": 3000,
+      "filter": ".filter-item[prop-id]:not(.d-none) .filter-value-item",
+      "apply": null,
+      "wait_ms": 5000
+    },
+    {
+      "name": "Сетка сварная - по ячейке",
+      "category": "https://steelborg.ru/catalog/setka-svarnaya",
+      "card": ".product-item",
+      "открыть": ".filter-item[prop-id]:not(.d-none) .filter-item-title",
+      "открыть_все": true,
+      "open_wait_ms": 3000,
+      "filter": ".filter-item[prop-id]:not(.d-none) .filter-value-item",
+      "apply": null,
+      "wait_ms": 5000
+    }
+  ]
+}
