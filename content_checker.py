@@ -789,15 +789,22 @@ def _d_tag_tiles(c: _Ctx):
     return present, None
 
 
+# Классы кнопки-корзины у проектов. СТБ добавлен отдельно: там кнопка -
+# ИКОНКА (<button class="add-to-basket"><span></span><img …></button>), подпись
+# рисует Alpine из x-text, в коде текста нет. Детектор искал слова «в корзину»
+# в видимом тексте, не находил и писал «кнопки заказа нет», хотя покупатель её
+# видит. Ловим такие кнопки по классу.
+_КЛАССЫ_КОРЗИНЫ = ('card-item-add-to-cart-block', 'an-ico-basket',
+                   'add-to-cart-btn', 'popup_form',
+                   'add-to-basket', 'calculation-add-cart')
+
+
 def _d_btn_cart(c: _Ctx):
     # «В корзину»: СМУ - иконка-корзина (an-ico-basket), текст в <noindex>;
     # ИМП - кнопка add-to-cart-btn; МПЭ - popup_form («Заявка», «Расчитать
-    # заказ» открывают форму). Ловим по вёрстке и по тексту.
+    # заказ» открывают форму); СТБ - add-to-basket. Ловим по вёрстке и по тексту.
     present = (
-        'card-item-add-to-cart-block' in c.vis_html_lower
-        or 'an-ico-basket' in c.vis_html_lower
-        or 'add-to-cart-btn' in c.vis_html_lower
-        or 'popup_form' in c.vis_html_lower
+        any(k in c.vis_html_lower for k in _КЛАССЫ_КОРЗИНЫ)
         or 'в корзину' in c.vis_text_lower
     )
     return present, None
@@ -807,20 +814,22 @@ def _d_btn_add_cart(c: _Ctx):
     present = (
         'добавить в корзину' in c.vis_text_lower
         or 'в корзину' in c.vis_text_lower
-        or 'card-item-add-to-cart-block' in c.vis_html_lower
-        or 'an-ico-basket' in c.vis_html_lower
-        or 'add-to-cart-btn' in c.vis_html_lower
-        or 'popup_form' in c.vis_html_lower
+        or any(k in c.vis_html_lower for k in _КЛАССЫ_КОРЗИНЫ)
     )
     return present, None
 
 
 def _d_btn_oneclick(c: _Ctx):
     # «Купить в один клик»: текст в карточке + класс кнопки one-click.
+    # СТБ пишет «Купить в 1 клик» цифрой, а кнопку быстрого заказа у самого
+    # товара подписывает «Купить сейчас» (класс fast-order).
     present = (
         'в один клик' in c.vis_text_lower
+        or 'в 1 клик' in c.vis_text_lower
+        or 'купить сейчас' in c.vis_text_lower
         or 'one-click-to-buy' in c.vis_html_lower
         or 'an-ico-one-click' in c.vis_html_lower
+        or 'fast-order' in c.vis_html_lower
     )
     return present, None
 
@@ -1863,12 +1872,12 @@ def check_content(html: str, type_code: str, css_hidden: tuple = (),
     # значит скрыто/отключено.
     raw_has_price = bool(_PRICE_RE.search(ctx.text)) or 'по запросу' in ctx.text_lower
     raw_has_btn = (
-        'card-item-add-to-cart-block' in ctx.html_lower
+        any(k in ctx.html_lower for k in _КЛАССЫ_КОРЗИНЫ)
         or 'card-item-add-no-cart-block' in ctx.html_lower
-        or 'an-ico-basket' in ctx.html_lower or 'add-to-cart-btn' in ctx.html_lower
         or 'one-click-to-buy' in ctx.html_lower or 'an-ico-one-click' in ctx.html_lower
-        or 'popup_form' in ctx.html_lower
+        or 'fast-order' in ctx.html_lower
         or 'в корзину' in ctx.text_lower or 'в один клик' in ctx.text_lower
+        or 'в 1 клик' in ctx.text_lower or 'купить сейчас' in ctx.text_lower
     )
 
     _profile = _tech_profile_for(url) if type_code == 'tech' else _profile_for(type_code, page_kind)

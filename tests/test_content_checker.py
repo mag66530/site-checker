@@ -436,6 +436,35 @@ def test_product_page():
     assert r.bug_count == 0
 
 
+def test_product_кнопка_корзины_иконкой_без_текста():
+    """СТБ: кнопка заказа - иконка, подпись рисует JS (span пустой). Текста
+    «в корзину» в коде нет, но кнопка есть и покупатель её видит - «нет кнопки
+    заказа» было ложным."""
+    html = (
+        COMMON + SMU_MARKER + '<span>5 400 руб</span>'
+        + '<button class="add-to-basket"><span></span>'
+          '<img src="/images/calculation-cart.svg" alt="cart"></button>'
+        + '<div>Характеристики</div><div>Способы оплаты</div>'
+    )
+    r = check_content(html, 'product')
+    b = _by_key(r)
+    assert b['btn_order'].present
+    assert not any(bug.key == 'btn_order' for bug in r.bugs)
+
+
+def test_listing_кнопка_купить_в_1_клик_цифрой():
+    """«Купить в 1 клик» цифрой (СТБ) - та же кнопка, что «в один клик»."""
+    html = (
+        COMMON
+        + '<div class="catalog-product-card-item">'
+          '<a href="/catalog/cat/tovar-3/">Товар</a><span>1 200 ₽</span>'
+          '<button class="fast-order">Купить в 1 клик</button></div>'
+        + FORM_NF + SMU_MARKER
+    )
+    b = _by_key(check_content(html, 'category'))
+    assert b['btn_oneclick'].present and b['btn_order'].present
+
+
 def test_product_without_price_is_bug():
     html = COMMON + SMU_MARKER + '<button>Добавить в корзину</button>'
     r = check_content(html, 'product')
