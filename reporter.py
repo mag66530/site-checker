@@ -22,7 +22,8 @@ from openpyxl.utils import get_column_letter, range_boundaries
 from report_priorities import (
     PRIORITY_LABEL, collect_findings, group_into_tasks, extra_site_tasks,
     classify, indexing_site_findings, metadata_site_findings,
-    home_dupes_findings, arsenkin_findings, page404_findings,
+    home_dupes_findings, arsenkin_findings, title_key_order_findings,
+    page404_findings,
     stress_check_findings, ps_filters_findings,
     service_issues_findings, w3c_findings,
     url_format_findings, robots_hygiene_findings, content_sections_findings,
@@ -3132,6 +3133,7 @@ def build_report(
     anomalies: dict = None,        # аномалии ГСК/Метрика - лист «Хосты и аномалии»
     trust: dict = None,            # ИКС + DR - секция на «Трафик и траст»
     uniqueness: dict = None,       # уникальность контента (text.ru) - лист «Уникальность»
+    title_key: dict = None,        # порядок слов ключа в title (Вордстат через Арсенкина)
 ) -> Path:
     """Сформировать xlsx-отчёт и сохранить в output_path."""
     wb = Workbook()
@@ -3195,6 +3197,7 @@ def build_report(
                       + metadata_site_findings(meta_summary)
                       + home_dupes_findings(home_dupes)
                       + arsenkin_findings(arsenkin)
+                      + title_key_order_findings(title_key)
                       + page404_findings(p404_check)
                       + stress_check_findings(stress_check)
                       # Бывшие секции листа «Техничка»: интерактив (слайдер/

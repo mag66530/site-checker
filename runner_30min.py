@@ -1818,6 +1818,33 @@ def run_check(pid, params, creds, log, progress):
                 except Exception as _e:
                     log(f'⚠ Индексация (Арсенкин): {_e}')
 
+        # ── Порядок слов ключа в title (ручная проработка меты) ──
+        # Частотность вариантов порядка берём в Вордстате через API Арсенкина -
+        # тем же токеном, что и проверка индексации. Одна задача на весь прогон
+        # (до 10 000 фраз), поэтому лимит API не расходуется впустую.
+        _title_key = None
+        if params.get('check_title_key_order'):
+            _tok = (params.get('arsenkin_token') or '').strip()
+            if not _tok:
+                log('⚠ Порядок ключа в title: не введён токен Арсенкина - пропускаю.')
+            else:
+                try:
+                    import title_key_order as _tko
+                    log('Порядок ключа в title: собираю частотности…')
+                    _title_key = _tko.run_check(
+                        results, _tok, log=lambda m: log(f'  {m}'),
+                        proxy_url=proxy_url,
+                        # Города ВСЕГО проекта, а не только прогона: у СМУ
+                        # московская категория подписана «цена в Екатеринбурге»,
+                        # и чужой город без этого списка попадал в ключ.
+                        города=[s.city for s in (src.subdomains or [])])
+                    if not _title_key.get('available'):
+                        log(f'⚠ Порядок ключа в title: {_title_key.get("error")}')
+                        if _title_key.get('raw_sample'):
+                            log(f'  [сырой ответ] {_title_key["raw_sample"][:500]}')
+                except Exception as _e:
+                    log(f'⚠ Порядок ключа в title: {_e}')
+
         # ── Поиск по сайту находит категории и теги (чек-лист) ──
         # Категория - случайная из прогона; тег (страница-фильтр) - случайный
         # из прогона, а если фильтров в выборке нет - из базы каталога.
@@ -2200,7 +2227,8 @@ def run_check(pid, params, creds, log, progress):
             admin_settings=_admin_settings, yabusiness=_yabusiness,
             gsc_pages=_gsc_pages, home_dupes=_home_dupes, traffic=_traffic,
             arsenkin=_arsenkin, review_priority=_review_priority,
-            anomalies=_anomalies, trust=_trust, uniqueness=_uniqueness)
+            anomalies=_anomalies, trust=_trust, uniqueness=_uniqueness,
+            title_key=_title_key)
         _m_pages = sum(r.total_pages for r in (_metrika_reports or []))
         log(f'✓ Отчёт собран: уведомлений {len(_notifs)}, '
             f'404-страниц {_m_pages}, ошибок сервисов {len(_service_issues or [])}')

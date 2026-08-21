@@ -92,6 +92,8 @@ FIXED_SEC = {
     'check_review_priority': 45,
     'check_anomalies': 45,
     'check_arsenkin': 60,
+    # Одна задача Вордстата на весь прогон: ~30-60 с на счёт + опрос.
+    'check_title_key_order': 60,
     'check_yabusiness': 60,
     'check_404': 30,
     'check_traffic': 30,

@@ -843,6 +843,8 @@ def init_session():
         'c30_check_gsc_pages': False,  # количество страниц в ГСК по статусам - браузер, по запросу
         'c30_check_home_dupes': True,  # дубли главной страницы (HTTP, без браузера)
         'c30_check_arsenkin': False,  # индексация URL через API Арсенкина (токен из поля)
+        # порядок слов ключа в title (частотность Вордстата через Арсенкина)
+        'c30_check_title_key_order': False,
         'c30_check_uniqueness': False,  # уникальность контента через text.ru (ключ из поля)
         'c30_check_filter_fn': True,  # фильтр-тест товаров (браузер) - по запросу
         'c30_check_console': True,    # п.1.14 - ошибки JS в консоли (браузер) - по запросу
@@ -1392,7 +1394,8 @@ if pid:
                     'c30_check_admin_product_crud', 'c30_check_admin_tech_crud',
                     'c30_check_admin_counters']
         _SEC_DOP = ['c30_fetch_notifications', 'c30_fetch_metrika_404',
-                    'c30_check_arsenkin', 'c30_check_stress', 'c30_autoclick',
+                    'c30_check_arsenkin', 'c30_check_title_key_order',
+                    'c30_check_stress', 'c30_autoclick',
                     'c30_use_custom_urls', 'c30_check_uniqueness']
 
         def _sec_n(_keys):
@@ -2208,6 +2211,41 @@ if pid:
                                          'чтобы меньше ложных «не в индексе».**')
                     st.caption('1 URL × 1 поисковая система = 2 лимита Арсенкина. '
                                'Проверка идёт в конце прогона, результат – в отчёте.')
+            st.checkbox('Порядок слов ключа в title (частотность Вордстата)',
+                        key='c30_check_title_key_order',
+                        help='**Проверяет, что ключ в title стоит в самой '
+                             'популярной последовательности слов.**\n\n'
+                             '- из title вычленяется ключ: отбрасываются '
+                             'коммерческие хвосты («купить», «цена»), город и '
+                             'всё после разделителя\n'
+                             '- перестановки слов ключа («труба бесшовная» / '
+                             '«бесшовная труба») проверяются в Вордстате '
+                             'уточнённой частотностью «[!фраза]» - только она '
+                             'различает порядок слов; регион «Все регионы»\n'
+                             '- в title стоит не самый частотный порядок = '
+                             'находка с числами по обоим вариантам\n\n'
+                             'Идёт по категориям прогона. Нужен тот же токен '
+                             'Арсенкина, что и у проверки индексации (поле выше; '
+                             'включать саму индексацию не обязательно).')
+            if (st.session_state.get('c30_check_title_key_order')
+                    and not st.session_state.get('c30_check_arsenkin')):
+                # Токен уже сохранён в «Настройках проекта» - переспрашивать
+                # нечего: прогон возьмёт его сам (см. сборку params).
+                _tok_saved = str(_secret_pid('arsenkin_token', pid) or '').strip()
+                if _tok_saved:
+                    st.caption('Токен Арсенкина взят из «Настроек проекта» - '
+                               'вводить не нужно.')
+                else:
+                    with st.container(border=True):
+                        st.markdown('**Арсенкин: токен**')
+                        st.text_input(
+                            'API-токен Арсенкина', key='c30_arsenkin_token',
+                            type='password',
+                            placeholder='вставь токен (профиль Арсенкина → API)',
+                            help='Тот же токен, что и у проверки индексации. '
+                                 'Можно сохранить один раз в «Настройках '
+                                 'проекта» - тогда поле больше не появится. '
+                                 'Нужен тариф с доступом к API Вордстата.')
             _ck_stress = st.checkbox(
                 'Ошибки сервера: парсинг, нагрузка, дубли URL (по запросу)',
                 key='c30_check_stress',
@@ -2594,7 +2632,11 @@ if pid:
                 'check_gsc_pages': st.session_state.get('c30_check_gsc_pages', False),
                 'check_home_dupes': st.session_state.get('c30_check_home_dupes', False),
                 'check_arsenkin': st.session_state.get('c30_check_arsenkin', False),
-                'arsenkin_token': (st.session_state.get('c30_arsenkin_token', '') or '').strip(),
+                # Токен: поле этой сессии главнее, иначе - «Настройки проекта»
+                # (руководитель сохранил его в кабинете, и переспрашивать не нужно).
+                'arsenkin_token': ((st.session_state.get('c30_arsenkin_token', '') or '').strip()
+                                   or str(_secret_pid('arsenkin_token', pid) or '').strip()),
+                'check_title_key_order': st.session_state.get('c30_check_title_key_order', False),
                 'arsenkin_urls': st.session_state.get('c30_arsenkin_urls', '') or '',
                 'arsenkin_yandex': st.session_state.get('c30_arsenkin_yandex', True),
                 'arsenkin_google': st.session_state.get('c30_arsenkin_google', True),
