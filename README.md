@@ -233,6 +233,7 @@ pagespeed_report.py   - xlsx-отчёт по скорости (сводка/де
 pagespeed_run.py      - фоновый/CLI прогон проверки скорости
 index_gsc_api.py      - источник «Google» (Search Console API) для 404 в индексе
 index_tech_pages.py   - служебные страницы (корзина/поиск/ЛК/админка) в индексе
+tech_pages_discovery.py - автопоиск тех. страниц проекта по ссылкам главной
 telegram_notify.py    - отправка отчётов в Telegram
 metrika_404.py        - 404-отчёты из почты Метрики
 convert_catalogs.py   - разовая конвертация xlsx → CSV

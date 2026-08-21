@@ -876,9 +876,22 @@ def run_check(pid, params, creds, log, progress):
 
         # Технические страницы (на главном домене) - проверяем ВСЕГДА, при любом
         # прогоне, вне зависимости от объёма выборки.
-        _tech_paths = get_tech_paths(pid)
         _mcity = cfg.get('mandatory_city', 'Москва')
         _main = next((s for s in src.subdomains if s.city == _mcity), None)
+        _tech_paths = get_tech_paths(pid)
+        # Списка у проекта нет - ищем служебные страницы по ссылкам главной
+        # (кеш на неделю). Раньше такие проекты (МПК, МТТ, STB) шли в отчёт
+        # вообще без блока тех. страниц.
+        if _main and not _tech_paths:
+            try:
+                from tech_pages_discovery import tech_paths_for_project
+                import sources as _sources
+                _found = tech_paths_for_project(pid, _main.host,
+                                                proxy_url=proxy_url, log=log)
+                _sources.register_tech_pages(pid, _found)
+                _tech_paths = [p['path'] for p in _found]
+            except Exception as _e:
+                log(f'⚠ Тех. страницы (автопоиск): {_e}')
         if _main and _tech_paths:
             _tech_urls = [f'https://{_main.host}{p}' for p in _tech_paths]
             try:

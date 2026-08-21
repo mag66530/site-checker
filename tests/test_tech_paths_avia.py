@@ -44,5 +44,15 @@ def test_чужие_проекты_не_затронуты():
     assert len(S.get_tech_paths('imp')) == 24
     assert len(S.get_tech_paths('smu')) == 10
     assert len(S.get_tech_paths('sm')) == 6
-    assert S.get_tech_paths('mpk') == []      # у МПК списка по-прежнему нет
     print('✓ правка адресная: у остальных проектов всё как было')
+
+
+def test_списки_есть_у_всех_боевых_проектов():
+    """Проект без списка = отчёт без блока служебных страниц. Для стенда
+    mpinew (закрыт паролем) список ищется автопоиском внутри прогона."""
+    пусто = [p for p in ('smu', 'imp', 'mpe', 'mpi', 'sm', 'avia',
+                         'mpk', 'mtt', 'stb')
+             if not S.get_tech_paths(p)]
+
+    assert not пусто, пусто
+    print('✓ тех. страницы заведены у всех девяти боевых проектов')

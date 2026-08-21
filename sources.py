@@ -277,6 +277,24 @@ TECH_PAGE_PATHS = {
     'avia': [
         '/about', '/delivery', '/contacts', '/sprav',
     ],
+    # МПК, МТТ, STB - списки собраны автопоиском (tech_pages_discovery: ссылки
+    # шапки и подвала главной) и подтверждены живым прозвоном 21.08.2026:
+    # каждый адрес отдаёт 200 в той форме, что записана (все три сайта -
+    # БЕЗ завершающего слеша). Товарные разделы отсеяны: у МТТ и STB каталог
+    # лежит прямо в корне (/armatura, /truby), и от служебной страницы такой
+    # адрес отличается только разметкой (цена/Product/«в корзину»).
+    'mpk': [
+        '/about', '/contacts', '/dostavka', '/uslugi', '/privacy-policy',
+        '/enable-cookie',
+    ],
+    'mtt': [
+        '/about', '/contacts', '/partners', '/policy', '/oferta',
+    ],
+    'stb': [
+        '/about', '/contacts', '/delivery', '/agreement', '/privacy',
+    ],
+    # МПИ-стенд (mpinew) списка не имеет намеренно: сайт закрыт паролем, и
+    # автопоиск отрабатывает уже внутри прогона, где вход установлен.
 }
 
 
@@ -338,7 +356,38 @@ TECH_PAGE_LABELS = {
     # у них называется «Доставка и оплата», но подпись общая на все проекты,
     # и «Доставка» её не искажает.
     '/sprav/': 'Справочники',
+    # МПК / МТТ / STB
+    '/uslugi/': 'Услуги',
+    '/privacy-policy/': 'Политика конфиденциальности',
+    '/policy/': 'Политика конфиденциальности',
+    '/enable-cookie/': 'Соглашение по cookie',
+    '/partners/': 'Поставщики',
+    '/oferta/': 'Оферта',
+    '/agreement/': 'Пользовательское соглашение',
 }
+
+
+# Подписи и пути, найденные автопоиском (tech_pages_discovery) в ЭТОМ запуске:
+# у проектов без ручного списка тех. страницы берутся с сайта, и отчёт должен
+# показывать их так же по-человечески, как заведённые руками.
+_RUNTIME_TECH_LABELS: dict = {}
+
+
+def register_tech_pages(project_id: str, pages: list) -> None:
+    """Запомнить найденные автопоиском страницы: [{'path','label'}].
+
+    Кладём и в TECH_PAGE_PATHS (её читают типизация страниц Метрики и аудит
+    sitemap - иначе у таких проектов «служебных» страниц как будто нет), и в
+    карту подписей для отчёта."""
+    paths = [p['path'] for p in pages or [] if p.get('path')]
+    if not paths:
+        return
+    TECH_PAGE_PATHS[project_id] = paths
+    for p in pages:
+        path = p.get('path') or ''
+        label = (p.get('label') or '').strip()
+        if path and label:
+            _RUNTIME_TECH_LABELS[path if path.endswith('/') else path + '/'] = label
 
 
 def tech_page_label(path: str) -> str:
@@ -346,7 +395,7 @@ def tech_page_label(path: str) -> str:
     if not path:
         return path or ''
     p = path if path.endswith('/') else path + '/'
-    return TECH_PAGE_LABELS.get(p, path)
+    return TECH_PAGE_LABELS.get(p) or _RUNTIME_TECH_LABELS.get(p, path)
 
 
 def _pick_random(items: list, n: int, rng: random.Random) -> list:
