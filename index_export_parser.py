@@ -26,6 +26,8 @@ import csv
 import io
 from urllib.parse import urlsplit
 
+from index_tech_pages import add_tech
+
 # Заголовки колонок → наши ключи (терпимо к рус/англ и регистру).
 _COL_ALIASES = {
     'url': 'url', 'адрес': 'url', 'адрес страницы': 'url',
@@ -141,7 +143,7 @@ def analyze_exports(files: list, log=None) -> dict:
 
     out = {'available': False, 'source': 'yandex_export', 'hosts': [],
            'total_checked': 0, 'total_dead': 0, 'total_soft': 0,
-           'total_files': 0, 'error': None}
+           'total_tech': 0, 'total_files': 0, 'error': None}
     by_host = {}
     parsed_any = False
     for name, data in files or []:
@@ -159,13 +161,17 @@ def analyze_exports(files: list, log=None) -> dict:
         for r in rows:
             host = _host_of(r.get('url', ''))
             hb = by_host.setdefault(host, {
-                'host': host, 'dead': [], 'soft': [], 'errors': [],
+                'host': host, 'dead': [], 'soft': [], 'errors': [], 'tech': [],
                 'searchable': 0, 'checked': 0, 'ok': 0, 'redirects': 0})
             hb['checked'] += 1
             v = classify_export_row(r.get('http'), r.get('status'))
             st = (str(r.get('status') or '')).upper()
             if st == 'SEARCHABLE':
                 hb['searchable'] += 1
+                # Служебная страница (корзина/поиск/ЛК/админка) в ПОИСКЕ:
+                # только SEARCHABLE - LOW_DEMAND и прочие статусы значат, что
+                # адрес известен роботу, но в выдаче его нет.
+                add_tech(hb, r.get('url', ''), 'Яндекс')
             entry = {'url': r.get('url', ''),
                      'status': r.get('http'),
                      'source': 'Яндекс',
@@ -189,6 +195,7 @@ def analyze_exports(files: list, log=None) -> dict:
         out['hosts'].append(hb)
         out['total_checked'] += hb['checked']
         out['total_dead'] += len(hb['dead'])
+        out['total_tech'] += len(hb.get('tech') or [])
     return out
 
 
@@ -209,9 +216,18 @@ def merge_index_404(*checks) -> dict:
         for h in c.get('hosts') or []:
             hb = hosts.setdefault(h.get('host', ''), {
                 'host': h.get('host', ''), 'dead': [], 'soft': [], 'errors': [],
-                'in_index_total': 0, 'checked': 0, 'ok': 0, 'redirects': 0})
+                'tech': [], 'in_index_total': 0, 'checked': 0, 'ok': 0,
+                'redirects': 0})
             for k in ('dead', 'soft', 'errors'):
                 hb[k].extend(h.get(k) or [])
+            # Служебные адреса: один и тот же URL приходит и от Яндекса, и от
+            # Google - дедуп сразу здесь, иначе в отчёте будет две одинаковые
+            # строки с разным «источником».
+            _seen_tech = {e.get('url') for e in hb['tech']}
+            for e in h.get('tech') or []:
+                if e.get('url') and e['url'] not in _seen_tech:
+                    _seen_tech.add(e['url'])
+                    hb['tech'].append(e)
             hb['checked'] += h.get('checked', 0) or 0
             hb['ok'] += h.get('ok', 0) or 0
             hb['redirects'] += h.get('redirects', 0) or 0
@@ -227,5 +243,6 @@ def merge_index_404(*checks) -> dict:
         'total_checked': sum(h['checked'] for h in host_list),
         'total_dead': sum(len(h['dead']) for h in host_list),
         'total_soft': sum(len(h['soft']) for h in host_list),
+        'total_tech': sum(len(h.get('tech') or []) for h in host_list),
         'error': ('; '.join(errs) if (errs and not avail) else None),
     }

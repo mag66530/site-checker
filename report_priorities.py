@@ -33,6 +33,7 @@ from typing import Optional
 # опечатка развела бы их по двум разным «разделам» в отчёте.
 SEC_DUPES = 'Дубли и редиректы'
 SEC_LINKS = 'Ссылки'
+SEC_INDEX_TECH = 'Тех. страницы в индексе'
 
 
 @dataclass
@@ -619,6 +620,29 @@ def _index_404_findings(index_404_check: Optional[dict]) -> list:
     return out
 
 
+def _index_tech_findings(index_404_check: Optional[dict]) -> list:
+    """Служебные страницы (корзина, поиск по сайту, ЛК, админка,
+    AJAX-обработчики) В ИНДЕКСЕ. Кандидатов собирают источники индекса
+    (Вебмастер/GSC), живьём их подтверждает index_tech_pages: остаются
+    только те, что сейчас отвечают 200 и БЕЗ noindex.
+
+    Отдельно от «404 в индексе» (там страница битая) и от проверки
+    robots.txt (там - есть ли правило; здесь - адрес уже в выдаче)."""
+    out = []
+    for h in (index_404_check or {}).get('hosts') or []:
+        for e in h.get('tech') or []:
+            label = e.get('label') or 'служебная страница'
+            out.append(Finding(
+                'Ошибка', SEC_INDEX_TECH,
+                f'служебная страница в индексе: {label}',
+                url=e.get('url', ''),
+                detail=f'источник: {e.get("source", "")}',
+                fix_note='Закрыть страницу noindex (meta или X-Robots-Tag) '
+                         'и Disallow в robots.txt, затем удалить адрес из '
+                         'поиска в Вебмастере / Search Console.'))
+    return out
+
+
 def _metrika_404_findings(metrika_reports, results) -> list:
     """404 по данным Яндекс.Метрики (реальные визиты на несуществующую
     страницу) - раньше отдельный лист «404 из Метрики». Источник ДРУГОЙ,
@@ -864,6 +888,7 @@ def collect_findings(results, *, console_check: dict = None,
                                            city=city, page_type=page_type, url=url))
     out.extend(_console_findings(console_check))
     out.extend(_index_404_findings(index_404_check))
+    out.extend(_index_tech_findings(index_404_check))
     out.extend(_metrika_404_findings(metrika_reports, results))
     out.extend(_calltracking_findings(results, calltracking_check))
     out.extend(_search_check_findings(search_check))
@@ -896,6 +921,12 @@ _RULES = [
     ('404 в индексе', '', 1, 'SEO + разработка', 'index_404',
      'Убрать из поиска удалённые страницы',
      'Пользователь из поиска попадает в пустоту, вес страниц теряется - нужен 301 на живой раздел.'),
+
+    (SEC_INDEX_TECH, '', 2, 'SEO + разработка', 'index_tech_pages',
+     'Убрать служебные страницы из индекса',
+     'Корзина, поиск по сайту, личный кабинет и админка не отвечают ни на один '
+     'запрос покупателя: они тратят краулинговый бюджет и попадают в выдачу '
+     'вместо товарных страниц.'),
 
     ('Индексация', 'noindex', 1, 'SEO', 'idx_noindex',
      'Проверить расхождение robots/noindex',

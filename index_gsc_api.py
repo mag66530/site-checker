@@ -46,6 +46,7 @@ sys.path.insert(0, str(ROOT))
 
 from index_pages_checker import _check_all           # прозвон + вердикт 404/…
 from index_sitemap_checker import _host_of, _window  # нормализация хоста + ротация
+from index_tech_pages import add_tech                # служебные адреса в индексе
 from sources import load_project_config
 
 SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
@@ -267,7 +268,8 @@ def check_gsc_api_404(project_id: str, sa_info: dict, *, proxy_url=None,
                 log(m)
 
     out = {"available": False, "source": "gsc", "hosts": [],
-           "total_checked": 0, "total_dead": 0, "total_soft": 0, "error": None}
+           "total_checked": 0, "total_dead": 0, "total_soft": 0,
+           "total_tech": 0, "error": None}
 
     try:
         all_urls = list_indexed_urls(project_id, sa_info, days=days, log=log)
@@ -310,10 +312,15 @@ def check_gsc_api_404(project_id: str, sa_info: dict, *, proxy_url=None,
     for url, r in checked.items():
         host = _host_of(url)
         hb = by_host.setdefault(host, {
-            "host": host, "dead": [], "soft": [], "errors": [],
+            "host": host, "dead": [], "soft": [], "errors": [], "tech": [],
             "in_index_total": 0, "checked": 0, "ok": 0, "redirects": 0})
         hb["checked"] += 1
         verdict = r.get("verdict")
+        # Служебная страница в индексе Google: список пришёл из Search
+        # Analytics - значит адрес показывался в выдаче. Учитываем только
+        # живые (ok/redirect): битые и так уйдут в «404 в индексе».
+        if verdict in ("ok", "redirect"):
+            add_tech(hb, url, "Google (API)")
         entry = {"url": url, "status": r.get("status"), "source": "Google (API)",
                  "reason": r.get("reason", "")}
         if verdict == "dead":
@@ -333,6 +340,7 @@ def check_gsc_api_404(project_id: str, sa_info: dict, *, proxy_url=None,
         out["total_checked"] += hb["checked"]
         out["total_dead"] += len(hb["dead"])
         out["total_soft"] += len(hb["soft"])
+        out["total_tech"] += len(hb.get("tech") or [])
     _log(f"GSC API: проверено {out['total_checked']}, битых 404/410 "
          f"{out['total_dead']}, soft {out['total_soft']}")
     return out

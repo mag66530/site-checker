@@ -38,6 +38,8 @@ import aiohttp
 # _get - HTTPS GET с OAuth и ретраями, _norm_host/_project_hosts - матчинг
 # хостов проекта из catalogs/<pid>-subdomains.csv.
 from webmaster_api import _get, _norm_host, _project_hosts
+# Служебные адреса (корзина/поиск/ЛК/админка) среди страниц в поиске.
+from index_tech_pages import add_tech
 
 IN_SEARCH_SAMPLES = '/user/{uid}/hosts/{hid}/search-urls/in-search/samples/'
 
@@ -252,7 +254,8 @@ def check_index_404(project_id: str, token: str, proxy_url: Optional[str] = None
             log(msg)
 
     out = {'available': False, 'source': 'yandex_webmaster', 'hosts': [],
-           'total_checked': 0, 'total_dead': 0, 'total_soft': 0, 'error': None}
+           'total_checked': 0, 'total_dead': 0, 'total_soft': 0,
+           'total_tech': 0, 'error': None}
     if not token:
         out['error'] = 'нет OAuth-токена Вебмастера (yandex_oauth_<pid>)'
         return out
@@ -297,15 +300,23 @@ def check_index_404(project_id: str, token: str, proxy_url: Optional[str] = None
         errs = [r for r in hres if r['verdict'] in
                 ('server_error', 'no_response', 'client_error')]
         redirs = sum(1 for r in hres if r['verdict'] == 'redirect')
-        out['hosts'].append({
+        hb = {
             'host': host_norm, 'in_index_total': total, 'checked': len(hres),
-            'dead': dead, 'soft': soft, 'errors': errs,
+            'dead': dead, 'soft': soft, 'errors': errs, 'tech': [],
             'redirects': redirs,
             'ok': sum(1 for r in hres if r['verdict'] == 'ok'),
-        })
+        }
+        # Служебные страницы (корзина/поиск/ЛК/админка) среди адресов, которые
+        # Яндекс ДЕРЖИТ В ПОИСКЕ: выборка in-search - это уже «в индексе».
+        # Битые сюда не тащим - они уходят в свой бакет 404.
+        for r in hres:
+            if r['verdict'] in ('ok', 'redirect'):
+                add_tech(hb, r.get('url', ''), 'Яндекс')
+        out['hosts'].append(hb)
         out['total_checked'] += len(hres)
         out['total_dead'] += len(dead)
         out['total_soft'] += len(soft)
+        out['total_tech'] += len(hb['tech'])
     return out
 
 

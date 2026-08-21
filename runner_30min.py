@@ -1698,10 +1698,23 @@ def run_check(pid, params, creds, log, progress):
                     _index_404 = reverify_index_404(_index_404, proxy_url=proxy_url, log=_nlog)
                 except Exception as _e:
                     log(f'⚠ 404 в индексе (перепроверка): {_e}')
+            # Служебные страницы (корзина/поиск/ЛК/админка) среди адресов из
+            # индекса: кандидатов собрали сами источники, здесь подтверждаем их
+            # живьём - находка только если адрес СЕЙЧАС отдаёт 200 без noindex.
+            if _index_404 and _index_404.get('available') and (
+                    _index_404.get('total_tech', 0)):
+                try:
+                    from index_tech_pages import reverify_tech_pages
+                    _index_404 = reverify_tech_pages(
+                        _index_404, proxy_url=proxy_url, log=_nlog)
+                except Exception as _e:
+                    log(f'⚠ Тех. страницы в индексе: {_e}')
             if _index_404 and not _index_404.get('error'):
                 log(f'404 в индексе (итог за {int(_time.monotonic() - _t404)}с): '
                     f'проверено {_index_404.get("total_checked", 0)}, битых 404/410 '
                     f'{_index_404.get("total_dead", 0)}, '
+                    f'служебных страниц в индексе '
+                    f'{_index_404.get("total_tech", 0)}, '
                     f'источники: {", ".join(_index_404.get("sources") or []) or "–"}')
 
         # ── Количество страниц в ГСК (индексировано / не индексировано / сумма) ──

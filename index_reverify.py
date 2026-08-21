@@ -101,7 +101,11 @@ def reverify_index_404(check: dict, proxy_url=None, log=None) -> dict:
 
     new_hosts, kept, dropped = [], 0, 0
     for h in check['hosts']:
+        # tech (служебные страницы в индексе) переносим как есть: это ДРУГАЯ
+        # проверка со своей перепроверкой (index_tech_pages), здесь её находки
+        # не судим - но и терять их нельзя.
         nh = {'host': h.get('host', ''), 'dead': [], 'soft': [], 'errors': [],
+              'tech': list(h.get('tech') or []),
               'in_index_total': h.get('in_index_total', 0),
               'checked': h.get('checked', 0), 'ok': h.get('ok', 0),
               'redirects': h.get('redirects', 0)}
@@ -119,7 +123,9 @@ def reverify_index_404(check: dict, proxy_url=None, log=None) -> dict:
                     kept += 1
                 else:
                     dropped += 1          # 200 / таймаут / сеть - не подтвердилось
-        if nh['dead'] or nh['errors']:
+        # Хост без 404 оставляем, если у него есть служебные страницы в
+        # индексе - иначе находки другой проверки исчезли бы вместе с хостом.
+        if nh['dead'] or nh['errors'] or nh['tech']:
             new_hosts.append(nh)
 
     out = dict(check)
@@ -127,6 +133,7 @@ def reverify_index_404(check: dict, proxy_url=None, log=None) -> dict:
     out['reverified'] = True
     out['total_dead'] = sum(len(h['dead']) for h in new_hosts)
     out['total_soft'] = 0
+    out['total_tech'] = sum(len(h['tech']) for h in new_hosts)
     _log(f'Перепроверка за {int(time.monotonic() - t0)}с: подтверждено '
          f'{kept}, убрано неподтверждённых {dropped}')
     return out
