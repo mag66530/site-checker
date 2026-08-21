@@ -5852,6 +5852,52 @@ def _ensure_modal_consent(scope, page):
     page.wait_for_timeout(400)
 
 
+def форма_отправляется_js(form) -> bool:
+    """У <form> нет ни action, ни method - отправку делает JS.
+
+    Живой случай (МПЭ, «Обратная связь» на Контактах): в разметке
+    `<form id="contactForm">` без атрибутов, а скрипт шаблона перехватывает
+    submit и шлёт fetch('/local/ajax/sendMail.php') с JSON-телом. Проверять
+    такую форму по коду НЕЛЬЗЯ: наш POST уходит на саму страницу, сайт
+    отвечает обычным HTML с кодом 200, и в отчёт идёт ложное «успешно» -
+    при том что заявка никуда не ушла. Такие формы гоняем браузером.
+
+    Форма без action, но С method - обычная (Bitrix шлёт POST на ту же
+    страницу), её по коду проверять можно. ЧИСТАЯ функция - есть юнит-тест."""
+    if form is None:
+        return False
+    action = (form.get("action") or "").strip()
+    method = (form.get("method") or "").strip()
+    return not action and not method
+
+
+# Подтверждение для человека в ОТВЕТЕ сервера (code-путь, без браузера):
+# ajax-обработчик обычно возвращает {"success":true,"message":"Спасибо…"} или
+# короткий кусок html с той же фразой.
+_RE_УСПЕХ_ОТВЕТ = re.compile(
+    r'спасибо|заявка принята|заявка отправлена|успешно отправ|сообщение отправлено|'
+    r'ваша заявка|благодарим', re.I)
+
+
+def уведомление_из_ответа(text: str, json_obj=None) -> str:
+    """«Да (подтверждение в ответе сервера)» или пусто - для колонки
+    «Уведомление пользователю» на code-пути.
+
+    Пусто значит «не смогли увидеть», а не «нет»: попап рисует JS, и по
+    ответу его не всегда видно - в матрице это честный прочерк, а не ✗.
+
+    Полную HTML-страницу НЕ анализируем: слово «Спасибо» может лежать в
+    скрытой разметке попапа, который никто не показывал. ЧИСТАЯ функция -
+    есть юнит-тест."""
+    if isinstance(json_obj, dict):
+        if json_obj.get("success") is True or json_obj.get("ok") is True:
+            return "Да (подтверждение в ответе сервера)"
+    t = (text or "").strip()
+    if not t or len(t) > 20000 or re.search(r'<html|<!doctype', t[:2000], re.I):
+        return ""
+    return "Да (подтверждение в ответе сервера)" if _RE_УСПЕХ_ОТВЕТ.search(t) else ""
+
+
 def _interpret_response_status(result: requests.Response) -> str:
     """Пытается понять, принята ли заявка, а не просто HTTP 200."""
     text = result.text.lower()
@@ -7782,6 +7828,16 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                 )
                 return False
 
+            # Форму отправляет JS (нет ни action, ни method) - по коду её
+            # проверять нельзя, наш POST уйдёт не на тот адрес. Отдаём браузеру.
+            if форма_отправляется_js(form):
+                if probe:
+                    print(f"   ↪ «{название}»: отправку формы делает JS "
+                          f"(нет action/method) - проверяю через браузер")
+                    return None
+                print("      ⚠️ У формы нет action/method: отправку делает JS, "
+                      "результат по коду недостоверен")
+
             data = {}
             for hidden in form.find_all("input", {"type": "hidden"}):
                 if hidden.get("name"):
@@ -7910,6 +7966,16 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
             except Exception as _est:  # noqa: BLE001
                 print(f"      ⚠️ Структурные проверки по коду не удались: {_est}")
 
+            # Уведомление пользователю: попап рисует JS и по коду его не
+            # видно, но ajax-обработчик обычно возвращает ту же фразу в ответе.
+            # Нашли - ставим «Да», не нашли - оставляем пусто (прочерк
+            # «не смогли увидеть», а не ✗ «нет уведомления»).
+            try:
+                _js_ответ = result.json()
+            except (json.JSONDecodeError, ValueError):
+                _js_ответ = None
+            _увед_код = уведомление_из_ответа(result.text, _js_ответ)
+
             записать_в_excel(
                 {
                     "тип": "REQUESTS",
@@ -7922,6 +7988,7 @@ def run_test(ОЧИСТИТЬ_EXCEL=True, stop_flag=None, headless=True,
                     "комментарий": КОММЕНТАРИЙ if КОММЕНТАРИЙ else имя_теста,
                     "статус": статус,
                     "код": result.status_code,
+                    **({"уведомление": _увед_код} if _увед_код else {}),
                     **_структ,
                 }
             )
