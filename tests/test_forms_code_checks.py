@@ -87,6 +87,53 @@ def test_проблемная_форма_честные_крестики():
     print('✓ проблемная форма: честные ✗/⚠', симв)
 
 
+def test_согласие_рисует_js_прочерк_а_не_ложный_крестик():
+    """Разметка stalmetural.ru: контейнер согласия пустой, чекбоксы ставит JS.
+
+    Формы «Срочный заказ» и «Не нашли что искали?» проверяются по коду, и по
+    статическому HTML согласия не видно - но на живой странице оба чекбокса и
+    ссылка на политику есть. Вердикт по коду выносить нельзя: вместо колонок
+    согласия выставляется служебный маркер, по которому вызывающий код
+    дочитывает согласие в браузере (а не ложный ✗).
+    """
+    html = '''
+    <form class="quick_order--form" action="/local/ajax/form.php">
+      <input type=hidden name=hash value="">
+      <input type=text name=phone placeholder="Ваш телефон" required>
+      <button type=submit>Оформить</button>
+      <div class="confidentiality_checkboxes" data-conf-id="form-order-quick_order"></div>
+    </form>'''
+    res = t._html_структурные_проверки(_form(html), html, t.csrf_куки_инфо([]))
+    for k in ('согласие_чекбоксы', 'согласие_предустановка',
+              'согласие_ссылка', 'согласие_обязательно'):
+        assert k not in res, (k, res.get(k))
+    assert res['_согласие_рисует_js'] is True     # сигнал «дочитать в браузере»
+    # Остальные колонки по-прежнему заполняются.
+    assert res['csrf_защита']
+    print('✓ согласие рисует JS → маркер для браузера, а не ложный ✗')
+
+
+def test_маркер_не_попадает_в_отчёт():
+    """Служебный маркер вынимается через pop() и в колонки отчёта не уходит."""
+    html = ('<form><input type=text name=phone placeholder=Телефон>'
+            '<div class="confidentiality_checkboxes" data-conf-id="x"></div></form>')
+    res = t._html_структурные_проверки(_form(html), html, t.csrf_куки_инфо([]))
+    assert res.pop('_согласие_рисует_js') is True
+    assert not any(k.startswith('_') for k in res), res
+    assert all(k in t.LOG_KEYS_ORDER for k in res), res
+    print('✓ маркер служебный: после pop() остаются только колонки отчёта')
+
+
+def test_согласия_нет_совсем_честный_крестик():
+    """Без контейнера-плейсхолдера отсутствие согласия - настоящая находка."""
+    html = '<form><input type=text name=phone placeholder=Телефон><button>ok</button></form>'
+    res = t._html_структурные_проверки(_form(html), html, t.csrf_куки_инфо([]))
+    assert res['согласие_чекбоксы'] == '0 (нужно ≥2)'
+    assert _символы({'согласие_чекбоксы': res['согласие_чекбоксы']})[
+        'Наличие чек боксов согласия'] == '✗'
+    print('✓ согласия нет и плейсхолдера нет → честный ✗')
+
+
 def test_нет_элемента_прочерк_а_не_ложный_вердикт():
     # Ни <select>, ни <input type=file> → эти колонки прочерк (N/A), не ✗.
     html = '<form><input type=text name=q placeholder=Поиск></form>'
