@@ -53,6 +53,70 @@ def test_обычные_страницы_не_трогаем():
     print('✓ каталог, фильтры и параметрические адреса не считаются служебными')
 
 
+def test_оформление_заказа_ловим_по_всем_слагам_проектов():
+    """Слаги собраны по живым сайтам: СМУ /order → /basket/, ИМП /checkout/ →
+    /cart/, МПК /onepagecheckout/, МПЭ /personal/order/."""
+    for url in ('https://site.ru/checkout/cart',
+                'https://site.ru/onepagecheckout/',
+                'https://site.ru/personal/order/',
+                'https://site.ru/oformlenie/'):
+        hit = m.classify_tech_url(url)
+        assert hit, url
+    print('✓ все реальные адреса оформления заказа распознаются')
+
+
+def test_order_метка_мягкая_а_остальные_жёсткие():
+    """/order/ бывает и информационной «Как заказать» - такую метку
+    подтверждает живая страница, а /checkout/ и /basket/ однозначны."""
+    assert m.classify_tech_url('https://site.ru/order/')['soft'] is True
+    assert m.classify_tech_url('https://site.ru/checkout/')['soft'] is False
+    assert m.classify_tech_url('https://site.ru/basket/')['soft'] is False
+    print('✓ мягкая метка только у /order/')
+
+
+def test_разметка_оформления_отличается_от_рассказа_о_заказе():
+    чекаут = '<form id="bx-soa-order"><input name="ORDER_PROP_1"></form>'
+    инфо = ('<h1>Как оформить заказ</h1><p>Чтобы оформить заказ, позвоните '
+            'нам или напишите на почту.</p>')
+
+    assert m.looks_like_checkout(чекаут)
+    assert not m.looks_like_checkout(инфо)
+    print('✓ судим по разметке, а не по фразе «оформить заказ»')
+
+
+def test_мягкая_метка_без_чекаута_не_находка(monkeypatch):
+    async def _fake(urls, proxy):
+        return {
+            'https://site.ru/order/': ('finding', 200, False),   # «Как заказать»
+            'https://site.ru/basket/': ('finding', 200, False),  # корзина, метка жёсткая
+        }
+    monkeypatch.setattr(m, '_check_all', _fake)
+
+    check = {'available': True, 'hosts': [
+        {'host': 'site.ru', 'dead': [], 'soft': [], 'errors': [],
+         'tech': [{'url': 'https://site.ru/order/', 'label': 'оформление заказа',
+                   'source': 'Яндекс', 'soft': True},
+                  {'url': 'https://site.ru/basket/', 'label': 'корзина',
+                   'source': 'Яндекс', 'soft': False}],
+         'checked': 5, 'ok': 5, 'redirects': 0, 'in_index_total': 5}]}
+
+    res = m.reverify_tech_pages(check)
+
+    assert [e['url'] for e in res['hosts'][0]['tech']] == \
+        ['https://site.ru/basket/']
+    print('✓ информационная «Как заказать» в находки не идёт, корзина идёт')
+
+
+def test_свои_тех_страницы_проекта_не_обвиняем():
+    """«Поиск по товару» /search/ у ИМП - обычная страница проекта, она
+    заведена в его списке тех. страниц и в индексе законна."""
+    assert m.classify_tech_url('https://inmetprom.ru/search/') is not None
+    assert m.classify_tech_url('https://inmetprom.ru/search/', 'imp') is None
+    # У чужого проекта тот же адрес по-прежнему служебный.
+    assert m.classify_tech_url('https://site.ru/search/', 'smu') is not None
+    print('✓ страницы из списка проекта служебными не считаются')
+
+
 def test_потолок_на_хост():
     hb = {}
     for i in range(m.MAX_TECH_PER_HOST + 10):
@@ -151,9 +215,9 @@ def test_вердикт_по_живому_ответу():
 def test_перепроверка_убирает_неподтверждённые(monkeypatch):
     async def _fake(urls, proxy):
         return {
-            'https://site.ru/basket/': ('finding', 200),   # правда открыта
-            'https://site.ru/search/': ('noindex', 200),   # уже закрыта noindex
-            'https://site.ru/auth/': ('gone', 404),        # страницы нет
+            'https://site.ru/basket/': ('finding', 200, True),   # правда открыта
+            'https://site.ru/search/': ('noindex', 200, False),  # уже закрыта noindex
+            'https://site.ru/auth/': ('gone', 404, False),       # страницы нет
         }
     monkeypatch.setattr(m, '_check_all', _fake)
 

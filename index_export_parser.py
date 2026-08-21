@@ -131,9 +131,13 @@ def parse_export(data: bytes, filename: str = '') -> list:
     return out
 
 
-def analyze_exports(files: list, log=None) -> dict:
+def analyze_exports(files: list, log=None, project_id: str = None) -> dict:
     """files: [(filename, bytes)]. Разбирает все выгрузки, группирует по хосту.
-    Возвращает структуру, совместимую с check_index_404 (один лист отчёта)."""
+    Возвращает структуру, совместимую с check_index_404 (один лист отчёта).
+
+    project_id нужен служебным страницам: адрес из СОБСТВЕННОГО списка тех.
+    страниц проекта служебным не считается (у ИМП и SHOPMET, например,
+    «Поиск по товару» - обычная страница, которую они продвигают)."""
     def _log(msg):
         if log:
             try:
@@ -171,7 +175,7 @@ def analyze_exports(files: list, log=None) -> dict:
                 # Служебная страница (корзина/поиск/ЛК/админка) в ПОИСКЕ:
                 # только SEARCHABLE - LOW_DEMAND и прочие статусы значат, что
                 # адрес известен роботу, но в выдаче его нет.
-                add_tech(hb, r.get('url', ''), 'Яндекс')
+                add_tech(hb, r.get('url', ''), 'Яндекс', project_id)
             entry = {'url': r.get('url', ''),
                      'status': r.get('http'),
                      'source': 'Яндекс',

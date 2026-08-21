@@ -30,6 +30,7 @@ noindex'ом - поисковик просто помнит старое, кли
 from __future__ import annotations
 
 import asyncio
+import re
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -42,7 +43,9 @@ _TECH_SEGMENTS = {
     # корзина
     'basket': 'корзина', 'cart': 'корзина', 'korzina': 'корзина',
     # оформление заказа
-    'order': 'оформление заказа', 'checkout': 'оформление заказа',
+    'order': 'оформление заказа', 'orders': 'оформление заказа',
+    'checkout': 'оформление заказа', 'onepagecheckout': 'оформление заказа',
+    'one-page-checkout': 'оформление заказа',
     'oformlenie': 'оформление заказа', 'makeorder': 'оформление заказа',
     # поиск по сайту
     'search': 'поиск по сайту', 'poisk': 'поиск по сайту',
@@ -81,22 +84,53 @@ _TECH_FILES = {
 }
 
 
-def classify_tech_url(url: str):
-    """Служебный ли адрес. → {'label', 'segment'} или None.
+# Сегменты, по которым адрес служебный НЕ НАВЕРНЯКА: /order/ на большинстве
+# сайтов - оформление заказа, но бывает и информационная «Как заказать».
+# Прозвон по всем девяти боевым проектам (21.08.2026) показал только первое
+# (СМУ /order → /basket/, ИМП /checkout/ → /cart/, МПЭ /personal/order/ →
+# форма входа), однако на новом проекте может быть иначе. Поэтому мягкая
+# метка: находка выписывается, только если ЖИВАЯ страница показывает разметку
+# оформления (см. looks_like_checkout) - на информационной её нет.
+_SOFT_SEGMENTS = {'order', 'orders'}
+
+
+def _manual_tech_paths(project_id: str) -> set:
+    """Пути тех. страниц проекта (заведены руками / найдены автопоиском) в
+    сравнимом виде. Такие адреса служебными не считаем: проект сам их
+    проверяет как обычные страницы, значит место в индексе им законное
+    (например «Поиск по товару» /search/ у ИМП и SHOPMET)."""
+    if not project_id:
+        return set()
+    try:
+        import sources
+        return {(p or '').rstrip('/').lower()
+                for p in sources.get_tech_paths(project_id)}
+    except Exception:
+        return set()
+
+
+def classify_tech_url(url: str, project_id: str = None):
+    """Служебный ли адрес. → {'label', 'segment', 'soft'} или None.
 
     Смотрим ТОЛЬКО путь: параметрические дубли (?sort=, ?PAGEN_1=, utm) -
     это другая история (дубль обычной страницы, а не служебный раздел), их
-    ловит проверка robots.txt. ЧИСТАЯ функция - есть юнит-тест."""
+    ловит проверка robots.txt.
+
+    project_id - чтобы не обвинять страницы из СОБСТВЕННОГО списка тех.
+    страниц проекта. ЧИСТАЯ функция - есть юнит-тест."""
     path = (urlsplit((url or '').strip()).path or '/').lower()
+    if (path.rstrip('/') or '/') in _manual_tech_paths(project_id):
+        return None
     for seg in path.split('/'):
         if not seg:
             continue
         label = _TECH_SEGMENTS.get(seg)
         if label:
-            return {'label': label, 'segment': seg}
+            return {'label': label, 'segment': seg,
+                    'soft': seg in _SOFT_SEGMENTS}
         label = _TECH_FILES.get(seg)
         if label:
-            return {'label': label, 'segment': seg}
+            return {'label': label, 'segment': seg, 'soft': False}
     return None
 
 
@@ -106,20 +140,24 @@ def classify_tech_url(url: str):
 MAX_TECH_PER_HOST = 50
 
 
-def tech_entry(url: str, source: str) -> dict:
+def tech_entry(url: str, source: str, project_id: str = None) -> dict:
     """Запись для host['tech'] - форма как у dead/errors (url/source/reason),
-    чтобы отчёт читал их одинаково. None, если адрес не служебный."""
-    hit = classify_tech_url(url)
+    чтобы отчёт читал их одинаково. None, если адрес не служебный.
+
+    soft=True - метку надо подтвердить живой страницей (см. _SOFT_SEGMENTS)."""
+    hit = classify_tech_url(url, project_id)
     if not hit:
         return None
     return {'url': url, 'source': source, 'label': hit['label'],
+            'soft': hit['soft'],
             'reason': f'{hit["label"]} - служебная страница в индексе'}
 
 
-def add_tech(host_bucket: dict, url: str, source: str) -> bool:
+def add_tech(host_bucket: dict, url: str, source: str,
+             project_id: str = None) -> bool:
     """Добавить адрес в host['tech'], если он служебный и есть место.
     Возвращает True, если запись добавлена."""
-    entry = tech_entry(url, source)
+    entry = tech_entry(url, source, project_id)
     if not entry:
         return False
     bucket = host_bucket.setdefault('tech', [])
@@ -151,9 +189,30 @@ def tech_verdict(status, noindex: bool) -> str:
     return 'noindex' if noindex else 'finding'
 
 
+# Разметка страницы оформления заказа. Смотрим именно РАЗМЕТКУ, а не текст:
+# фраза «оформить заказ» есть и на информационной «Как оформить заказ», а
+# формы оформления с полями покупателя и итогом корзины - только на реальном
+# чекауте. Маркеры собраны по нашим проектам: bx-soa - шаблон оформления
+# Битрикса, ORDER_PROP_* - поля покупателя, остальное - типовые классы
+# корзины/чекаута у Next.js-сайтов.
+_RE_CHECKOUT = re.compile(
+    r'bx-soa|ORDER_PROP_|name\s*=\s*["\']ORDER_|'
+    r'(?:id|class)\s*=\s*["\'][^"\']*(?:checkout|basket|cart-total|order-form|'
+    r'cart__total|order__form)', re.I)
+
+
+def looks_like_checkout(html: str) -> bool:
+    """Есть ли на странице разметка оформления заказа/корзины.
+
+    Нужно для мягких меток (/order/): служебная это страница или
+    информационная «Как заказать» - по адресу не понять, по разметке видно.
+    ЧИСТАЯ функция - есть юнит-тест."""
+    return bool(_RE_CHECKOUT.search((html or '')[:400_000]))
+
+
 async def _check_one(session, url, proxy, sem):
-    """(вердикт, код). GET без редиректов: 301 на служебном адресе значит,
-    что страницы по нему уже нет."""
+    """(вердикт, код, признаки_чекаута). GET без редиректов: 301 на служебном
+    адресе значит, что страницы по нему уже нет."""
     from indexing_checker import _find_meta_robots, _x_robots_noindex
     to = aiohttp.ClientTimeout(total=_TIMEOUT)
     async with sem:
@@ -161,15 +220,15 @@ async def _check_one(session, url, proxy, sem):
             async with session.get(url, timeout=to, proxy=proxy,
                                    allow_redirects=False) as r:
                 if r.status != 200:
-                    return 'gone', r.status
+                    return 'gone', r.status, False
                 headers = {k.lower(): v for k, v in r.headers.items()}
                 html = await r.text(errors='replace')
         except Exception:
-            return 'gone', None
+            return 'gone', None, False
     _, noindex = _find_meta_robots(html)
     if not noindex:
         _, noindex = _x_robots_noindex(headers)
-    return tech_verdict(200, noindex), 200
+    return tech_verdict(200, noindex), 200, looks_like_checkout(html)
 
 
 async def _check_all(urls, proxy):
@@ -225,15 +284,20 @@ def reverify_tech_pages(check: dict, proxy_url=None, log=None) -> dict:
         nh = dict(h)
         tech = []
         for e in h.get('tech') or []:
-            verdict, st = live.get(e.get('url'), (None, None))
+            verdict, st, checkout = live.get(e.get('url'), (None, None, False))
             if verdict is None:
                 tech.append(e)          # не дошли до перепроверки (потолок)
                 continue
-            if verdict == 'finding':
-                tech.append({**e, 'status': st})
-                kept += 1
-            else:
+            if verdict != 'finding':
                 dropped += 1
+                continue
+            # Мягкая метка (/order/) без разметки оформления - это
+            # информационная страница «Как заказать», ей в индексе место.
+            if e.get('soft') and not checkout:
+                dropped += 1
+                continue
+            tech.append({**e, 'status': st})
+            kept += 1
         nh['tech'] = tech
         new_hosts.append(nh)
 

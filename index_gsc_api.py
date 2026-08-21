@@ -320,7 +320,7 @@ def check_gsc_api_404(project_id: str, sa_info: dict, *, proxy_url=None,
         # Analytics - значит адрес показывался в выдаче. Учитываем только
         # живые (ok/redirect): битые и так уйдут в «404 в индексе».
         if verdict in ("ok", "redirect"):
-            add_tech(hb, url, "Google (API)")
+            add_tech(hb, url, "Google (API)", project_id)
         entry = {"url": url, "status": r.get("status"), "source": "Google (API)",
                  "reason": r.get("reason", "")}
         if verdict == "dead":
