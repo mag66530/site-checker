@@ -311,7 +311,7 @@ def check_index_404(project_id: str, token: str, proxy_url: Optional[str] = None
         # Битые сюда не тащим - они уходят в свой бакет 404.
         for r in hres:
             if r['verdict'] in ('ok', 'redirect'):
-                add_tech(hb, r.get('url', ''), 'Яндекс')
+                add_tech(hb, r.get('url', ''), 'Яндекс', project_id)
         out['hosts'].append(hb)
         out['total_checked'] += len(hres)
         out['total_dead'] += len(dead)

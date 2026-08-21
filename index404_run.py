@@ -295,7 +295,7 @@ async def _run(pid: str, max_hosts, scout: bool) -> dict:
         return {'available': False, 'source': 'yandex_export',
                 'error': 'ни одной выгрузки не скачано (см. лог/кнопки выше)',
                 'hosts': []}
-    return analyze_exports(files, log=lambda lvl, m: _log(m))
+    return analyze_exports(files, log=lambda lvl, m: _log(m), project_id=pid)
 
 
 def main():
